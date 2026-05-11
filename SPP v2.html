@@ -1,0 +1,1028 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<title>SPP v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700;800&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+<style>
+  :root {
+    --bg-base: #17161C;
+    --bg-canvas: #0F0E13;
+    --bg-surface: #211F28;
+    --bg-elevated: #2C2A35;
+    --border: #35323F;
+    --border-soft: #2A2833;
+    --text-primary: #F0EEF8;
+    --text-secondary: #8B88A0;
+    --text-tertiary: #5F5D72;
+    --accent: #7C6FE0;
+    --accent-hover: #9B8FF0;
+    --accent-glow: rgba(124, 111, 224, 0.15);
+    --accent-glow-strong: rgba(124, 111, 224, 0.32);
+    --success: #52C97A;
+    --warning: #E0A650;
+    --danger: #E06B6B;
+    --mode-blue: #6FB5E0;
+    --mode-pink: #E06FA8;
+    --mode-yellow: #E0C050;
+    --mode-orange: #E08A50;
+    --radius-card: 8px;
+    --radius-btn: 6px;
+    --radius-input: 4px;
+    --t: 150ms ease-out;
+  }
+  * { box-sizing: border-box; }
+  html, body, #root { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg-base);
+    color: var(--text-primary);
+    font-family: "DM Sans", "Helvetica Neue", Arial, sans-serif;
+    font-size: 13px;
+    line-height: 1.45;
+    direction: rtl;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow: hidden;
+  }
+  .syne { font-family: "Syne", "Helvetica Neue", sans-serif; letter-spacing: -0.01em; }
+  button { font-family: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  input { font-family: inherit; color: inherit; background: none; border: 0; outline: 0; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; border: 2px solid var(--bg-base); }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  /* ---------- HOME ---------- */
+  .home-shell {
+    height: 100%;
+    overflow-y: auto;
+    background:
+      radial-gradient(900px 480px at 75% -10%, rgba(124,111,224,0.10), transparent 60%),
+      radial-gradient(700px 420px at 10% 110%, rgba(124,111,224,0.06), transparent 60%),
+      var(--bg-base);
+  }
+  .home-wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 28px 56px 80px;
+  }
+  .topnav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 56px;
+  }
+  .logo {
+    font-family: "Syne", sans-serif;
+    font-weight: 800;
+    font-size: 22px;
+    color: var(--accent);
+    letter-spacing: -0.02em;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .logo .dot {
+    width: 6px; height: 6px; border-radius: 999px;
+    background: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-glow);
+  }
+  .nav-links { display: flex; gap: 4px; align-items: center; }
+  .nav-link {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    padding: 7px 12px;
+    border-radius: var(--radius-btn);
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    transition: color var(--t), background var(--t);
+  }
+  .nav-link:hover { color: var(--text-primary); background: var(--bg-surface); }
+
+  .hero {
+    margin-top: 64px;
+    margin-bottom: 36px;
+  }
+  .hero h1 {
+    font-family: "Syne", sans-serif;
+    font-weight: 700;
+    font-size: 44px;
+    line-height: 1.08;
+    margin: 0 0 12px;
+    letter-spacing: -0.02em;
+  }
+  .hero p {
+    color: var(--text-secondary);
+    font-size: 15px;
+    margin: 0;
+  }
+
+  .modes-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+  }
+  .mode-card {
+    position: relative;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-card);
+    padding: 22px 22px 20px;
+    text-align: right;
+    transition: transform var(--t), border-color var(--t), background var(--t), box-shadow var(--t);
+    cursor: pointer;
+    overflow: hidden;
+    isolation: isolate;
+  }
+  .mode-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(220px 120px at 88% 0%, var(--mode-tint, var(--accent-glow)), transparent 70%);
+    opacity: 0;
+    transition: opacity var(--t);
+    z-index: -1;
+  }
+  .mode-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent);
+    background: var(--bg-elevated);
+    box-shadow: 0 0 0 1px var(--accent), 0 12px 28px -16px var(--accent-glow-strong);
+  }
+  .mode-card:hover::before { opacity: 1; }
+  .mode-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in oklab, var(--mode-color, var(--accent)) 14%, transparent);
+    color: var(--mode-color, var(--accent));
+    margin-bottom: 18px;
+  }
+  .mode-title {
+    font-family: "Syne", sans-serif;
+    font-weight: 700;
+    font-size: 17px;
+    margin: 0 0 4px;
+    color: var(--text-primary);
+  }
+  .mode-desc {
+    color: var(--text-secondary);
+    font-size: 12.5px;
+    margin: 0;
+  }
+  .mode-arrow {
+    position: absolute;
+    bottom: 16px;
+    left: 18px;
+    color: var(--text-tertiary);
+    opacity: 0;
+    transform: translateX(6px);
+    transition: opacity var(--t), transform var(--t), color var(--t);
+  }
+  .mode-card:hover .mode-arrow { opacity: 1; transform: translateX(0); color: var(--accent); }
+
+  .section-title {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin: 56px 0 16px;
+  }
+  .section-title h2 {
+    font-family: "Syne", sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin: 0;
+  }
+  .section-title a {
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 500;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .section-title a:hover { color: var(--accent-hover); }
+
+  .recent {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .recent-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-card);
+    padding: 10px 12px 10px 16px;
+    transition: border-color var(--t), background var(--t);
+    cursor: pointer;
+  }
+  .recent-card:hover { border-color: var(--border); background: var(--bg-elevated); }
+  .recent-thumb {
+    width: 56px;
+    height: 56px;
+    border-radius: 6px;
+    background:
+      repeating-linear-gradient(45deg, #2C2A35 0 6px, #26242E 6px 12px);
+    flex-shrink: 0;
+    position: relative;
+    overflow: hidden;
+  }
+  .recent-thumb.b { background:
+    repeating-linear-gradient(135deg, #2A2833 0 6px, #221F2A 6px 12px); }
+  .recent-thumb.c { background:
+    repeating-linear-gradient(0deg, #2C2A35 0 6px, #221F2A 6px 12px); }
+  .recent-thumb .badge {
+    position: absolute; top: 6px; right: 6px;
+    width: 18px; height: 18px; border-radius: 4px;
+    background: var(--bg-base);
+    display: grid; place-items: center;
+    color: var(--text-secondary);
+  }
+  .recent-meta { flex: 1; min-width: 0; }
+  .recent-name {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin: 0 0 2px;
+  }
+  .recent-date {
+    color: var(--text-secondary);
+    font-size: 11.5px;
+    margin: 0;
+  }
+  .recent-open {
+    color: var(--text-secondary);
+    font-size: 11.5px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: var(--radius-input);
+    transition: color var(--t), background var(--t);
+  }
+  .recent-card:hover .recent-open { color: var(--accent); }
+
+  /* ---------- CANVAS ---------- */
+  .canvas-shell {
+    display: grid;
+    grid-template-rows: 44px 1fr 32px;
+    height: 100%;
+    background: var(--bg-base);
+  }
+  .topbar {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-base);
+    height: 44px;
+  }
+  .topbar-side { display: flex; align-items: center; gap: 6px; }
+  .topbar-side.right { justify-content: flex-end; }
+  .icon-btn {
+    width: 28px; height: 28px;
+    border-radius: var(--radius-input);
+    display: inline-grid; place-items: center;
+    color: var(--text-secondary);
+    transition: color var(--t), background var(--t);
+  }
+  .icon-btn:hover { color: var(--text-primary); background: var(--bg-surface); }
+  .icon-btn:disabled, .icon-btn.disabled { opacity: 0.35; cursor: default; }
+  .topbar-divider { width: 1px; height: 18px; background: var(--border); margin: 0 6px; }
+  .project-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    padding: 4px 8px;
+    border-radius: var(--radius-input);
+    background: transparent;
+    width: 200px;
+    transition: background var(--t);
+  }
+  .project-name:hover, .project-name:focus { background: var(--bg-surface); }
+  .topbar-center {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+  .mode-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 9px 3px 8px;
+    border-radius: 999px;
+    background: var(--accent-glow);
+    color: var(--accent-hover);
+    font-size: 11px;
+    font-weight: 600;
+    font-family: "Syne", sans-serif;
+    letter-spacing: 0.02em;
+  }
+  .mode-chip .dot {
+    width: 5px; height: 5px; border-radius: 999px; background: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: var(--radius-btn);
+    font-size: 12.5px;
+    font-weight: 600;
+    transition: background var(--t), border-color var(--t), color var(--t), box-shadow var(--t);
+    border: 1px solid transparent;
+  }
+  .btn-accent { background: var(--accent); color: white; }
+  .btn-accent:hover { background: var(--accent-hover); box-shadow: 0 0 0 3px var(--accent-glow); }
+  .btn-success-outline { color: var(--success); border-color: color-mix(in oklab, var(--success) 35%, transparent); background: transparent; }
+  .btn-success-outline:hover { background: color-mix(in oklab, var(--success) 10%, transparent); border-color: var(--success); }
+  .btn-ghost { color: var(--text-secondary); }
+  .btn-ghost:hover { color: var(--text-primary); background: var(--bg-surface); }
+
+  .stage {
+    display: grid;
+    grid-template-columns: 52px 1fr 280px;
+    overflow: hidden;
+  }
+  .left-rail {
+    border-left: 1px solid var(--border);
+    background: var(--bg-base);
+    padding: 10px 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .tool {
+    position: relative;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    color: var(--text-secondary);
+    transition: color var(--t), background var(--t);
+  }
+  .tool:hover { color: var(--text-primary); background: var(--bg-surface); }
+  .tool.active {
+    background: var(--accent);
+    color: white;
+    box-shadow: 0 0 0 1px var(--accent), 0 6px 14px -6px var(--accent-glow-strong);
+  }
+  .tool .tip {
+    position: absolute;
+    left: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-size: 11.5px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--t);
+    z-index: 10;
+  }
+  .tool:hover .tip { opacity: 1; }
+  .rail-sep { width: 22px; height: 1px; background: var(--border); margin: 6px 0; }
+
+  .canvas-area {
+    background: var(--bg-canvas);
+    position: relative;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+  }
+  .canvas-area::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+    background-size: 32px 32px;
+    pointer-events: none;
+  }
+  .ruler-top, .ruler-side {
+    position: absolute;
+    background: var(--bg-base);
+    color: var(--text-tertiary);
+    font-size: 9px;
+    font-family: "DM Sans", sans-serif;
+    user-select: none;
+  }
+  .ruler-top {
+    top: 0; left: 0; right: 0; height: 18px;
+    border-bottom: 1px solid var(--border-soft);
+    background-image:
+      repeating-linear-gradient(90deg, var(--border) 0 1px, transparent 1px 50px),
+      repeating-linear-gradient(90deg, var(--border-soft) 0 1px, transparent 1px 10px);
+  }
+  .ruler-side {
+    top: 0; bottom: 0; right: 0; width: 18px;
+    border-left: 1px solid var(--border-soft);
+    background-image:
+      repeating-linear-gradient(0deg, var(--border) 0 1px, transparent 1px 50px),
+      repeating-linear-gradient(0deg, var(--border-soft) 0 1px, transparent 1px 10px);
+  }
+
+  .paper {
+    background: #fbfafa;
+    width: 560px;
+    height: 720px;
+    border-radius: 2px;
+    box-shadow:
+      0 0 0 1px rgba(0,0,0,0.5),
+      0 30px 60px -20px rgba(0,0,0,0.6),
+      0 10px 22px -10px rgba(0,0,0,0.45);
+    padding: 28px 28px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(4, 1fr);
+    gap: 10px;
+    position: relative;
+    z-index: 1;
+  }
+  .cell {
+    background: #e6e3df;
+    background-image:
+      repeating-linear-gradient(45deg, #ddd9d2 0 8px, #e6e3df 8px 16px);
+    border-radius: 2px;
+    display: grid;
+    place-items: center;
+    color: #a8a39a;
+    position: relative;
+  }
+  .cell.filled {
+    background:
+      linear-gradient(135deg, #c9d3da 0%, #97a7b4 60%, #6e8290 100%);
+  }
+  .cell.filled-2 {
+    background:
+      linear-gradient(135deg, #ddd0c2 0%, #b59c80 55%, #7a614a 100%);
+  }
+  .cell.filled-3 {
+    background:
+      linear-gradient(135deg, #cdd9c6 0%, #93a98a 60%, #5d6f56 100%);
+  }
+  .cell.filled-4 {
+    background:
+      linear-gradient(135deg, #e3cad2 0%, #b88694 55%, #7a4a59 100%);
+  }
+  .cell .ph-icon { opacity: 0.7; }
+
+  .right-panel {
+    border-right: 1px solid var(--border);
+    background: var(--bg-base);
+    overflow-y: auto;
+    padding: 18px 16px 24px;
+  }
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 18px;
+  }
+  .panel-title {
+    font-family: "Syne", sans-serif;
+    font-weight: 700;
+    font-size: 14px;
+    margin: 0;
+  }
+  .panel-pill {
+    color: var(--text-secondary);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+  }
+  .field { margin-bottom: 16px; }
+  .field-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    margin-bottom: 7px;
+  }
+  .field-label .hint { color: var(--text-tertiary); text-transform: none; letter-spacing: 0; font-weight: 500; }
+  .stepper {
+    display: grid;
+    grid-template-columns: 28px 1fr 28px;
+    height: 30px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-input);
+    overflow: hidden;
+  }
+  .stepper button {
+    color: var(--text-secondary);
+    transition: color var(--t), background var(--t);
+  }
+  .stepper button:hover { color: var(--accent-hover); background: var(--bg-elevated); }
+  .stepper input {
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    width: 100%;
+    height: 100%;
+  }
+  .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  .slider-row { display: flex; align-items: center; gap: 10px; }
+  .slider {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--accent) 0%, var(--accent) var(--p,40%), var(--border) var(--p,40%), var(--border) 100%);
+    outline: none;
+  }
+  .slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--text-primary);
+    border: 2px solid var(--accent);
+    cursor: grab;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  }
+  .num-input {
+    width: 62px;
+    height: 28px;
+    padding: 0 8px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-input);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    text-align: center;
+    transition: border-color var(--t);
+  }
+  .num-input:focus { border-color: var(--accent); }
+  .num-input .unit { color: var(--text-tertiary); margin-right: 2px; font-weight: 500; }
+
+  .margins-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .margin-cell {
+    display: grid;
+    grid-template-columns: 18px 1fr;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-input);
+    height: 30px;
+    padding: 0 8px;
+    transition: border-color var(--t);
+  }
+  .margin-cell:focus-within { border-color: var(--accent); }
+  .margin-cell .lbl {
+    font-size: 10px;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .margin-cell input {
+    font-size: 12px;
+    font-weight: 600;
+    width: 100%;
+    text-align: left;
+  }
+
+  .seg {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-input);
+    padding: 3px;
+    gap: 2px;
+  }
+  .seg button {
+    height: 26px;
+    border-radius: 3px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    transition: color var(--t), background var(--t);
+  }
+  .seg button:hover { color: var(--text-primary); }
+  .seg button.on { background: var(--bg-elevated); color: var(--text-primary); box-shadow: inset 0 0 0 1px var(--border); }
+
+  .panel-sep {
+    height: 1px;
+    background: var(--border);
+    margin: 20px -16px;
+  }
+  .btn-block {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    height: 36px;
+    border-radius: var(--radius-btn);
+    font-size: 13px;
+    font-weight: 600;
+    transition: all var(--t);
+  }
+  .btn-outline-accent {
+    background: transparent;
+    color: var(--accent-hover);
+    border: 1px solid color-mix(in oklab, var(--accent) 45%, transparent);
+  }
+  .btn-outline-accent:hover { background: var(--accent-glow); border-color: var(--accent); }
+  .btn-fill-accent {
+    background: var(--accent);
+    color: white;
+    margin-top: 8px;
+  }
+  .btn-fill-accent:hover { background: var(--accent-hover); box-shadow: 0 0 0 3px var(--accent-glow); }
+
+  /* bottom bar */
+  .bottombar {
+    height: 32px;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    padding: 0 12px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-base);
+    font-size: 11.5px;
+    color: var(--text-secondary);
+  }
+  .bottombar .right { justify-self: end; display: inline-flex; align-items: center; gap: 2px; }
+  .bottombar .left { justify-self: start; display: inline-flex; align-items: center; gap: 8px; }
+  .pager { display: inline-flex; align-items: center; gap: 2px; }
+  .pager button {
+    width: 22px; height: 22px; border-radius: 4px;
+    color: var(--text-secondary);
+    display: grid; place-items: center;
+    transition: color var(--t), background var(--t);
+  }
+  .pager button:hover { color: var(--text-primary); background: var(--bg-surface); }
+  .zoom { display: inline-flex; align-items: center; gap: 2px; }
+  .zoom button {
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    transition: color var(--t), background var(--t);
+  }
+  .zoom button:hover { color: var(--text-primary); background: var(--bg-surface); }
+  .zoom button.on { background: var(--bg-surface); color: var(--text-primary); }
+  .progress-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 22px;
+    padding: 0 8px;
+    background: color-mix(in oklab, var(--success) 12%, transparent);
+    border: 1px solid color-mix(in oklab, var(--success) 25%, transparent);
+    color: var(--success);
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .progress-pill .bar {
+    width: 60px; height: 3px; border-radius: 3px;
+    background: color-mix(in oklab, var(--success) 20%, transparent);
+    overflow: hidden;
+  }
+  .progress-pill .bar i {
+    display: block; height: 100%;
+    background: var(--success);
+    width: 72%;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
+
+/* lucide via UMD */
+const I = ({ name, size = 16, stroke = 1.75, color, style }) => {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!ref.current || !window.lucide) return;
+    ref.current.innerHTML = "";
+    const icon = window.lucide.createElement(window.lucide[name]);
+    if (icon) {
+      icon.setAttribute("width", size);
+      icon.setAttribute("height", size);
+      icon.setAttribute("stroke-width", stroke);
+      ref.current.appendChild(icon);
+    }
+  }, [name, size, stroke]);
+  return <span ref={ref} style={{ display: "inline-flex", alignItems: "center", color, ...style }} />;
+};
+
+const MODES = [
+  { id: "free",    title: "עיצוב חופשי",   desc: "הוסף תמונות וטקסט בחופשיות",   icon: "Palette", color: "var(--accent)",      tint: "rgba(124,111,224,0.18)" },
+  { id: "grid",    title: "גריד",          desc: "סדר תמונות בתאים אוטומטית",   icon: "LayoutGrid", color: "var(--mode-blue)",  tint: "rgba(111,181,224,0.18)" },
+  { id: "mask",    title: "מסיכות",        desc: "צורות וחיתוכים לתמונות",       icon: "Circle",  color: "var(--mode-pink)",   tint: "rgba(224,111,168,0.18)" },
+  { id: "class",   title: "תמונת מחזור",   desc: "צור תמונת מחזור כיתתית",       icon: "Users",   color: "var(--mode-yellow)", tint: "rgba(224,192,80,0.18)"  },
+  { id: "print",   title: "פיתוח תמונות",  desc: "הכן תמונות להדפסה",            icon: "Printer", color: "var(--success)",     tint: "rgba(82,201,122,0.16)"  },
+  { id: "lib",     title: "ספריית מוצרים", desc: "עצב על גבי מוצרים מוכנים",    icon: "Package", color: "var(--mode-orange)", tint: "rgba(224,138,80,0.18)"  },
+];
+
+const RECENT = [
+  { name: "אלבום חתונה — דנה ויובל",   date: "נערך לפני 12 דקות",  variant: "" },
+  { name: "תמונת מחזור — כיתה ו'1",     date: "אתמול, 19:42",       variant: "b" },
+  { name: "פוסטרים A2 — קמפיין יולי",  date: "5 במאי",              variant: "c" },
+];
+
+function Home({ onOpen }) {
+  return (
+    <div className="home-shell">
+      <div className="home-wrap">
+        <div className="topnav">
+          <div className="logo"><span className="dot"></span>SPP <span style={{opacity:.7, marginRight:2}}>v2</span></div>
+          <div className="nav-links">
+            <button className="nav-link"><I name="Clock" size={14} /> פרויקטים אחרונים</button>
+            <button className="nav-link"><I name="Settings" size={14} /> הגדרות</button>
+          </div>
+        </div>
+
+        <section className="hero">
+          <h1 className="syne">מה תרצה ליצור היום?</h1>
+          <p>בחר מצב עבודה כדי להתחיל.</p>
+        </section>
+
+        <div className="modes-grid">
+          {MODES.map(m => (
+            <button
+              key={m.id}
+              className="mode-card"
+              style={{ "--mode-color": m.color, "--mode-tint": m.tint }}
+              onClick={() => onOpen(m.id)}
+            >
+              <div className="mode-icon"><I name={m.icon} size={22} stroke={1.8} /></div>
+              <h3 className="mode-title">{m.title}</h3>
+              <p className="mode-desc">{m.desc}</p>
+              <span className="mode-arrow"><I name="ArrowLeft" size={16} /></span>
+            </button>
+          ))}
+        </div>
+
+        <div className="section-title">
+          <h2>פרויקטים אחרונים</h2>
+          <a href="#"><I name="ArrowLeft" size={12} /> כל הפרויקטים</a>
+        </div>
+
+        <div className="recent">
+          {RECENT.map((r, i) => (
+            <div key={i} className="recent-card" onClick={() => onOpen("grid")}>
+              <div className={"recent-thumb " + r.variant}>
+                <span className="badge"><I name="Image" size={10} /></span>
+              </div>
+              <div className="recent-meta">
+                <p className="recent-name">{r.name}</p>
+                <p className="recent-date">{r.date}</p>
+              </div>
+              <span className="recent-open"><I name="ArrowLeft" size={12} /> פתח</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Tool({ name, label, active, onClick }) {
+  return (
+    <button className={"tool" + (active ? " active" : "")} onClick={onClick}>
+      <I name={name} size={18} stroke={1.8} />
+      <span className="tip">{label}</span>
+    </button>
+  );
+}
+
+function Canvas({ onHome }) {
+  const [tool, setTool] = useState("move");
+  const [rows, setRows] = useState(4);
+  const [cols, setCols] = useState(3);
+  const [gap, setGap] = useState(10);
+  const [margins, setMargins] = useState({ t: 28, r: 28, b: 28, l: 28 });
+  const [fit, setFit] = useState("fit");
+  const [zoom, setZoom] = useState("100");
+
+  const cells = [
+    { filled: "filled" },  null, { filled: "filled-2" },
+    null, { filled: "filled-3" }, null,
+    { filled: "filled-4" }, null, { filled: "filled" },
+    null, { filled: "filled-2" }, null,
+  ];
+
+  const gapPct = Math.round((gap / 40) * 100);
+
+  return (
+    <div className="canvas-shell">
+      <div className="topbar">
+        <div className="topbar-side">
+          <button className="icon-btn" onClick={onHome} title="בית"><I name="Home" size={16} /></button>
+          <div className="topbar-divider"></div>
+          <button className="icon-btn"><I name="Undo2" size={16} /></button>
+          <button className="icon-btn"><I name="Redo2" size={16} /></button>
+          <div className="topbar-divider"></div>
+          <input className="project-name" defaultValue="אלבום חתונה — דנה ויובל" />
+        </div>
+        <div className="topbar-center">
+          <span className="syne" style={{fontWeight:600, fontSize:13}}>גריד</span>
+          <span className="mode-chip"><span className="dot"></span>Grid Mode</span>
+        </div>
+        <div className="topbar-side right">
+          <button className="btn btn-ghost"><I name="Share2" size={14} /> שתף</button>
+          <button className="btn btn-success-outline"><I name="Printer" size={14} /> הדפסה</button>
+          <button className="btn btn-accent"><I name="Download" size={14} /> ייצוא</button>
+        </div>
+      </div>
+
+      <div className="stage">
+        <div className="left-rail">
+          <Tool name="MousePointer2" label="העבר"   active={tool==="move"}  onClick={() => setTool("move")} />
+          <Tool name="Type"           label="טקסט"   active={tool==="text"}  onClick={() => setTool("text")} />
+          <Tool name="Square"         label="צורה"   active={tool==="shape"} onClick={() => setTool("shape")} />
+          <Tool name="LayoutGrid"     label="מסגרת"  active={tool==="frame"} onClick={() => setTool("frame")} />
+          <div className="rail-sep"></div>
+          <Tool name="Layers"         label="שכבות"  active={tool==="layers"} onClick={() => setTool("layers")} />
+          <Tool name="Image"          label="נכסים"  active={tool==="assets"} onClick={() => setTool("assets")} />
+        </div>
+
+        <div className="canvas-area">
+          <div className="ruler-top"></div>
+          <div className="ruler-side"></div>
+          <div
+            className="paper"
+            style={{
+              gridTemplateColumns: `repeat(${cols}, 1fr)`,
+              gridTemplateRows: `repeat(${rows}, 1fr)`,
+              gap: `${gap}px`,
+              padding: `${margins.t}px ${margins.r}px ${margins.b}px ${margins.l}px`,
+            }}
+          >
+            {Array.from({length: rows * cols}).map((_, i) => {
+              const c = cells[i % cells.length];
+              return (
+                <div key={i} className={"cell " + (c?.filled || "")}>
+                  {!c?.filled && <span className="ph-icon"><I name="ImagePlus" size={20} color="#a8a39a" /></span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <aside className="right-panel">
+          <div className="panel-header">
+            <h3 className="panel-title">הגדרות גריד</h3>
+            <span className="panel-pill">Grid</span>
+          </div>
+
+          <div className="row-2">
+            <div className="field">
+              <div className="field-label">שורות</div>
+              <div className="stepper">
+                <button onClick={() => setRows(Math.max(1, rows-1))}><I name="Minus" size={12} /></button>
+                <input value={rows} onChange={(e)=>setRows(+e.target.value||1)} />
+                <button onClick={() => setRows(Math.min(12, rows+1))}><I name="Plus" size={12} /></button>
+              </div>
+            </div>
+            <div className="field">
+              <div className="field-label">עמודות</div>
+              <div className="stepper">
+                <button onClick={() => setCols(Math.max(1, cols-1))}><I name="Minus" size={12} /></button>
+                <input value={cols} onChange={(e)=>setCols(+e.target.value||1)} />
+                <button onClick={() => setCols(Math.min(12, cols+1))}><I name="Plus" size={12} /></button>
+              </div>
+            </div>
+          </div>
+
+          <div className="field">
+            <div className="field-label">
+              מרווח בין תאים
+              <span className="hint">{gap}px</span>
+            </div>
+            <div className="slider-row">
+              <input
+                type="range" min="0" max="40" value={gap}
+                className="slider"
+                style={{"--p": gapPct + "%"}}
+                onChange={(e)=>setGap(+e.target.value)}
+              />
+              <input className="num-input" value={gap + "px"} readOnly />
+            </div>
+          </div>
+
+          <div className="field">
+            <div className="field-label">שוליים</div>
+            <div className="margins-grid">
+              <div className="margin-cell"><span className="lbl">עליון</span><input value={margins.t + "px"} onChange={e=>setMargins({...margins, t: parseInt(e.target.value)||0})} /></div>
+              <div className="margin-cell"><span className="lbl">תחתון</span><input value={margins.b + "px"} onChange={e=>setMargins({...margins, b: parseInt(e.target.value)||0})} /></div>
+              <div className="margin-cell"><span className="lbl">ימין</span><input value={margins.r + "px"} onChange={e=>setMargins({...margins, r: parseInt(e.target.value)||0})} /></div>
+              <div className="margin-cell"><span className="lbl">שמאל</span><input value={margins.l + "px"} onChange={e=>setMargins({...margins, l: parseInt(e.target.value)||0})} /></div>
+            </div>
+          </div>
+
+          <div className="field">
+            <div className="field-label">מצב התאמה</div>
+            <div className="seg">
+              <button className={fit==="fit"?"on":""} onClick={()=>setFit("fit")}><I name="Maximize2" size={11} /> Fit</button>
+              <button className={fit==="fill"?"on":""} onClick={()=>setFit("fill")}><I name="Square" size={11} /> Fill</button>
+              <button className={fit==="smart"?"on":""} onClick={()=>setFit("smart")}><I name="Sparkles" size={11} /> Smart</button>
+            </div>
+          </div>
+
+          <div className="panel-sep"></div>
+
+          <button className="btn-block btn-outline-accent">
+            <I name="Copy" size={14} /> החל על כל הדפים
+          </button>
+          <button className="btn-block btn-fill-accent">
+            <I name="ImagePlus" size={14} /> הוסף תמונות
+          </button>
+        </aside>
+      </div>
+
+      <div className="bottombar">
+        <div className="left">
+          <span>דף <span style={{color:"var(--text-primary)", fontWeight:600}}>1</span> מתוך 3</span>
+          <span className="pager">
+            <button><I name="ChevronRight" size={14} /></button>
+            <button><I name="ChevronLeft" size={14} /></button>
+          </span>
+          <span style={{width:1, height:14, background:"var(--border)", display:"inline-block", margin:"0 4px"}}></span>
+          <span className="progress-pill">
+            <I name="CheckCircle2" size={11} />
+            שמירה אוטומטית
+          </span>
+        </div>
+        <div></div>
+        <div className="right">
+          <span className="zoom">
+            <button><I name="Minus" size={11} /></button>
+            <button>50%</button>
+            <button>75%</button>
+            <button className="on">100%</button>
+            <button>Fit</button>
+            <button><I name="Plus" size={11} /></button>
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [screen, setScreen] = useState("home");
+  return screen === "home"
+    ? <Home onOpen={() => setScreen("canvas")} />
+    : <Canvas onHome={() => setScreen("home")} />;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
