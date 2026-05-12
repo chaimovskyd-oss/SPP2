@@ -16,18 +16,21 @@ function imageAsset(width: number, height: number): Asset {
 }
 
 describe("Phase 1 image import sizing", () => {
-  it("keeps portrait images portrait and fully fitted by default", () => {
+  it("פריים פריסה (layout frame) — תמונה פורטרט שומרת יחס ומשתמשת ב-fill", () => {
     const layer = createImageFrameLayer(imageAsset(1000, 2000), 1240, 1748);
 
-    expect(layer.fitMode).toBe("fit");
+    // FrameLayer לפריסה משתמש ב-fill (ממלא את תא הפריסה)
+    expect(layer.fitMode).toBe("fill");
+    expect(layer.type).toBe("frame");
     expect(layer.height).toBeGreaterThan(layer.width);
     expect(layer.width / layer.height).toBeCloseTo(0.5, 2);
   });
 
-  it("keeps landscape images landscape and fully fitted by default", () => {
+  it("פריים פריסה (layout frame) — תמונה לנדסקייפ שומרת יחס ומשתמשת ב-fill", () => {
     const layer = createImageFrameLayer(imageAsset(2400, 1200), 1240, 1748);
 
-    expect(layer.fitMode).toBe("fit");
+    expect(layer.fitMode).toBe("fill");
+    expect(layer.type).toBe("frame");
     expect(layer.width).toBeGreaterThan(layer.height);
     expect(layer.width / layer.height).toBeCloseTo(2, 2);
   });

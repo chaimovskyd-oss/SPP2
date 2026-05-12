@@ -31,7 +31,7 @@ describe("Pro text engine foundation", () => {
     expect(layer.autoContrast.enabled).toBe(false);
   });
 
-  it("migrates older text layers on project load without adding a new top-level envelope key", () => {
+  it("migrates older text layers on project load while preserving explicit project version fields", () => {
     const currentLayer = createTextLayer({
       text: "Legacy",
       rect: {
@@ -67,7 +67,7 @@ describe("Pro text engine foundation", () => {
     const parsed = parseProject(serializeProject(envelope));
     const migrated = parsed.document.pages[0]?.layers[0] as TextLayer | undefined;
 
-    expect(Object.keys(parsed)).toEqual(["format", "version", "document", "linkedGroups", "batchJobs"]);
+    expect(Object.keys(parsed)).toEqual(["format", "version", "projectVersion", "appVersion", "schemaVersion", "document", "linkedGroups", "batchJobs"]);
     expect(migrated?.layerType).toBe("text");
     expect(migrated?.effects).toEqual([]);
     expect(migrated?.warpSettings.type).toBe("none");

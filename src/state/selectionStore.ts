@@ -1,13 +1,22 @@
 import { create } from "zustand";
+import { createSelectionState } from "@/core/selection/selectionEngine";
 
 export interface SelectionState {
   selectedLayerIds: string[];
+  layoutEditMode: boolean;
   setSelection: (ids: string[]) => void;
   clearSelection: () => void;
+  enterLayoutEditMode: () => void;
+  exitLayoutEditMode: () => void;
+  toggleLayoutEditMode: () => void;
 }
 
 export const useSelectionStore = create<SelectionState>((set) => ({
   selectedLayerIds: [],
-  setSelection: (ids) => set({ selectedLayerIds: [...new Set(ids)] }),
-  clearSelection: () => set({ selectedLayerIds: [] })
+  layoutEditMode: false,
+  setSelection: (ids) => set({ selectedLayerIds: createSelectionState(ids).selectedLayerIds }),
+  clearSelection: () => set({ selectedLayerIds: createSelectionState().selectedLayerIds }),
+  enterLayoutEditMode: () => set({ layoutEditMode: true }),
+  exitLayoutEditMode: () => set({ layoutEditMode: false }),
+  toggleLayoutEditMode: () => set((state) => ({ layoutEditMode: !state.layoutEditMode }))
 }));

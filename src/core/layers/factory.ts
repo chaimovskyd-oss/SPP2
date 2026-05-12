@@ -1,6 +1,8 @@
 import { createId } from "../ids";
 import type {
   BaseLayer,
+  ContentTransform,
+  FrameBehaviorMode,
   FrameLayer,
   ImageLayer,
   LinkedGroup,
@@ -15,6 +17,14 @@ const defaultCrop: CropRect = {
   y: 0,
   width: 1,
   height: 1
+};
+
+export const defaultContentTransform: ContentTransform = {
+  version: 1,
+  offsetX: 0,
+  offsetY: 0,
+  scale: 1,
+  rotation: 0
 };
 
 function baseLayer(input: {
@@ -50,11 +60,15 @@ export interface CreateFrameLayerOptions {
   id?: string;
   name?: string;
   rect: Rect;
+  behaviorMode?: FrameBehaviorMode;
   shape?: FrameLayer["shape"];
   contentType?: FrameLayer["contentType"];
   imageAssetId?: string;
   textLayerId?: string;
   fitMode?: FitMode;
+  contentTransform?: Partial<ContentTransform>;
+  padding?: number;
+  cornerRadius?: number;
   linkedGroup?: string;
   batchIndex?: number;
   smartCropMode?: FrameLayer["smartCropMode"];
@@ -69,20 +83,23 @@ export function createFrameLayer(options: CreateFrameLayerOptions): FrameLayer {
     ...baseLayer({
       id: options.id,
       type: "frame",
-      name: options.name ?? "Frame",
+      name: options.name ?? "פריים",
       rect: options.rect,
       zIndex: options.zIndex,
       locked: options.lockedFrame,
       metadata: options.metadata
     }),
     type: "frame",
+    behaviorMode: options.behaviorMode ?? "freeform",
     shape: options.shape ?? "rect",
     contentType: options.contentType ?? (options.imageAssetId ? "image" : "empty"),
     imageAssetId: options.imageAssetId,
     textLayerId: options.textLayerId,
-    fitMode: options.fitMode ?? "fit",
+    fitMode: options.fitMode ?? "fill",
+    contentTransform: { ...defaultContentTransform, ...options.contentTransform },
     crop: { ...defaultCrop },
-    padding: 0,
+    padding: options.padding ?? 0,
+    cornerRadius: options.cornerRadius,
     linkedGroup: options.linkedGroup,
     batchIndex: options.batchIndex,
     smartCropMode: options.smartCropMode ?? "none",

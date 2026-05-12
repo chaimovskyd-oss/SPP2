@@ -1,22 +1,47 @@
 import { create } from "zustand";
+import {
+  addAssetAction,
+  addAssetAndLayerAction,
+  addLayerAction,
+  addPageAction,
+  applyDocumentAction,
+  changeLayerAction,
+  changePageAction,
+  createHistoryState,
+  deleteLayerAction,
+  deletePageAction,
+  redoDocumentAction,
+  reorderLayersAction,
+  setFrameImageAction,
+  undoDocumentAction,
+  updateFrameContentAction,
+  type DocumentAction,
+  type HistoryState
+} from "@/core/history/actions";
+import { applyLinkedGroupPatch, withMemberOverride, removeLinkedGroupMember } from "@/core/layers/linkedGroups";
 import { applyTextPresetToLayer, applyTextStylePatch, extractTextStylePatch } from "@/core/text/presets";
 import { measureTextLayerSize } from "@/core/text/measurement";
 import type { Asset, Document, Page } from "@/types/document";
-import type { VisualLayer } from "@/types/layers";
+import type { LinkedGroupPatch } from "@/core/layers/linkedGroups";
+import type { ContentTransform, FrameLayer, LinkedGroup, VisualLayer } from "@/types/layers";
 import type { TextPreset, TextStylePatch } from "@/types/text";
 
 export interface DocumentState {
   document: Document | null;
   activePageId: string | null;
-  undoStack: Document[];
-  redoStack: Document[];
+  history: HistoryState;
   canUndo: boolean;
   canRedo: boolean;
   textStyleClipboard: TextStylePatch | null;
+  linkedGroups: LinkedGroup[];
   setDocument: (document: Document) => void;
   clearDocument: () => void;
   setActivePage: (pageId: string) => void;
   addPage: (page: Page) => void;
+  duplicatePage: (pageId: string) => void;
+  removePage: (pageId: string) => void;
+  reorderPages: (pageIds: string[]) => void;
+  updatePage: (page: Page) => void;
   addAsset: (asset: Asset) => void;
   addLayer: (pageId: string, layer: VisualLayer) => void;
   addAssetAndLayer: (pageId: string, asset: Asset, layer: VisualLayer) => void;
@@ -28,24 +53,31 @@ export interface DocumentState {
   applyTextPreset: (pageId: string, layerId: string, preset: TextPreset) => void;
   copyTextStyle: (pageId: string, layerId: string) => void;
   pasteTextStyle: (pageId: string, layerIds: string[]) => void;
+  updateFrameContent: (pageId: string, frameId: string, contentTransform: ContentTransform) => void;
+  setFrameImage: (pageId: string, frameId: string, assetId: string) => void;
+  setLinkedGroups: (groups: LinkedGroup[]) => void;
+  applyLinkedGroupPatch: (pageId: string, groupId: string, patch: LinkedGroupPatch) => void;
+  setGroupMemberOverride: (groupId: string, memberId: string, override: Partial<FrameLayer>) => void;
+  removeGroupMember: (groupId: string, memberId: string) => void;
+  addLinkedGroup: (group: LinkedGroup) => void;
+  applyDocumentChange: (type: string, updater: (document: Document) => Document, activePageId?: string | null) => void;
   undo: () => void;
   redo: () => void;
 }
 
-export const useDocumentStore = create<DocumentState>((set) => ({
+export const useDocumentStore = create<DocumentState>((set, get) => ({
   document: null,
   activePageId: null,
-  undoStack: [],
-  redoStack: [],
+  history: createHistoryState(),
   canUndo: false,
   canRedo: false,
   textStyleClipboard: null,
+  linkedGroups: [],
   setDocument: (document) =>
     set({
       document,
       activePageId: document.pages[0]?.id ?? null,
-      undoStack: [],
-      redoStack: [],
+      history: createHistoryState(),
       canUndo: false,
       canRedo: false,
       textStyleClipboard: null
@@ -54,11 +86,11 @@ export const useDocumentStore = create<DocumentState>((set) => ({
     set({
       document: null,
       activePageId: null,
-      undoStack: [],
-      redoStack: [],
+      history: createHistoryState(),
       canUndo: false,
       canRedo: false,
-      textStyleClipboard: null
+      textStyleClipboard: null,
+      linkedGroups: []
     }),
   setActivePage: (pageId) => set({ activePageId: pageId }),
   addPage: (page) =>
@@ -66,173 +98,146 @@ export const useDocumentStore = create<DocumentState>((set) => ({
       if (state.document === null) {
         return state;
       }
-      return commitDocumentChange(state, {
-        ...state.document,
-        modifiedAt: new Date().toISOString(),
-        pages: [...state.document.pages, page]
-      }, page.id);
+      return commitDocumentAction(state, addPageAction(page), page.id);
+    }),
+  duplicatePage: (pageId) =>
+    set((state) => {
+      if (state.document === null) {
+        return state;
+      }
+      const sourcePage = state.document.pages.find((page) => page.id === pageId);
+      if (sourcePage === undefined) {
+        return state;
+      }
+      const nextPage = {
+        ...sourcePage,
+        id: crypto.randomUUID(),
+        metadata: {
+          ...sourcePage.metadata,
+          name: `${String(sourcePage.metadata.name ?? "Page")} copy`
+        },
+        layers: sourcePage.layers.map((layer) => ({
+          ...layer,
+          id: crypto.randomUUID()
+        }))
+      };
+      return commitDocumentAction(state, addPageAction(nextPage), nextPage.id);
+    }),
+  removePage: (pageId) =>
+    set((state) => {
+      if (state.document === null || state.document.pages.length <= 1) {
+        return state;
+      }
+      const sourcePage = state.document.pages.find((page) => page.id === pageId);
+      if (sourcePage === undefined) {
+        return state;
+      }
+      const nextActivePageId = state.document.pages.find((page) => page.id !== pageId)?.id ?? null;
+      return commitDocumentAction(state, deletePageAction(sourcePage), nextActivePageId);
+    }),
+  reorderPages: (pageIds) =>
+    set((state) => {
+      if (state.document === null) {
+        return state;
+      }
+      const pageById = new Map(state.document.pages.map((page) => [page.id, page]));
+      const pages = pageIds.flatMap((pageId) => {
+        const page = pageById.get(pageId);
+        return page === undefined ? [] : [page];
+      });
+      if (pages.length !== state.document.pages.length) {
+        return state;
+      }
+      return commitDocumentAction(state, createInlineAction("ReorderPagesAction", (document) => ({ ...document, pages }), (document) => ({ ...document, pages: state.document?.pages ?? document.pages })));
+    }),
+  updatePage: (page) =>
+    set((state) => {
+      if (state.document === null) {
+        return state;
+      }
+      const previous = state.document.pages.find((existing) => existing.id === page.id);
+      return previous === undefined ? state : commitDocumentAction(state, changePageAction(previous, page), page.id);
     }),
   addAsset: (asset) =>
     set((state) => {
       if (state.document === null) {
         return state;
       }
-      return commitDocumentChange(state, {
-        ...state.document,
-        modifiedAt: new Date().toISOString(),
-        assets: [...state.document.assets, asset]
-      });
+      return commitDocumentAction(state, addAssetAction(asset));
     }),
   addLayer: (pageId, layer) =>
     set((state) => {
       if (state.document === null) {
         return state;
       }
-      return commitDocumentChange(state, {
-        ...state.document,
-        modifiedAt: new Date().toISOString(),
-        pages: state.document.pages.map((page) =>
-          page.id === pageId
-            ? {
-                ...page,
-                layers: [...page.layers, layer]
-              }
-            : page
-        )
-      });
+      return commitDocumentAction(state, addLayerAction(pageId, layer));
     }),
   addAssetAndLayer: (pageId, asset, layer) =>
     set((state) => {
       if (state.document === null) {
         return state;
       }
-      return commitDocumentChange(state, {
-        ...state.document,
-        modifiedAt: new Date().toISOString(),
-        assets: [...state.document.assets, asset],
-        pages: state.document.pages.map((page) =>
-          page.id === pageId
-            ? {
-                ...page,
-                layers: [...page.layers, layer]
-              }
-            : page
-        )
-      });
+      return commitDocumentAction(state, addAssetAndLayerAction(pageId, asset, layer));
     }),
   updateLayer: (pageId, layer) =>
     set((state) => {
       if (state.document === null) {
         return state;
       }
-      return commitDocumentChange(state, {
-        ...state.document,
-        modifiedAt: new Date().toISOString(),
-        pages: state.document.pages.map((page) =>
-          page.id === pageId
-            ? {
-                ...page,
-                layers: page.layers.map((existing) => (existing.id === layer.id ? layer : existing))
-              }
-            : page
-        )
-      });
+      const previous = findLayer(state.document, pageId, layer.id);
+      return previous === undefined ? state : commitDocumentAction(state, changeLayerAction(pageId, previous, layer, "ChangeLayerPropertyAction"));
     }),
   removeLayer: (pageId, layerId) =>
     set((state) => {
       if (state.document === null) {
         return state;
       }
-      return commitDocumentChange(state, {
-        ...state.document,
-        modifiedAt: new Date().toISOString(),
-        pages: state.document.pages.map((page) =>
-          page.id === pageId
-            ? {
-                ...page,
-                layers: page.layers.filter((layer) => layer.id !== layerId)
-              }
-            : page
-        )
-      });
+      const previous = findLayer(state.document, pageId, layerId);
+      return previous === undefined ? state : commitDocumentAction(state, deleteLayerAction(pageId, previous));
     }),
   moveLayer: (pageId, layerId, direction) =>
     set((state) => {
       if (state.document === null) {
         return state;
       }
-      return commitDocumentChange(state, {
-        ...state.document,
-        modifiedAt: new Date().toISOString(),
-        pages: state.document.pages.map((page) => {
-          if (page.id !== pageId) {
-            return page;
-          }
-          return {
-            ...page,
-            layers: moveLayerByDirection(page.layers, layerId, direction)
-          };
-        })
-      });
+      const page = state.document.pages.find((item) => item.id === pageId);
+      if (page === undefined) {
+        return state;
+      }
+      return commitDocumentAction(state, reorderLayersAction(pageId, page.layers, moveLayerByDirection(page.layers, layerId, direction)));
     }),
   reorderLayers: (pageId, layerIdsTopToBottom) =>
     set((state) => {
       if (state.document === null) {
         return state;
       }
-      return commitDocumentChange(state, {
-        ...state.document,
-        modifiedAt: new Date().toISOString(),
-        pages: state.document.pages.map((page) => {
-          if (page.id !== pageId) {
-            return page;
-          }
-          return {
-            ...page,
-            layers: reorderLayersByVisualOrder(page.layers, layerIdsTopToBottom)
-          };
-        })
-      });
+      const page = state.document.pages.find((item) => item.id === pageId);
+      if (page === undefined) {
+        return state;
+      }
+      return commitDocumentAction(state, reorderLayersAction(pageId, page.layers, reorderLayersByVisualOrder(page.layers, layerIdsTopToBottom)));
     }),
   updateTextLayer: (pageId, layerId, patch) =>
     set((state) => {
       if (state.document === null) {
         return state;
       }
-      return commitDocumentChange(state, {
-        ...state.document,
-        modifiedAt: new Date().toISOString(),
-        pages: state.document.pages.map((page) =>
-          page.id === pageId
-            ? {
-                ...page,
-                layers: page.layers.map((layer) =>
-                  layer.id === layerId && layer.type === "text" ? { ...layer, ...patch } : layer
-                )
-              }
-            : page
-        )
-      });
+      const previous = findLayer(state.document, pageId, layerId);
+      if (previous?.type !== "text") {
+        return state;
+      }
+      return commitDocumentAction(state, changeLayerAction(pageId, previous, { ...previous, ...patch }, "ChangeTextLayerAction"));
     }),
   applyTextPreset: (pageId, layerId, preset) =>
     set((state) => {
       if (state.document === null) {
         return state;
       }
-      return commitDocumentChange(state, {
-        ...state.document,
-        modifiedAt: new Date().toISOString(),
-        pages: state.document.pages.map((page) =>
-          page.id === pageId
-            ? {
-                ...page,
-                layers: page.layers.map((layer) =>
-                  layer.id === layerId && layer.type === "text" ? withMeasuredTextLayerSize(applyTextPresetToLayer(layer, preset)) : layer
-                )
-              }
-            : page
-        )
-      });
+      const previous = findLayer(state.document, pageId, layerId);
+      if (previous?.type !== "text") {
+        return state;
+      }
+      return commitDocumentAction(state, changeLayerAction(pageId, previous, withMeasuredTextLayerSize(applyTextPresetToLayer(previous, preset)), "ApplyTextPresetAction"));
     }),
   copyTextStyle: (pageId, layerId) =>
     set((state) => {
@@ -252,76 +257,132 @@ export const useDocumentStore = create<DocumentState>((set) => ({
         return state;
       }
       const targetIds = new Set(layerIds);
-      return commitDocumentChange(state, {
-        ...state.document,
-        modifiedAt: new Date().toISOString(),
-        pages: state.document.pages.map((page) =>
-          page.id === pageId
-            ? {
-                ...page,
-                layers: page.layers.map((layer) =>
-                  targetIds.has(layer.id) && layer.type === "text"
-                    ? withMeasuredTextLayerSize(applyTextStylePatch(layer, state.textStyleClipboard as TextStylePatch))
-                    : layer
-                )
-              }
-            : page
-        )
-      });
+      const page = state.document.pages.find((item) => item.id === pageId);
+      if (page === undefined) {
+        return state;
+      }
+      const nextLayers = page.layers.map((layer) =>
+        targetIds.has(layer.id) && layer.type === "text"
+          ? withMeasuredTextLayerSize(applyTextStylePatch(layer, state.textStyleClipboard as TextStylePatch))
+          : layer
+      );
+      return commitDocumentAction(state, reorderLayersAction(pageId, page.layers, nextLayers));
+    }),
+  updateFrameContent: (pageId, frameId, contentTransform) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const previous = findLayer(state.document, pageId, frameId);
+      if (previous?.type !== "frame") return state;
+      return commitDocumentAction(state, updateFrameContentAction(pageId, previous, contentTransform));
+    }),
+  setFrameImage: (pageId, frameId, assetId) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const previous = findLayer(state.document, pageId, frameId);
+      if (previous?.type !== "frame") return state;
+      const contentTransform = { version: 1 as const, offsetX: 0, offsetY: 0, scale: 1, rotation: 0 };
+      return commitDocumentAction(state, setFrameImageAction(pageId, previous, assetId, contentTransform));
+    }),
+  setLinkedGroups: (groups) => set({ linkedGroups: groups }),
+  addLinkedGroup: (group) => set((state) => ({ linkedGroups: [...state.linkedGroups, group] })),
+  applyDocumentChange: (type, updater, activePageId) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const before = state.document;
+      const action = createInlineAction(type, updater, () => before);
+      return commitDocumentAction(state, action, activePageId ?? state.activePageId);
+    }),
+  applyLinkedGroupPatch: (pageId, groupId, patch) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const group = state.linkedGroups.find((g) => g.id === groupId);
+      if (group === undefined) return state;
+      const page = state.document.pages.find((p) => p.id === pageId);
+      if (page === undefined) return state;
+      const nextLayers = applyLinkedGroupPatch(page.layers, group, patch);
+      const before = page.layers;
+      return commitDocumentAction(state, reorderLayersAction(pageId, before, nextLayers));
+    }),
+  setGroupMemberOverride: (groupId, memberId, override) =>
+    set((state) => {
+      const group = state.linkedGroups.find((g) => g.id === groupId);
+      if (group === undefined) return state;
+      const updated = withMemberOverride(group, memberId, override);
+      return { linkedGroups: state.linkedGroups.map((g) => (g.id === groupId ? updated : g)) };
+    }),
+  removeGroupMember: (groupId, memberId) =>
+    set((state) => {
+      const group = state.linkedGroups.find((g) => g.id === groupId);
+      if (group === undefined) return state;
+      const updated = removeLinkedGroupMember(group, memberId);
+      return { linkedGroups: state.linkedGroups.map((g) => (g.id === groupId ? updated : g)) };
     }),
   undo: () =>
     set((state) => {
-      const previous = state.undoStack.at(-1);
-      if (previous === undefined || state.document === null) {
+      if (state.document === null) {
         return state;
       }
-      const undoStack = state.undoStack.slice(0, -1);
-      const redoStack = [...state.redoStack, state.document];
+      const result = undoDocumentAction(state.document, state.history);
+      if (result === null) {
+        return state;
+      }
       return {
-        document: previous,
-        activePageId: previous.pages[0]?.id ?? null,
-        undoStack,
-        redoStack,
-        canUndo: undoStack.length > 0,
-        canRedo: true
+        document: result.document,
+        activePageId: result.document.pages[0]?.id ?? null,
+        history: result.history,
+        canUndo: result.history.undoStack.length > 0,
+        canRedo: result.history.redoStack.length > 0
       };
     }),
   redo: () =>
     set((state) => {
-      const next = state.redoStack.at(-1);
-      if (next === undefined || state.document === null) {
+      if (state.document === null) {
         return state;
       }
-      const redoStack = state.redoStack.slice(0, -1);
-      const undoStack = [...state.undoStack, state.document];
+      const result = redoDocumentAction(state.document, state.history);
+      if (result === null) {
+        return state;
+      }
       return {
-        document: next,
-        activePageId: next.pages[0]?.id ?? null,
-        undoStack,
-        redoStack,
-        canUndo: true,
-        canRedo: redoStack.length > 0
+        document: result.document,
+        activePageId: result.document.pages[0]?.id ?? null,
+        history: result.history,
+        canUndo: result.history.undoStack.length > 0,
+        canRedo: result.history.redoStack.length > 0
       };
     })
 }));
 
-function commitDocumentChange(
+function commitDocumentAction(
   state: DocumentState,
-  document: Document,
+  action: DocumentAction,
   activePageId = state.activePageId
 ): Partial<DocumentState> {
   if (state.document === null) {
     return state;
   }
-  const undoStack = [...state.undoStack, state.document].slice(-100);
+  const result = applyDocumentAction(state.document, state.history, action);
   return {
-    document,
+    document: result.document,
     activePageId,
-    undoStack,
-    redoStack: [],
-    canUndo: undoStack.length > 0,
-    canRedo: false
+    history: result.history,
+    canUndo: result.history.undoStack.length > 0,
+    canRedo: result.history.redoStack.length > 0
   };
+}
+
+function createInlineAction(type: string, apply: DocumentAction["apply"], undo: DocumentAction["undo"]): DocumentAction {
+  return {
+    id: crypto.randomUUID(),
+    type,
+    createdAt: new Date().toISOString(),
+    apply: (document) => ({ ...apply(document), modifiedAt: new Date().toISOString() }),
+    undo: (document) => ({ ...undo(document), modifiedAt: new Date().toISOString() })
+  };
+}
+
+function findLayer(document: Document, pageId: string, layerId: string): VisualLayer | undefined {
+  return document.pages.find((page) => page.id === pageId)?.layers.find((layer) => layer.id === layerId);
 }
 
 function withMeasuredTextLayerSize<T extends Extract<VisualLayer, { type: "text" }>>(layer: T): T {

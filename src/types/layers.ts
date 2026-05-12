@@ -19,6 +19,7 @@ import type {
   TextEffect,
   WarpType
 } from "./text";
+import type { VisualEffectStack } from "./visualEffects";
 
 export type LayerType =
   | "image"
@@ -57,6 +58,15 @@ export interface BaseLayer extends VersionedEntity {
   metadata: Metadata;
 }
 
+export type FrameBehaviorMode = "layoutLocked" | "semiFlexible" | "freeform";
+
+export interface ContentTransform extends VersionedEntity {
+  offsetX: number;
+  offsetY: number;
+  scale: number;
+  rotation: number;
+}
+
 export interface FaceAnchorData extends VersionedEntity {
   faceBox: CropRect;
   leftEye?: { x: number; y: number };
@@ -66,11 +76,13 @@ export interface FaceAnchorData extends VersionedEntity {
 
 export interface FrameLayer extends BaseLayer {
   type: "frame";
+  behaviorMode: FrameBehaviorMode;
   shape: "rect" | "circle" | "ellipse" | "polygon" | "svgPath" | "customMask";
   contentType: "image" | "text" | "mixed" | "empty";
   imageAssetId?: ID;
   textLayerId?: ID;
   fitMode: FitMode;
+  contentTransform: ContentTransform;
   crop: CropRect;
   padding: number;
   cornerRadius?: number;
@@ -83,6 +95,7 @@ export interface FrameLayer extends BaseLayer {
   faceAnchor?: FaceAnchorData;
   lockedContent?: boolean;
   lockedFrame?: boolean;
+  visualEffects?: VisualEffectStack;
 }
 
 export interface ArcSettings extends VersionedEntity {
@@ -164,6 +177,7 @@ export interface ImageLayer extends BaseLayer {
   colorAdjustments: ColorAdjustments;
   perspective?: PerspectiveCorrection;
   mask?: ID;
+  visualEffects?: VisualEffectStack;
 }
 
 export interface ShapeLayer extends BaseLayer {
@@ -172,6 +186,7 @@ export interface ShapeLayer extends BaseLayer {
   fill?: FillStyle;
   stroke?: StrokeStyle;
   pathData?: string;
+  visualEffects?: VisualEffectStack;
 }
 
 export interface GroupLayer extends BaseLayer {
@@ -184,6 +199,7 @@ export interface MaskLayer extends BaseLayer {
   source: "shape" | "svg" | "png";
   pathData?: string;
   assetId?: ID;
+  visualEffects?: VisualEffectStack;
 }
 
 export interface BackgroundLayer extends BaseLayer {

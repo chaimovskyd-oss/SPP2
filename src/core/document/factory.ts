@@ -1,4 +1,4 @@
-import { DEFAULT_COLOR_PROFILE, DEFAULT_DPI, createPageDefaults, defaultPageSetup } from "../defaults";
+import { DEFAULT_COLOR_PROFILE, DEFAULT_DPI, createPageDefaults, defaultPageSetup, defaultViewportState } from "../defaults";
 import { createId } from "../ids";
 import type { Asset, Document, Page } from "@/types/document";
 import type { VisualLayer } from "@/types/layers";
@@ -10,6 +10,8 @@ export interface CreateDocumentOptions {
   now?: string;
   dpi?: number;
   colorProfile?: string;
+  viewport?: Document["viewport"];
+  pages?: Page[];
   metadata?: Metadata;
 }
 
@@ -31,9 +33,13 @@ export function createDocument(options: CreateDocumentOptions): Document {
     modifiedAt: now,
     dpi: options.dpi ?? DEFAULT_DPI,
     colorProfile: options.colorProfile ?? DEFAULT_COLOR_PROFILE,
-    pages: [],
+    pages: options.pages ?? [],
     assets: [],
     presets: [],
+    gridRules: [],
+    gridImageAssignments: [],
+    gridTextOverlayRules: [],
+    viewport: options.viewport ?? { ...defaultViewportState },
     metadata: options.metadata ?? {}
   };
 }
@@ -53,6 +59,18 @@ export function createPage(options: CreatePageOptions = {}): Page {
     margins: {
       ...defaultPageSetup.margins,
       ...options.setup?.margins
+    },
+    safeArea: {
+      ...defaultPageSetup.safeArea,
+      ...options.setup?.safeArea
+    },
+    snapSettings: {
+      ...defaultPageSetup.snapSettings,
+      ...options.setup?.snapSettings
+    },
+    gridSettings: {
+      ...defaultPageSetup.gridSettings,
+      ...options.setup?.gridSettings
     }
   };
 
@@ -62,9 +80,21 @@ export function createPage(options: CreatePageOptions = {}): Page {
     width: setup.size.width,
     height: setup.size.height,
     orientation: setup.orientation,
+    setup,
     ...createPageDefaults(),
     bleed: setup.bleed,
     margins: setup.margins,
+    background:
+      setup.backgroundTransparent === true
+        ? {
+            version: 1,
+            type: "transparent"
+          }
+        : {
+            version: 1,
+            type: "color",
+            color: setup.backgroundColor ?? "#fbfafa"
+          },
     layers: options.layers ?? [],
     metadata: {
       name: options.name ?? "Page",

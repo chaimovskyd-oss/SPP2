@@ -21,6 +21,9 @@ export function useKonvaImage(src: string | undefined): HTMLImageElement | null 
 
     return () => {
       active = false;
+      img.onload = null;
+      img.onerror = null;
+      img.src = "";
     };
   }, [src]);
 

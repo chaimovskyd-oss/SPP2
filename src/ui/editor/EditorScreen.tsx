@@ -1,5 +1,6 @@
 import {
   AlignCenter,
+  AlignJustify,
   AlignLeft,
   AlignRight,
   Bold,
@@ -18,36 +19,88 @@ import {
   Italic,
   Layers,
   Lock,
+  Maximize2,
   MousePointer2,
+  Plus,
   Redo2,
   Save,
+  Star,
   Trash2,
   Type,
   Unlock,
-  Undo2
+  Undo2,
+  X,
+  ZoomIn,
+  ZoomOut
 } from "lucide-react";
-import { useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type DragEvent, type ReactElement } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type CSSProperties,
+  type DragEvent,
+  type ReactElement
+} from "react";
 import type Konva from "konva";
 import type { LucideIcon } from "lucide-react";
+import {
+  alignLayers,
+  addImagesToGrid,
+  applyTextLayerToAllGridCells,
+  applyGridFitModeToAll,
+  AutosaveManager,
+  createGridTextOverlay,
+  createPage,
+  createProjectEnvelope,
+  deleteGridImageAndCompactFromEnd,
+  PAGE_PRESETS,
+  pageSetupFromPreset,
+  pxToUnit,
+  regenerateGrid,
+  resetGridCrops,
+  clampContentTransformToFillBounds,
+  swapGridCellImages,
+  unitToPx,
+  type AlignmentCommand
+} from "@/core";
+import { importImageAsset } from "@/core/assets/assetManager";
 import { measureTextLayerSize } from "@/core/text/measurement";
 import { BUILTIN_TEXT_PRESETS } from "@/core/text/presets";
 import { useDocumentStore } from "@/state/documentStore";
 import { useSelectionStore } from "@/state/selectionStore";
-import type { Asset } from "@/types/document";
-import type { VisualLayer } from "@/types/layers";
+import { CropUI } from "./CropUI";
+import { useViewportStore, type ViewportStore } from "@/state/viewportStore";
+import type { Asset, Document } from "@/types/document";
+import type { BlendMode, VisualLayer } from "@/types/layers";
+import type { GridLayoutRule } from "@/types/grid";
+import type { PageSetup, Unit } from "@/types/primitives";
 import type { TextPreset } from "@/types/text";
 import {
-  createImageAsset,
-  createImageFrameLayer,
+  VISUAL_EFFECT_LABELS,
+  VISUAL_EFFECT_PRESETS,
+  type VisualEffect,
+  type VisualEffectParams,
+  type VisualEffectStack
+} from "@/types/visualEffects";
+import {
+  createFreeImageLayer,
   createStarterTextLayer,
+  exportStageJpg,
   exportStagePdf,
   exportStagePng,
   loadProject,
-  readImageDimensions,
-  readFileAsDataUrl,
+  savePortableProject,
   saveProject
 } from "../projectActions";
 import { CanvasStage } from "./CanvasStage";
+import {
+  getFontFavorites,
+  getGroupedFonts,
+  toggleFontFavorite,
+  type FontEntry
+} from "./fonts";
 
 type ToolId = "move" | "text" | "image" | "layers";
 
@@ -59,6 +112,7 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
   const stageRef = useRef<Konva.Stage | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const projectInputRef = useRef<HTMLInputElement>(null);
+  const autosaveRef = useRef(new AutosaveManager({ intervalMs: 2500 }));
   const [tool, setTool] = useState<ToolId>("move");
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [status, setStatus] = useState("שמירה אוטומטית מוכנה");
@@ -71,6 +125,12 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
   const removeLayer = useDocumentStore((state) => state.removeLayer);
   const moveLayer = useDocumentStore((state) => state.moveLayer);
   const reorderLayers = useDocumentStore((state) => state.reorderLayers);
+  const addPage = useDocumentStore((state) => state.addPage);
+  const duplicatePage = useDocumentStore((state) => state.duplicatePage);
+  const removePage = useDocumentStore((state) => state.removePage);
+  const updatePage = useDocumentStore((state) => state.updatePage);
+  const setActivePage = useDocumentStore((state) => state.setActivePage);
+  const applyDocumentChange = useDocumentStore((state) => state.applyDocumentChange);
   const applyTextPreset = useDocumentStore((state) => state.applyTextPreset);
   const copyTextStyle = useDocumentStore((state) => state.copyTextStyle);
   const pasteTextStyle = useDocumentStore((state) => state.pasteTextStyle);
@@ -83,6 +143,9 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
   const selectedLayerId = selectedLayerIds[0] ?? null;
   const setSelection = useSelectionStore((state) => state.setSelection);
   const clearSelection = useSelectionStore((state) => state.clearSelection);
+  const layoutEditMode = useSelectionStore((state) => state.layoutEditMode);
+  const toggleLayoutEditMode = useSelectionStore((state) => state.toggleLayoutEditMode);
+  const viewport = useViewportStore();
 
   const activePage = useMemo(
     () => document?.pages.find((page) => page.id === activePageId) ?? document?.pages[0] ?? null,
@@ -92,6 +155,25 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
     () => activePage?.layers.find((layer) => layer.id === selectedLayerId) ?? null,
     [activePage, selectedLayerId]
   );
+  const activeGridRule = useMemo(
+    () => document?.gridRules.find((rule) => rule.id === document.metadata["activeGridId"]) ?? document?.gridRules[0] ?? null,
+    [document]
+  );
+  const isGridMode = document?.metadata["mode"] === "grid";
+
+  useEffect(() => {
+    if (document?.viewport !== undefined) {
+      viewport.setViewport(document.viewport);
+    }
+  }, [document?.id]);
+
+  useEffect(() => {
+    if (document === null) {
+      return;
+    }
+    autosaveRef.current.schedule(createProjectEnvelope({ document, linkedGroups: [], batchJobs: [] }), "unsaved");
+    return () => autosaveRef.current.stop();
+  }, [document]);
 
   if (document === null || activePage === null) {
     return (
@@ -105,6 +187,7 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
 
   const currentDocument = document;
   const currentPage = activePage;
+  const currentPageIndex = Math.max(0, currentDocument.pages.findIndex((page) => page.id === currentPage.id));
 
   function handleAddText(): void {
     const layer = createStarterTextLayer(currentPage.width, currentPage.height);
@@ -114,13 +197,69 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
     setStatus("נוספה שכבת טקסט");
   }
 
+  function handleCanvasLayerChange(layer: VisualLayer): void {
+    if (isGridMode && activeGridRule !== null && layer.type === "frame" && layer.metadata["gridCell"] !== undefined) {
+      const asset = currentDocument.assets.find((item) => item.id === layer.imageAssetId);
+      const nextLayer = asset === undefined || asset.width === undefined || asset.height === undefined
+        ? layer
+        : {
+            ...layer,
+            contentTransform: clampContentTransformToFillBounds(
+              layer.contentTransform,
+              layer.width,
+              layer.height,
+              asset.width,
+              asset.height,
+              layer.fitMode,
+              layer.padding
+            )
+          };
+      applyDocumentChange(
+        "UpdateGridCellContentCommand",
+        (doc) => ({
+          ...doc,
+          pages: doc.pages.map((page) => page.id === currentPage.id
+            ? { ...page, layers: page.layers.map((item) => (item.id === nextLayer.id ? nextLayer : item)) }
+            : page),
+          gridImageAssignments: doc.gridImageAssignments.map((assignment) => assignment.gridId === activeGridRule.id && assignment.frameId === nextLayer.id
+            ? {
+                ...assignment,
+                manualContentTransform: nextLayer.contentTransform,
+                manualFitModeOverride: nextLayer.fitMode,
+                hasManualCropOverride: true,
+                hasManualRotationOverride: nextLayer.contentTransform.rotation !== 0
+              }
+            : assignment)
+        }),
+        currentPage.id
+      );
+      return;
+    }
+
+    updateLayer(currentPage.id, layer);
+  }
+
   async function handleImageFiles(files: FileList | File[]): Promise<void> {
     const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
+    if (isGridMode && activeGridRule !== null) {
+      const assets: Asset[] = [];
+      for (const file of imageFiles) {
+        const { asset } = await importImageAsset(file, currentDocument.assets, { createPreview: true });
+        assets.push(asset);
+      }
+      if (assets.length > 0) {
+        applyDocumentChange(
+          "AddImagesToGridCommand",
+          (doc) => addImagesToGrid(doc, activeGridRule.id, assets.map((asset) => ({ asset }))),
+          currentPage.id
+        );
+        setStatus(`Grid: נוספו ${assets.length} תמונות`);
+      }
+      return;
+    }
     for (const file of imageFiles) {
-      const dataUrl = await readFileAsDataUrl(file);
-      const dimensions = await readImageDimensions(dataUrl);
-      const asset = createImageAsset(file, dataUrl, dimensions);
-      const layer = createImageFrameLayer(asset, currentPage.width, currentPage.height);
+      const { asset } = await importImageAsset(file, currentDocument.assets, { createPreview: true });
+      const layer = createFreeImageLayer(asset, currentPage.width, currentPage.height);
       addAssetAndLayer(currentPage.id, asset, layer);
       setSelection([layer.id]);
     }
@@ -132,11 +271,10 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
 
   async function handleProjectLoad(event: ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = event.target.files?.[0];
-    if (file === undefined) {
-      return;
-    }
+    if (file === undefined) return;
     const envelope = await loadProject(file);
     setDocument(envelope.document);
+    viewport.setViewport(envelope.document.viewport);
     clearSelection();
     setStatus("הפרויקט נטען");
     event.target.value = "";
@@ -144,9 +282,7 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
 
   function handleImageInput(event: ChangeEvent<HTMLInputElement>): void {
     const files = event.target.files;
-    if (files !== null) {
-      void handleImageFiles(files);
-    }
+    if (files !== null) void handleImageFiles(files);
     event.target.value = "";
   }
 
@@ -156,71 +292,179 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
   }
 
   function handleSave(): void {
-    saveProject(currentDocument);
+    saveProject(withViewport(currentDocument, viewport));
     setStatus("קובץ הפרויקט נשמר");
+  }
+
+  async function handleSavePortable(): Promise<void> {
+    await savePortableProject(withViewport(currentDocument, viewport));
+    setStatus("קובץ SPP נייד נשמר");
+  }
+
+  function withViewport(documentToSave: Document, viewportState: ViewportStore): Document {
+    return {
+      ...documentToSave,
+      viewport: {
+        version: viewportState.version,
+        zoom: viewportState.zoom,
+        panX: viewportState.panX,
+        panY: viewportState.panY,
+        screenWidth: viewportState.screenWidth,
+        screenHeight: viewportState.screenHeight,
+        showRulers: viewportState.showRulers,
+        showGrid: viewportState.showGrid,
+        showGuides: viewportState.showGuides,
+        snapEnabled: viewportState.snapEnabled,
+        fitMode: viewportState.fitMode,
+        backgroundStyle: viewportState.backgroundStyle
+      }
+    };
+  }
+
+  function handleAddPage(): void {
+    addPage(createPage({
+      name: `Page ${currentDocument.pages.length + 1}`,
+      setup: currentPage.setup
+    }));
+    clearSelection();
+  }
+
+  function handleAddGuide(axis: "x" | "y"): void {
+    updatePage({
+      ...currentPage,
+      guides: [
+        ...currentPage.guides,
+        {
+          version: 1,
+          id: crypto.randomUUID(),
+          axis,
+          position: axis === "x" ? currentPage.width / 2 : currentPage.height / 2,
+          locked: false,
+          visible: true,
+          color: "#54C6EB"
+        }
+      ]
+    });
+  }
+
+  function handleApplyPageSetup(setup: PageSetup): void {
+    updatePage({
+      ...currentPage,
+      width: setup.size.width,
+      height: setup.size.height,
+      orientation: setup.orientation,
+      setup,
+      bleed: setup.bleed,
+      margins: setup.margins,
+      background:
+        setup.backgroundTransparent === true
+          ? {
+              version: 1,
+              type: "transparent"
+            }
+          : {
+              version: 1,
+              type: "color",
+              color: setup.backgroundColor ?? "#fbfafa"
+            }
+    });
   }
 
   function handleExportPng(): void {
     const stage = stageRef.current;
-    if (stage === null) {
-      return;
-    }
+    if (stage === null) return;
     exportStagePng(stage, currentDocument.name, currentPage);
     setStatus("PNG יוצא");
   }
 
   async function handleExportPdf(): Promise<void> {
     const stage = stageRef.current;
-    if (stage === null) {
-      return;
-    }
+    if (stage === null) return;
     await exportStagePdf(stage, currentDocument.name, currentPage);
     setStatus("PDF יוצא");
   }
 
+  function handleExportJpg(): void {
+    const stage = stageRef.current;
+    if (stage === null) return;
+    exportStageJpg(stage, currentDocument.name, currentPage);
+    setStatus("JPG exported");
+  }
+
   function handleDeleteSelected(): void {
-    if (selectedLayerIds.length === 0) {
-      return;
-    }
+    if (selectedLayerIds.length === 0) return;
     selectedLayerIds.forEach((layerId) => removeLayer(currentPage.id, layerId));
     clearSelection();
     setStatus("השכבה נמחקה");
   }
 
   function updateSelectedText(text: string): void {
-    if (selectedLayer?.type !== "text") {
-      return;
-    }
-    const nextLayer = {
-      ...selectedLayer,
-      text
-    };
+    if (selectedLayer?.type !== "text") return;
+    const nextLayer = { ...selectedLayer, text };
     const size = measureTextLayerSize(nextLayer);
-    updateLayer(currentPage.id, {
-      ...nextLayer,
-      width: size.width,
-      height: size.height
-    });
+    updateLayer(currentPage.id, { ...nextLayer, width: size.width, height: size.height });
   }
 
   function patchSelectedLayer(patch: Partial<VisualLayer>): void {
-    if (selectedLayer === null) {
-      return;
-    }
-    const nextLayer = {
-      ...selectedLayer,
-      ...patch
-    } as VisualLayer;
+    if (selectedLayer === null) return;
+    const nextLayer = { ...selectedLayer, ...patch } as VisualLayer;
     if (nextLayer.type === "text") {
       const size = measureTextLayerSize(nextLayer);
-      updateLayer(currentPage.id, {
-        ...nextLayer,
-        width: size.width,
-        height: size.height
-      });
+      updateLayer(currentPage.id, { ...nextLayer, width: size.width, height: size.height });
       return;
     }
-    updateLayer(currentPage.id, nextLayer);
+    handleCanvasLayerChange(nextLayer);
+  }
+
+  function handleAlign(command: AlignmentCommand): void {
+    if (selectedLayerIds.length === 0) return;
+    const alignedLayers = alignLayers({
+      page: currentPage,
+      layers: currentPage.layers,
+      selectedLayerIds,
+      command
+    });
+    alignedLayers.forEach((layer) => {
+      const original = currentPage.layers.find((item) => item.id === layer.id);
+      if (original !== undefined && (original.x !== layer.x || original.y !== layer.y)) {
+        updateLayer(currentPage.id, layer);
+      }
+    });
+    setStatus("Alignment updated");
+  }
+
+  function handleRegenerateGrid(rule: GridLayoutRule, patch: Partial<GridLayoutRule>): void {
+    applyDocumentChange("RegenerateGridCommand", (doc) => regenerateGrid(doc, rule.id, patch), currentPage.id);
+    setStatus("Grid regenerated");
+  }
+
+  function handleApplyGridFit(rule: GridLayoutRule, fitMode: GridLayoutRule["fitMode"]): void {
+    applyDocumentChange("ApplyGridFitModeToAllCommand", (doc) => applyGridFitModeToAll(doc, rule.id, fitMode), currentPage.id);
+    setStatus("Grid fit mode applied");
+  }
+
+  function handleResetGridCrops(rule: GridLayoutRule): void {
+    applyDocumentChange("ResetGridCropsCommand", (doc) => resetGridCrops(doc, rule.id), currentPage.id);
+    setStatus("Grid crops reset");
+  }
+
+  function handleAddGridFilenameText(rule: GridLayoutRule): void {
+    applyDocumentChange("ApplyGridTextOverlayCommand", (doc) => createGridTextOverlay(doc, rule.id, { textSource: "filename" }), currentPage.id);
+    setStatus("Filename text added to grid cells");
+  }
+
+  function handleApplySelectedTextToGrid(rule: GridLayoutRule): void {
+    if (selectedLayer?.type !== "text") return;
+    applyDocumentChange("ApplyTextLayerToAllGridCellsCommand", (doc) => applyTextLayerToAllGridCells(doc, rule.id, selectedLayer.id), currentPage.id);
+    setStatus("הטקסט הוחל על כל התאים");
+  }
+
+  function handleDeleteGridImage(rule: GridLayoutRule): void {
+    if (selectedLayer?.type !== "frame") return;
+    const cell = selectedLayer.metadata["gridCell"];
+    if (typeof cell !== "object" || cell === null || !("cellIndexGlobal" in cell) || typeof cell.cellIndexGlobal !== "number") return;
+    const cellIndexGlobal = cell.cellIndexGlobal;
+    applyDocumentChange("DeleteGridImageAndCompactFromEndCommand", (doc) => deleteGridImageAndCompactFromEnd(doc, rule.id, cellIndexGlobal), currentPage.id);
   }
 
   return (
@@ -231,10 +475,22 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
             <Home size={16} />
           </button>
           <span className="topbar-divider" />
-          <button className={`icon-btn ${canUndo ? "" : "disabled"}`} disabled={!canUndo} onClick={undo} title="Undo" type="button">
+          <button
+            className={`icon-btn ${canUndo ? "" : "disabled"}`}
+            disabled={!canUndo}
+            onClick={undo}
+            title="Undo"
+            type="button"
+          >
             <Undo2 size={16} />
           </button>
-          <button className={`icon-btn ${canRedo ? "" : "disabled"}`} disabled={!canRedo} onClick={redo} title="Redo" type="button">
+          <button
+            className={`icon-btn ${canRedo ? "" : "disabled"}`}
+            disabled={!canRedo}
+            onClick={redo}
+            title="Redo"
+            type="button"
+          >
             <Redo2 size={16} />
           </button>
           <span className="project-name">{currentDocument.name}</span>
@@ -246,6 +502,49 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
             <span />
             Free Mode
           </span>
+          <button
+            className={`btn btn-ghost ${layoutEditMode ? "btn-accent" : ""}`}
+            onClick={toggleLayoutEditMode}
+            title="מצב עריכת פריסה — מאפשר הזזה ושינוי גודל של פריימים"
+            type="button"
+          >
+            {layoutEditMode ? "✏️ עריכת פריסה פעילה" : "עריכת פריסה"}
+          </button>
+          <span className="topbar-divider" />
+          <button className="icon-btn" disabled={selectedLayerIds.length === 0} onClick={() => handleAlign("left")} title="Align left" type="button">
+            <AlignLeft size={15} />
+          </button>
+          <button className="icon-btn" disabled={selectedLayerIds.length === 0} onClick={() => handleAlign("centerX")} title="Align horizontal center" type="button">
+            <AlignCenter size={15} />
+          </button>
+          <button className="icon-btn" disabled={selectedLayerIds.length === 0} onClick={() => handleAlign("right")} title="Align right" type="button">
+            <AlignRight size={15} />
+          </button>
+          <button className="icon-btn" disabled={selectedLayerIds.length === 0} onClick={() => handleAlign("top")} title="Align top" type="button">
+            <ChevronsUp size={15} />
+          </button>
+          <button className="icon-btn" disabled={selectedLayerIds.length === 0} onClick={() => handleAlign("centerY")} title="Align vertical center" type="button">
+            <AlignCenter size={15} />
+          </button>
+          <button className="icon-btn" disabled={selectedLayerIds.length === 0} onClick={() => handleAlign("bottom")} title="Align bottom" type="button">
+            <ChevronsDown size={15} />
+          </button>
+          <button className="icon-btn" disabled={selectedLayerIds.length < 3} onClick={() => handleAlign("distributeX")} title="Distribute horizontally" type="button">
+            <GripVertical size={15} />
+          </button>
+          <button className="icon-btn" disabled={selectedLayerIds.length < 3} onClick={() => handleAlign("distributeY")} title="Distribute vertically" type="button">
+            <ChevronsDown size={15} />
+          </button>
+          <button className="icon-btn" onClick={viewport.zoomOut} title="Zoom out" type="button">
+            <ZoomOut size={15} />
+          </button>
+          <span className="zoom-readout">{Math.round(viewport.zoom * 100)}%</span>
+          <button className="icon-btn" onClick={viewport.zoomIn} title="הגדל תצוגה" type="button">
+            <ZoomIn size={15} />
+          </button>
+          <button className="icon-btn" onClick={viewport.fitPage} title="התאם דף" type="button">
+            <Maximize2 size={15} />
+          </button>
         </div>
 
         <div className="topbar-side topbar-actions">
@@ -257,9 +556,17 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
             <Save size={14} />
             שמירה
           </button>
+          <button className="btn btn-ghost" onClick={() => void handleSavePortable()} type="button">
+            <Save size={14} />
+            SPP
+          </button>
           <button className="btn btn-success-outline" onClick={handleExportPng} type="button">
             <Download size={14} />
             PNG
+          </button>
+          <button className="btn btn-success-outline" onClick={handleExportJpg} type="button">
+            <Download size={14} />
+            JPG
           </button>
           <button className="btn btn-accent" onClick={() => void handleExportPdf()} type="button">
             <FileDown size={14} />
@@ -277,16 +584,13 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
           <ToolButton active={tool === "layers"} icon={Layers} label="שכבות" onClick={() => setTool("layers")} testId="tool-layers" />
         </aside>
 
-        <div
-          className="canvas-area"
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={handleDrop}
-        >
+        <div className="canvas-area" onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
           <div className="ruler-top" />
           <div className="ruler-side" />
           <CanvasStage
             assets={currentDocument.assets}
             editingLayerId={editingLayerId}
+            layoutEditMode={layoutEditMode}
             page={currentPage}
             selectedLayerIds={selectedLayerIds}
             selectedLayerId={selectedLayerId}
@@ -297,7 +601,7 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
               setTool("text");
             }}
             onEndTextEdit={() => setEditingLayerId(null)}
-            onLayerChange={(layer) => updateLayer(currentPage.id, layer)}
+            onLayerChange={handleCanvasLayerChange}
             onSelectLayer={(layerId) => (layerId === null ? clearSelection() : setSelection([layerId]))}
             onSelectLayers={(layerIds) => setSelection(layerIds)}
           />
@@ -306,6 +610,23 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
 
         <aside className="right-panel">
           <PanelHeader selectedLayer={selectedLayer} />
+          {isGridMode && activeGridRule !== null ? (
+            <>
+              <GridModePanel
+                assignmentCount={currentDocument.gridImageAssignments.filter((assignment) => assignment.gridId === activeGridRule.id).length}
+                rule={activeGridRule}
+                selectedLayer={selectedLayer}
+                onAddImages={() => imageInputRef.current?.click()}
+                onAddFilenameText={() => handleAddGridFilenameText(activeGridRule)}
+                onApplyFit={handleApplyGridFit}
+                onApplySelectedText={() => handleApplySelectedTextToGrid(activeGridRule)}
+                onDeleteSelectedImage={() => handleDeleteGridImage(activeGridRule)}
+                onRegenerate={handleRegenerateGrid}
+                onResetCrops={() => handleResetGridCrops(activeGridRule)}
+              />
+              <span className="panel-sep" />
+            </>
+          ) : null}
           <LayerInspector
             selectedLayer={selectedLayer}
             hasTextStyleClipboard={hasTextStyleClipboard}
@@ -319,16 +640,32 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
             onCopyTextStyle={() => {
               if (selectedLayer?.type === "text") {
                 copyTextStyle(currentPage.id, selectedLayer.id);
-                setStatus("׳¡׳’׳ ׳•׳ ׳˜׳§׳¡׳˜ ׳”׳•׳¢׳×׳§");
+                setStatus("סגנון טקסט הועתק");
               }
             }}
             onPasteTextStyle={() => {
               if (selectedLayer?.type === "text") {
                 pasteTextStyle(currentPage.id, [selectedLayer.id]);
-                setStatus("׳¡׳’׳ ׳•׳ ׳˜׳§׳¡׳˜ ׳”׳•׳“׳‘׳§");
+                setStatus("סגנון טקסט הודבק");
               }
             }}
             onTextChange={updateSelectedText}
+          />
+          <span className="panel-sep" />
+          <DocumentEnvironmentPanel
+            activePage={currentPage}
+            activePageId={currentPage.id}
+            document={currentDocument}
+            onAddGuide={handleAddGuide}
+            onAddPage={handleAddPage}
+            onApplyPageSetup={handleApplyPageSetup}
+            onDuplicatePage={() => duplicatePage(currentPage.id)}
+            onRemovePage={() => removePage(currentPage.id)}
+            onSelectPage={(pageId) => {
+              setActivePage(pageId);
+              clearSelection();
+            }}
+            viewport={viewport}
           />
           <span className="panel-sep" />
           <LayerList
@@ -345,20 +682,71 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
 
       <footer className="bottombar">
         <div className="bottom-side">
+          <span className="current-page-label">עמוד {currentPageIndex + 1} מתוך {currentDocument.pages.length}</span>
           <span>עמוד 1 מתוך {currentDocument.pages.length}</span>
+          <div className="bottom-page-nav" aria-label="ניווט עמודים">
+            <button
+              aria-label="עמוד קודם"
+              className="page-nav-btn"
+              disabled={currentPageIndex <= 0}
+              onClick={() => {
+                const page = currentDocument.pages[currentPageIndex - 1];
+                if (page !== undefined) {
+                  setActivePage(page.id);
+                  clearSelection();
+                }
+              }}
+              type="button"
+            >
+              ‹
+            </button>
+            {currentDocument.pages.map((page, index) => (
+              <button
+                aria-label={`עמוד ${index + 1}`}
+                className={`page-chip ${page.id === currentPage.id ? "active" : ""}`}
+                key={page.id}
+                onClick={() => {
+                  setActivePage(page.id);
+                  clearSelection();
+                }}
+                type="button"
+              >
+                {index + 1}
+              </button>
+            ))}
+            <button
+              aria-label="עמוד הבא"
+              className="page-nav-btn"
+              disabled={currentPageIndex >= currentDocument.pages.length - 1}
+              onClick={() => {
+                const page = currentDocument.pages[currentPageIndex + 1];
+                if (page !== undefined) {
+                  setActivePage(page.id);
+                  clearSelection();
+                }
+              }}
+              type="button"
+            >
+              ›
+            </button>
+          </div>
           <span className="progress-pill">{status}</span>
         </div>
         <div className="bottom-side bottom-left">
-          <span>{Math.round(currentPage.width)} x {Math.round(currentPage.height)} px</span>
-          <span>Zoom Fit</span>
+          <span>
+            {Math.round(currentPage.width)} x {Math.round(currentPage.height)} px
+          </span>
+          <span>התאמה למסך</span>
         </div>
       </footer>
 
       <input ref={imageInputRef} accept="image/*" hidden multiple onChange={handleImageInput} type="file" />
-      <input ref={projectInputRef} accept=".json,.spp.json" hidden onChange={(event) => void handleProjectLoad(event)} type="file" />
+      <input ref={projectInputRef} accept=".json,.spp.json,.spp" hidden onChange={(event) => void handleProjectLoad(event)} type="file" />
     </main>
   );
 }
+
+// ─── Tool button ──────────────────────────────────────────────────────────────
 
 function ToolButton({
   active,
@@ -381,14 +769,458 @@ function ToolButton({
   );
 }
 
+// ─── Panel header ─────────────────────────────────────────────────────────────
+
 function PanelHeader({ selectedLayer }: { selectedLayer: VisualLayer | null }): ReactElement {
   return (
     <header className="panel-header">
       <h2 className="panel-title">{selectedLayer === null ? "מסמך" : selectedLayer.name}</h2>
-      <span className="panel-pill">{selectedLayer === null ? "No selection" : selectedLayer.type}</span>
+      <span className="panel-pill">{selectedLayer === null ? "ללא בחירה" : selectedLayer.type}</span>
     </header>
   );
 }
+
+// ─── Slider field ─────────────────────────────────────────────────────────────
+
+function GridModePanel({
+  assignmentCount,
+  rule,
+  selectedLayer,
+  onAddFilenameText,
+  onAddImages,
+  onApplyFit,
+  onApplySelectedText,
+  onDeleteSelectedImage,
+  onRegenerate,
+  onResetCrops
+}: {
+  assignmentCount: number;
+  rule: GridLayoutRule;
+  selectedLayer: VisualLayer | null;
+  onAddFilenameText: () => void;
+  onAddImages: () => void;
+  onApplyFit: (rule: GridLayoutRule, fitMode: GridLayoutRule["fitMode"]) => void;
+  onApplySelectedText: () => void;
+  onDeleteSelectedImage: () => void;
+  onRegenerate: (rule: GridLayoutRule, patch: Partial<GridLayoutRule>) => void;
+  onResetCrops: () => void;
+}): ReactElement {
+  const [rows, setRows] = useState(rule.rows);
+  const [columns, setColumns] = useState(rule.columns);
+  const [spacingX, setSpacingX] = useState(rule.spacingX);
+  const [spacingY, setSpacingY] = useState(rule.spacingY);
+  const selectedIsGridCell = selectedLayer?.type === "frame" && selectedLayer.metadata["gridCell"] !== undefined;
+  const selectedIsText = selectedLayer?.type === "text";
+
+  useEffect(() => {
+    setRows(rule.rows);
+    setColumns(rule.columns);
+    setSpacingX(rule.spacingX);
+    setSpacingY(rule.spacingY);
+  }, [rule.id, rule.rows, rule.columns, rule.spacingX, rule.spacingY]);
+
+  return (
+    <section className="panel-card grid-mode-panel">
+      <div className="panel-section-title">מצב גריד</div>
+      <div className="metrics-grid">
+        <Metric label="שורות" value={rule.rows} />
+        <Metric label="עמודות" value={rule.columns} />
+        <Metric label="תמונות" value={assignmentCount} />
+      </div>
+      {selectedIsGridCell ? <p className="panel-note">התא מנוהל על ידי הגריד. מזיזים רק את התמונה שבתוכו.</p> : null}
+      <button className="btn btn-accent wide" onClick={onAddImages} type="button">
+        <ImagePlus size={14} />
+        הוספת תמונות
+      </button>
+      <div className="field-grid">
+        <NumberField label="שורות" min={1} max={40} value={rows} onChange={setRows} />
+        <NumberField label="עמודות" min={1} max={40} value={columns} onChange={setColumns} />
+        <NumberField label="ריווח X" min={0} max={400} value={Math.round(spacingX)} onChange={setSpacingX} />
+        <NumberField label="ריווח Y" min={0} max={400} value={Math.round(spacingY)} onChange={setSpacingY} />
+      </div>
+      <button className="mini-action success" onClick={() => onRegenerate(rule, { rows, columns, spacingX, spacingY })} type="button">
+        בניית גריד מחדש
+      </button>
+      <div className="field">
+        <span className="field-label">התאמת תמונה</span>
+        <div className="seg">
+          {(["fit", "fill", "smartCrop", "stretch"] as const).map((mode) => (
+            <button className={rule.fitMode === mode ? "on" : ""} key={mode} onClick={() => onApplyFit(rule, mode)} type="button">
+              {fitModeLabel(mode)}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="button-row">
+        <button className="mini-action" onClick={onResetCrops} type="button">איפוס חיתוכים</button>
+        <button className="mini-action" onClick={onAddFilenameText} type="button">טקסט משמות קבצים</button>
+      </div>
+      <button className="mini-action success" disabled={!selectedIsText} onClick={onApplySelectedText} type="button">
+        החל טקסט נבחר על כל התאים
+      </button>
+      <button className="mini-action danger" disabled={!selectedIsGridCell} onClick={onDeleteSelectedImage} type="button">
+        מחיקת תמונה ומילוי מהסוף
+      </button>
+    </section>
+  );
+}
+
+function fitModeLabel(mode: GridLayoutRule["fitMode"]): string {
+  const labels: Record<GridLayoutRule["fitMode"], string> = {
+    fit: "התאם",
+    fill: "מלא",
+    smartCrop: "חכם",
+    stretch: "מתח"
+  };
+  return labels[mode];
+}
+
+function NumberField({
+  label,
+  max,
+  min,
+  onChange,
+  value
+}: {
+  label: string;
+  max: number;
+  min: number;
+  onChange: (value: number) => void;
+  value: number;
+}): ReactElement {
+  return (
+    <label className="field">
+      <span className="field-label">{label}</span>
+      <input className="text-input" max={max} min={min} onChange={(event) => onChange(Math.max(min, Math.min(max, Number(event.target.value) || min)))} type="number" value={value} />
+    </label>
+  );
+}
+
+function DocumentEnvironmentPanel({
+  activePage,
+  activePageId,
+  document,
+  onAddGuide,
+  onAddPage,
+  onApplyPageSetup,
+  onDuplicatePage,
+  onRemovePage,
+  onSelectPage,
+  viewport
+}: {
+  activePage: Document["pages"][number];
+  activePageId: string;
+  document: Document;
+  onAddGuide: (axis: "x" | "y") => void;
+  onAddPage: () => void;
+  onApplyPageSetup: (setup: PageSetup) => void;
+  onDuplicatePage: () => void;
+  onRemovePage: () => void;
+  onSelectPage: (pageId: string) => void;
+  viewport: ViewportStore;
+}): ReactElement {
+  const [presetId, setPresetId] = useState(String(activePage.setup.metadata?.presetId ?? "a4"));
+  const [units, setUnits] = useState<Unit>(activePage.setup.units);
+  const [dpi, setDpi] = useState(activePage.setup.dpi);
+  const [orientation, setOrientation] = useState(activePage.orientation);
+  const [customSize, setCustomSize] = useState(String(activePage.setup.metadata?.presetId ?? "a4") === "custom");
+  const [customWidth, setCustomWidth] = useState(pxToUnit(activePage.width, activePage.setup.units, activePage.setup.dpi));
+  const [customHeight, setCustomHeight] = useState(pxToUnit(activePage.height, activePage.setup.units, activePage.setup.dpi));
+  const [bleed, setBleed] = useState(pxToUnit(activePage.bleed.top, activePage.setup.units, activePage.setup.dpi));
+  const [margins, setMargins] = useState(pxToUnit(activePage.margins.top, activePage.setup.units, activePage.setup.dpi));
+  const [safeArea, setSafeArea] = useState(pxToUnit(activePage.setup.safeArea.top, activePage.setup.units, activePage.setup.dpi));
+
+  useEffect(() => {
+    setPresetId(String(activePage.setup.metadata?.presetId ?? "a4"));
+    setCustomSize(String(activePage.setup.metadata?.presetId ?? "a4") === "custom");
+    setUnits(activePage.setup.units);
+    setDpi(activePage.setup.dpi);
+    setOrientation(activePage.orientation);
+    setCustomWidth(pxToUnit(activePage.width, activePage.setup.units, activePage.setup.dpi));
+    setCustomHeight(pxToUnit(activePage.height, activePage.setup.units, activePage.setup.dpi));
+    setBleed(pxToUnit(activePage.bleed.top, activePage.setup.units, activePage.setup.dpi));
+    setMargins(pxToUnit(activePage.margins.top, activePage.setup.units, activePage.setup.dpi));
+    setSafeArea(pxToUnit(activePage.setup.safeArea.top, activePage.setup.units, activePage.setup.dpi));
+  }, [activePage.id]);
+
+  function handlePresetChange(nextPresetId: string): void {
+    const preset = PAGE_PRESETS.find((item) => item.id === nextPresetId) ?? PAGE_PRESETS[1];
+    setPresetId(nextPresetId);
+    setCustomSize(preset.id === "custom");
+    setUnits(preset.units);
+    setDpi(preset.dpi);
+    setCustomWidth(preset.width);
+    setCustomHeight(preset.height);
+    setBleed(preset.bleed ?? 0);
+    setMargins(preset.margins ?? 0);
+    setSafeArea(preset.margins ?? 0);
+  }
+
+  function applySizeChange(): void {
+    const preset = PAGE_PRESETS.find((item) => item.id === presetId) ?? PAGE_PRESETS[1];
+    const sourcePreset = customSize
+      ? {
+          ...preset,
+          width: customWidth,
+          height: customHeight,
+          units,
+          dpi
+        }
+      : {
+          ...preset,
+          dpi
+        };
+    const nextSetup = pageSetupFromPreset(sourcePreset, orientation);
+    const bleedPx = unitToPx(bleed, units, dpi);
+    const marginsPx = unitToPx(margins, units, dpi);
+    const safeAreaPx = unitToPx(safeArea, units, dpi);
+    onApplyPageSetup({
+      ...nextSetup,
+      units,
+      dpi,
+      bleed: {
+        top: bleedPx,
+        right: bleedPx,
+        bottom: bleedPx,
+        left: bleedPx
+      },
+      margins: {
+        top: marginsPx,
+        right: marginsPx,
+        bottom: marginsPx,
+        left: marginsPx
+      },
+      safeArea: {
+        top: safeAreaPx,
+        right: safeAreaPx,
+        bottom: safeAreaPx,
+        left: safeAreaPx
+      }
+    });
+  }
+
+  return (
+    <section className="document-env">
+      <h3>מסמך</h3>
+      <div className="button-row">
+        <button className="toggle" onClick={onAddPage} type="button"><Plus size={14} />עמוד</button>
+        <button className="toggle" onClick={onDuplicatePage} type="button"><Copy size={14} />שכפל</button>
+        <button className="toggle" disabled={document.pages.length <= 1} onClick={onRemovePage} type="button"><Trash2 size={14} />מחק</button>
+      </div>
+      <div className="page-strip">
+        {document.pages.map((page, index) => (
+          <button className={page.id === activePageId ? "on" : ""} key={page.id} onClick={() => onSelectPage(page.id)} type="button">
+            {index + 1}
+          </button>
+        ))}
+      </div>
+      <label className="field">
+        <span className="field-label">מידת עמוד</span>
+        <select className="text-input" onChange={(event) => handlePresetChange(event.target.value)} value={presetId}>
+          {PAGE_PRESETS.map((preset) => (
+            <option key={preset.id} value={preset.id}>{preset.name}</option>
+          ))}
+        </select>
+      </label>
+      <div className="seg">
+        <button className={orientation === "portrait" ? "on" : ""} onClick={() => setOrientation("portrait")} type="button">לאורך</button>
+        <button className={orientation === "landscape" ? "on" : ""} onClick={() => setOrientation("landscape")} type="button">לרוחב</button>
+        <button disabled type="button">כפולה</button>
+      </div>
+      <label className="check-line">
+        <input checked={customSize} onChange={(event) => setCustomSize(event.target.checked)} type="checkbox" />
+        מידה מותאמת אישית
+      </label>
+      <div className="field-grid">
+        <label className="field">
+          <span className="field-label">יחידות</span>
+          <select className="text-input" onChange={(event) => setUnits(event.target.value as Unit)} value={units}>
+            <option value="mm">מ״מ</option>
+            <option value="cm">ס״מ</option>
+            <option value="inch">אינץ׳</option>
+            <option value="px">פיקסלים</option>
+          </select>
+        </label>
+        <label className="field">
+          <span className="field-label">DPI</span>
+          <input className="text-input" max={1200} min={72} onChange={(event) => setDpi(Number(event.target.value) || 300)} type="number" value={dpi} />
+        </label>
+        <label className="field">
+          <span className="field-label">רוחב</span>
+          <input className="text-input" disabled={!customSize} min={1} onChange={(event) => setCustomWidth(Number(event.target.value) || 1)} type="number" value={Math.round(customWidth * 100) / 100} />
+        </label>
+        <label className="field">
+          <span className="field-label">גובה</span>
+          <input className="text-input" disabled={!customSize} min={1} onChange={(event) => setCustomHeight(Number(event.target.value) || 1)} type="number" value={Math.round(customHeight * 100) / 100} />
+        </label>
+        <label className="field">
+          <span className="field-label">בליד</span>
+          <input className="text-input" min={0} onChange={(event) => setBleed(Number(event.target.value) || 0)} type="number" value={bleed} />
+        </label>
+        <label className="field">
+          <span className="field-label">שוליים</span>
+          <input className="text-input" min={0} onChange={(event) => setMargins(Number(event.target.value) || 0)} type="number" value={margins} />
+        </label>
+        <label className="field">
+          <span className="field-label">אזור בטוח</span>
+          <input className="text-input" min={0} onChange={(event) => setSafeArea(Number(event.target.value) || 0)} type="number" value={safeArea} />
+        </label>
+      </div>
+      <button className="btn-block" onClick={applySizeChange} type="button">החלפת מידת קנבס</button>
+      <div className="button-row">
+        <button className={viewport.showRulers ? "toggle on" : "toggle"} onClick={viewport.toggleRulers} type="button">סרגלים</button>
+        <button className={viewport.showGrid ? "toggle on" : "toggle"} onClick={viewport.toggleGrid} type="button">גריד</button>
+        <button className={viewport.showGuides ? "toggle on" : "toggle"} onClick={viewport.toggleGuides} type="button">קווי עזר</button>
+        <button className={viewport.snapEnabled ? "toggle on" : "toggle"} onClick={viewport.toggleSnap} type="button">הצמדה</button>
+      </div>
+      <div className="button-row">
+        <button className="toggle" onClick={() => onAddGuide("x")} type="button">קו אנכי</button>
+        <button className="toggle" onClick={() => onAddGuide("y")} type="button">קו אופקי</button>
+      </div>
+    </section>
+  );
+}
+
+function SliderField({
+  label,
+  min,
+  max,
+  step = 1,
+  value,
+  onChange,
+  decimals = 0,
+  unit = ""
+}: {
+  label: string;
+  min: number;
+  max: number;
+  step?: number;
+  value: number;
+  onChange: (v: number) => void;
+  decimals?: number;
+  unit?: string;
+}): ReactElement {
+  return (
+    <label className="field slider-field">
+      <div className="slider-header">
+        <span className="field-label">{label}</span>
+        <span className="slider-value">
+          {value.toFixed(decimals)}
+          {unit}
+        </span>
+      </div>
+      <input
+        className="slider"
+        max={max}
+        min={min}
+        onChange={(e) => onChange(Number(e.target.value))}
+        step={step}
+        type="range"
+        value={value}
+      />
+    </label>
+  );
+}
+
+// ─── Font selector ────────────────────────────────────────────────────────────
+
+function FontSelector({
+  value,
+  onChange
+}: {
+  value: string;
+  onChange: (family: string) => void;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [favorites, setFavorites] = useState<Set<string>>(() => getFontFavorites());
+
+  const groups = useMemo(() => getGroupedFonts(favorites, query), [favorites, query]);
+
+  function handleSelect(family: string): void {
+    onChange(family);
+    setOpen(false);
+    setQuery("");
+  }
+
+  function handleToggleFavorite(e: React.MouseEvent, family: string): void {
+    e.stopPropagation();
+    const next = toggleFontFavorite(family);
+    setFavorites(new Set(next));
+  }
+
+  function renderGroup(title: string, list: FontEntry[]): ReactElement | null {
+    if (list.length === 0) return null;
+    return (
+      <div className="font-group" key={title}>
+        <div className="font-group-label">{title}</div>
+        {list.map((f) => (
+          <button
+            className={`font-option ${f.family === value ? "active" : ""}`}
+            key={f.family}
+            onClick={() => handleSelect(f.family)}
+            style={{ fontFamily: `"${f.family}", sans-serif` }}
+            title={f.family}
+            type="button"
+          >
+            <span className="font-option-label">{f.label}</span>
+            <button
+              className={`font-star ${favorites.has(f.family) ? "starred" : ""}`}
+              onClick={(e) => handleToggleFavorite(e, f.family)}
+              title={favorites.has(f.family) ? "הסר ממועדפים" : "הוסף למועדפים"}
+              type="button"
+            >
+              <Star size={11} />
+            </button>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`font-selector ${open ? "open" : ""}`}>
+      <button
+        className="font-trigger"
+        onClick={() => setOpen((v) => !v)}
+        style={{ fontFamily: `"${value}", sans-serif` }}
+        type="button"
+      >
+        <span className="font-trigger-label">{value}</span>
+        <span className="font-trigger-arrow">▾</span>
+      </button>
+
+      {open && (
+        <div className="font-dropdown">
+          <div className="font-search-wrap">
+            <input
+              autoFocus
+              className="font-search"
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="חפש גופן…"
+              type="text"
+              value={query}
+            />
+          </div>
+          <div className="font-list">
+            {renderGroup("★ מועדפים", groups.favorites)}
+            {renderGroup("עברית", groups.hebrew)}
+            {renderGroup("לטינית", groups.latin)}
+            {groups.favorites.length === 0 && groups.hebrew.length === 0 && groups.latin.length === 0 && (
+              <div className="font-empty">לא נמצאו גופנים</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {open && <div className="font-overlay" onClick={() => { setOpen(false); setQuery(""); }} />}
+    </div>
+  );
+}
+
+// ─── Layer inspector ──────────────────────────────────────────────────────────
+// For text layers: coordinates + visibility/lock live inside the Type tab.
+// For non-text layers: they stay at the top here.
 
 function LayerInspector({
   selectedLayer,
@@ -413,30 +1245,51 @@ function LayerInspector({
     return (
       <div className="empty-panel">
         <strong>לא נבחרה שכבה</strong>
-        <span>בחר שכבה בקנבס או ברשימה כדי לערוך מאפיינים בסיסיים.</span>
+        <span>בחר שכבה בקנבס או ברשימה כדי לערוך מאפיינים.</span>
       </div>
     );
   }
 
+  const isText = selectedLayer.type === "text";
+  const isVisualNonText =
+    selectedLayer.type === "frame" ||
+    selectedLayer.type === "image" ||
+    selectedLayer.type === "shape" ||
+    selectedLayer.type === "mask";
+
   return (
     <div className="inspector">
-      <div className="field-grid">
-        <Metric label="X" value={selectedLayer.x} />
-        <Metric label="Y" value={selectedLayer.y} />
-        <Metric label="W" value={selectedLayer.width} />
-        <Metric label="H" value={selectedLayer.height} />
-      </div>
-      <div className="quick-controls">
-        <button className={selectedLayer.visible ? "toggle on" : "toggle"} onClick={() => onPatch({ visible: !selectedLayer.visible })} type="button">
-          {selectedLayer.visible ? <Eye size={14} /> : <EyeOff size={14} />}
-          תצוגה
-        </button>
-        <button className={selectedLayer.locked ? "toggle on" : "toggle"} onClick={() => onPatch({ locked: !selectedLayer.locked })} type="button">
-          {selectedLayer.locked ? <Lock size={14} /> : <Unlock size={14} />}
-          נעילה
-        </button>
-      </div>
-      {selectedLayer.type === "text" ? (
+      {/* Metrics + quick controls shown at top ONLY for non-text layers */}
+      {!isText ? (
+        <>
+          <div className="field-grid">
+            <Metric label="X" value={selectedLayer.x} />
+            <Metric label="Y" value={selectedLayer.y} />
+            <Metric label="W" value={selectedLayer.width} />
+            <Metric label="H" value={selectedLayer.height} />
+          </div>
+          <div className="quick-controls">
+            <button
+              className={selectedLayer.visible ? "toggle on" : "toggle"}
+              onClick={() => onPatch({ visible: !selectedLayer.visible })}
+              type="button"
+            >
+              {selectedLayer.visible ? <Eye size={14} /> : <EyeOff size={14} />}
+              תצוגה
+            </button>
+            <button
+              className={selectedLayer.locked ? "toggle on" : "toggle"}
+              onClick={() => onPatch({ locked: !selectedLayer.locked })}
+              type="button"
+            >
+              {selectedLayer.locked ? <Lock size={14} /> : <Unlock size={14} />}
+              נעילה
+            </button>
+          </div>
+        </>
+      ) : null}
+
+      {isText ? (
         <TextControls
           hasTextStyleClipboard={hasTextStyleClipboard}
           layer={selectedLayer}
@@ -447,9 +1300,11 @@ function LayerInspector({
           onTextChange={onTextChange}
         />
       ) : null}
-      {selectedLayer.type === "frame" && selectedLayer.contentType === "image" ? (
-        <ImageControls layer={selectedLayer} onPatch={onPatch} />
+
+      {isVisualNonText ? (
+        <NonTextLayerControls layer={selectedLayer} onPatch={onPatch} />
       ) : null}
+
       <button className="btn-block btn-danger" onClick={onDelete} type="button">
         <Trash2 size={14} />
         מחק שכבה
@@ -458,30 +1313,370 @@ function LayerInspector({
   );
 }
 
-function ImageControls({
+// ─── Non-text layer tabs: Edit | FX ──────────────────────────────────────────
+
+function NonTextLayerControls({
   layer,
   onPatch
 }: {
-  layer: Extract<VisualLayer, { type: "frame" }>;
+  layer: VisualLayer;
   onPatch: (patch: Partial<VisualLayer>) => void;
 }): ReactElement {
+  const [tab, setTab] = useState<"edit" | "fx">("edit");
+
   return (
-    <div className="field">
-      <span className="field-label">התאמת תמונה</span>
-      <div className="seg">
-        <button className={layer.fitMode === "fit" ? "on" : ""} onClick={() => onPatch({ fitMode: "fit" } as Partial<VisualLayer>)} type="button">
-          Fit
-        </button>
-        <button className={layer.fitMode === "fill" ? "on" : ""} onClick={() => onPatch({ fitMode: "fill" } as Partial<VisualLayer>)} type="button">
-          Fill
-        </button>
-        <button className={layer.fitMode === "stretch" ? "on" : ""} onClick={() => onPatch({ fitMode: "stretch" } as Partial<VisualLayer>)} type="button">
-          Stretch
-        </button>
+    <div className="text-pro-controls">
+      <div className="text-tabs" role="tablist">
+        <button className={tab === "edit" ? "on" : ""} onClick={() => setTab("edit")} type="button">עריכה</button>
+        <button className={tab === "fx" ? "on" : ""} onClick={() => setTab("fx")} type="button">FX</button>
       </div>
+
+      {tab === "edit" ? (
+        <div className="text-tab-panel">
+          {layer.type === "frame" && (layer.contentType === "image" || layer.imageAssetId !== undefined) ? (
+            <CropUI
+              layer={layer as Extract<VisualLayer, { type: "frame" }>}
+              onPatch={(patch) => onPatch(patch as Partial<VisualLayer>)}
+            />
+          ) : layer.type === "frame" ? (
+            <div className="field">
+              <span className="field-label">פריים ריק</span>
+              <p className="empty-panel-note">גרור תמונה אל הפריים כדי למלא אותו.</p>
+            </div>
+          ) : (
+            <p className="empty-panel-note">אין הגדרות עריכה לשכבה זו.</p>
+          )}
+          <SliderField
+            label="שקיפות שכבה"
+            min={0}
+            max={1}
+            step={0.01}
+            value={layer.opacity}
+            onChange={(v) => onPatch({ opacity: v } as Partial<VisualLayer>)}
+            decimals={2}
+          />
+        </div>
+      ) : null}
+
+      {tab === "fx" ? (
+        <div className="text-tab-panel">
+          <VisualEffectsControls layer={layer} onPatch={onPatch} />
+        </div>
+      ) : null}
     </div>
   );
 }
+
+// ─── Visual effects controls ──────────────────────────────────────────────────
+
+function makeId(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function makeDefaultEffect(type: VisualEffectParams["type"]): VisualEffect {
+  const defaults: Record<string, VisualEffectParams> = {
+    stroke: { type: "stroke", color: "#ffffff", width: 4, position: "outside", opacity: 1 },
+    dropShadow: { type: "dropShadow", color: "#000000", opacity: 0.35, offsetX: 0, offsetY: 6, blur: 12, spread: 0 },
+    outerGlow: { type: "outerGlow", color: "#ffffff", opacity: 0.8, blur: 20, spread: 0 },
+    softEdge: { type: "softEdge", radius: 20, shape: "uniform" },
+    colorOverlay: { type: "colorOverlay", color: "#000000", opacity: 0.4, blendMode: "normal" },
+    gradientOverlay: {
+      type: "gradientOverlay",
+      gradientType: "linear",
+      stops: [{ color: "#000000", position: 0 }, { color: "#ffffff", position: 1 }],
+      angle: 90,
+      opacity: 0.6,
+      blendMode: "normal"
+    }
+  };
+  return {
+    version: 1,
+    id: makeId(type),
+    enabled: true,
+    params: (defaults[type] ?? { type }) as VisualEffectParams
+  };
+}
+
+function VisualEffectsControls({
+  layer,
+  onPatch
+}: {
+  layer: VisualLayer;
+  onPatch: (patch: Partial<VisualLayer>) => void;
+}): ReactElement {
+  const stack: VisualEffectStack =
+    ("visualEffects" in layer && layer.visualEffects !== undefined)
+      ? layer.visualEffects
+      : { version: 1, enabled: true, effects: [] };
+
+  function updateStack(next: VisualEffectStack): void {
+    onPatch({ visualEffects: next } as Partial<VisualLayer>);
+  }
+
+  function addEffect(type: VisualEffectParams["type"]): void {
+    updateStack({ ...stack, enabled: true, effects: [...stack.effects, makeDefaultEffect(type)] });
+  }
+
+  function toggleEffect(id: string, enabled: boolean): void {
+    updateStack({ ...stack, effects: stack.effects.map((e) => (e.id === id ? { ...e, enabled } : e)) });
+  }
+
+  function patchEffectParams(id: string, patch: Partial<VisualEffectParams>): void {
+    updateStack({
+      ...stack,
+      effects: stack.effects.map((e) =>
+        e.id === id ? { ...e, params: { ...e.params, ...patch } as VisualEffectParams } : e
+      )
+    });
+  }
+
+  function removeEffect(id: string): void {
+    updateStack({ ...stack, effects: stack.effects.filter((e) => e.id !== id) });
+  }
+
+  const presentTypes = new Set(stack.effects.map((e) => e.params.type));
+  const mvpTypes: VisualEffectParams["type"][] = ["stroke", "dropShadow", "outerGlow", "softEdge", "colorOverlay", "gradientOverlay"];
+  const addableTypes = mvpTypes.filter((t) => !presentTypes.has(t));
+
+  const addLabels: Record<string, string> = {
+    stroke: "+ מסגרת",
+    dropShadow: "+ צל",
+    outerGlow: "+ זוהר",
+    softEdge: "+ קצוות רכות",
+    colorOverlay: "+ כיסוי צבע",
+    gradientOverlay: "+ גרדיאנט"
+  };
+
+  return (
+    <section className="visual-fx-panel">
+      <label className="check-line fx-stack-toggle">
+        <input
+          checked={stack.enabled}
+          onChange={(e) => updateStack({ ...stack, enabled: e.target.checked })}
+          type="checkbox"
+        />
+        <strong>אפקטים ויזואליים</strong>
+      </label>
+
+      {stack.effects.map((effect) => (
+        <VisualEffectCard
+          key={effect.id}
+          effect={effect}
+          onPatchParams={(patch) => patchEffectParams(effect.id, patch)}
+          onRemove={() => removeEffect(effect.id)}
+          onToggle={(enabled) => toggleEffect(effect.id, enabled)}
+        />
+      ))}
+
+      {addableTypes.length > 0 && (
+        <div className="add-fx-row">
+          {addableTypes.map((t) => (
+            <button className="toggle" key={t} onClick={() => addEffect(t)} type="button">
+              {addLabels[t] ?? `+ ${t}`}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="preset-grid">
+        {VISUAL_EFFECT_PRESETS.map((preset) => (
+          <button
+            className="preset-chip"
+            key={preset.id}
+            onClick={() => updateStack(preset.stack)}
+            type="button"
+          >
+            <strong>{preset.name}</strong>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function VisualEffectCard({
+  effect,
+  onToggle,
+  onPatchParams,
+  onRemove
+}: {
+  effect: VisualEffect;
+  onToggle: (enabled: boolean) => void;
+  onPatchParams: (patch: Partial<VisualEffectParams>) => void;
+  onRemove: () => void;
+}): ReactElement {
+  const p = effect.params;
+  const label = VISUAL_EFFECT_LABELS[p.type] ?? p.type;
+
+  return (
+    <div className="effect-card">
+      <div className="effect-card-header">
+        <label className="check-line">
+          <input
+            checked={effect.enabled}
+            onChange={(e) => onToggle(e.target.checked)}
+            type="checkbox"
+          />
+          {label}
+        </label>
+        <button className="icon-btn icon-btn-xs" onClick={onRemove} title="הסר אפקט" type="button">
+          <X size={12} />
+        </button>
+      </div>
+
+      {effect.enabled ? (
+        <div className="effect-card-body">
+          {p.type === "stroke" && (
+            <>
+              <div className="field-row">
+                <label className="field">
+                  <span className="field-label">צבע</span>
+                  <input className="color-input" onChange={(e) => onPatchParams({ color: e.target.value })} type="color" value={p.color} />
+                </label>
+              </div>
+              <SliderField label="עובי" min={1} max={60} value={p.width} onChange={(v) => onPatchParams({ width: v })} unit=" px" />
+              <SliderField label="שקיפות" min={0} max={1} step={0.01} decimals={2} value={p.opacity} onChange={(v) => onPatchParams({ opacity: v })} />
+            </>
+          )}
+          {p.type === "dropShadow" && (
+            <>
+              <div className="field-row">
+                <label className="field">
+                  <span className="field-label">צבע</span>
+                  <input className="color-input" onChange={(e) => onPatchParams({ color: e.target.value })} type="color" value={p.color} />
+                </label>
+              </div>
+              <SliderField label="שקיפות" min={0} max={1} step={0.01} decimals={2} value={p.opacity} onChange={(v) => onPatchParams({ opacity: v })} />
+              <SliderField label="מרחק X" min={-80} max={80} value={p.offsetX} onChange={(v) => onPatchParams({ offsetX: v })} unit=" px" />
+              <SliderField label="מרחק Y" min={-80} max={80} value={p.offsetY} onChange={(v) => onPatchParams({ offsetY: v })} unit=" px" />
+              <SliderField label="טשטוש" min={0} max={80} value={p.blur} onChange={(v) => onPatchParams({ blur: v })} unit=" px" />
+            </>
+          )}
+          {p.type === "outerGlow" && (
+            <>
+              <div className="field-row">
+                <label className="field">
+                  <span className="field-label">צבע זוהר</span>
+                  <input className="color-input" onChange={(e) => onPatchParams({ color: e.target.value })} type="color" value={p.color} />
+                </label>
+              </div>
+              <SliderField label="שקיפות" min={0} max={1} step={0.01} decimals={2} value={p.opacity} onChange={(v) => onPatchParams({ opacity: v })} />
+              <SliderField label="עוצמה" min={4} max={80} value={p.blur} onChange={(v) => onPatchParams({ blur: v })} unit=" px" />
+            </>
+          )}
+          {p.type === "softEdge" && (
+            <>
+              <SliderField label="רדיוס" min={0} max={80} value={p.radius} onChange={(v) => onPatchParams({ radius: v })} unit=" px" />
+              <div className="field">
+                <span className="field-label">צורה</span>
+                <div className="seg">
+                  <button className={p.shape === "uniform" ? "on" : ""} onClick={() => onPatchParams({ shape: "uniform" })} type="button">אחיד</button>
+                  <button className={p.shape === "horizontal" ? "on" : ""} onClick={() => onPatchParams({ shape: "horizontal" })} type="button">אופקי</button>
+                  <button className={p.shape === "vertical" ? "on" : ""} onClick={() => onPatchParams({ shape: "vertical" })} type="button">אנכי</button>
+                </div>
+              </div>
+            </>
+          )}
+          {p.type === "colorOverlay" && (
+            <>
+              <div className="field-row">
+                <label className="field">
+                  <span className="field-label">צבע</span>
+                  <input className="color-input" onChange={(e) => onPatchParams({ color: e.target.value })} type="color" value={p.color} />
+                </label>
+              </div>
+              <SliderField label="שקיפות" min={0} max={1} step={0.01} decimals={2} value={p.opacity} onChange={(v) => onPatchParams({ opacity: v })} />
+              <div className="field">
+                <span className="field-label">Blend Mode</span>
+                <select
+                  className="text-input"
+                  onChange={(e) => onPatchParams({ blendMode: e.target.value as BlendMode })}
+                  value={p.blendMode}
+                >
+                  <option value="normal">Normal</option>
+                  <option value="multiply">Multiply</option>
+                  <option value="screen">Screen</option>
+                  <option value="overlay">Overlay</option>
+                  <option value="darken">Darken</option>
+                  <option value="lighten">Lighten</option>
+                </select>
+              </div>
+            </>
+          )}
+          {p.type === "gradientOverlay" && (
+            <>
+              <div className="field">
+                <span className="field-label">סוג</span>
+                <div className="seg">
+                  <button className={p.gradientType === "linear" ? "on" : ""} onClick={() => onPatchParams({ gradientType: "linear" })} type="button">לינארי</button>
+                  <button className={p.gradientType === "radial" ? "on" : ""} onClick={() => onPatchParams({ gradientType: "radial" })} type="button">רדיאלי</button>
+                </div>
+              </div>
+              <div className="field-row">
+                <label className="field">
+                  <span className="field-label">צבע 1</span>
+                  <input
+                    className="color-input"
+                    onChange={(e) => onPatchParams({ stops: [{ ...p.stops[0], color: e.target.value }, ...(p.stops.slice(1))] })}
+                    type="color"
+                    value={p.stops[0]?.color ?? "#000000"}
+                  />
+                </label>
+                <label className="field">
+                  <span className="field-label">צבע 2</span>
+                  <input
+                    className="color-input"
+                    onChange={(e) => onPatchParams({ stops: [...p.stops.slice(0, 1), { ...p.stops[1], color: e.target.value }] })}
+                    type="color"
+                    value={p.stops[1]?.color ?? "#ffffff"}
+                  />
+                </label>
+              </div>
+              {p.gradientType === "linear" && (
+                <SliderField label="זווית" min={0} max={360} value={p.angle} onChange={(v) => onPatchParams({ angle: v })} unit="°" />
+              )}
+              <SliderField label="שקיפות" min={0} max={1} step={0.01} decimals={2} value={p.opacity} onChange={(v) => onPatchParams({ opacity: v })} />
+              <div className="field">
+                <span className="field-label">Blend Mode</span>
+                <select
+                  className="text-input"
+                  onChange={(e) => onPatchParams({ blendMode: e.target.value as BlendMode })}
+                  value={p.blendMode}
+                >
+                  <option value="normal">Normal</option>
+                  <option value="multiply">Multiply</option>
+                  <option value="screen">Screen</option>
+                  <option value="overlay">Overlay</option>
+                  <option value="darken">Darken</option>
+                  <option value="lighten">Lighten</option>
+                </select>
+              </div>
+            </>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ─── Text controls ────────────────────────────────────────────────────────────
+
+const WARP_TYPES = [
+  { id: "none", label: "ללא" },
+  { id: "arc", label: "קשת (Arc)" },
+  { id: "arch", label: "קמרון (Arch)" },
+  { id: "bulge", label: "בליטה (Bulge)" },
+  { id: "wave", label: "גל (Wave)" },
+  { id: "flag", label: "דגל (Flag)" },
+  { id: "fisheye", label: "עין דג (Fisheye)" },
+  { id: "inflate", label: "ניפוח (Inflate)" },
+  { id: "squeeze", label: "לחיצה (Squeeze)" },
+  { id: "rise", label: "עלייה (Rise)" },
+  { id: "fish", label: "דג (Fish)" },
+  { id: "shell_lower", label: "קונכייה תחתית" },
+  { id: "shell_upper", label: "קונכייה עליונה" },
+  { id: "twist", label: "ספירלה (Twist)" },
+] as const;
 
 function TextControls({
   hasTextStyleClipboard,
@@ -500,149 +1695,636 @@ function TextControls({
   onPatch: (patch: Partial<VisualLayer>) => void;
   onTextChange: (text: string) => void;
 }): ReactElement {
-  const [tab, setTab] = useState<"type" | "effects" | "presets">("type");
-  const shadowDistance = Math.round(Math.hypot(layer.shadow?.offsetX ?? 0, layer.shadow?.offsetY ?? 0));
+  const [tab, setTab] = useState<"type" | "effects" | "warp" | "presets">("type");
+
   return (
     <div className="text-pro-controls">
-      <label className="field">
-        <span className="field-label">טקסט</span>
-        <textarea className="text-area" dir="auto" value={layer.text} onChange={(event) => onTextChange(event.target.value)} />
-      </label>
+      {/* ── Tabs are at the TOP so options are immediately visible ── */}
       <div className="text-tabs" role="tablist" aria-label="Text controls">
-        <button className={tab === "type" ? "on" : ""} onClick={() => setTab("type")} type="button">
-          Type
-        </button>
-        <button className={tab === "effects" ? "on" : ""} onClick={() => setTab("effects")} type="button">
-          FX
-        </button>
-        <button className={tab === "presets" ? "on" : ""} onClick={() => setTab("presets")} type="button">
-          Presets
-        </button>
+        <button className={tab === "type" ? "on" : ""} onClick={() => setTab("type")} type="button">Type</button>
+        <button className={tab === "effects" ? "on" : ""} onClick={() => setTab("effects")} type="button">FX</button>
+        <button className={tab === "warp" ? "on" : ""} onClick={() => setTab("warp")} type="button">Warp</button>
+        <button className={tab === "presets" ? "on" : ""} onClick={() => setTab("presets")} type="button">Presets</button>
       </div>
 
+      {/* ── Type Tab ── */}
       {tab === "type" ? (
         <div className="text-tab-panel">
-          <label className="field">
+          <div className="field">
             <span className="field-label">גופן</span>
-            <select className="text-input" onChange={(event) => onPatch({ fontFamily: event.target.value } as Partial<VisualLayer>)} value={layer.fontFamily}>
-              <option value="DM Sans">DM Sans</option>
-              <option value="Noto Sans Hebrew, Arial">Noto Sans Hebrew</option>
-              <option value="Arial">Arial</option>
-              <option value="Times New Roman">Times New Roman</option>
-              <option value="Georgia">Georgia</option>
-            </select>
-          </label>
-          <div className="field-grid">
-            <NumberField label="גודל" max={240} min={8} onChange={(fontSize) => onPatch({ fontSize } as Partial<VisualLayer>)} value={layer.fontSize} />
-            <NumberField label="משקל" max={900} min={100} onChange={(fontWeight) => onPatch({ fontWeight } as Partial<VisualLayer>)} step={100} value={layer.fontWeight} />
-            <NumberField label="גובה שורה" max={3} min={0.7} onChange={(lineHeight) => onPatch({ lineHeight } as Partial<VisualLayer>)} step={0.05} value={layer.lineHeight} />
-            <NumberField label="ריווח" max={40} min={-10} onChange={(letterSpacing) => onPatch({ letterSpacing } as Partial<VisualLayer>)} value={layer.letterSpacing} />
+            <FontSelector
+              value={layer.fontFamily}
+              onChange={(family) => onPatch({ fontFamily: family } as Partial<VisualLayer>)}
+            />
           </div>
+
+          <SliderField
+            label="גודל"
+            min={8}
+            max={240}
+            value={layer.fontSize}
+            onChange={(v) => onPatch({ fontSize: v } as Partial<VisualLayer>)}
+            unit=" px"
+          />
+          <SliderField
+            label="משקל"
+            min={100}
+            max={900}
+            step={100}
+            value={layer.fontWeight}
+            onChange={(v) => onPatch({ fontWeight: v } as Partial<VisualLayer>)}
+          />
+          <SliderField
+            label="גובה שורה"
+            min={0.7}
+            max={3}
+            step={0.05}
+            value={layer.lineHeight}
+            onChange={(v) => onPatch({ lineHeight: v } as Partial<VisualLayer>)}
+            decimals={2}
+            unit="×"
+          />
+          <SliderField
+            label="ריווח אותיות"
+            min={-10}
+            max={40}
+            value={layer.letterSpacing}
+            onChange={(v) => onPatch({ letterSpacing: v } as Partial<VisualLayer>)}
+            unit=" px"
+          />
+
           <div className="button-row">
-            <button className={layer.fontWeight >= 700 ? "toggle on" : "toggle"} onClick={() => onPatch({ fontWeight: layer.fontWeight >= 700 ? 400 : 700 } as Partial<VisualLayer>)} type="button">
+            <button
+              className={layer.fontWeight >= 700 ? "toggle on" : "toggle"}
+              onClick={() => onPatch({ fontWeight: layer.fontWeight >= 700 ? 400 : 700 } as Partial<VisualLayer>)}
+              type="button"
+              title="Bold"
+            >
               <Bold size={14} />
             </button>
-            <button className={layer.fontStyle === "italic" ? "toggle on" : "toggle"} onClick={() => onPatch({ fontStyle: layer.fontStyle === "italic" ? "normal" : "italic" } as Partial<VisualLayer>)} type="button">
+            <button
+              className={layer.fontStyle === "italic" ? "toggle on" : "toggle"}
+              onClick={() => onPatch({ fontStyle: layer.fontStyle === "italic" ? "normal" : "italic" } as Partial<VisualLayer>)}
+              type="button"
+              title="Italic"
+            >
               <Italic size={14} />
             </button>
-            <button className={layer.alignment === "right" ? "toggle on" : "toggle"} onClick={() => onPatch({ alignment: "right" } as Partial<VisualLayer>)} type="button">
-              <AlignRight size={14} />
-            </button>
-            <button className={layer.alignment === "center" ? "toggle on" : "toggle"} onClick={() => onPatch({ alignment: "center" } as Partial<VisualLayer>)} type="button">
-              <AlignCenter size={14} />
-            </button>
-            <button className={layer.alignment === "left" ? "toggle on" : "toggle"} onClick={() => onPatch({ alignment: "left" } as Partial<VisualLayer>)} type="button">
-              <AlignLeft size={14} />
-            </button>
+            <span className="btn-divider" />
+            <button className={layer.alignment === "right" ? "toggle on" : "toggle"} onClick={() => onPatch({ alignment: "right" } as Partial<VisualLayer>)} type="button"><AlignRight size={14} /></button>
+            <button className={layer.alignment === "center" ? "toggle on" : "toggle"} onClick={() => onPatch({ alignment: "center" } as Partial<VisualLayer>)} type="button"><AlignCenter size={14} /></button>
+            <button className={layer.alignment === "left" ? "toggle on" : "toggle"} onClick={() => onPatch({ alignment: "left" } as Partial<VisualLayer>)} type="button"><AlignLeft size={14} /></button>
+            <button className={layer.alignment === "justify" ? "toggle on" : "toggle"} onClick={() => onPatch({ alignment: "justify" } as Partial<VisualLayer>)} type="button"><AlignJustify size={14} /></button>
           </div>
-          <div className="field-grid">
+
+          <div className="field-row">
             <label className="field">
               <span className="field-label">צבע</span>
-              <input className="color-input" onChange={(event) => onPatch({ color: event.target.value, autoContrastOverridden: true } as Partial<VisualLayer>)} type="color" value={layer.color} />
+              <input
+                className="color-input"
+                onChange={(e) => onPatch({ color: e.target.value, autoContrastOverridden: true } as Partial<VisualLayer>)}
+                type="color"
+                value={layer.color}
+              />
             </label>
-            <NumberField label="Opacity" max={1} min={0} onChange={(fillOpacity) => onPatch({ fillOpacity } as Partial<VisualLayer>)} step={0.05} value={layer.fillOpacity} />
+            <div className="seg">
+              <button className={layer.direction === "rtl" ? "on" : ""} onClick={() => onPatch({ direction: "rtl" } as Partial<VisualLayer>)} type="button">RTL</button>
+              <button className={layer.direction === "auto" ? "on" : ""} onClick={() => onPatch({ direction: "auto" } as Partial<VisualLayer>)} type="button">Auto</button>
+              <button className={layer.direction === "ltr" ? "on" : ""} onClick={() => onPatch({ direction: "ltr" } as Partial<VisualLayer>)} type="button">LTR</button>
+            </div>
           </div>
-          <div className="seg">
-            <button className={layer.direction === "rtl" ? "on" : ""} onClick={() => onPatch({ direction: "rtl" } as Partial<VisualLayer>)} type="button">
-              RTL
-            </button>
-            <button className={layer.direction === "auto" ? "on" : ""} onClick={() => onPatch({ direction: "auto" } as Partial<VisualLayer>)} type="button">
-              Auto
-            </button>
-            <button className={layer.direction === "ltr" ? "on" : ""} onClick={() => onPatch({ direction: "ltr" } as Partial<VisualLayer>)} type="button">
-              LTR
-            </button>
+
+          <SliderField
+            label="שקיפות טקסט (Fill Opacity)"
+            min={0}
+            max={1}
+            step={0.01}
+            value={layer.fillOpacity}
+            onChange={(v) => onPatch({ fillOpacity: v } as Partial<VisualLayer>)}
+            decimals={2}
+          />
+          <SliderField
+            label="שקיפות שכבה (Layer Opacity)"
+            min={0}
+            max={1}
+            step={0.01}
+            value={layer.opacity}
+            onChange={(v) => onPatch({ opacity: v } as Partial<VisualLayer>)}
+            decimals={2}
+          />
+
+          {/* ── Coordinates, lock and textarea — bottom of Type tab ── */}
+          <div className="type-tab-footer">
+            <div className="field-grid">
+              <Metric label="X" value={layer.x} />
+              <Metric label="Y" value={layer.y} />
+              <Metric label="W" value={layer.width} />
+              <Metric label="H" value={layer.height} />
+            </div>
+            <div className="quick-controls">
+              <button
+                className={layer.visible ? "toggle on" : "toggle"}
+                onClick={() => onPatch({ visible: !layer.visible } as Partial<VisualLayer>)}
+                type="button"
+              >
+                {layer.visible ? <Eye size={14} /> : <EyeOff size={14} />}
+                תצוגה
+              </button>
+              <button
+                className={layer.locked ? "toggle on" : "toggle"}
+                onClick={() => onPatch({ locked: !layer.locked } as Partial<VisualLayer>)}
+                type="button"
+              >
+                {layer.locked ? <Lock size={14} /> : <Unlock size={14} />}
+                נעילה
+              </button>
+            </div>
+            <label className="field">
+              <span className="field-label">תוכן הטקסט</span>
+              <textarea className="text-area" dir="auto" value={layer.text} onChange={(e) => onTextChange(e.target.value)} />
+            </label>
           </div>
         </div>
       ) : null}
 
+      {/* ── Effects Tab ── */}
       {tab === "effects" ? (
         <div className="text-tab-panel">
+          {/* Stroke */}
           <div className="effect-card">
             <label className="check-line">
               <input
                 checked={layer.stroke !== undefined}
-                onChange={(event) => onPatch({ stroke: event.target.checked ? { version: 1, color: "#111111", width: 2, opacity: 1 } : undefined } as Partial<VisualLayer>)}
+                onChange={(e) =>
+                  onPatch({
+                    stroke: e.target.checked
+                      ? { version: 1, color: "#111111", width: 2, opacity: 1 }
+                      : undefined
+                  } as Partial<VisualLayer>)
+                }
                 type="checkbox"
               />
-              Stroke
+              Stroke — קו
             </label>
             {layer.stroke !== undefined ? (
-              <div className="field-grid">
-                <label className="field">
-                  <span className="field-label">צבע קו</span>
-                  <input className="color-input" onChange={(event) => onPatch({ stroke: { ...layer.stroke, color: event.target.value } } as Partial<VisualLayer>)} type="color" value={layer.stroke.color} />
-                </label>
-                <NumberField label="עובי" max={20} min={0} onChange={(width) => onPatch({ stroke: { ...layer.stroke, width } } as Partial<VisualLayer>)} value={layer.stroke.width} />
-              </div>
+              <>
+                <div className="field-row">
+                  <label className="field">
+                    <span className="field-label">צבע קו</span>
+                    <input
+                      className="color-input"
+                      onChange={(e) => onPatch({ stroke: { ...layer.stroke, color: e.target.value } } as Partial<VisualLayer>)}
+                      type="color"
+                      value={layer.stroke.color}
+                    />
+                  </label>
+                </div>
+                <SliderField
+                  label="עובי"
+                  min={0}
+                  max={30}
+                  value={layer.stroke.width}
+                  onChange={(v) => onPatch({ stroke: { ...layer.stroke, width: v } } as Partial<VisualLayer>)}
+                  unit=" px"
+                />
+                <SliderField
+                  label="שקיפות Stroke"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={layer.stroke.opacity}
+                  onChange={(v) => onPatch({ stroke: { ...layer.stroke, opacity: v } } as Partial<VisualLayer>)}
+                  decimals={2}
+                />
+              </>
             ) : null}
           </div>
+
+          {/* Drop Shadow */}
           <div className="effect-card">
             <label className="check-line">
               <input
                 checked={layer.shadow !== undefined}
-                onChange={(event) => onPatch({ shadow: event.target.checked ? { version: 1, color: "#000000", blur: 8, offsetX: 0, offsetY: 5, opacity: 0.3 } : undefined } as Partial<VisualLayer>)}
+                onChange={(e) =>
+                  onPatch({
+                    shadow: e.target.checked
+                      ? { version: 1, color: "#000000", blur: 8, offsetX: 0, offsetY: 5, opacity: 0.35 }
+                      : undefined
+                  } as Partial<VisualLayer>)
+                }
                 type="checkbox"
               />
-              Shadow / Glow
+              Drop Shadow — צל
             </label>
             {layer.shadow !== undefined ? (
               <>
-                <div className="field-grid">
+                <div className="field-row">
                   <label className="field">
-                    <span className="field-label">צבע צל</span>
-                    <input className="color-input" onChange={(event) => onPatch({ shadow: { ...layer.shadow, color: event.target.value } } as Partial<VisualLayer>)} type="color" value={layer.shadow.color} />
+                    <span className="field-label">צבע</span>
+                    <input
+                      className="color-input"
+                      onChange={(e) => onPatch({ shadow: { ...layer.shadow, color: e.target.value } } as Partial<VisualLayer>)}
+                      type="color"
+                      value={layer.shadow.color}
+                    />
                   </label>
-                  <NumberField label="טשטוש" max={60} min={0} onChange={(blur) => onPatch({ shadow: { ...layer.shadow, blur } } as Partial<VisualLayer>)} value={layer.shadow.blur} />
-                  <NumberField label="מרחק" max={80} min={0} onChange={(distance) => onPatch({ shadow: { ...layer.shadow, offsetX: 0, offsetY: distance } } as Partial<VisualLayer>)} value={shadowDistance} />
-                  <NumberField label="Opacity" max={1} min={0} onChange={(opacity) => onPatch({ shadow: { ...layer.shadow, opacity } } as Partial<VisualLayer>)} step={0.05} value={layer.shadow.opacity} />
                 </div>
-                <button className="mini-action" onClick={() => layer.shadow !== undefined ? onPatch({ shadow: { ...layer.shadow, offsetX: 0, offsetY: 0, blur: Math.max(layer.shadow.blur, 18) } } as Partial<VisualLayer>) : undefined} type="button">
-                  Glow mode
-                </button>
+                <SliderField
+                  label="טשטוש"
+                  min={0}
+                  max={80}
+                  value={layer.shadow.blur}
+                  onChange={(v) => onPatch({ shadow: { ...layer.shadow, blur: v } } as Partial<VisualLayer>)}
+                  unit=" px"
+                />
+                <SliderField
+                  label="מרחק X"
+                  min={-80}
+                  max={80}
+                  value={layer.shadow.offsetX}
+                  onChange={(v) => onPatch({ shadow: { ...layer.shadow, offsetX: v } } as Partial<VisualLayer>)}
+                  unit=" px"
+                />
+                <SliderField
+                  label="מרחק Y"
+                  min={-80}
+                  max={80}
+                  value={layer.shadow.offsetY}
+                  onChange={(v) => onPatch({ shadow: { ...layer.shadow, offsetY: v } } as Partial<VisualLayer>)}
+                  unit=" px"
+                />
+                <SliderField
+                  label="שקיפות"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={layer.shadow.opacity}
+                  onChange={(v) => onPatch({ shadow: { ...layer.shadow, opacity: v } } as Partial<VisualLayer>)}
+                  decimals={2}
+                />
               </>
             ) : null}
           </div>
-          <div className="field">
-            <span className="field-label">Shape / Warp metadata</span>
-            <div className="seg">
-              {(["none", "arc", "wave"] as const).map((type) => (
-                <button className={layer.warpSettings.type === type ? "on" : ""} key={type} onClick={() => onPatch({ warpSettings: { ...layer.warpSettings, enabled: type !== "none", type } } as Partial<VisualLayer>)} type="button">
-                  {type}
-                </button>
-              ))}
-            </div>
-            <NumberField
-              label="עוצמה"
-              max={100}
-              min={-100}
-              onChange={(amount) => onPatch({ warpSettings: { ...layer.warpSettings, enabled: amount !== 0, amount, intensity: amount } } as Partial<VisualLayer>)}
-              value={layer.warpSettings.amount}
-            />
+
+          {/* Outer Glow — uses shadow with zero offset */}
+          <div className="effect-card">
+            <label className="check-line">
+              <input
+                checked={
+                  layer.effects.some((e) => e.enabled && e.effectType === "outer_glow") ||
+                  (layer.shadow !== undefined && layer.shadow.offsetX === 0 && layer.shadow.offsetY === 0)
+                }
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    // Add glow: set shadow to glow mode
+                    onPatch({
+                      shadow: { version: 1, color: "#ffffff", blur: 24, offsetX: 0, offsetY: 0, opacity: 0.8 }
+                    } as Partial<VisualLayer>);
+                  } else {
+                    onPatch({ shadow: undefined } as Partial<VisualLayer>);
+                  }
+                }}
+                type="checkbox"
+              />
+              Outer Glow — זוהר חיצוני
+            </label>
+            {layer.shadow !== undefined && layer.shadow.offsetX === 0 && layer.shadow.offsetY === 0 ? (
+              <>
+                <div className="field-row">
+                  <label className="field">
+                    <span className="field-label">צבע זוהר</span>
+                    <input
+                      className="color-input"
+                      onChange={(e) => onPatch({ shadow: { ...layer.shadow, color: e.target.value } } as Partial<VisualLayer>)}
+                      type="color"
+                      value={layer.shadow.color}
+                    />
+                  </label>
+                  <label className="check-line neon-check">
+                    <input
+                      checked={layer.shadow.blur >= 30}
+                      onChange={(e) =>
+                        onPatch({
+                          shadow: { ...layer.shadow, blur: e.target.checked ? 40 : 18, opacity: e.target.checked ? 0.95 : 0.8 }
+                        } as Partial<VisualLayer>)
+                      }
+                      type="checkbox"
+                    />
+                    Neon
+                  </label>
+                </div>
+                <SliderField
+                  label="עוצמת זוהר"
+                  min={4}
+                  max={80}
+                  value={layer.shadow.blur}
+                  onChange={(v) => onPatch({ shadow: { ...layer.shadow, blur: v } } as Partial<VisualLayer>)}
+                  unit=" px"
+                />
+                <SliderField
+                  label="שקיפות"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={layer.shadow.opacity}
+                  onChange={(v) => onPatch({ shadow: { ...layer.shadow, opacity: v } } as Partial<VisualLayer>)}
+                  decimals={2}
+                />
+              </>
+            ) : null}
+          </div>
+
+          {/* Inner Shadow — basic, using canvas warp renderer when warp is active */}
+          <div className="effect-card">
+            <label className="check-line">
+              <input
+                checked={layer.effects.some((e) => e.enabled && e.effectType === "inner_shadow")}
+                onChange={(e) => {
+                  const next = e.target.checked
+                    ? [
+                        ...layer.effects,
+                        {
+                          version: 1,
+                          id: `is_${Date.now()}`,
+                          effectId: `is_${Date.now()}`,
+                          effectType: "inner_shadow" as const,
+                          enabled: true,
+                          opacity: 0.6,
+                          blendMode: "normal" as const,
+                          params: { color: "#000000", opacity: 0.6, angle: 135, distance: 4, blur: 6 }
+                        }
+                      ]
+                    : layer.effects.filter((ef) => ef.effectType !== "inner_shadow");
+                  onPatch({ effects: next } as Partial<VisualLayer>);
+                }}
+                type="checkbox"
+              />
+              Inner Shadow — צל פנימי
+            </label>
+            {layer.effects
+              .filter((e) => e.enabled && e.effectType === "inner_shadow")
+              .map((e) => {
+                const p = e.params as Record<string, unknown>;
+                return (
+                  <div key={e.id}>
+                    <div className="field-row">
+                      <label className="field">
+                        <span className="field-label">צבע</span>
+                        <input
+                          className="color-input"
+                          onChange={(ev) =>
+                            onPatch({
+                              effects: layer.effects.map((ef) =>
+                                ef.id === e.id ? { ...ef, params: { ...ef.params, color: ev.target.value } } : ef
+                              )
+                            } as Partial<VisualLayer>)
+                          }
+                          type="color"
+                          value={typeof p["color"] === "string" ? p["color"] : "#000000"}
+                        />
+                      </label>
+                    </div>
+                    <SliderField
+                      label="טשטוש"
+                      min={0}
+                      max={40}
+                      value={typeof p["blur"] === "number" ? p["blur"] : 6}
+                      onChange={(v) =>
+                        onPatch({
+                          effects: layer.effects.map((ef) =>
+                            ef.id === e.id ? { ...ef, params: { ...ef.params, blur: v } } : ef
+                          )
+                        } as Partial<VisualLayer>)
+                      }
+                      unit=" px"
+                    />
+                    <SliderField
+                      label="מרחק"
+                      min={0}
+                      max={30}
+                      value={typeof p["distance"] === "number" ? p["distance"] : 4}
+                      onChange={(v) =>
+                        onPatch({
+                          effects: layer.effects.map((ef) =>
+                            ef.id === e.id ? { ...ef, params: { ...ef.params, distance: v } } : ef
+                          )
+                        } as Partial<VisualLayer>)
+                      }
+                      unit=" px"
+                    />
+                    <SliderField
+                      label="שקיפות"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={e.opacity}
+                      onChange={(v) =>
+                        onPatch({
+                          effects: layer.effects.map((ef) =>
+                            ef.id === e.id ? { ...ef, opacity: v } : ef
+                          )
+                        } as Partial<VisualLayer>)
+                      }
+                      decimals={2}
+                    />
+                    <div className="field">
+                      <span className="field-label">Blend Mode</span>
+                      <select
+                        className="text-input"
+                        onChange={(ev) =>
+                          onPatch({
+                            effects: layer.effects.map((ef) =>
+                              ef.id === e.id ? { ...ef, blendMode: ev.target.value as "normal" | "multiply" | "screen" | "overlay" } : ef
+                            )
+                          } as Partial<VisualLayer>)
+                        }
+                        value={e.blendMode}
+                      >
+                        <option value="normal">Normal</option>
+                        <option value="multiply">Multiply</option>
+                        <option value="screen">Screen</option>
+                        <option value="overlay">Overlay</option>
+                      </select>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+
+          {/* Bevel & Emboss */}
+          <div className="effect-card">
+            <label className="check-line">
+              <input
+                checked={layer.effects.some((e) => e.enabled && e.effectType === "bevel_emboss")}
+                onChange={(e) => {
+                  const next = e.target.checked
+                    ? [
+                        ...layer.effects,
+                        {
+                          version: 1,
+                          id: `be_${Date.now()}`,
+                          effectId: `be_${Date.now()}`,
+                          effectType: "bevel_emboss" as const,
+                          enabled: true,
+                          opacity: 1,
+                          blendMode: "normal" as const,
+                          params: {
+                            style: "inner_bevel",
+                            technique: "smooth",
+                            depth: 5,
+                            size: 5,
+                            soften: 0,
+                            highlightColor: "#ffffff",
+                            shadowColor: "#000000"
+                          }
+                        }
+                      ]
+                    : layer.effects.filter((ef) => ef.effectType !== "bevel_emboss");
+                  onPatch({ effects: next } as Partial<VisualLayer>);
+                }}
+                type="checkbox"
+              />
+              Bevel & Emboss — תבליט
+              <span className="effect-note">מוצג בייצוא Python</span>
+            </label>
+            {layer.effects
+              .filter((e) => e.enabled && e.effectType === "bevel_emboss")
+              .map((e) => {
+                const p = e.params as Record<string, unknown>;
+                return (
+                  <div key={e.id}>
+                    <div className="field">
+                      <span className="field-label">סגנון</span>
+                      <select
+                        className="text-input"
+                        onChange={(ev) =>
+                          onPatch({ effects: layer.effects.map((ef) => ef.id === e.id ? { ...ef, params: { ...ef.params, style: ev.target.value } } : ef) } as Partial<VisualLayer>)
+                        }
+                        value={typeof p["style"] === "string" ? p["style"] : "inner_bevel"}
+                      >
+                        <option value="inner_bevel">Inner Bevel</option>
+                        <option value="outer_bevel">Outer Bevel</option>
+                        <option value="emboss">Emboss</option>
+                        <option value="pillow_emboss">Pillow Emboss</option>
+                      </select>
+                    </div>
+                    <SliderField
+                      label="עומק"
+                      min={1}
+                      max={20}
+                      value={typeof p["depth"] === "number" ? p["depth"] : 5}
+                      onChange={(v) => onPatch({ effects: layer.effects.map((ef) => ef.id === e.id ? { ...ef, params: { ...ef.params, depth: v } } : ef) } as Partial<VisualLayer>)}
+                      unit=" px"
+                    />
+                    <SliderField
+                      label="גודל"
+                      min={0}
+                      max={20}
+                      value={typeof p["size"] === "number" ? p["size"] : 5}
+                      onChange={(v) => onPatch({ effects: layer.effects.map((ef) => ef.id === e.id ? { ...ef, params: { ...ef.params, size: v } } : ef) } as Partial<VisualLayer>)}
+                      unit=" px"
+                    />
+                    <div className="field-row">
+                      <label className="field">
+                        <span className="field-label">הייליט</span>
+                        <input className="color-input" type="color" value={typeof p["highlightColor"] === "string" ? p["highlightColor"] : "#ffffff"}
+                          onChange={(ev) => onPatch({ effects: layer.effects.map((ef) => ef.id === e.id ? { ...ef, params: { ...ef.params, highlightColor: ev.target.value } } : ef) } as Partial<VisualLayer>)} />
+                      </label>
+                      <label className="field">
+                        <span className="field-label">צל</span>
+                        <input className="color-input" type="color" value={typeof p["shadowColor"] === "string" ? p["shadowColor"] : "#000000"}
+                          onChange={(ev) => onPatch({ effects: layer.effects.map((ef) => ef.id === e.id ? { ...ef, params: { ...ef.params, shadowColor: ev.target.value } } : ef) } as Partial<VisualLayer>)} />
+                      </label>
+                    </div>
+                  </div>
+                );
+              })}
           </div>
         </div>
       ) : null}
 
+      {/* ── Warp Tab ── */}
+      {tab === "warp" ? (
+        <div className="text-tab-panel">
+          <div className="field">
+            <span className="field-label">סוג עיוות</span>
+            <select
+              className="text-input"
+              onChange={(e) =>
+                onPatch({
+                  warpSettings: {
+                    ...layer.warpSettings,
+                    enabled: e.target.value !== "none",
+                    type: e.target.value as typeof layer.warpSettings.type
+                  }
+                } as Partial<VisualLayer>)
+              }
+              value={layer.warpSettings.type}
+            >
+              {WARP_TYPES.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {layer.warpSettings.type !== "none" ? (
+            <>
+              <SliderField
+                label="עוצמה (Bend)"
+                min={-100}
+                max={100}
+                value={layer.warpSettings.amount}
+                onChange={(v) =>
+                  onPatch({
+                    warpSettings: {
+                      ...layer.warpSettings,
+                      amount: v,
+                      intensity: v,
+                      enabled: v !== 0 || layer.warpSettings.type !== "none"
+                    }
+                  } as Partial<VisualLayer>)
+                }
+                unit="%"
+              />
+              <SliderField
+                label="עיוות אופקי"
+                min={-100}
+                max={100}
+                value={layer.warpSettings.horizontalDistortion}
+                onChange={(v) =>
+                  onPatch({ warpSettings: { ...layer.warpSettings, horizontalDistortion: v } } as Partial<VisualLayer>)
+                }
+                unit="%"
+              />
+              <SliderField
+                label="עיוות אנכי"
+                min={-100}
+                max={100}
+                value={layer.warpSettings.verticalDistortion}
+                onChange={(v) =>
+                  onPatch({ warpSettings: { ...layer.warpSettings, verticalDistortion: v } } as Partial<VisualLayer>)
+                }
+                unit="%"
+              />
+              <button
+                className="mini-action"
+                onClick={() =>
+                  onPatch({
+                    warpSettings: { ...layer.warpSettings, amount: 0, horizontalDistortion: 0, verticalDistortion: 0, enabled: false, type: "none" }
+                  } as Partial<VisualLayer>)
+                }
+                type="button"
+              >
+                איפוס עיוות
+              </button>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* ── Presets Tab ── */}
       {tab === "presets" ? (
         <div className="text-tab-panel">
           <div className="button-row">
@@ -667,78 +2349,6 @@ function TextControls({
       ) : null}
     </div>
   );
-  return (
-    <>
-      <label className="field">
-        <span className="field-label">טקסט</span>
-        <textarea className="text-area" value={layer.text} onChange={(event) => onTextChange(event.target.value)} />
-      </label>
-      <div className="field-grid">
-        <label className="field">
-          <span className="field-label">גודל</span>
-          <input
-            className="text-input"
-            min={8}
-            max={240}
-            onChange={(event) => onPatch({ fontSize: Number(event.target.value) || layer.fontSize } as Partial<VisualLayer>)}
-            type="number"
-            value={layer.fontSize}
-          />
-        </label>
-        <label className="field">
-          <span className="field-label">צבע</span>
-          <input
-            className="color-input"
-            onChange={(event) => onPatch({ color: event.target.value } as Partial<VisualLayer>)}
-            type="color"
-            value={layer.color}
-          />
-        </label>
-      </div>
-      <div className="seg">
-        <button className={layer.alignment === "right" ? "on" : ""} onClick={() => onPatch({ alignment: "right" } as Partial<VisualLayer>)} type="button">
-          ימין
-        </button>
-        <button className={layer.alignment === "center" ? "on" : ""} onClick={() => onPatch({ alignment: "center" } as Partial<VisualLayer>)} type="button">
-          מרכז
-        </button>
-        <button className={layer.alignment === "left" ? "on" : ""} onClick={() => onPatch({ alignment: "left" } as Partial<VisualLayer>)} type="button">
-          שמאל
-        </button>
-      </div>
-    </>
-  );
-}
-
-function NumberField({
-  label,
-  max,
-  min,
-  onChange,
-  step = 1,
-  value
-}: {
-  label: string;
-  max: number;
-  min: number;
-  onChange: (value: number) => void;
-  step?: number;
-  value: number;
-}): ReactElement {
-  return (
-    <label className="field">
-      <span className="field-label">{label}</span>
-      <input
-        className="text-input"
-        max={max}
-        min={min}
-        onChange={(event) => onChange(Number(event.target.value) || min)}
-        step={step}
-        type="number"
-        value={value}
-      />
-    </label>
-  );
 }
 
 function presetPreviewStyle(preset: TextPreset): CSSProperties {
@@ -749,7 +2359,8 @@ function presetPreviewStyle(preset: TextPreset): CSSProperties {
       preset.style.shadow === undefined
         ? undefined
         : `${preset.style.shadow.offsetX}px ${preset.style.shadow.offsetY}px ${preset.style.shadow.blur}px ${preset.style.shadow.color}`,
-    WebkitTextStroke: preset.style.stroke === undefined ? undefined : `${preset.style.stroke.width}px ${preset.style.stroke.color}`
+    WebkitTextStroke:
+      preset.style.stroke === undefined ? undefined : `${preset.style.stroke.width}px ${preset.style.stroke.color}`
   };
 }
 
@@ -761,6 +2372,8 @@ function Metric({ label, value }: { label: string; value: number }): ReactElemen
     </span>
   );
 }
+
+// ─── Layer list ───────────────────────────────────────────────────────────────
 
 function LayerList({
   assets,
@@ -787,7 +2400,7 @@ function LayerList({
       setDraggingLayerId(null);
       return;
     }
-    const nextIds = ordered.map((layer) => layer.id).filter((layerId) => layerId !== draggingLayerId);
+    const nextIds = ordered.map((l) => l.id).filter((id) => id !== draggingLayerId);
     const targetIndex = nextIds.indexOf(targetLayerId);
     nextIds.splice(targetIndex < 0 ? 0 : targetIndex, 0, draggingLayerId);
     onReorder(nextIds);
@@ -804,10 +2417,10 @@ function LayerList({
           draggable
           key={layer.id}
           onDragEnd={() => setDraggingLayerId(null)}
-          onDragOver={(event) => event.preventDefault()}
-          onDragStart={(event) => {
-            event.dataTransfer.effectAllowed = "move";
-            event.dataTransfer.setData("text/plain", layer.id);
+          onDragOver={(e) => e.preventDefault()}
+          onDragStart={(e) => {
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("text/plain", layer.id);
             setDraggingLayerId(layer.id);
           }}
           onDrop={() => handleDrop(layer.id)}
@@ -818,18 +2431,10 @@ function LayerList({
             <strong>{layer.name}</strong>
           </button>
           <span className="layer-actions">
-            <button
-              aria-label="שלח אחורה"
-              onClick={() => onMove(layer.id, "backward")}
-              type="button"
-            >
+            <button aria-label="שלח אחורה" onClick={() => onMove(layer.id, "backward")} type="button">
               <ChevronsDown size={12} />
             </button>
-            <button
-              aria-label="הבא קדימה"
-              onClick={() => onMove(layer.id, "forward")}
-              type="button"
-            >
+            <button aria-label="הבא קדימה" onClick={() => onMove(layer.id, "forward")} type="button">
               <ChevronsUp size={12} />
             </button>
           </span>
@@ -840,6 +2445,13 @@ function LayerList({
 }
 
 function LayerThumbnail({ assets, layer }: { assets: Asset[]; layer: VisualLayer }): ReactElement {
+  if (layer.type === "image") {
+    const asset = assets.find((item) => item.id === layer.assetId);
+    if (asset?.previewPath !== undefined) {
+      return <img alt="" className="layer-thumb image" src={asset.previewPath} />;
+    }
+  }
+
   if (layer.type === "frame" && layer.contentType === "image") {
     const asset = assets.find((item) => item.id === layer.imageAssetId);
     if (asset?.previewPath !== undefined) {
@@ -848,11 +2460,13 @@ function LayerThumbnail({ assets, layer }: { assets: Asset[]; layer: VisualLayer
   }
 
   if (layer.type === "text") {
-    const effectCount = layer.effects.filter((effect) => effect.enabled).length;
+    const effectCount = layer.effects.filter((e) => e.enabled).length;
+    const hasWarp = layer.warpSettings.enabled && layer.warpSettings.type !== "none";
     return (
       <span className="layer-thumb text" style={{ color: layer.color }}>
         {layer.text.trim().charAt(0) || "T"}
         {effectCount > 0 ? <em>{effectCount}</em> : null}
+        {hasWarp ? <em className="warp-badge">W</em> : null}
       </span>
     );
   }
