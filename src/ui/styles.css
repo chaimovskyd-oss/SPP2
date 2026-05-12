@@ -1691,6 +1691,17 @@ input[type="range"]::-webkit-slider-runnable-track {
   gap: 14px;
 }
 
+.setup-info-panel {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.setup-info-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .setup-subpanel {
   margin-top: 18px;
   padding-top: 16px;

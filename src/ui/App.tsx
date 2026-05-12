@@ -1,6 +1,7 @@
 import { Suspense, lazy, useMemo, useState, type ReactElement } from "react";
-import { cleanupRecovery, createGridModeDocument, getLatestRecoveryRecord, restoreRecoveryRecord, type AutosaveRecord } from "@/core";
+import { cleanupRecovery, createGridModeDocument, getLatestRecoveryRecord, restoreRecoveryRecord, withProjectMetadata, type AutosaveRecord } from "@/core";
 import type { PageSetup } from "@/types/primitives";
+import type { ProjectCustomerInfo } from "@/types/project";
 import type { GridCreateOptions } from "@/types/grid";
 import type { ModeType } from "@/types/template";
 import { useDocumentStore } from "@/state/documentStore";
@@ -35,9 +36,13 @@ export function App(): ReactElement {
     setScreen("setup");
   }
 
-  function createDocument(setup: PageSetup, gridOptions?: Partial<GridCreateOptions>): void {
+  function createDocument(setup: PageSetup, gridOptions?: Partial<GridCreateOptions>, customerInfo?: ProjectCustomerInfo): void {
     const name = pendingMode === "free" ? "פרויקט חופשי חדש" : `פרויקט ${pendingMode}`;
-    setDocument(pendingMode === "grid" ? createGridModeDocument(name, setup, gridOptions) : createFreeModeDocument(name, setup));
+    const projectMetadata = {
+      ...customerInfo,
+      projectType: pendingMode === "grid" ? "Grid" : "Collage"
+    };
+    setDocument(pendingMode === "grid" ? createGridModeDocument(name, setup, gridOptions, projectMetadata) : createFreeModeDocument(name, setup, projectMetadata));
     resetViewport();
     clearSelection();
     setScreen("editor");
@@ -53,7 +58,7 @@ export function App(): ReactElement {
       return;
     }
     const envelope = restoreRecoveryRecord(recoveryRecord);
-    setDocument(envelope.document);
+    setDocument(withProjectMetadata(envelope.document, envelope.metadata));
     resetViewport();
     clearSelection();
     setRecoveryRecord(null);

@@ -9,16 +9,23 @@ import {
   createPortableSppPackage,
   parseProject,
   readPortableSppPackage,
-  serializeProject
+  serializeProject,
+  createDefaultProjectFilename,
+  safeFilename,
+  withProjectMetadata
 } from "@/core";
 import type { Asset, Document, Page } from "@/types/document";
 import type { PageSetup } from "@/types/primitives";
-import type { ProjectEnvelope } from "@/types/project";
+import type { ProjectEnvelope, ProjectMetadataInput } from "@/types/project";
 import { measureTextLayerSize } from "@/core/text/measurement";
 import { SCREEN_HELPER_NODE_NAME } from "./editor/canvasNodeNames";
 import { downloadBytes, downloadDataUrl, downloadTextFile } from "./file";
 
-export function createFreeModeDocument(name: string, setup?: PageSetup): Document {
+export interface ProjectSaveOptions {
+  filename?: string;
+}
+
+export function createFreeModeDocument(name: string, setup?: PageSetup, projectMetadata: ProjectMetadataInput = {}): Document {
   const page = createPage({
     name: "עמוד 1",
     setup:
@@ -51,7 +58,7 @@ export function createFreeModeDocument(name: string, setup?: PageSetup): Documen
       }
   });
 
-  return {
+  return withProjectMetadata({
     ...createDocument({
       name,
       dpi: page.setup.dpi,
@@ -60,7 +67,7 @@ export function createFreeModeDocument(name: string, setup?: PageSetup): Documen
       }
     }),
     pages: [page]
-  };
+  }, { ...projectMetadata, projectType: projectMetadata.projectType ?? "Collage" });
 }
 
 export function createStarterTextLayer(pageWidth: number, pageHeight: number) {
@@ -186,16 +193,16 @@ export function readImageDimensions(dataUrl: string): Promise<{ width: number; h
   });
 }
 
-export function saveProject(document: Document): void {
+export function saveProject(document: Document, options: ProjectSaveOptions = {}): void {
   const envelope = createProjectEnvelope({
     document,
     linkedGroups: [],
     batchJobs: []
   });
-  downloadTextFile(`${safeFilename(document.name)}.spp.json`, serializeProject(envelope), "application/json");
+  downloadTextFile(options.filename ?? createDefaultProjectFilename(envelope.metadata, { extension: ".spp2" }), serializeProject(envelope), "application/json");
 }
 
-export async function savePortableProject(document: Document): Promise<void> {
+export async function savePortableProject(document: Document, options: ProjectSaveOptions = {}): Promise<void> {
   const envelope = createProjectEnvelope({
     document,
     linkedGroups: [],
@@ -205,7 +212,8 @@ export async function savePortableProject(document: Document): Promise<void> {
     project: envelope,
     metadata: {
       savedAt: new Date().toISOString(),
-      portable: true
+      portable: true,
+      projectMetadata: envelope.metadata
     },
     assets: document.assets.map((asset) => ({
       assetId: asset.id,
@@ -214,7 +222,7 @@ export async function savePortableProject(document: Document): Promise<void> {
       thumbnail: dataUrlToBytes(asset.thumbnailPath)
     }))
   });
-  downloadBytes(`${safeFilename(document.name)}.spp`, bytes, "application/octet-stream");
+  downloadBytes(options.filename ?? createDefaultProjectFilename(envelope.metadata, { extension: ".spp" }), bytes, "application/octet-stream");
 }
 
 export async function loadProject(file: File): Promise<ProjectEnvelope> {
@@ -293,10 +301,6 @@ export function exportStagePreviewPng(stage: Konva.Stage, documentName: string):
     pixelRatio: 2
   });
   downloadDataUrl(`${safeFilename(documentName)}.preview.png`, dataUrl);
-}
-
-function safeFilename(name: string): string {
-  return name.replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_").trim() || "spp-project";
 }
 
 function dataUrlToBytes(value: string | undefined): Uint8Array | undefined {

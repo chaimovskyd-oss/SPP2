@@ -1,5 +1,5 @@
 import { captureError, writeLog } from "@/core/logging/logger";
-import type { ProjectEnvelope } from "@/types/project";
+import type { ProjectEnvelope, ProjectMetadata } from "@/types/project";
 import { parseProject, serializeProject } from "./projectFormat";
 
 export interface AutosaveRecord {
@@ -7,6 +7,7 @@ export interface AutosaveRecord {
   projectId: string;
   projectName: string;
   savedAt: string;
+  metadata?: ProjectMetadata;
   kind: "unsaved" | "json" | "spp";
   payload: string;
 }
@@ -58,9 +59,10 @@ export class AutosaveManager {
 export async function saveRecoveryRecord(project: ProjectEnvelope, kind: AutosaveRecord["kind"], options: AutosaveOptions = {}): Promise<AutosaveRecord> {
   const record: AutosaveRecord = {
     id: crypto.randomUUID(),
-    projectId: project.document.id,
+    projectId: project.metadata.internalUuid,
     projectName: project.document.name,
     savedAt: new Date().toISOString(),
+    metadata: project.metadata,
     kind,
     payload: serializeProject(project)
   };

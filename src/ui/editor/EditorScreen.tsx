@@ -63,6 +63,7 @@ import {
   clampContentTransformToFillBounds,
   swapGridCellImages,
   unitToPx,
+  withProjectMetadata,
   type AlignmentCommand
 } from "@/core";
 import { importImageAsset } from "@/core/assets/assetManager";
@@ -273,7 +274,7 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
     const file = event.target.files?.[0];
     if (file === undefined) return;
     const envelope = await loadProject(file);
-    setDocument(envelope.document);
+    setDocument(withProjectMetadata(envelope.document, envelope.metadata));
     viewport.setViewport(envelope.document.viewport);
     clearSelection();
     setStatus("הפרויקט נטען");

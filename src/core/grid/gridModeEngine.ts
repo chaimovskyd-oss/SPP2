@@ -1,25 +1,27 @@
 import { createDocument, createPage } from "@/core/document/factory";
 import { createId } from "@/core/ids";
 import { createFrameLayer, createTextLayer, defaultContentTransform } from "@/core/layers/factory";
+import { withProjectMetadata } from "@/core/projectMetadata";
 import { measureTextLayerSize } from "@/core/text/measurement";
 import type { Asset, Document, Page } from "@/types/document";
 import type { FrameLayer, TextLayer, VisualLayer } from "@/types/layers";
 import type { ContentTransform } from "@/types/layers";
 import type { GridCellMetadata, GridCellRect, GridCreateOptions, GridImageAssignment, GridImageInput, GridLayoutRule, GridTextOverlayRule } from "@/types/grid";
 import type { FitMode, Margins, PageSetup, Rect } from "@/types/primitives";
+import type { ProjectMetadataInput } from "@/types/project";
 
 export const DEFAULT_GRID_ROWS = 2;
 export const DEFAULT_GRID_COLUMNS = 3;
 export const DEFAULT_GRID_SPACING = 24;
 
-export function createGridModeDocument(name: string, setup: PageSetup, options: Partial<GridCreateOptions> = {}): Document {
+export function createGridModeDocument(name: string, setup: PageSetup, options: Partial<GridCreateOptions> = {}, projectMetadata: ProjectMetadataInput = {}): Document {
   const gridOptions = normalizeGridCreateOptions(options);
   const page = createPage({ name: "Grid 1", setup });
   const gridId = createId("grid");
   const linkedGroupId = createId("linked");
   const rule = createGridRule(gridId, linkedGroupId, gridOptions);
   const { page: pageWithCells, rule: ruleWithCells } = createGridPage(page, rule, 0);
-  return {
+  return withProjectMetadata({
     ...createDocument({
       name,
       dpi: setup.dpi,
@@ -30,7 +32,7 @@ export function createGridModeDocument(name: string, setup: PageSetup, options: 
       }
     }),
     gridRules: [ruleWithCells]
-  };
+  }, { ...projectMetadata, projectType: projectMetadata.projectType ?? "Grid" });
 }
 
 export function computeGridCellRects(page: Pick<Page, "width" | "height">, rule: Pick<GridLayoutRule, "rows" | "columns" | "margins" | "spacingX" | "spacingY" | "fillDirection">): GridCellRect[] {

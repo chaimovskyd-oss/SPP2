@@ -19,6 +19,7 @@ import {
   type HistoryState
 } from "@/core/history/actions";
 import { applyLinkedGroupPatch, withMemberOverride, removeLinkedGroupMember } from "@/core/layers/linkedGroups";
+import { touchProjectMetadata } from "@/core/projectMetadata";
 import { applyTextPresetToLayer, applyTextStylePatch, extractTextStylePatch } from "@/core/text/presets";
 import { measureTextLayerSize } from "@/core/text/measurement";
 import type { Asset, Document, Page } from "@/types/document";
@@ -363,7 +364,7 @@ function commitDocumentAction(
   }
   const result = applyDocumentAction(state.document, state.history, action);
   return {
-    document: result.document,
+    document: touchProjectMetadata(result.document),
     activePageId,
     history: result.history,
     canUndo: result.history.undoStack.length > 0,

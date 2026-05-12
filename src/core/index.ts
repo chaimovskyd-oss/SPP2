@@ -29,6 +29,7 @@ export * from "./logging/logger";
 export * from "./pages/grid";
 export * from "./pageSetup/presets";
 export * from "./product/productDocument";
+export * from "./projectMetadata";
 export * from "./jobs/fillFramesJob";
 export * from "./layout/layoutEngine";
 export * from "./rendering/frameFitEngine";

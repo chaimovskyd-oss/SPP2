@@ -3,11 +3,12 @@ import { PAGE_PRESETS, pageSetupFromPreset } from "@/core/pageSetup/presets";
 import { unitToPx } from "@/core/units/conversion";
 import type { GridCreateOptions } from "@/types/grid";
 import type { PageSetup, Unit } from "@/types/primitives";
+import type { ProjectCustomerInfo } from "@/types/project";
 
 interface DocumentSetupScreenProps {
   modeName: string;
   onBack: () => void;
-  onCreate: (setup: PageSetup, gridOptions?: Partial<GridCreateOptions>) => void;
+  onCreate: (setup: PageSetup, gridOptions?: Partial<GridCreateOptions>, customerInfo?: ProjectCustomerInfo) => void;
 }
 
 export function DocumentSetupScreen({ modeName, onBack, onCreate }: DocumentSetupScreenProps): ReactElement {
@@ -28,6 +29,9 @@ export function DocumentSetupScreen({ modeName, onBack, onCreate }: DocumentSetu
   const [gridColumns, setGridColumns] = useState(3);
   const [gridSpacing, setGridSpacing] = useState(8);
   const [gridFillDirection, setGridFillDirection] = useState<"rtl" | "ltr">("rtl");
+  const [customerName, setCustomerName] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [email, setEmail] = useState("");
 
   const setup = useMemo(() => {
     const preset = PAGE_PRESETS.find((item) => item.id === presetId) ?? PAGE_PRESETS[1];
@@ -73,7 +77,12 @@ export function DocumentSetupScreen({ modeName, onBack, onCreate }: DocumentSetu
             margins: setup.margins,
             fillDirection: gridFillDirection
           }
-        : undefined
+        : undefined,
+      {
+        customerName,
+        phoneNumber,
+        email
+      }
     );
   }
 
@@ -98,6 +107,24 @@ export function DocumentSetupScreen({ modeName, onBack, onCreate }: DocumentSetu
         ) : null}
 
         {setupStep === 1 ? (
+          <>
+          <section className="setup-info-panel" aria-label="Customer / Project Info">
+            <div className="panel-section-title">Customer / Project Info</div>
+            <div className="setup-grid setup-info-grid">
+              <label className="field">
+                <span className="field-label">Customer Name</span>
+                <input className="text-input" onChange={(event) => setCustomerName(event.target.value)} type="text" value={customerName} />
+              </label>
+              <label className="field">
+                <span className="field-label">Phone Number</span>
+                <input className="text-input" inputMode="tel" onChange={(event) => setPhoneNumber(event.target.value)} type="tel" value={phoneNumber} />
+              </label>
+              <label className="field">
+                <span className="field-label">Email</span>
+                <input className="text-input" inputMode="email" onChange={(event) => setEmail(event.target.value)} type="email" value={email} />
+              </label>
+            </div>
+          </section>
           <div className="setup-grid">
             <label className="field">
               <span className="field-label">מידת דף</span>
@@ -138,6 +165,7 @@ export function DocumentSetupScreen({ modeName, onBack, onCreate }: DocumentSetu
             <SetupNumber label={`שוליים (${units})`} onChange={setMargins} value={margins} />
             <SetupNumber label={`אזור בטוח (${units})`} onChange={setSafeArea} value={safeArea} />
           </div>
+          </>
         ) : (
           <section className="setup-subpanel">
             <div className="panel-section-title">הגדרת גריד</div>

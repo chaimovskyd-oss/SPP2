@@ -67,7 +67,8 @@ describe("Pro text engine foundation", () => {
     const parsed = parseProject(serializeProject(envelope));
     const migrated = parsed.document.pages[0]?.layers[0] as TextLayer | undefined;
 
-    expect(Object.keys(parsed)).toEqual(["format", "version", "projectVersion", "appVersion", "schemaVersion", "document", "linkedGroups", "batchJobs"]);
+    expect(Object.keys(parsed)).toEqual(["format", "version", "projectVersion", "appVersion", "schemaVersion", "metadata", "document", "linkedGroups", "batchJobs"]);
+    expect(parsed.metadata.internalUuid).toBe(parsed.document.id);
     expect(migrated?.layerType).toBe("text");
     expect(migrated?.effects).toEqual([]);
     expect(migrated?.warpSettings.type).toBe("none");

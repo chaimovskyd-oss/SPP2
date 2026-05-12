@@ -1,4 +1,5 @@
 import { defaultViewportState } from "@/core/defaults";
+import { createProjectMetadata } from "@/core/projectMetadata";
 import { migrateProjectTextLayers } from "@/core/text/migration";
 import { APP_VERSION, PROJECT_FORMAT_VERSION, PROJECT_SCHEMA_VERSION, type ProjectEnvelope } from "@/types/project";
 
@@ -83,12 +84,14 @@ export function normalizeProjectEnvelope(input: unknown): ProjectEnvelope {
   if (!isProjectEnvelopeLike(input)) {
     throw new Error("Invalid SPP project envelope");
   }
+  const metadata = createProjectMetadata(input.metadata, input.document);
   let project: ProjectEnvelope = {
     format: "SPP_PROJECT",
     version: PROJECT_FORMAT_VERSION,
     projectVersion: input.projectVersion ?? String(input.version ?? PROJECT_FORMAT_VERSION),
     appVersion: input.appVersion ?? APP_VERSION,
     schemaVersion: input.schemaVersion ?? 1,
+    metadata,
     document: {
       ...input.document,
       gridRules: input.document.gridRules ?? [],

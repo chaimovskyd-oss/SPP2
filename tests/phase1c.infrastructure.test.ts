@@ -4,6 +4,7 @@ import {
   buildRenderModel,
   createExportJobPlan,
   createPortableSppPackage,
+  createDefaultProjectFilename,
   createProjectEnvelope,
   findMissingAssets,
   getLogs,
@@ -110,7 +111,43 @@ describe("Phase 1C core infrastructure", () => {
     const restored = restoreRecoveryRecord(record);
 
     expect(restored.document.id).toBe(document.id);
+    expect(restored.metadata.internalUuid).toBe(envelope.metadata.internalUuid);
+    expect(record.metadata?.internalUuid).toBe(envelope.metadata.internalUuid);
     expect(storage.get("test.recovery")).toContain("Recovery");
+  });
+
+  it("stores project-level customer metadata without adding canvas layers", () => {
+    const document = createFreeModeDocument("Customer Project", undefined, {
+      customerName: "Moshe Cohen",
+      phoneNumber: "050-123-4582",
+      email: "moshe@example.com",
+      projectType: "Collage",
+      createdAt: "2026-05-12T10:00:00.000Z"
+    });
+    const envelope = createProjectEnvelope({ document, linkedGroups: [], batchJobs: [] });
+    const parsed = parseProject(serializeProject(envelope));
+
+    expect(parsed.metadata.customerName).toBe("Moshe Cohen");
+    expect(parsed.metadata.phoneNumber).toBe("050-123-4582");
+    expect(parsed.metadata.projectType).toBe("Collage");
+    expect(parsed.document.pages[0]?.layers).toHaveLength(0);
+  });
+
+  it("generates safe default project filenames for indexing and duplicate avoidance", () => {
+    const metadata = createProjectEnvelope({
+      document: createFreeModeDocument("Filename", undefined, {
+        customerName: "Moshe Cohen",
+        phoneNumber: "050-123-4582",
+        projectType: "Collage",
+        createdAt: "2026-05-12T10:00:00.000Z"
+      }),
+      linkedGroups: [],
+      batchJobs: []
+    }).metadata;
+
+    expect(createDefaultProjectFilename(metadata, { reserve: false })).toBe("MosheCohen_4582_Collage_2026-05-12.spp2");
+    expect(createDefaultProjectFilename(metadata, { existingNames: ["MosheCohen_4582_Collage_2026-05-12.spp2"], reserve: false })).toBe("MosheCohen_4582_Collage_2026-05-12(2).spp2");
+    expect(createDefaultProjectFilename({ ...metadata, customerName: "", phoneNumber: "" }, { reserve: false })).toBe("Unknown_Collage_2026-05-12.spp2");
   });
 
   it("uses action-based undo/redo for add, move, resize and delete without full document stacks", () => {
