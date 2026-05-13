@@ -1,6 +1,6 @@
 import type { Document } from "@/types/document";
 import type { JsonValue } from "@/types/primitives";
-import type { ProjectMetadata, ProjectMetadataInput } from "@/types/project";
+import { PROJECT_FORMAT_VERSION, type ProjectMetadata, type ProjectMetadataInput } from "@/types/project";
 
 export const DOCUMENT_PROJECT_METADATA_KEY = "projectMetadata";
 const DEFAULT_PROJECT_TYPE = "Collage";
@@ -18,14 +18,26 @@ export function createProjectMetadata(input: ProjectMetadataInput = {}, document
   const previous = document === undefined ? null : getProjectMetadata(document);
   const createdAt = input.createdAt ?? previous?.createdAt ?? document?.createdAt ?? new Date().toISOString();
   const updatedAt = input.updatedAt ?? document?.modifiedAt ?? previous?.updatedAt ?? createdAt;
+  const projectUuid = normalizeProjectText(input.projectUuid ?? input.internalUuid ?? previous?.projectUuid ?? previous?.internalUuid ?? document?.id ?? crypto.randomUUID());
+  const phone = normalizeProjectText(input.customerPhone ?? input.phoneNumber ?? previous?.customerPhone ?? previous?.phoneNumber ?? "");
+  const email = normalizeOptionalProjectText(input.customerEmail ?? input.email ?? previous?.customerEmail ?? previous?.email);
   return {
     customerName: normalizeProjectText(input.customerName ?? previous?.customerName ?? ""),
-    phoneNumber: normalizeProjectText(input.phoneNumber ?? previous?.phoneNumber ?? ""),
-    email: normalizeOptionalProjectText(input.email ?? previous?.email),
+    customerPhone: phone,
+    customerEmail: email,
+    phoneNumber: phone,
+    email,
+    projectUuid,
     projectType: normalizeProjectText(input.projectType ?? previous?.projectType ?? inferProjectType(document) ?? DEFAULT_PROJECT_TYPE) || DEFAULT_PROJECT_TYPE,
+    fileFormatVersion: normalizePositiveInteger(input.fileFormatVersion ?? previous?.fileFormatVersion, PROJECT_FORMAT_VERSION),
     createdAt,
     updatedAt,
-    internalUuid: normalizeProjectText(input.internalUuid ?? previous?.internalUuid ?? document?.id ?? crypto.randomUUID())
+    lastOpenedAt: normalizeOptionalProjectText(input.lastOpenedAt ?? previous?.lastOpenedAt),
+    originalFilePath: normalizeOptionalProjectText(input.originalFilePath ?? previous?.originalFilePath),
+    currentFilePath: normalizeOptionalProjectText(input.currentFilePath ?? previous?.currentFilePath),
+    thumbnailPath: normalizeOptionalProjectText(input.thumbnailPath ?? previous?.thumbnailPath),
+    projectState: input.projectState ?? previous?.projectState ?? "clean",
+    internalUuid: projectUuid
   };
 }
 
@@ -104,14 +116,26 @@ function coerceProjectMetadata(value: unknown): ProjectMetadata | null {
     return null;
   }
   const candidate = value as Partial<ProjectMetadata>;
+  const projectUuid = normalizeProjectText(candidate.projectUuid ?? candidate.internalUuid) || crypto.randomUUID();
+  const phone = normalizeProjectText(candidate.customerPhone ?? candidate.phoneNumber);
+  const email = normalizeOptionalProjectText(candidate.customerEmail ?? candidate.email);
   return {
     customerName: normalizeProjectText(candidate.customerName),
-    phoneNumber: normalizeProjectText(candidate.phoneNumber),
-    email: normalizeOptionalProjectText(candidate.email),
+    customerPhone: phone,
+    customerEmail: email,
+    phoneNumber: phone,
+    email,
+    projectUuid,
     projectType: normalizeProjectText(candidate.projectType) || DEFAULT_PROJECT_TYPE,
+    fileFormatVersion: normalizePositiveInteger(candidate.fileFormatVersion, PROJECT_FORMAT_VERSION),
     createdAt: normalizeProjectText(candidate.createdAt) || new Date().toISOString(),
     updatedAt: normalizeProjectText(candidate.updatedAt) || new Date().toISOString(),
-    internalUuid: normalizeProjectText(candidate.internalUuid) || crypto.randomUUID()
+    lastOpenedAt: normalizeOptionalProjectText(candidate.lastOpenedAt),
+    originalFilePath: normalizeOptionalProjectText(candidate.originalFilePath),
+    currentFilePath: normalizeOptionalProjectText(candidate.currentFilePath),
+    thumbnailPath: normalizeOptionalProjectText(candidate.thumbnailPath),
+    projectState: candidate.projectState ?? "clean",
+    internalUuid: projectUuid
   };
 }
 
@@ -130,6 +154,10 @@ function normalizeProjectText(value: unknown): string {
 function normalizeOptionalProjectText(value: unknown): string | undefined {
   const normalized = normalizeProjectText(value);
   return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizePositiveInteger(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
 function phoneLast4(phoneNumber: string): string {

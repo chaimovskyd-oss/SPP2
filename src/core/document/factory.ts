@@ -39,6 +39,10 @@ export function createDocument(options: CreateDocumentOptions): Document {
     gridRules: [],
     gridImageAssignments: [],
     gridTextOverlayRules: [],
+    maskRules: [],
+    maskImageAssignments: [],
+    maskTextOverlayRules: [],
+    maskPresets: [],
     viewport: options.viewport ?? { ...defaultViewportState },
     metadata: options.metadata ?? {}
   };

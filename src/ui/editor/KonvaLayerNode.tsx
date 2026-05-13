@@ -85,6 +85,37 @@ function resolveFrameEffects(stack: VisualEffectStack | undefined): ResolvedFx {
   return result;
 }
 
+function maskShape(layer: FrameLayer): string | null {
+  const metadata = layer.metadata["maskFrame"];
+  if (typeof metadata === "object" && metadata !== null && "maskShape" in metadata && typeof metadata.maskShape === "string") {
+    return metadata.maskShape;
+  }
+  return null;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function heartPath(ctx: any, x: number, y: number, width: number, height: number): void {
+  ctx.moveTo(x + width / 2, y + height * 0.92);
+  ctx.bezierCurveTo(x + width * 0.05, y + height * 0.62, x, y + height * 0.28, x + width * 0.25, y + height * 0.14);
+  ctx.bezierCurveTo(x + width * 0.38, y + height * 0.06, x + width * 0.5, y + height * 0.16, x + width / 2, y + height * 0.28);
+  ctx.bezierCurveTo(x + width * 0.5, y + height * 0.16, x + width * 0.62, y + height * 0.06, x + width * 0.75, y + height * 0.14);
+  ctx.bezierCurveTo(x + width, y + height * 0.28, x + width * 0.95, y + height * 0.62, x + width / 2, y + height * 0.92);
+  ctx.closePath();
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function starPath(ctx: any, cx: number, cy: number, outerRadius: number, innerRadius: number): void {
+  for (let index = 0; index < 10; index += 1) {
+    const radius = index % 2 === 0 ? outerRadius : innerRadius;
+    const angle = -Math.PI / 2 + index * Math.PI / 5;
+    const x = cx + Math.cos(angle) * radius;
+    const y = cy + Math.sin(angle) * radius;
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+}
+
 function mapBlendMode(mode: BlendMode): string {
   const table: Record<BlendMode, string> = {
     normal: "source-over",
@@ -507,6 +538,7 @@ function FrameNode({
   );
   const blurRadius = fx.softEdge?.radius ?? 0;
   const isGridCell = layer.metadata["gridCell"] !== undefined;
+  const isMaskFrame = layer.metadata["maskFrame"] !== undefined;
 
   useEffect(() => {
     const node = blurRef.current;
@@ -518,6 +550,7 @@ function FrameNode({
   // האם הפריים עצמו ניתן לגרירה
   const frameIsDraggable =
     !isGridCell &&
+    !isMaskFrame &&
     !layer.locked &&
     !layer.lockedFrame &&
     (layer.behaviorMode === "freeform" || layoutEditMode);
@@ -550,6 +583,10 @@ function FrameNode({
     ctx.beginPath();
     if (layer.shape === "circle" || layer.shape === "ellipse") {
       ctx.ellipse(pad + w / 2, pad + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+    } else if (layer.shape === "svgPath" && maskShape(layer) === "star") {
+      starPath(ctx, pad + w / 2, pad + h / 2, Math.min(w, h) / 2, Math.min(w, h) / 4);
+    } else if (layer.shape === "svgPath" && maskShape(layer) === "heart") {
+      heartPath(ctx, pad, pad, w, h);
     } else {
       const r = Math.min(cornerRadius, w / 2, h / 2);
       ctx.moveTo(pad + r, pad);
@@ -566,11 +603,26 @@ function FrameNode({
     : {};
 
   const handleFrameDragEnd = (event: Konva.KonvaEventObject<DragEvent>): void => {
+    if (isMaskFrame) {
+      event.cancelBubble = true;
+      event.target.x(layer.x);
+      event.target.y(layer.y);
+      return;
+    }
     onChange({ ...layer, x: event.target.x(), y: event.target.y() });
   };
 
   const handleTransformEnd = (event: Konva.KonvaEventObject<Event>): void => {
     const node = event.target;
+    if (isMaskFrame) {
+      event.cancelBubble = true;
+      node.x(layer.x);
+      node.y(layer.y);
+      node.scaleX(1);
+      node.scaleY(1);
+      node.rotation(layer.rotation);
+      return;
+    }
     const scaleX = node.scaleX();
     const scaleY = node.scaleY();
     node.scaleX(1);
@@ -586,6 +638,7 @@ function FrameNode({
   };
 
   const handleContentDragEnd = (event: Konva.KonvaEventObject<DragEvent>): void => {
+    event.cancelBubble = true;
     if (contentRect === null) return;
     const node = event.target;
     clampContentNodeToFrame(node, contentRect, layer);
@@ -654,7 +707,10 @@ function FrameNode({
             draggable={contentIsDraggable}
             filters={blurRadius > 0 ? [Konva.Filters.Blur] : []}
             blurRadius={blurRadius}
-            onDragMove={(event) => clampContentNodeToFrame(event.target, contentRect, layer)}
+            onDragMove={(event) => {
+              event.cancelBubble = true;
+              clampContentNodeToFrame(event.target, contentRect, layer);
+            }}
             onDragEnd={handleContentDragEnd}
           />
         )}

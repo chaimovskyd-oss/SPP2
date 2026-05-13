@@ -2,6 +2,7 @@ export * from "./batch";
 export * from "./document";
 export * from "./grid";
 export * from "./layers";
+export * from "./mask";
 export * from "./preset";
 export * from "./primitives";
 export * from "./product";

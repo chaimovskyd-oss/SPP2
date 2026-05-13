@@ -77,6 +77,22 @@ export const PROJECT_MIGRATIONS: ProjectMigration[] = [
         gridTextOverlayRules: project.document.gridTextOverlayRules ?? []
       }
     })
+  },
+  {
+    fromSchema: 4,
+    toSchema: 5,
+    description: "Add persistent Mask Mode rule, assignment, overlay, and preset collections",
+    migrate: (project) => ({
+      ...project,
+      schemaVersion: 5,
+      document: {
+        ...project.document,
+        maskRules: project.document.maskRules ?? [],
+        maskImageAssignments: project.document.maskImageAssignments ?? [],
+        maskTextOverlayRules: project.document.maskTextOverlayRules ?? [],
+        maskPresets: project.document.maskPresets ?? []
+      }
+    })
   }
 ];
 
@@ -97,6 +113,10 @@ export function normalizeProjectEnvelope(input: unknown): ProjectEnvelope {
       gridRules: input.document.gridRules ?? [],
       gridImageAssignments: input.document.gridImageAssignments ?? [],
       gridTextOverlayRules: input.document.gridTextOverlayRules ?? [],
+      maskRules: input.document.maskRules ?? [],
+      maskImageAssignments: input.document.maskImageAssignments ?? [],
+      maskTextOverlayRules: input.document.maskTextOverlayRules ?? [],
+      maskPresets: input.document.maskPresets ?? [],
       viewport: input.document.viewport ?? { ...defaultViewportState },
       assets: input.document.assets ?? [],
       pages: input.document.pages.map((page) => ({

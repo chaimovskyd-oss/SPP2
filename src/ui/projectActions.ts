@@ -5,13 +5,16 @@ import {
   createImageLayer,
   createPage,
   createProjectEnvelope,
+  cloneProjectForSaveAs,
   createTextLayer,
   createPortableSppPackage,
   parseProject,
+  recordProjectSaved,
   readPortableSppPackage,
   serializeProject,
   createDefaultProjectFilename,
   safeFilename,
+  validateProjectEnvelope,
   withProjectMetadata
 } from "@/core";
 import type { Asset, Document, Page } from "@/types/document";
@@ -23,6 +26,8 @@ import { downloadBytes, downloadDataUrl, downloadTextFile } from "./file";
 
 export interface ProjectSaveOptions {
   filename?: string;
+  filePath?: string;
+  thumbnailPath?: string;
 }
 
 export function createFreeModeDocument(name: string, setup?: PageSetup, projectMetadata: ProjectMetadataInput = {}): Document {
@@ -193,27 +198,41 @@ export function readImageDimensions(dataUrl: string): Promise<{ width: number; h
   });
 }
 
-export function saveProject(document: Document, options: ProjectSaveOptions = {}): void {
+export function saveProject(document: Document, options: ProjectSaveOptions = {}): ProjectEnvelope {
   const envelope = createProjectEnvelope({
     document,
     linkedGroups: [],
     batchJobs: []
   });
-  downloadTextFile(options.filename ?? createDefaultProjectFilename(envelope.metadata, { extension: ".spp2" }), serializeProject(envelope), "application/json");
+  const saved = recordProjectSaved(envelope, options.filePath ?? options.filename, options.thumbnailPath);
+  downloadTextFile(options.filename ?? createDefaultProjectFilename(saved.metadata, { extension: ".spp2" }), serializeProject(saved), "application/json");
+  return saved;
 }
 
-export async function savePortableProject(document: Document, options: ProjectSaveOptions = {}): Promise<void> {
+export function saveProjectAs(document: Document, options: ProjectSaveOptions = {}): ProjectEnvelope {
+  const envelope = cloneProjectForSaveAs(createProjectEnvelope({
+    document,
+    linkedGroups: [],
+    batchJobs: []
+  }), options.filePath ?? options.filename);
+  const saved = recordProjectSaved(envelope, options.filePath ?? options.filename, options.thumbnailPath);
+  downloadTextFile(options.filename ?? createDefaultProjectFilename(saved.metadata, { extension: ".spp2" }), serializeProject(saved), "application/json");
+  return saved;
+}
+
+export async function savePortableProject(document: Document, options: ProjectSaveOptions = {}): Promise<ProjectEnvelope> {
   const envelope = createProjectEnvelope({
     document,
     linkedGroups: [],
     batchJobs: []
   });
+  const saved = recordProjectSaved(envelope, options.filePath ?? options.filename, options.thumbnailPath);
   const bytes = await createPortableSppPackage({
-    project: envelope,
+    project: saved,
     metadata: {
       savedAt: new Date().toISOString(),
       portable: true,
-      projectMetadata: envelope.metadata
+      projectMetadata: saved.metadata
     },
     assets: document.assets.map((asset) => ({
       assetId: asset.id,
@@ -222,16 +241,19 @@ export async function savePortableProject(document: Document, options: ProjectSa
       thumbnail: dataUrlToBytes(asset.thumbnailPath)
     }))
   });
-  downloadBytes(options.filename ?? createDefaultProjectFilename(envelope.metadata, { extension: ".spp" }), bytes, "application/octet-stream");
+  downloadBytes(options.filename ?? createDefaultProjectFilename(saved.metadata, { extension: ".spp" }), bytes, "application/octet-stream");
+  return saved;
 }
 
 export async function loadProject(file: File): Promise<ProjectEnvelope> {
-  if (file.name.toLowerCase().endsWith(".spp")) {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    return readPortableSppPackage(bytes).project;
+  const envelope = file.name.toLowerCase().endsWith(".spp")
+    ? readPortableSppPackage(new Uint8Array(await file.arrayBuffer())).project
+    : parseProject(await file.text());
+  const validation = validateProjectEnvelope(envelope);
+  if (!validation.ok) {
+    throw new Error(validation.errors.join(", "));
   }
-  const text = await file.text();
-  return parseProject(text);
+  return envelope;
 }
 
 export function exportStagePng(stage: Konva.Stage, documentName: string, page: Page): void {
@@ -301,6 +323,32 @@ export function exportStagePreviewPng(stage: Konva.Stage, documentName: string):
     pixelRatio: 2
   });
   downloadDataUrl(`${safeFilename(documentName)}.preview.png`, dataUrl);
+}
+
+export function captureProjectThumbnail(stage: Konva.Stage, page: Page): string {
+  const original = {
+    width: stage.width(),
+    height: stage.height(),
+    scaleX: stage.scaleX(),
+    scaleY: stage.scaleY()
+  };
+  const maxSide = 320;
+  const ratio = Math.min(maxSide / page.width, maxSide / page.height, 1);
+  stage.width(page.width);
+  stage.height(page.height);
+  stage.scale({ x: 1, y: 1 });
+  stage.batchDraw();
+  try {
+    return stage.toDataURL({
+      mimeType: "image/png",
+      pixelRatio: ratio
+    });
+  } finally {
+    stage.width(original.width);
+    stage.height(original.height);
+    stage.scale({ x: original.scaleX, y: original.scaleY });
+    stage.batchDraw();
+  }
 }
 
 function dataUrlToBytes(value: string | undefined): Uint8Array | undefined {

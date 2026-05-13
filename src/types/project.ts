@@ -3,26 +3,55 @@ import type { LinkedGroup } from "./layers";
 import type { BatchJob } from "./batch";
 
 export const PROJECT_FORMAT_VERSION = 1;
-export const PROJECT_SCHEMA_VERSION = 4;
-export const APP_VERSION = "0.3.0-phase3-grid";
+export const PROJECT_SCHEMA_VERSION = 5;
+export const APP_VERSION = "0.4.0-phase4-mask";
+
+export type ProjectState =
+  | "clean"
+  | "modified"
+  | "autosaving"
+  | "autosaved"
+  | "save_failed"
+  | "recovery_available"
+  | "missing_assets"
+  | "relink_required"
+  | "corrupted"
+  | "read_only";
 
 export interface ProjectCustomerInfo {
   customerName: string;
+  customerPhone?: string;
+  customerEmail?: string;
   phoneNumber: string;
   email?: string;
 }
 
 export interface ProjectMetadata extends ProjectCustomerInfo {
+  customerPhone: string;
+  projectUuid: string;
   projectType: string;
+  fileFormatVersion: number;
   createdAt: string;
   updatedAt: string;
+  lastOpenedAt?: string;
+  originalFilePath?: string;
+  currentFilePath?: string;
+  thumbnailPath?: string;
+  projectState: ProjectState;
   internalUuid: string;
 }
 
 export type ProjectMetadataInput = Partial<ProjectCustomerInfo> & {
+  projectUuid?: string;
   projectType?: string;
+  fileFormatVersion?: number;
   createdAt?: string;
   updatedAt?: string;
+  lastOpenedAt?: string;
+  originalFilePath?: string;
+  currentFilePath?: string;
+  thumbnailPath?: string;
+  projectState?: ProjectState;
   internalUuid?: string;
 };
 

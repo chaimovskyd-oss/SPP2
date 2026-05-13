@@ -4,6 +4,7 @@ import type Konva from "konva";
 import { beginPointer, createInputState, endPointer, movePointer } from "@/core/input/inputSystem";
 import { normalizeRect } from "@/core/bounds/bounds";
 import { isGridCellLayer } from "@/core/grid/gridModeEngine";
+import { isMaskFrameLayer } from "@/core/mask/maskModeEngine";
 import { marqueeSelect } from "@/core/selection/selectionEngine";
 import { snapLayerBounds, snapLayerPosition, type SnapLine, type SnapLineKind, type SnapSourceRole } from "@/core/snap/snapEngine";
 import { measureTextLayerSize } from "@/core/text/measurement";
@@ -79,10 +80,6 @@ export function CanvasStage({
   const stageWidth = Math.round(page.width * scale);
   const stageHeight = Math.round(page.height * scale);
   const gridLines = useMemo(() => buildGridLines(page, viewport.showGrid), [page, viewport.showGrid]);
-  const selectedTextLayer = useMemo(
-    () => page.layers.find((layer): layer is TextLayer => layer.type === "text" && layer.id === selectedLayerId) ?? null,
-    [page.layers, selectedLayerId]
-  );
   const editingLayer = useMemo(
     () => page.layers.find((layer): layer is TextLayer => layer.type === "text" && layer.id === editingLayerId) ?? null,
     [editingLayerId, page.layers]
@@ -96,7 +93,7 @@ export function CanvasStage({
     }
     const nonTransformableIds = new Set(
       page.layers
-        .filter((l) => l.type === "frame" && (l.metadata["gridCell"] !== undefined || (l.behaviorMode === "layoutLocked" && !layoutEditMode)))
+        .filter((l) => l.type === "frame" && (l.metadata["gridCell"] !== undefined || l.metadata["maskFrame"] !== undefined || (l.behaviorMode === "layoutLocked" && !layoutEditMode)))
         .map((l) => l.id)
     );
     const nodes = selectedLayerIds
@@ -161,6 +158,7 @@ export function CanvasStage({
     const layer = page.layers.find((l) => l.id === layerId);
     if (layer === undefined) return;
     if (isGridCellLayer(layer)) return;
+    if (isMaskFrameLayer(layer)) return;
 
     const x = node.x();
     const y = node.y();
@@ -192,6 +190,7 @@ export function CanvasStage({
     const layer = page.layers.find((item) => item.id === node.id());
     if (layer === undefined) return;
     if (isGridCellLayer(layer)) return;
+    if (isMaskFrameLayer(layer)) return;
 
     const anchor = transformer.getActiveAnchor();
     const result = snapLayerBounds({
@@ -213,6 +212,19 @@ export function CanvasStage({
     // For transform-end (resize), we still snap the position component.
     const previous = page.layers.find((item) => item.id === layer.id);
     if (previous !== undefined && isGridCellLayer(previous) && layer.type === "frame") {
+      onLayerChange({
+        ...layer,
+        x: previous.x,
+        y: previous.y,
+        width: previous.width,
+        height: previous.height,
+        rotation: previous.rotation,
+        behaviorMode: "layoutLocked",
+        lockedFrame: true
+      });
+      return;
+    }
+    if (previous !== undefined && isMaskFrameLayer(previous) && layer.type === "frame") {
       onLayerChange({
         ...layer,
         x: previous.x,
@@ -476,59 +488,9 @@ export function CanvasStage({
           />
         </Layer>
       </Stage>
-      {selectedTextLayer !== null && editingLayer === null ? (
-        <TextContextBar layer={selectedTextLayer} scale={scale} onChange={handleLayerChange} />
-      ) : null}
       {editingLayer !== null ? (
         <InlineTextEditor layer={editingLayer} scale={scale} onChange={handleLayerChange} onClose={onEndTextEdit} />
       ) : null}
-    </div>
-  );
-}
-
-function TextContextBar({
-  layer,
-  scale,
-  onChange
-}: {
-  layer: TextLayer;
-  scale: number;
-  onChange: (layer: VisualLayer) => void;
-}): React.ReactElement {
-  const top = Math.max(8, layer.y * scale - 44);
-  const left = Math.max(8, layer.x * scale);
-  return (
-    <div className="text-context-bar" style={{ top, left }} data-testid="text-context-bar">
-      <button
-        className={layer.fontWeight >= 700 ? "on" : ""}
-        onClick={() => onChange(withMeasuredTextSize({ ...layer, fontWeight: layer.fontWeight >= 700 ? 400 : 700 }))}
-        title="Bold"
-        type="button"
-      >
-        B
-      </button>
-      <button
-        className={layer.fontStyle === "italic" ? "on" : ""}
-        onClick={() => onChange(withMeasuredTextSize({ ...layer, fontStyle: layer.fontStyle === "italic" ? "normal" : "italic" }))}
-        title="Italic"
-        type="button"
-      >
-        I
-      </button>
-      <input
-        aria-label="Font size"
-        max={240}
-        min={8}
-        onChange={(event) => onChange(withMeasuredTextSize({ ...layer, fontSize: Number(event.target.value) || layer.fontSize }))}
-        type="number"
-        value={layer.fontSize}
-      />
-      <input
-        aria-label="Text color"
-        onChange={(event) => onChange(withMeasuredTextSize({ ...layer, color: event.target.value, autoContrastOverridden: true }))}
-        type="color"
-        value={layer.color}
-      />
     </div>
   );
 }

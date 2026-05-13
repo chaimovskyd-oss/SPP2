@@ -2,6 +2,7 @@ import type { VisualLayer } from "./layers";
 import type { ID, Guide, Margins, Metadata, PageSetup, VersionedEntity, ViewportState } from "./primitives";
 import type { Preset } from "./preset";
 import type { GridImageAssignment, GridLayoutRule, GridTextOverlayRule } from "./grid";
+import type { MaskImageAssignment, MaskLayoutRule, MaskPreset, MaskTextOverlayRule } from "./mask";
 
 export interface Asset extends VersionedEntity {
   id: ID;
@@ -53,6 +54,10 @@ export interface Document extends VersionedEntity {
   gridRules: GridLayoutRule[];
   gridImageAssignments: GridImageAssignment[];
   gridTextOverlayRules: GridTextOverlayRule[];
+  maskRules: MaskLayoutRule[];
+  maskImageAssignments: MaskImageAssignment[];
+  maskTextOverlayRules: MaskTextOverlayRule[];
+  maskPresets: MaskPreset[];
   viewport: ViewportState;
   metadata: Metadata;
 }

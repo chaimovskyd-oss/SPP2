@@ -4,17 +4,27 @@ import {
   buildRenderModel,
   createExportJobPlan,
   createPortableSppPackage,
+  cloneProjectForSaveAs,
   createDefaultProjectFilename,
   createProjectEnvelope,
+  createProjectIndexEntry,
+  discardRecoveryRecord,
   findMissingAssets,
+  getProjectIndexEntries,
   getLogs,
+  getRecoveryEntries,
   marqueeSelect,
   parseProject,
+  recordProjectOpened,
+  recordProjectSaved,
   readPortableSppPackage,
   relinkFolder,
   restoreRecoveryRecord,
   saveRecoveryRecord,
   serializeProject,
+  upsertProjectIndexEntry,
+  validateProjectEnvelope,
+  validateSerializedProject,
   validatePortableAssetCoverage
 } from "@/core";
 import { useDocumentStore } from "@/state/documentStore";
@@ -116,6 +126,69 @@ describe("Phase 1C core infrastructure", () => {
     expect(storage.get("test.recovery")).toContain("Recovery");
   });
 
+  it("stores project lifecycle identity, aliases, timestamps, and index metadata", () => {
+    const document = createFreeModeDocument("Lifecycle", undefined, {
+      customerName: "Leah",
+      customerPhone: "050-000-1111",
+      customerEmail: "leah@example.com",
+      projectType: "Collage"
+    });
+    const envelope = recordProjectOpened(createProjectEnvelope({ document, linkedGroups: [], batchJobs: [] }), "nas/share/lifecycle.spp2");
+    const saved = recordProjectSaved(envelope, "nas/share/lifecycle.spp2", "thumb:data");
+    const entries = getProjectIndexEntries();
+
+    expect(saved.metadata.projectUuid).toBe(envelope.metadata.projectUuid);
+    expect(saved.metadata.internalUuid).toBe(saved.metadata.projectUuid);
+    expect(saved.metadata.customerPhone).toBe("050-000-1111");
+    expect(saved.metadata.phoneNumber).toBe("050-000-1111");
+    expect(entries[0]?.projectUuid).toBe(saved.metadata.projectUuid);
+    expect(entries[0]?.filePath).toBe("nas/share/lifecycle.spp2");
+    expect(entries[0]?.thumbnailPath).toBe("thumb:data");
+    expect(entries[0]?.projectState).toBe("clean");
+  });
+
+  it("treats Save As as a new project identity for index isolation", () => {
+    const original = createProjectEnvelope({ document: createFreeModeDocument("Original"), linkedGroups: [], batchJobs: [] });
+    const copy = cloneProjectForSaveAs(original, "copy.spp2");
+
+    upsertProjectIndexEntry(createProjectIndexEntry(original, { filePath: "original.spp2" }));
+    upsertProjectIndexEntry(createProjectIndexEntry(copy, { filePath: "copy.spp2" }));
+
+    expect(copy.metadata.projectUuid).not.toBe(original.metadata.projectUuid);
+    expect(copy.metadata.internalUuid).toBe(copy.metadata.projectUuid);
+    expect(getProjectIndexEntries()).toHaveLength(2);
+  });
+
+  it("exposes recovery entries and only discards them by explicit request", async () => {
+    const document = createFreeModeDocument("Recoverable", undefined, {
+      customerName: "Recover Me",
+      projectType: "Grid"
+    });
+    const envelope = createProjectEnvelope({ document, linkedGroups: [], batchJobs: [] });
+    const record = await saveRecoveryRecord(envelope, "unsaved", { storageKey: "test.recovery" });
+    const entries = getRecoveryEntries("test.recovery");
+
+    expect(entries[0]?.projectUuid).toBe(envelope.metadata.projectUuid);
+    expect(entries[0]?.customerName).toBe("Recover Me");
+    expect(entries[0]?.lastAutosavedAt).toBe(record.savedAt);
+
+    discardRecoveryRecord(record.id, "test.recovery");
+    expect(getRecoveryEntries("test.recovery")).toHaveLength(0);
+  });
+
+  it("validates corrupted payloads and missing assets without crashing", () => {
+    const missingAsset = asset(9, { status: "missing", originalPath: undefined, previewPath: undefined });
+    const document = { ...createFreeModeDocument("Missing assets"), assets: [missingAsset] };
+    const validation = validateProjectEnvelope(createProjectEnvelope({ document, linkedGroups: [], batchJobs: [] }));
+    const corrupted = validateSerializedProject("{not json");
+
+    expect(validation.ok).toBe(true);
+    expect(validation.projectState).toBe("missing_assets");
+    expect(validation.missingAssets).toHaveLength(1);
+    expect(corrupted.project).toBeNull();
+    expect(corrupted.validation.projectState).toBe("corrupted");
+  });
+
   it("stores project-level customer metadata without adding canvas layers", () => {
     const document = createFreeModeDocument("Customer Project", undefined, {
       customerName: "Moshe Cohen",
@@ -158,7 +231,9 @@ describe("Phase 1C core infrastructure", () => {
     const store = useDocumentStore.getState();
 
     store.setDocument(document);
+    expect(useDocumentStore.getState().revision).toBe(0);
     useDocumentStore.getState().addLayer(page.id, layer);
+    expect(useDocumentStore.getState().revision).toBe(1);
     expect(useDocumentStore.getState().history.undoStack.at(-1)?.type).toBe("AddLayerAction");
 
     useDocumentStore.getState().updateLayer(page.id, { ...layer, x: layer.x + 10 });

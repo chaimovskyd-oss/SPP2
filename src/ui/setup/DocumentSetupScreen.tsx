@@ -2,17 +2,19 @@ import { useMemo, useState, type ReactElement } from "react";
 import { PAGE_PRESETS, pageSetupFromPreset } from "@/core/pageSetup/presets";
 import { unitToPx } from "@/core/units/conversion";
 import type { GridCreateOptions } from "@/types/grid";
+import type { MaskCreateOptions, MaskShape } from "@/types/mask";
 import type { PageSetup, Unit } from "@/types/primitives";
 import type { ProjectCustomerInfo } from "@/types/project";
 
 interface DocumentSetupScreenProps {
   modeName: string;
   onBack: () => void;
-  onCreate: (setup: PageSetup, gridOptions?: Partial<GridCreateOptions>, customerInfo?: ProjectCustomerInfo) => void;
+  onCreate: (setup: PageSetup, options?: { grid?: Partial<GridCreateOptions>; mask?: Partial<MaskCreateOptions> }, customerInfo?: ProjectCustomerInfo) => void;
 }
 
 export function DocumentSetupScreen({ modeName, onBack, onCreate }: DocumentSetupScreenProps): ReactElement {
   const isGridMode = modeName === "grid";
+  const isMaskMode = modeName === "mask";
   const [setupStep, setSetupStep] = useState<1 | 2>(1);
   const [presetId, setPresetId] = useState("a4");
   const [orientation, setOrientation] = useState<"portrait" | "landscape">("portrait");
@@ -29,6 +31,12 @@ export function DocumentSetupScreen({ modeName, onBack, onCreate }: DocumentSetu
   const [gridColumns, setGridColumns] = useState(3);
   const [gridSpacing, setGridSpacing] = useState(8);
   const [gridFillDirection, setGridFillDirection] = useState<"rtl" | "ltr">("rtl");
+  const [maskShape, setMaskShape] = useState<MaskShape>("circle");
+  const [maskWidth, setMaskWidth] = useState(40);
+  const [maskHeight, setMaskHeight] = useState(40);
+  const [maskKeepProportions, setMaskKeepProportions] = useState(true);
+  const [maskSpacing, setMaskSpacing] = useState(5);
+  const [maskSmartCrop, setMaskSmartCrop] = useState(true);
   const [customerName, setCustomerName] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [email, setEmail] = useState("");
@@ -68,8 +76,9 @@ export function DocumentSetupScreen({ modeName, onBack, onCreate }: DocumentSetu
   function createDocument(): void {
     onCreate(
       setup,
-      isGridMode
-        ? {
+      {
+        grid: isGridMode
+          ? {
             rows: gridRows,
             columns: gridColumns,
             spacingX: unitToPx(gridSpacing, units, dpi),
@@ -77,7 +86,20 @@ export function DocumentSetupScreen({ modeName, onBack, onCreate }: DocumentSetu
             margins: setup.margins,
             fillDirection: gridFillDirection
           }
-        : undefined,
+          : undefined,
+        mask: isMaskMode
+          ? {
+              maskShape,
+              maskWidth: unitToPx(maskWidth, units, dpi),
+              maskHeight: unitToPx(maskHeight, units, dpi),
+              keepProportions: maskKeepProportions,
+              spacingX: unitToPx(maskSpacing, units, dpi),
+              spacingY: unitToPx(maskSpacing, units, dpi),
+              margins: setup.margins,
+              smartCropEnabled: maskSmartCrop
+            }
+          : undefined
+      },
       {
         customerName,
         phoneNumber,
@@ -91,18 +113,18 @@ export function DocumentSetupScreen({ modeName, onBack, onCreate }: DocumentSetu
       <section className="setup-panel">
         <header className="setup-header">
           <div>
-            <span>{isGridMode ? "מצב גריד" : "עיצוב חופשי"}</span>
-            <h1>{isGridMode && setupStep === 2 ? "הגדרת הגריד" : "הגדרת דף"}</h1>
+            <span>{isGridMode ? "מצב גריד" : isMaskMode ? "Mask Mode" : "עיצוב חופשי"}</span>
+            <h1>{isGridMode && setupStep === 2 ? "הגדרת הגריד" : isMaskMode && setupStep === 2 ? "Mask setup" : "הגדרת דף"}</h1>
           </div>
           <button className="btn btn-ghost" onClick={onBack} type="button">
             חזרה
           </button>
         </header>
 
-        {isGridMode ? (
+        {isGridMode || isMaskMode ? (
           <div className="setup-steps" aria-label="שלבי הגדרה">
             <span className={setupStep === 1 ? "active" : ""}>1. דף</span>
-            <span className={setupStep === 2 ? "active" : ""}>2. גריד</span>
+            <span className={setupStep === 2 ? "active" : ""}>{isMaskMode ? "2. Mask" : "2. גריד"}</span>
           </div>
         ) : null}
 
@@ -166,7 +188,7 @@ export function DocumentSetupScreen({ modeName, onBack, onCreate }: DocumentSetu
             <SetupNumber label={`אזור בטוח (${units})`} onChange={setSafeArea} value={safeArea} />
           </div>
           </>
-        ) : (
+        ) : isGridMode ? (
           <section className="setup-subpanel">
             <div className="panel-section-title">הגדרת גריד</div>
             <div className="setup-grid">
@@ -183,6 +205,39 @@ export function DocumentSetupScreen({ modeName, onBack, onCreate }: DocumentSetu
             </div>
             <GridPreview columns={gridColumns} rows={gridRows} />
           </section>
+        ) : (
+          <section className="setup-subpanel">
+            <div className="panel-section-title">Mask setup</div>
+            <div className="setup-grid">
+              <label className="field">
+                <span className="field-label">Mask shape</span>
+                <select className="text-input" onChange={(event) => setMaskShape(event.target.value as MaskShape)} value={maskShape}>
+                  <option value="circle">Circle</option>
+                  <option value="roundedRect">Rounded rectangle</option>
+                  <option value="heart">Heart</option>
+                  <option value="star">Star</option>
+                </select>
+              </label>
+              <SetupNumber label={`Mask width (${units})`} min={1} onChange={(value) => {
+                setMaskWidth(value);
+                if (maskKeepProportions) setMaskHeight(value);
+              }} value={maskWidth} />
+              <SetupNumber label={`Mask height (${units})`} min={1} onChange={(value) => {
+                setMaskHeight(value);
+                if (maskKeepProportions) setMaskWidth(value);
+              }} value={maskHeight} />
+              <label className="check-line">
+                <input checked={maskKeepProportions} onChange={(event) => setMaskKeepProportions(event.target.checked)} type="checkbox" />
+                Keep proportions
+              </label>
+              <SetupNumber label={`Spacing (${units})`} onChange={setMaskSpacing} value={maskSpacing} />
+              <label className="check-line">
+                <input checked={maskSmartCrop} onChange={(event) => setMaskSmartCrop(event.target.checked)} type="checkbox" />
+                Use Smart Crop / Face Detection
+              </label>
+            </div>
+            <MaskPreview shape={maskShape} />
+          </section>
         )}
 
         <div className="setup-summary">
@@ -192,11 +247,11 @@ export function DocumentSetupScreen({ modeName, onBack, onCreate }: DocumentSetu
         </div>
 
         <div className="setup-actions">
-          {isGridMode && setupStep === 2 ? (
+          {(isGridMode || isMaskMode) && setupStep === 2 ? (
             <button className="btn btn-ghost" onClick={() => setSetupStep(1)} type="button">חזרה להגדרת דף</button>
           ) : null}
-          {isGridMode && setupStep === 1 ? (
-            <button className="btn btn-accent setup-create" onClick={() => setSetupStep(2)} type="button">המשך להגדרת גריד</button>
+          {(isGridMode || isMaskMode) && setupStep === 1 ? (
+            <button className="btn btn-accent setup-create" onClick={() => setSetupStep(2)} type="button">{isMaskMode ? "Continue to Mask setup" : "המשך להגדרת גריד"}</button>
           ) : (
             <button className="btn btn-accent setup-create" data-testid="create-document" onClick={createDocument} type="button">צור מסמך</button>
           )}
@@ -220,6 +275,16 @@ function GridPreview({ rows, columns }: { rows: number; columns: number }): Reac
     <div className="grid-setup-preview" style={{ gridTemplateColumns: `repeat(${Math.max(1, columns)}, 1fr)` }}>
       {Array.from({ length: Math.max(1, rows * columns) }).map((_, index) => (
         <span key={index}>{index + 1}</span>
+      ))}
+    </div>
+  );
+}
+
+function MaskPreview({ shape }: { shape: MaskShape }): ReactElement {
+  return (
+    <div className="mask-setup-preview" aria-hidden="true">
+      {Array.from({ length: 12 }).map((_, index) => (
+        <span className={`mask-preview-shape mask-preview-${shape}`} key={index}>{index + 1}</span>
       ))}
     </div>
   );

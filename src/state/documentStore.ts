@@ -33,6 +33,9 @@ export interface DocumentState {
   history: HistoryState;
   canUndo: boolean;
   canRedo: boolean;
+  revision: number;
+  meaningfulActionCount: number;
+  lastMeaningfulActionType: string | null;
   textStyleClipboard: TextStylePatch | null;
   linkedGroups: LinkedGroup[];
   setDocument: (document: Document) => void;
@@ -72,6 +75,9 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   history: createHistoryState(),
   canUndo: false,
   canRedo: false,
+  revision: 0,
+  meaningfulActionCount: 0,
+  lastMeaningfulActionType: null,
   textStyleClipboard: null,
   linkedGroups: [],
   setDocument: (document) =>
@@ -81,6 +87,9 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       history: createHistoryState(),
       canUndo: false,
       canRedo: false,
+      revision: 0,
+      meaningfulActionCount: 0,
+      lastMeaningfulActionType: null,
       textStyleClipboard: null
     }),
   clearDocument: () =>
@@ -90,6 +99,9 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       history: createHistoryState(),
       canUndo: false,
       canRedo: false,
+      revision: 0,
+      meaningfulActionCount: 0,
+      lastMeaningfulActionType: null,
       textStyleClipboard: null,
       linkedGroups: []
     }),
@@ -332,7 +344,10 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         activePageId: result.document.pages[0]?.id ?? null,
         history: result.history,
         canUndo: result.history.undoStack.length > 0,
-        canRedo: result.history.redoStack.length > 0
+        canRedo: result.history.redoStack.length > 0,
+        revision: state.revision + 1,
+        meaningfulActionCount: state.meaningfulActionCount + 1,
+        lastMeaningfulActionType: "UndoAction"
       };
     }),
   redo: () =>
@@ -349,7 +364,10 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         activePageId: result.document.pages[0]?.id ?? null,
         history: result.history,
         canUndo: result.history.undoStack.length > 0,
-        canRedo: result.history.redoStack.length > 0
+        canRedo: result.history.redoStack.length > 0,
+        revision: state.revision + 1,
+        meaningfulActionCount: state.meaningfulActionCount + 1,
+        lastMeaningfulActionType: "RedoAction"
       };
     })
 }));
@@ -368,7 +386,10 @@ function commitDocumentAction(
     activePageId,
     history: result.history,
     canUndo: result.history.undoStack.length > 0,
-    canRedo: result.history.redoStack.length > 0
+    canRedo: result.history.redoStack.length > 0,
+    revision: state.revision + 1,
+    meaningfulActionCount: state.meaningfulActionCount + 1,
+    lastMeaningfulActionType: action.type
   };
 }
 
