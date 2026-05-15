@@ -1,5 +1,8 @@
-import { useEffect, useMemo, useRef } from "react";
-import { Group, Image as KonvaImage, Line, Rect, Text } from "react-konva";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Circle, Group, Image as KonvaImage, Line, Rect, Text } from "react-konva";
+import { drawPuzzlePath } from "@/core/collage/collagePuzzle";
+import { generateTornEdgePoints } from "@/core/collage/collageTornPaper";
+import type { CollageEdgeConfig } from "@/types/collage";
 import Konva from "konva";
 import { resolveCanvasAssetPath } from "@/core/assets/assetManager";
 import { clampContentTransformToFillBounds, computeContentRect, type ContentRect } from "@/core/rendering/frameFitEngine";
@@ -16,7 +19,16 @@ import type {
   VisualEffectStack
 } from "@/types/visualEffects";
 import { useKonvaImage } from "./useKonvaImage";
+import { collageAdjToKonva, imageLayerAdjToKonva, type CollageColorAdj } from "@/core/rendering/colorAdjustUtils";
 import { renderTextToCanvas } from "./warpText";
+
+export interface CanvasContextMenuTarget {
+  layerId: string;
+  layerType: "image" | "frame";
+  hasImage: boolean;
+  screenX: number;
+  screenY: number;
+}
 
 interface KonvaLayerNodeProps {
   layer: VisualLayer;
@@ -26,6 +38,7 @@ interface KonvaLayerNodeProps {
   onSelect: (layerId: string) => void;
   onChange: (layer: VisualLayer) => void;
   onBeginTextEdit: (layerId: string) => void;
+  onContextMenu?: (target: CanvasContextMenuTarget) => void;
 }
 
 export function KonvaLayerNode({
@@ -35,18 +48,19 @@ export function KonvaLayerNode({
   layoutEditMode,
   onSelect,
   onChange,
-  onBeginTextEdit
+  onBeginTextEdit,
+  onContextMenu
 }: KonvaLayerNodeProps): React.ReactElement | null {
   if (layer.type === "text") {
     return <TextNode layer={layer} selected={selected} onBeginTextEdit={onBeginTextEdit} onChange={onChange} onSelect={onSelect} />;
   }
 
   if (layer.type === "image") {
-    return <ImageNode layer={layer} assets={assets} selected={selected} onChange={onChange} onSelect={onSelect} />;
+    return <ImageNode layer={layer} assets={assets} selected={selected} onChange={onChange} onSelect={onSelect} onContextMenu={onContextMenu} />;
   }
 
   if (layer.type === "frame") {
-    return <FrameNode layer={layer} assets={assets} selected={selected} layoutEditMode={layoutEditMode} onChange={onChange} onSelect={onSelect} />;
+    return <FrameNode layer={layer} assets={assets} selected={selected} layoutEditMode={layoutEditMode} onChange={onChange} onSelect={onSelect} onContextMenu={onContextMenu} />;
   }
 
   return null;
@@ -91,6 +105,64 @@ function maskShape(layer: FrameLayer): string | null {
     return metadata.maskShape;
   }
   return null;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+interface CollageGlobalMaskMeta {
+  enabled?: boolean;
+  shape?: "heart" | "circle";
+  canvasW?: number;
+  canvasH?: number;
+  marginPx?: number;
+}
+
+function drawGlobalMaskPath(
+  ctx: any,
+  mask: CollageGlobalMaskMeta,
+  layerX: number,
+  layerY: number
+): boolean {
+  if (mask.enabled !== true || typeof mask.canvasW !== "number" || typeof mask.canvasH !== "number") return false;
+  const canvasW = mask.canvasW;
+  const canvasH = mask.canvasH;
+  const marginPx = typeof mask.marginPx === "number" ? mask.marginPx : Math.min(canvasW, canvasH) * 0.04;
+  const ox = -layerX;
+  const oy = -layerY;
+  ctx.beginPath();
+  if (mask.shape === "circle") {
+    const r = Math.max(1, Math.min(canvasW, canvasH) / 2 - marginPx);
+    ctx.ellipse(ox + canvasW / 2, oy + canvasH / 2, r, r, 0, 0, Math.PI * 2);
+    ctx.closePath();
+    return true;
+  }
+  if (mask.shape === "heart") {
+    const pts: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i < 180; i++) {
+      const t = (i / 180) * Math.PI * 2;
+      pts.push({
+        x: 16 * Math.sin(t) ** 3,
+        y: -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t))
+      });
+    }
+    const minX = Math.min(...pts.map((p) => p.x));
+    const maxX = Math.max(...pts.map((p) => p.x));
+    const minY = Math.min(...pts.map((p) => p.y));
+    const maxY = Math.max(...pts.map((p) => p.y));
+    const srcW = Math.max(1, maxX - minX);
+    const srcH = Math.max(1, maxY - minY);
+    const scale = Math.min((canvasW - 2 * marginPx) / srcW, (canvasH - 2 * marginPx) / srcH);
+    const px0 = (canvasW - srcW * scale) / 2 - minX * scale;
+    const py0 = (canvasH - srcH * scale) / 2 - minY * scale;
+    pts.forEach((pt, index) => {
+      const x = ox + pt.x * scale + px0;
+      const y = oy + pt.y * scale + py0;
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.closePath();
+    return true;
+  }
+  return false;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -380,6 +452,81 @@ function rgba(color: string, opacity: number): string {
   return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(1, opacity))})`;
 }
 
+
+type KonvaQuickAdjustment = {
+  brightness: number;
+  contrast: number;
+  saturation: number;
+  hue: number;
+  grayscale: boolean;
+  blurRadius: number;
+  hasAny: boolean;
+};
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function quickEditParamsToKonva(params: Record<string, unknown> | null | undefined): KonvaQuickAdjustment {
+  const exposure = typeof params?.["exposure"] === "number" ? params["exposure"] : 0;
+  const brightness = typeof params?.["brightness"] === "number" ? params["brightness"] : 0;
+  const contrast = typeof params?.["contrast"] === "number" ? params["contrast"] : 0;
+  const saturation = typeof params?.["saturation"] === "number" ? params["saturation"] : 0;
+  const hue = typeof params?.["hue"] === "number" ? params["hue"] : 0;
+  const blur = typeof params?.["blur"] === "number" ? params["blur"] : 0;
+  const grayscale = params?.["black_white"] === true;
+
+  const mappedBrightness = clampNumber(exposure / 175 + brightness / 220, -0.45, 0.45);
+  const mappedContrast = clampNumber(contrast, -40, 40);
+  const mappedSaturation = clampNumber(1 + saturation / 200, 0.7, 1.35);
+  const mappedHue = clampNumber(hue, -45, 45);
+  const mappedBlur = clampNumber(blur, 0, 8);
+
+  return {
+    brightness: mappedBrightness,
+    contrast: mappedContrast,
+    saturation: mappedSaturation,
+    hue: mappedHue,
+    grayscale,
+    blurRadius: mappedBlur,
+    hasAny:
+      Math.abs(mappedBrightness) > 0.001 ||
+      Math.abs(mappedContrast) > 0.001 ||
+      Math.abs(mappedSaturation - 1) > 0.001 ||
+      Math.abs(mappedHue) > 0.001 ||
+      grayscale ||
+      mappedBlur > 0
+  };
+}
+
+function mergeKonvaAdjustments(
+  base: { brightness?: number; contrast?: number; saturation?: number; hue?: number; grayscale?: boolean; hasAny?: boolean } | null | undefined,
+  quick: KonvaQuickAdjustment
+): KonvaQuickAdjustment {
+  const brightness = clampNumber((base?.brightness ?? 0) + quick.brightness, -0.55, 0.55);
+  const contrast = clampNumber((base?.contrast ?? 0) + quick.contrast, -55, 55);
+  const saturation = clampNumber((base?.saturation ?? 1) * quick.saturation, 0.6, 1.6);
+  const hue = clampNumber((base?.hue ?? 0) + quick.hue, -60, 60);
+  const grayscale = Boolean(base?.grayscale) || quick.grayscale;
+
+  return {
+    brightness,
+    contrast,
+    saturation,
+    hue,
+    grayscale,
+    blurRadius: quick.blurRadius,
+    hasAny:
+      Boolean(base?.hasAny) ||
+      quick.hasAny ||
+      Math.abs(brightness) > 0.001 ||
+      Math.abs(contrast) > 0.001 ||
+      Math.abs(saturation - 1) > 0.001 ||
+      Math.abs(hue) > 0.001 ||
+      grayscale
+  };
+}
+
 // ─── Image Node (מצב חופשי — ImageLayer רגיל, ללא פריים/תא) ─────────────────
 // All visual effects are applied here. This node is used in free-mode only.
 // Frame/cell mode uses FrameNode which has its own effect rendering.
@@ -389,36 +536,58 @@ function ImageNode({
   assets,
   selected,
   onSelect,
-  onChange
+  onChange,
+  onContextMenu
 }: {
   layer: ImageLayer;
   assets: Asset[];
   selected: boolean;
   onSelect: (layerId: string) => void;
   onChange: (layer: VisualLayer) => void;
+  onContextMenu?: (target: CanvasContextMenuTarget) => void;
 }): React.ReactElement {
   const asset = assets.find((item) => item.id === layer.assetId);
   const image = useKonvaImage(resolveCanvasAssetPath(asset));
-  const blurRef = useRef<Konva.Image | null>(null);
+  const imageRef = useRef<Konva.Image | null>(null);
 
   const fx = useMemo(
     () => resolveFrameEffects(layer.visualEffects),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [JSON.stringify(layer.visualEffects)]
   );
-  const blurRadius = fx.softEdge?.radius ?? 0;
+  const softEdgeBlurRadius = fx.softEdge?.radius ?? 0;
+  const quickParams = layer.metadata["imageEditParams"] as Record<string, unknown> | undefined;
+  const baseColorAdj = imageLayerAdjToKonva(layer.colorAdjustments, undefined);
+  const quickColorAdj = quickEditParamsToKonva(quickParams);
+  const colorAdj = mergeKonvaAdjustments(baseColorAdj, quickColorAdj);
+  const blurRadius = Math.max(softEdgeBlurRadius, colorAdj.blurRadius);
 
-  // Cache the image node when soft-edge blur filter is active
+  // Build the active filter list for this node.
+  const activeFilters = useMemo(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const list: any[] = [];
+    if (blurRadius > 0) list.push(Konva.Filters.Blur);
+    if (Math.abs(colorAdj.brightness) > 0.001) list.push(Konva.Filters.Brighten);
+    if (Math.abs(colorAdj.contrast) > 0.001) list.push(Konva.Filters.Contrast);
+    if (colorAdj.grayscale) list.push(Konva.Filters.Grayscale);
+    if (!colorAdj.grayscale && (Math.abs(colorAdj.saturation - 1) > 0.001 || Math.abs(colorAdj.hue) > 0.001)) list.push(Konva.Filters.HSL);
+    return list;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blurRadius, colorAdj.brightness, colorAdj.contrast, colorAdj.saturation, colorAdj.hue, colorAdj.grayscale]);
+
+  const needsCache = activeFilters.length > 0;
+
+  // Cache the node whenever filters are active or image changes
   useEffect(() => {
-    const node = blurRef.current;
-    if (node === null) return;
-    if (blurRadius > 0) {
+    const node = imageRef.current;
+    if (node === null || image === null) return;
+    if (needsCache) {
       node.cache();
     } else {
       node.clearCache();
     }
     node.getLayer()?.batchDraw();
-  }, [blurRadius]);
+  }, [needsCache, image]);
 
   // Shadow/glow on the outer Group so it renders outside the image bounds
   const shadowProps = fx.shadow !== undefined
@@ -445,6 +614,16 @@ function ImageNode({
     draggable: !layer.locked,
     onClick: () => onSelect(layer.id),
     onTap: () => onSelect(layer.id),
+    onContextMenu: (event: Konva.KonvaEventObject<PointerEvent>) => {
+      event.evt.preventDefault();
+      onContextMenu?.({
+        layerId: layer.id,
+        layerType: "image",
+        hasImage: true,
+        screenX: event.evt.clientX,
+        screenY: event.evt.clientY
+      });
+    },
     onDragEnd: (event: Konva.KonvaEventObject<DragEvent>) => {
       onChange({ ...layer, x: event.target.x(), y: event.target.y() });
     },
@@ -465,48 +644,71 @@ function ImageNode({
     }
   };
 
+  // ─── Shape clip + flip from metadata ──────────────────────────────────────
+  const imageShape = (layer.metadata["imageShape"] as string | undefined) ?? "rect";
+  const cornerRadius = (layer.metadata["imageCornerRadius"] as number | undefined) ?? 0;
+  const flipH = (layer.metadata["flipH"] as boolean | undefined) ?? false;
+  const flipV = (layer.metadata["flipV"] as boolean | undefined) ?? false;
+
+  const hasClip = imageShape !== "rect" || cornerRadius > 0;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const imageClipFunc = hasClip ? (ctx: any): void => {
+    const w = layer.width;
+    const h = layer.height;
+    ctx.beginPath();
+    if (imageShape === "circle" || imageShape === "ellipse") {
+      ctx.ellipse(w / 2, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+    } else {
+      const r = Math.min(cornerRadius, w / 2, h / 2);
+      ctx.moveTo(r, 0);
+      ctx.arcTo(w, 0, w, h, r);
+      ctx.arcTo(w, h, 0, h, r);
+      ctx.arcTo(0, h, 0, 0, r);
+      ctx.arcTo(0, 0, w, 0, r);
+      ctx.closePath();
+    }
+  } : undefined;
+
+  // Flip via negative scale + offset compensation on the KonvaImage
+  const imgX = flipH ? layer.width : 0;
+  const imgY = flipV ? layer.height : 0;
+  const imgScaleX = flipH ? -1 : 1;
+  const imgScaleY = flipV ? -1 : 1;
+
   return (
     <Group {...groupCommon} {...shadowProps}>
-      {/* Image — blur filter applied here */}
-      <KonvaImage
-        ref={blurRef}
-        x={0}
-        y={0}
-        width={layer.width}
-        height={layer.height}
-        image={image ?? undefined}
-        filters={blurRadius > 0 ? [Konva.Filters.Blur] : []}
-        blurRadius={blurRadius}
-        stroke={fx.stroke?.color}
-        strokeWidth={fx.stroke?.width ?? 0}
-        strokeEnabled={fx.stroke !== undefined}
-      />
-      {/* Color overlay */}
-      {fx.colorOverlay !== undefined && (
-        <Rect
-          x={0}
-          y={0}
+      {/* Inner group clips to shape/corner-radius */}
+      <Group clipFunc={imageClipFunc}>
+        <KonvaImage
+          ref={imageRef}
+          x={imgX}
+          y={imgY}
+          scaleX={imgScaleX}
+          scaleY={imgScaleY}
           width={layer.width}
           height={layer.height}
-          fill={fx.colorOverlay.color}
-          opacity={fx.colorOverlay.opacity}
-          globalCompositeOperation={mapBlendMode(fx.colorOverlay.blendMode) as "source-over"}
-          listening={false}
+          image={image ?? undefined}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          filters={activeFilters as any}
+          blurRadius={blurRadius}
+          brightness={colorAdj.brightness}
+          contrast={colorAdj.contrast}
+          saturation={colorAdj.saturation}
+          hue={colorAdj.hue}
+          stroke={fx.stroke?.color}
+          strokeWidth={fx.stroke?.width ?? 0}
+          strokeEnabled={fx.stroke !== undefined}
         />
-      )}
-      {/* Gradient overlay */}
-      {fx.gradientOverlay !== undefined && (
-        <Rect
-          x={0}
-          y={0}
-          width={layer.width}
-          height={layer.height}
-          {...gradientOverlayRectProps(fx.gradientOverlay, layer.width, layer.height)}
-          opacity={fx.gradientOverlay.opacity}
-          globalCompositeOperation={mapBlendMode(fx.gradientOverlay.blendMode) as "source-over"}
-          listening={false}
-        />
-      )}
+        {/* Color overlay */}
+        {fx.colorOverlay !== undefined && (
+          <Rect x={0} y={0} width={layer.width} height={layer.height} fill={fx.colorOverlay.color} opacity={fx.colorOverlay.opacity} globalCompositeOperation={mapBlendMode(fx.colorOverlay.blendMode) as "source-over"} listening={false} />
+        )}
+        {/* Gradient overlay */}
+        {fx.gradientOverlay !== undefined && (
+          <Rect x={0} y={0} width={layer.width} height={layer.height} {...gradientOverlayRectProps(fx.gradientOverlay, layer.width, layer.height)} opacity={fx.gradientOverlay.opacity} globalCompositeOperation={mapBlendMode(fx.gradientOverlay.blendMode) as "source-over"} listening={false} />
+        )}
+      </Group>
     </Group>
   );
 }
@@ -519,7 +721,8 @@ function FrameNode({
   selected,
   layoutEditMode,
   onSelect,
-  onChange
+  onChange,
+  onContextMenu
 }: {
   layer: FrameLayer;
   assets: Asset[];
@@ -527,6 +730,7 @@ function FrameNode({
   layoutEditMode: boolean;
   onSelect: (layerId: string) => void;
   onChange: (layer: VisualLayer) => void;
+  onContextMenu?: (target: CanvasContextMenuTarget) => void;
 }): React.ReactElement {
   const asset = assets.find((item) => item.id === layer.imageAssetId);
   const image = useKonvaImage(resolveCanvasAssetPath(asset));
@@ -536,20 +740,48 @@ function FrameNode({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [JSON.stringify(layer.visualEffects)]
   );
-  const blurRadius = fx.softEdge?.radius ?? 0;
+  const softEdgeBlurRadius = fx.softEdge?.radius ?? 0;
   const isGridCell = layer.metadata["gridCell"] !== undefined;
   const isMaskFrame = layer.metadata["maskFrame"] !== undefined;
-  const collageFrameMeta = layer.metadata["collageFrame"] as { isCollageFrame?: boolean; layoutManaged?: boolean; slotType?: string } | undefined;
+  const collageFrameMeta = layer.metadata["collageFrame"] as { isCollageFrame?: boolean; layoutManaged?: boolean; slotType?: string; slotId?: string; slotShape?: string; vertices?: Array<{ x: number; y: number }>; edgeConfig?: CollageEdgeConfig; globalMask?: CollageGlobalMaskMeta } | undefined;
   const isCollageFrame = collageFrameMeta?.isCollageFrame === true;
   const isCollageEmpty = isCollageFrame && collageFrameMeta?.slotType === "empty";
   const collageSelectColor = "#22d3ee";
 
+  // Colour adjustments stored in metadata by syncFrameLayersToPage / updateCollageImageAdjustments
+  const rawCollageAdj = layer.metadata["collageColorAdj"] as CollageColorAdj | null | undefined;
+  const baseFrameColorAdj = rawCollageAdj != null ? collageAdjToKonva(rawCollageAdj, undefined) : null;
+  const quickFrameParams =
+    (layer.metadata["imageEditParams"] as Record<string, unknown> | undefined) ??
+    (layer.metadata["collageImageEditParams"] as Record<string, unknown> | undefined);
+  const quickFrameAdj = quickEditParamsToKonva(quickFrameParams);
+  const frameColorAdj = mergeKonvaAdjustments(baseFrameColorAdj, quickFrameAdj);
+  const blurRadius = Math.max(softEdgeBlurRadius, frameColorAdj.blurRadius);
+
+  // Edge config mirrored from collage assignment
+  const collageEdgeConfig = layer.metadata["collageEdgeConfig"] as CollageEdgeConfig | null | undefined;
+
+  const frameNeedsCache = blurRadius > 0 || frameColorAdj.hasAny;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const frameFilters = useMemo((): any[] => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const list: any[] = [];
+    if (blurRadius > 0) list.push(Konva.Filters.Blur);
+    if (Math.abs(frameColorAdj.brightness) > 0.001) list.push(Konva.Filters.Brighten);
+    if (Math.abs(frameColorAdj.contrast) > 0.001) list.push(Konva.Filters.Contrast);
+    if (frameColorAdj.grayscale) list.push(Konva.Filters.Grayscale);
+    if (!frameColorAdj.grayscale && (Math.abs(frameColorAdj.saturation - 1) > 0.001 || Math.abs(frameColorAdj.hue) > 0.001)) list.push(Konva.Filters.HSL);
+    return list;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blurRadius, frameColorAdj.brightness, frameColorAdj.contrast, frameColorAdj.saturation, frameColorAdj.hue, frameColorAdj.grayscale]);
+
   useEffect(() => {
     const node = blurRef.current;
-    if (node === null) return;
-    if (blurRadius > 0) { node.cache(); } else { node.clearCache(); }
+    if (node === null || image === null) return;
+    if (frameNeedsCache) { node.cache(); } else { node.clearCache(); }
     node.getLayer()?.batchDraw();
-  }, [blurRadius]);
+  }, [frameNeedsCache, image]);
 
   // האם הפריים עצמו ניתן לגרירה
   const frameIsDraggable =
@@ -580,13 +812,83 @@ function FrameNode({
     ? Math.min(layer.width, layer.height) / 2
     : (layer.cornerRadius ?? 0);
 
+  // Puzzle tabs from collage frame metadata
+  const puzzleTabs = (layer.metadata["collageFrame"] as Record<string, unknown> | undefined)?.["puzzleTabs"] as
+    import("@/types/collage").PuzzleTabs | undefined;
+
+  const slotId = (layer.metadata["collageFrame"] as Record<string, unknown> | undefined)?.["slotId"] as string | undefined;
+  const collageSlotShape = collageFrameMeta?.slotShape;
+  const collageVertices = collageFrameMeta?.vertices;
+  const collageGlobalMask = collageFrameMeta?.globalMask;
+  const [swapAnchorHovered, setSwapAnchorHovered] = useState(false);
+  const [activeSwapSlotId, setActiveSwapSlotId] = useState<string | null>(null);
+
+  useEffect(() => {
+    function handleSwapModeChange(event: Event): void {
+      const detail = (event as CustomEvent<{ slotId?: string | null }>).detail;
+      setActiveSwapSlotId(detail?.slotId ?? null);
+    }
+    window.addEventListener("spp2:collage-swap-mode-change", handleSwapModeChange);
+    return () => window.removeEventListener("spp2:collage-swap-mode-change", handleSwapModeChange);
+  }, []);
+
+  function handleCollageSwapAnchor(event: Konva.KonvaEventObject<MouseEvent>): void {
+    event.cancelBubble = true;
+    if (!slotId) return;
+    window.dispatchEvent(new CustomEvent("spp2:collage-slot-anchor-click", { detail: { slotId } }));
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const clipFunc = (ctx: any): void => {
     const pad = layer.padding;
     const w = layer.width - pad * 2;
     const h = layer.height - pad * 2;
+
+    if (collageGlobalMask != null && drawGlobalMaskPath(ctx, collageGlobalMask, layer.x, layer.y)) {
+      return;
+    }
+
+    if (layer.shape === "puzzle" && puzzleTabs) {
+      drawPuzzlePath(ctx, pad, pad, w, h, puzzleTabs);
+      return;
+    }
+
+    // Torn paper edge style: replace clip with jagged polygon
+    if (collageEdgeConfig?.style === "tornPaper") {
+      const roughness = collageEdgeConfig.tornPaperRoughness ?? 1;
+      const seed = collageEdgeConfig.tornPaperSeed ?? 42;
+      const sides = collageEdgeConfig.softEdgeSides ?? ["top", "right", "bottom", "left"] as import("@/core/collage/collageTornPaper").EdgeSide[];
+      const pts = generateTornEdgePoints(w, h, sides, roughness, seed, slotId ?? "");
+      ctx.beginPath();
+      if (pts.length >= 2) {
+        ctx.moveTo(pad + pts[0], pad + pts[1]);
+        for (let i = 2; i < pts.length; i += 2) {
+          ctx.lineTo(pad + pts[i], pad + pts[i + 1]);
+        }
+        ctx.closePath();
+      }
+      return;
+    }
+
+    // Outline circle: force circle clip regardless of slot shape
+    if (collageEdgeConfig?.style === "outlineCircle") {
+      ctx.beginPath();
+      ctx.ellipse(pad + w / 2, pad + h / 2, Math.min(w, h) / 2, Math.min(w, h) / 2, 0, 0, Math.PI * 2);
+      return;
+    }
+
     ctx.beginPath();
-    if (layer.shape === "circle" || layer.shape === "ellipse") {
+    if ((collageSlotShape === "polygon" || collageSlotShape === "diagonalPolygon") && Array.isArray(collageVertices) && collageVertices.length >= 3) {
+      collageVertices.forEach((vertex, index) => {
+        const px = pad + Math.max(0, Math.min(1, vertex.x)) * w;
+        const py = pad + Math.max(0, Math.min(1, vertex.y)) * h;
+        if (index === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.closePath();
+    } else if (collageSlotShape === "heart") {
+      heartPath(ctx, pad, pad, w, h);
+    } else if (layer.shape === "circle" || layer.shape === "ellipse" || collageSlotShape === "circle" || collageSlotShape === "ellipse") {
       ctx.ellipse(pad + w / 2, pad + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
     } else if (layer.shape === "svgPath" && maskShape(layer) === "star") {
       starPath(ctx, pad + w / 2, pad + h / 2, Math.min(w, h) / 2, Math.min(w, h) / 4);
@@ -670,6 +972,17 @@ function FrameNode({
     });
   };
 
+  const handleFrameContextMenu = (event: Konva.KonvaEventObject<PointerEvent>): void => {
+    event.evt.preventDefault();
+    onContextMenu?.({
+      layerId: layer.id,
+      layerType: "frame",
+      hasImage: image !== null,
+      screenX: event.evt.clientX,
+      screenY: event.evt.clientY
+    });
+  };
+
   return (
     <Group
       id={layer.id}
@@ -684,6 +997,7 @@ function FrameNode({
       draggable={frameIsDraggable}
       onClick={() => onSelect(layer.id)}
       onTap={() => onSelect(layer.id)}
+      onContextMenu={handleFrameContextMenu}
       onDragEnd={handleFrameDragEnd}
       onTransformEnd={handleTransformEnd}
       {...shadowProps}
@@ -736,8 +1050,13 @@ function FrameNode({
             height={contentRect.height}
             image={image}
             draggable={contentIsDraggable}
-            filters={blurRadius > 0 ? [Konva.Filters.Blur] : []}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            filters={frameFilters as any}
             blurRadius={blurRadius}
+            brightness={frameColorAdj.brightness}
+            contrast={frameColorAdj.contrast}
+            saturation={frameColorAdj.saturation}
+            hue={frameColorAdj.hue}
             onDragMove={(event) => {
               event.cancelBubble = true;
               clampContentNodeToFrame(event.target, contentRect, layer);
@@ -786,10 +1105,160 @@ function FrameNode({
       {layoutEditMode && selected && !isCollageFrame && (
         <Rect x={0} y={0} width={layer.width} height={layer.height} fill="transparent" stroke="#F59E0B" strokeWidth={2} dash={[6, 4]} cornerRadius={cornerRadius} listening={false} />
       )}
-      {/* Collage cell selected highlight */}
-      {isCollageFrame && selected && (
-        <Rect x={0} y={0} width={layer.width} height={layer.height} fill="rgba(34,211,238,0.08)" stroke={collageSelectColor} strokeWidth={2.5} cornerRadius={cornerRadius} listening={false} />
+
+      {/* Collage swap anchor: hidden by default. Hover the center point to reveal it; after choosing the first cell, all other anchors appear. */}
+      {isCollageFrame && image !== null && !isCollageEmpty && (
+        <>
+          <Circle
+            x={layer.width / 2}
+            y={layer.height / 2}
+            radius={Math.max(24, Math.min(42, Math.min(layer.width, layer.height) * 0.13))}
+            fill="rgba(0,0,0,0.001)"
+            stroke="transparent"
+            onMouseEnter={(event) => { setSwapAnchorHovered(true); const container = event.target.getStage()?.container(); if (container) container.style.cursor = "pointer"; }}
+            onMouseLeave={(event) => { setSwapAnchorHovered(false); const container = event.target.getStage()?.container(); if (container) container.style.cursor = "default"; }}
+            onClick={handleCollageSwapAnchor}
+            onTap={(event) => handleCollageSwapAnchor(event as unknown as Konva.KonvaEventObject<MouseEvent>)}
+          />
+          {(swapAnchorHovered || activeSwapSlotId !== null) && (
+            <Circle
+              x={layer.width / 2}
+              y={layer.height / 2}
+              radius={Math.max(16, Math.min(28, Math.min(layer.width, layer.height) * 0.09))}
+              fill={activeSwapSlotId === slotId ? "rgba(124,111,224,0.96)" : "rgba(34,211,238,0.92)"}
+              stroke="#ffffff"
+              strokeWidth={2.5}
+              shadowColor="rgba(0,0,0,0.38)"
+              shadowBlur={8}
+              shadowOpacity={0.5}
+              listening={false}
+            />
+          )}
+        </>
+      )}
+
+      {/* Collage/Grid/Mask cell: boundary box with zoom handles instead of fill highlight */}
+      {(isCollageFrame || isGridCell || isMaskFrame) && selected && image !== null && (
+        <ContentZoomHandles
+          layer={layer}
+          image={image}
+          collageSelectColor={collageSelectColor}
+          cornerRadius={cornerRadius}
+          onChange={onChange}
+        />
+      )}
+      {/* Collage empty cell selected indicator */}
+      {isCollageFrame && selected && image === null && (
+        <Rect x={0} y={0} width={layer.width} height={layer.height} fill="transparent" stroke={collageSelectColor} strokeWidth={2.5} cornerRadius={cornerRadius} listening={false} />
       )}
     </Group>
+  );
+}
+
+
+// --- Content Zoom Handles ---
+// Shows a boundary box with corner handles that zoom the image within a cell.
+
+const HANDLE_SIZE = 10;
+const HANDLE_HALF = HANDLE_SIZE / 2;
+
+interface ContentZoomHandlesProps {
+  layer: FrameLayer;
+  image: HTMLImageElement;
+  collageSelectColor: string;
+  cornerRadius: number;
+  onChange: (layer: VisualLayer) => void;
+}
+
+// Handles are placed OUTSIDE the frame so image content drag is never blocked.
+// Each handle sits fully outside its corner:
+//   TL → (-SIZE, -SIZE)   TR → (w, -SIZE)
+//   BL → (-SIZE, h)       BR → (w,  h)
+const HANDLE_OUTSIDE = HANDLE_SIZE; // how far outside the frame the handle sits
+
+function ContentZoomHandles({ layer, image, collageSelectColor, cornerRadius, onChange }: ContentZoomHandlesProps): React.ReactElement {
+  const dragStartRef = useRef<{ scale: number } | null>(null);
+
+  // Anchor = frame corner; handle placed fully outside
+  const corners = [
+    { key: "tl", ax: 0,           ay: 0,            hx: -HANDLE_OUTSIDE, hy: -HANDLE_OUTSIDE },
+    { key: "tr", ax: layer.width,  ay: 0,            hx: layer.width,      hy: -HANDLE_OUTSIDE },
+    { key: "bl", ax: 0,           ay: layer.height,  hx: -HANDLE_OUTSIDE, hy: layer.height },
+    { key: "br", ax: layer.width,  ay: layer.height,  hx: layer.width,      hy: layer.height },
+  ] as const;
+
+  function onDragStart(): void {
+    dragStartRef.current = { scale: layer.contentTransform.scale };
+  }
+
+  function onDragMove(e: Konva.KonvaEventObject<DragEvent>, ax: number, ay: number, hx: number, hy: number): void {
+    e.cancelBubble = true;
+    const node = e.target;
+    const start = dragStartRef.current;
+    if (start === null) return;
+
+    // Drag delta from handle's resting position
+    const dx = node.x() - hx;
+    const dy = node.y() - hy;
+    const fw = layer.width;
+    const fh = layer.height;
+    const diag = Math.sqrt(fw * fw + fh * fh) / 2;
+    // Direction: from center toward anchor corner
+    const dirX = (ax - fw / 2) / diag;
+    const dirY = (ay - fh / 2) / diag;
+    const projection = dx * dirX + dy * dirY;
+
+    const newScale = Math.max(0.5, Math.min(8, start.scale + projection * 0.004));
+    const clamped = clampContentTransformToFillBounds(
+      { ...layer.contentTransform, scale: newScale },
+      layer.width, layer.height,
+      image.naturalWidth, image.naturalHeight,
+      layer.fitMode, layer.padding
+    );
+    onChange({ ...layer, contentTransform: clamped });
+    // Snap handle back to resting position during drag so the image zooms in place
+    node.x(hx);
+    node.y(hy);
+  }
+
+  function onDragEnd(e: Konva.KonvaEventObject<DragEvent>, hx: number, hy: number): void {
+    e.cancelBubble = true;
+    e.target.x(hx);
+    e.target.y(hy);
+    dragStartRef.current = null;
+  }
+
+  return (
+    <>
+      {/* Dashed boundary box — listening=false so image drag is never blocked */}
+      <Rect
+        x={0} y={0}
+        width={layer.width} height={layer.height}
+        fill="transparent"
+        stroke={collageSelectColor}
+        strokeWidth={2}
+        dash={[5, 3]}
+        cornerRadius={cornerRadius}
+        listening={false}
+      />
+      {/* Zoom handles — fully OUTSIDE the frame, never overlap image area */}
+      {corners.map(({ key, ax, ay, hx, hy }) => (
+        <Rect
+          key={key}
+          x={hx}
+          y={hy}
+          width={HANDLE_SIZE}
+          height={HANDLE_SIZE}
+          fill="#fff"
+          stroke={collageSelectColor}
+          strokeWidth={2}
+          cornerRadius={2}
+          draggable
+          onDragStart={onDragStart}
+          onDragMove={(e) => onDragMove(e, ax, ay, hx, hy)}
+          onDragEnd={(e) => onDragEnd(e, hx, hy)}
+        />
+      ))}
+    </>
   );
 }

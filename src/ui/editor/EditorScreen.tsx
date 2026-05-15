@@ -4,29 +4,45 @@ import {
   AlignLeft,
   AlignRight,
   Bold,
+  ChevronDown,
+  Circle,
   Clipboard,
   Copy,
   Download,
   FileDown,
+  FileText,
   FileUp,
   ChevronsDown,
   ChevronsUp,
+  FlipHorizontal,
+  FlipVertical,
+  Frame,
   GripVertical,
   Eye,
   EyeOff,
   Home,
   ImagePlus,
   Italic,
+  LayoutGrid,
   Layers,
+  Link2,
   Lock,
   Maximize2,
   MousePointer2,
   Plus,
   Redo2,
+  Replace,
+  RotateCw,
   Save,
+  Settings,
+  SlidersHorizontal,
+  Sparkles,
+  Square,
+  SquareRoundCorner,
   Star,
   Trash2,
   Type,
+  Unlink2,
   Unlock,
   Undo2,
   X,
@@ -34,6 +50,7 @@ import {
   ZoomOut
 } from "lucide-react";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -64,6 +81,12 @@ import {
   PAGE_PRESETS,
   pageSetupFromPreset,
   pxToUnit,
+  pxToMm,
+  pxToCm,
+  pxToInch,
+  mmToPx,
+  cmToPx,
+  inchToPx,
   regenerateGrid,
   regenerateMaskLayout,
   resetGridCrops,
@@ -82,7 +105,7 @@ import { useSelectionStore } from "@/state/selectionStore";
 import { CropUI } from "./CropUI";
 import { useViewportStore, type ViewportStore } from "@/state/viewportStore";
 import type { Asset, Document } from "@/types/document";
-import type { BlendMode, VisualLayer } from "@/types/layers";
+import type { BlendMode, FrameLayer, VisualLayer } from "@/types/layers";
 import type { GridLayoutRule } from "@/types/grid";
 import type { MaskLayoutRule } from "@/types/mask";
 import type { PageSetup, Unit } from "@/types/primitives";
@@ -90,6 +113,8 @@ import type { TextEffect, TextPreset } from "@/types/text";
 import {
   VISUAL_EFFECT_LABELS,
   VISUAL_EFFECT_PRESETS,
+  type DropShadowEffect,
+  type StrokeEffect,
   type VisualEffect,
   type VisualEffectParams,
   type VisualEffectStack
@@ -101,13 +126,24 @@ import {
   exportStageJpg,
   exportStagePdf,
   exportStagePng,
+  exportStagePrintImage,
   loadProject,
   savePortableProject,
   saveProject
 } from "../projectActions";
 import { CanvasStage } from "./CanvasStage";
+import { CollageGridOverlay } from "./CollageGridOverlay";
+import type { CanvasContextMenuTarget } from "./KonvaLayerNode";
+import { isImageEditorAvailable, openImageEditorForAsset } from "@/services/imageEditorService";
+import { isPrintPreviewAvailable, openPrintPreviewForRenderedPage } from "@/services/printPreviewService";
 import { useProjectLifecycleStore } from "@/state/projectLifecycleStore";
 import { CollageModePanel } from "@/ui/collage/CollageModePanel";
+import { CollageLayoutsPanel } from "@/ui/collage/CollageLayoutsPanel";
+import { UtilitiesMenu } from "@/ui/utilities/UtilitiesMenu";
+import { GoogleFontsBrowser } from "@/ui/utilities/GoogleFontsBrowser";
+import { openInPhotoshop, stopPhotoshopWatch } from "@/integrations/photoshopIntegration";
+import { openInColorLab, stopColorLabWatch } from "@/integrations/colorLabIntegration";
+import { useUtilitiesSettings } from "@/utilities/settingsStore";
 import { applySmartCropToAssignment } from "@/core/collage/collageFrameSync";
 import { syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import {
@@ -145,12 +181,22 @@ async function runInitialSmartCrop(
 export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
   const stageRef = useRef<Konva.Stage | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const replaceImageInputRef = useRef<HTMLInputElement>(null);
   const projectInputRef = useRef<HTMLInputElement>(null);
   const autosaveRef = useRef(new AutosaveManager({ intervalMs: 1000 * 60 * 2, debounceMs: 3000, actionThreshold: 20 }));
   const lastAutosavedRevisionRef = useRef(0);
   const [tool, setTool] = useState<ToolId>("move");
+  const [leftTab, setLeftTab] = useState<"layers" | "pages" | "settings" | "collage">("layers");
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [status, setStatus] = useState("שמירה אוטומטית מוכנה");
+  const [canvasContextMenu, setCanvasContextMenu] = useState<CanvasContextMenuTarget | null>(null);
+  const [imageEditorBusy, setImageEditorBusy] = useState(false);
+  const [showFontsBrowser, setShowFontsBrowser] = useState(false);
+  const [extWatchId, setExtWatchId] = useState<string | null>(null);
+  const [showBackHomeDialog, setShowBackHomeDialog] = useState(false);
+  const [saveDropdownOpen, setSaveDropdownOpen] = useState(false);
+  const [dynamicGridMode, setDynamicGridMode] = useState(false);
+  const utilSettings = useUtilitiesSettings();
   const document = useDocumentStore((state) => state.document);
   const activePageId = useDocumentStore((state) => state.activePageId);
   const setDocument = useDocumentStore((state) => state.setDocument);
@@ -166,6 +212,10 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
   const updatePage = useDocumentStore((state) => state.updatePage);
   const setActivePage = useDocumentStore((state) => state.setActivePage);
   const applyDocumentChange = useDocumentStore((state) => state.applyDocumentChange);
+  const updateCollageCachedSlots = useDocumentStore((state) => state.updateCollageCachedSlots);
+  const updateCollageImageTransform = useDocumentStore((state) => state.updateCollageImageTransform);
+  const addAsset = useDocumentStore((state) => state.addAsset);
+  const updateAsset = useDocumentStore((state) => state.updateAsset);
   const applyTextPreset = useDocumentStore((state) => state.applyTextPreset);
   const copyTextStyle = useDocumentStore((state) => state.copyTextStyle);
   const pasteTextStyle = useDocumentStore((state) => state.pasteTextStyle);
@@ -214,6 +264,13 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
   const isGridMode = document?.metadata["mode"] === "grid";
   const isMaskMode = document?.metadata["mode"] === "mask";
   const isCollageMode = document?.metadata["mode"] === "collage";
+
+  // Auto-switch left tab to collage layouts when entering collage mode
+  useEffect(() => {
+    if (isCollageMode) setLeftTab("collage");
+    else if (leftTab === "collage") setLeftTab("layers");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCollageMode]);
 
   useEffect(() => {
     if (document?.viewport !== undefined) {
@@ -301,6 +358,126 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
     setStatus("נוספה שכבת טקסט");
   }
 
+  async function handleOpenImageEditor(target: CanvasContextMenuTarget): Promise<void> {
+    setCanvasContextMenu(null);
+    if (!currentDocument || imageEditorBusy) return;
+
+    // Resolve the asset for the target layer
+    let asset = currentDocument.assets.find((a) => {
+      const layer = currentPage?.layers.find((l) => l.id === target.layerId);
+      if (!layer) return false;
+      if (layer.type === "image") return a.id === layer.assetId;
+      if (layer.type === "frame") return a.id === layer.imageAssetId;
+      return false;
+    });
+    if (!asset) return;
+
+    setImageEditorBusy(true);
+    setStatus("עורך תמונות נפתח…");
+    try {
+      const updatedAsset = await openImageEditorForAsset(asset);
+      if (updatedAsset) {
+        updateAsset(updatedAsset);
+        setStatus("התמונה עודכנה");
+      } else {
+        setStatus("עריכה בוטלה");
+      }
+    } catch {
+      setStatus("שגיאה בפתיחת עורך התמונות");
+    } finally {
+      setImageEditorBusy(false);
+    }
+  }
+
+  async function handleOpenInPhotoshop(target: CanvasContextMenuTarget): Promise<void> {
+    setCanvasContextMenu(null);
+    if (!currentDocument || !utilSettings.photoshopPath) {
+      setStatus("נתיב Photoshop לא הוגדר — הגדר ב'כלי עזר → הגדרות'");
+      return;
+    }
+    const layer = currentPage?.layers.find((l) => l.id === target.layerId);
+    if (!layer) return;
+    const asset = currentDocument.assets.find((a) => {
+      if (layer.type === "image") return a.id === layer.assetId;
+      if (layer.type === "frame") return a.id === layer.imageAssetId;
+      return false;
+    });
+    if (!asset?.previewPath) return;
+
+    const ext = asset.mimeType?.includes("png") ? "png" : "jpg";
+    setStatus("פותח ב-Photoshop…");
+    const { watchId, error } = await openInPhotoshop(
+      utilSettings.photoshopPath,
+      asset.previewPath,
+      ext,
+      (base64) => {
+        const updated = { ...asset, previewPath: `data:image/${ext};base64,${base64}`, originalPath: `data:image/${ext};base64,${base64}` };
+        updateAsset(updated);
+        setStatus("התמונה עודכנה מ-Photoshop");
+      }
+    );
+    if (error) {
+      setStatus(`שגיאה: ${error}`);
+    } else {
+      setExtWatchId(watchId);
+      setStatus("Photoshop נפתח — שמור בפוטושופ לעדכון אוטומטי");
+    }
+  }
+
+  async function handleOpenInColorLab(target: CanvasContextMenuTarget): Promise<void> {
+    setCanvasContextMenu(null);
+    if (!currentDocument || !utilSettings.colorLabPath) {
+      setStatus("נתיב ColorLab לא הוגדר — הגדר ב'כלי עזר → הגדרות'");
+      return;
+    }
+    const layer = currentPage?.layers.find((l) => l.id === target.layerId);
+    if (!layer) return;
+    const asset = currentDocument.assets.find((a) => {
+      if (layer.type === "image") return a.id === layer.assetId;
+      if (layer.type === "frame") return a.id === layer.imageAssetId;
+      return false;
+    });
+    if (!asset?.previewPath) return;
+
+    const ext = asset.mimeType?.includes("png") ? "png" : "jpg";
+    setStatus("פותח ב-ColorLab…");
+    const { watchId, error } = await openInColorLab(
+      utilSettings.colorLabPath,
+      asset.previewPath,
+      ext,
+      (base64) => {
+        const updated = { ...asset, previewPath: `data:image/${ext};base64,${base64}`, originalPath: `data:image/${ext};base64,${base64}` };
+        updateAsset(updated);
+        setStatus("התמונה עודכנה מ-ColorLab");
+      }
+    );
+    if (error) {
+      setStatus(`שגיאה: ${error}`);
+    } else {
+      setExtWatchId(watchId);
+      setStatus("ColorLab נפתח — שמור לעדכון אוטומטי");
+    }
+  }
+
+  function handleInsertQRToCanvas(dataUrl: string): void {
+    void (async () => {
+      try {
+        const file = await dataUrlToFile(dataUrl, "qr-code.png");
+        const { asset } = await importImageAsset(file, currentDocument.assets, { createPreview: true });
+        const maxZIndex = Math.max(0, ...currentPage.layers.map((l) => l.zIndex));
+        const layer = createFreeImageLayer(asset, currentPage.width, currentPage.height);
+        addAssetAndLayer(currentPage.id, asset, layer);
+        setStatus("קוד QR נוסף לקנבס");
+      } catch {
+        setStatus("שגיאה בהכנסת QR");
+      }
+    })();
+  }
+
+  function dataUrlToFile(dataUrl: string, filename: string): Promise<File> {
+    return fetch(dataUrl).then((r) => r.blob()).then((b) => new File([b], filename, { type: "image/png" }));
+  }
+
   function handleCanvasLayerChange(layer: VisualLayer): void {
     if (isGridMode && activeGridRule !== null && layer.type === "frame" && layer.metadata["gridCell"] !== undefined) {
       const asset = currentDocument.assets.find((item) => item.id === layer.imageAssetId);
@@ -337,6 +514,16 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
         }),
         currentPage.id
       );
+      return;
+    }
+
+    if (isCollageMode && activeCollageRule !== null && layer.type === "frame" &&
+        (layer.metadata["collageFrame"] as { isCollageFrame?: boolean } | undefined)?.isCollageFrame === true) {
+      const collageMeta = layer.metadata["collageFrame"] as { slotId?: string } | undefined;
+      if (collageMeta?.slotId) {
+        updateCollageImageTransform(activeCollageRule.id, collageMeta.slotId, layer.contentTransform);
+        updateLayer(currentPage.id, layer);
+      }
       return;
     }
 
@@ -444,6 +631,25 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
     event.target.value = "";
   }
 
+  // Replace image: swap only the asset on the currently selected image/frame layer
+  async function handleReplaceImageInput(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file === undefined || selectedLayer === null) return;
+    if (selectedLayer.type !== "image" && selectedLayer.type !== "frame") return;
+
+    const { asset } = await importImageAsset(file, currentDocument.assets, { createPreview: true });
+    addAsset(asset);
+
+    if (selectedLayer.type === "image") {
+      updateLayer(currentPage.id, { ...selectedLayer, assetId: asset.id });
+    } else {
+      // FrameLayer: update imageAssetId, keep all existing frame properties
+      updateLayer(currentPage.id, { ...selectedLayer, imageAssetId: asset.id, contentType: "image" });
+    }
+    setStatus("תמונה הוחלפה");
+  }
+
   function handleDrop(event: DragEvent<HTMLDivElement>): void {
     event.preventDefault();
     void handleImageFiles(event.dataTransfer.files);
@@ -541,16 +747,17 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
 
   function handleBackHome(): void {
     if (lifecycle.isDirty) {
-      const choice = window.prompt("Unsaved changes. Autosave is only a recovery backup. Type Save, Don't Save, or Cancel.", "Save");
-      const normalized = choice?.trim().toLowerCase();
-      if (normalized === null || normalized === undefined || normalized === "" || normalized === "cancel") {
-        return;
-      }
-      if (normalized === "save") {
-        handleSaveLifecycle();
-      } else if (normalized !== "don't save" && normalized !== "dont save") {
-        return;
-      }
+      setShowBackHomeDialog(true);
+    } else {
+      onBackHome();
+    }
+  }
+
+  function confirmBackHome(action: "save" | "discard" | "cancel"): void {
+    setShowBackHomeDialog(false);
+    if (action === "cancel") return;
+    if (action === "save") {
+      handleSaveLifecycle();
     }
     onBackHome();
   }
@@ -623,6 +830,37 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
     if (stage === null) return;
     exportStageJpg(stage, currentDocument.name, currentPage);
     setStatus("JPG exported");
+  }
+
+  async function handlePrintPreview(): Promise<void> {
+    const stage = stageRef.current;
+    if (stage === null) return;
+
+    if (!isPrintPreviewAvailable()) {
+      setStatus("מודול ההדפסה זמין רק בהרצה דרך Electron");
+      return;
+    }
+
+    setStatus("מכין קובץ נקי להדפסה…");
+
+    try {
+      const rendered = exportStagePrintImage(stage, currentPage, "image/png");
+      const pageName = typeof currentPage.metadata["name"] === "string" ? currentPage.metadata["name"] : undefined;
+      const result = await openPrintPreviewForRenderedPage({
+        ...rendered,
+        documentName: currentDocument.name,
+        pageName
+      });
+
+      if (!result.success) {
+        setStatus(`שגיאה בפתיחת הדפסה: ${result.error ?? "לא ידוע"}`);
+        return;
+      }
+
+      setStatus("חלון הדפסה נפתח");
+    } catch (error) {
+      setStatus(`שגיאה בהכנת הדפסה: ${error instanceof Error ? error.message : "לא ידוע"}`);
+    }
   }
 
   function handleDeleteSelected(): void {
@@ -764,6 +1002,28 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
 
   return (
     <main className="canvas-shell" data-testid="editor-screen">
+      {/* Back-home confirmation dialog */}
+      {showBackHomeDialog && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.45)" }}>
+          <div style={{ background: "var(--color-surface, #fff)", borderRadius: 12, padding: "28px 32px", boxShadow: "0 8px 32px rgba(0,0,0,0.25)", maxWidth: 380, width: "90%", textAlign: "center" }}>
+            <h3 style={{ margin: "0 0 10px", fontSize: 17 }}>יש שינויים שלא נשמרו</h3>
+            <p style={{ margin: "0 0 22px", fontSize: 14, color: "var(--color-text-secondary, #666)" }}>
+              שמירה אוטומטית היא גיבוי בלבד. האם לשמור לפני החזרה לדף הבית?
+            </p>
+            <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+              <button className="btn btn-primary" type="button" onClick={() => confirmBackHome("save")}>
+                <Save size={14} /> שמור וצא
+              </button>
+              <button className="btn btn-ghost" type="button" style={{ color: "#e53e3e" }} onClick={() => confirmBackHome("discard")}>
+                צא ללא שמירה
+              </button>
+              <button className="btn btn-ghost" type="button" onClick={() => confirmBackHome("cancel")}>
+                ביטול
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <header className="topbar">
         <div className="topbar-side">
           <button className="icon-btn" onClick={handleBackHome} title="בית" type="button">
@@ -843,34 +1103,125 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
         </div>
 
         <div className="topbar-side topbar-actions">
+          <UtilitiesMenu
+            customerName={currentDocument.metadata.customerName as string | undefined}
+            customerPhone={(currentDocument.metadata.customerPhone ?? currentDocument.metadata.phoneNumber) as string | undefined}
+            customerEmail={(currentDocument.metadata.customerEmail ?? currentDocument.metadata.email) as string | undefined}
+            projectName={currentDocument.name}
+            onInsertQRToCanvas={handleInsertQRToCanvas}
+          />
+          <span className="topbar-divider" />
           <button className="btn btn-ghost" onClick={() => projectInputRef.current?.click()} type="button">
             <FileUp size={14} />
             טעינה
           </button>
-          <button className="btn btn-ghost" disabled={!lifecycle.isDirty && lifecycle.currentFilePath !== null} onClick={handleSaveLifecycle} type="button">
-            <Save size={14} />
-            שמירה
+          {/* Save dropdown */}
+          <div className="save-dropdown-wrapper" style={{ position: "relative" }}>
+            <button
+              className="btn btn-primary"
+              type="button"
+              onClick={() => setSaveDropdownOpen((v) => !v)}
+            >
+              <Save size={14} />
+              שמירה
+              <ChevronDown size={12} style={{ marginInlineStart: 2 }} />
+            </button>
+            {saveDropdownOpen && (
+              <>
+                <div
+                  style={{ position: "fixed", inset: 0, zIndex: 999 }}
+                  onClick={() => setSaveDropdownOpen(false)}
+                />
+                <div className="save-dropdown-menu" style={{
+                  position: "absolute", top: "calc(100% + 4px)", right: 0,
+                  background: "var(--color-surface, #fff)", border: "1px solid var(--color-border, #ddd)",
+                  borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.15)", zIndex: 1000,
+                  minWidth: 180, padding: "4px 0"
+                }}>
+                  <button
+                    className="save-dropdown-item"
+                    type="button"
+                    onClick={() => { handleSaveLifecycle(); setSaveDropdownOpen(false); }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}
+                  >
+                    <Save size={13} /> שמירה (JSON)
+                  </button>
+                  <button
+                    className="save-dropdown-item"
+                    type="button"
+                    onClick={() => { void handleSavePortableLifecycle(); setSaveDropdownOpen(false); }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}
+                  >
+                    <FileDown size={13} /> שמירה SPP
+                  </button>
+                  <hr style={{ margin: "4px 0", border: "none", borderTop: "1px solid var(--color-border, #eee)" }} />
+                  <button
+                    className="save-dropdown-item"
+                    type="button"
+                    onClick={() => { handleExportPng(); setSaveDropdownOpen(false); }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}
+                  >
+                    <Download size={13} /> ייצוא PNG
+                  </button>
+                  <button
+                    className="save-dropdown-item"
+                    type="button"
+                    onClick={() => { handleExportJpg(); setSaveDropdownOpen(false); }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}
+                  >
+                    <Download size={13} /> ייצוא JPEG
+                  </button>
+                  <button
+                    className="save-dropdown-item"
+                    type="button"
+                    onClick={() => { void handleExportPdf(); setSaveDropdownOpen(false); }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}
+                  >
+                    <FileDown size={13} /> ייצוא PDF
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+          {/* Print Preview */}
+          <button
+            className="btn btn-ghost"
+            type="button"
+            title="הדפסה / תצוגה לפני הדפסה"
+            onClick={() => { void handlePrintPreview(); }}
+          >
+            <FileText size={14} />
+            הדפסה
           </button>
-          <button className="btn btn-ghost" onClick={() => void handleSavePortableLifecycle()} type="button">
-            <Save size={14} />
-            SPP
-          </button>
-          <button className="btn btn-success-outline" onClick={handleExportPng} type="button">
-            <Download size={14} />
-            PNG
-          </button>
-          <button className="btn btn-success-outline" onClick={handleExportJpg} type="button">
-            <Download size={14} />
-            JPG
-          </button>
-          <button className="btn btn-accent" onClick={() => void handleExportPdf()} type="button">
-            <FileDown size={14} />
-            PDF
-          </button>
+          {/* Send to client buttons */}
+          {currentDocument.metadata.customerEmail && (
+            <button
+              className="btn btn-ghost"
+              type="button"
+              title={`שלח מייל ל-${String(currentDocument.metadata.customerEmail)}`}
+              onClick={() => window.open(`mailto:${String(currentDocument.metadata.customerEmail)}?subject=${encodeURIComponent(currentDocument.name)}`, "_blank")}
+            >
+              ✉ מייל
+            </button>
+          )}
+          {(currentDocument.metadata.customerPhone ?? currentDocument.metadata.phoneNumber) && (
+            <button
+              className="btn btn-ghost"
+              type="button"
+              title="שלח וואטסאפ ללקוח"
+              onClick={() => {
+                const phone = String(currentDocument.metadata.customerPhone ?? currentDocument.metadata.phoneNumber ?? "").replace(/\D/g, "");
+                window.open(`https://wa.me/${phone}?text=${encodeURIComponent(currentDocument.name)}`, "_blank");
+              }}
+            >
+              💬 וואטסאפ
+            </button>
+          )}
         </div>
       </header>
 
       <ContextToolbar
+        dpi={currentPage.setup.dpi}
         hasTextStyleClipboard={hasTextStyleClipboard}
         selectedLayer={selectedLayer}
         selectedLayers={selectedLayers}
@@ -883,6 +1234,7 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
             applyTextPreset(currentPage.id, selectedLayer.id, preset);
           }
         }}
+        onBrowseFonts={() => setShowFontsBrowser(true)}
         onCopyTextStyle={() => {
           if (selectedLayer?.type === "text") {
             copyTextStyle(currentPage.id, selectedLayer.id);
@@ -903,20 +1255,125 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
           }
         }}
         onPatch={patchSelectedLayer}
+        onReplaceImage={() => replaceImageInputRef.current?.click()}
         onToggleGrid={viewport.toggleGrid}
         onToggleSnap={viewport.toggleSnap}
       />
 
       <section className="stage">
-        <aside className="left-rail" aria-label="כלים">
-          <ToolButton active={tool === "move"} icon={MousePointer2} label="הזזה" onClick={() => setTool("move")} testId="tool-move" />
-          <ToolButton active={tool === "text"} icon={Type} label="טקסט" onClick={handleAddText} testId="tool-text" />
-          <ToolButton active={tool === "image"} icon={ImagePlus} label="תמונה" onClick={() => imageInputRef.current?.click()} testId="tool-image" />
-          <span className="rail-sep" />
-          <ToolButton active={tool === "layers"} icon={Layers} label="שכבות" onClick={() => setTool("layers")} testId="tool-layers" />
+        <aside className="left-sidebar" aria-label="ניווט">
+          <div className="ls-tools">
+            <ToolButton active={tool === "move"} icon={MousePointer2} label="הזזה" onClick={() => setTool("move")} testId="tool-move" />
+            <ToolButton active={tool === "text"} icon={Type} label="טקסט" onClick={handleAddText} testId="tool-text" />
+            <ToolButton active={tool === "image"} icon={ImagePlus} label="תמונה" onClick={() => imageInputRef.current?.click()} testId="tool-image" />
+            <ToolButton
+              active={layoutEditMode}
+              icon={Frame}
+              label="עריכת פריסה"
+              onClick={toggleLayoutEditMode}
+              testId="tool-layout-edit"
+            />
+            {isCollageMode && (
+              <ToolButton
+                active={dynamicGridMode}
+                icon={LayoutGrid}
+                label="גריד דינמי"
+                onClick={() => setDynamicGridMode((v) => !v)}
+                testId="tool-dynamic-grid"
+              />
+            )}
+          </div>
+          <nav className="ls-nav" aria-label="סעיפי לוח שמאל">
+            {isCollageMode && (
+              <button
+                aria-pressed={leftTab === "collage"}
+                className={`ls-nav-btn ${leftTab === "collage" ? "active" : ""}`}
+                onClick={() => setLeftTab("collage")}
+                type="button"
+              >
+                <LayoutGrid size={15} />
+                פריסות
+              </button>
+            )}
+            <button
+              aria-pressed={leftTab === "layers"}
+              className={`ls-nav-btn ${leftTab === "layers" ? "active" : ""}`}
+              onClick={() => setLeftTab("layers")}
+              type="button"
+            >
+              <Layers size={15} />
+              שכבות
+            </button>
+            <button
+              aria-pressed={leftTab === "pages"}
+              className={`ls-nav-btn ${leftTab === "pages" ? "active" : ""}`}
+              onClick={() => setLeftTab("pages")}
+              type="button"
+            >
+              <FileText size={15} />
+              עמודים
+            </button>
+            <button
+              aria-pressed={leftTab === "settings"}
+              className={`ls-nav-btn ${leftTab === "settings" ? "active" : ""}`}
+              onClick={() => setLeftTab("settings")}
+              type="button"
+            >
+              <Settings size={15} />
+              הגדרות
+            </button>
+          </nav>
+          <div className="ls-content">
+            {leftTab === "collage" && isCollageMode && activeCollageRule !== null && (
+              <CollageLayoutsPanel rule={activeCollageRule} />
+            )}
+            {leftTab === "layers" && (
+              <LayerList
+                assets={currentDocument.assets}
+                layers={currentPage.layers}
+                selectedLayerIds={selectedLayerIds}
+                selectedLayerId={selectedLayerId}
+                onMove={(layerId, direction) => moveLayer(currentPage.id, layerId, direction)}
+                onReorder={(layerIdsTopToBottom) => reorderLayers(currentPage.id, layerIdsTopToBottom)}
+                onSelect={(layerId) => setSelection([layerId])}
+              />
+            )}
+            {leftTab === "pages" && (
+              <PagesPanel
+                activePageId={currentPage.id}
+                document={currentDocument}
+                onAddPage={handleAddPage}
+                onDuplicatePage={() => duplicatePage(currentPage.id)}
+                onRemovePage={() => removePage(currentPage.id)}
+                onSelectPage={(pageId) => {
+                  setActivePage(pageId);
+                  clearSelection();
+                }}
+              />
+            )}
+            {leftTab === "settings" && (
+              <PageSettingsPanel
+                activePage={currentPage}
+                document={currentDocument}
+                viewport={viewport}
+                onAddGuide={handleAddGuide}
+                onApplyPageSetup={handleApplyPageSetup}
+              />
+            )}
+          </div>
         </aside>
 
-        <div className="canvas-area" onDragOver={(event) => event.preventDefault()} onDrop={handleDrop}>
+        <div
+          className="canvas-area"
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={handleDrop}
+          onClick={(event) => {
+            // Deselect when clicking the canvas-area background (outside the Konva stage)
+            if (event.target === event.currentTarget) {
+              clearSelection();
+            }
+          }}
+        >
           <div className="ruler-top" />
           <div className="ruler-side" />
           <CanvasStage
@@ -936,20 +1393,47 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
             onLayerChange={handleCanvasLayerChange}
             onSelectLayer={(layerId) => (layerId === null ? clearSelection() : setSelection([layerId]))}
             onSelectLayers={(layerIds) => setSelection(layerIds)}
+            onLayerContextMenu={(target) => {
+              setCanvasContextMenu(target);
+              setSelection([target.layerId]);
+            }}
           />
+          {/* Dynamic collage grid overlay */}
+          {isCollageMode && dynamicGridMode && activeCollageRule !== null && (
+            <CollageGridOverlay
+              rule={activeCollageRule}
+              page={currentPage}
+              viewport={viewport}
+              onUpdateSlots={(newSlots) => updateCollageCachedSlots(activeCollageRule.id, newSlots)}
+            />
+          )}
           <div className="drop-hint">גרור תמונות אל הקנבס או לחץ על כלי התמונה</div>
+          {canvasContextMenu !== null && (
+            <CanvasContextMenu
+              target={canvasContextMenu}
+              imageEditorAvailable={isImageEditorAvailable() && canvasContextMenu.hasImage}
+              imageEditorBusy={imageEditorBusy}
+              photoshopConfigured={!!utilSettings.photoshopPath}
+              colorLabConfigured={!!utilSettings.colorLabPath}
+              onClose={() => setCanvasContextMenu(null)}
+              onOpenImageEditor={() => void handleOpenImageEditor(canvasContextMenu)}
+              onOpenInPhotoshop={() => void handleOpenInPhotoshop(canvasContextMenu)}
+              onOpenInColorLab={() => void handleOpenInColorLab(canvasContextMenu)}
+            />
+          )}
         </div>
 
-        <aside className="right-panel">
-          <PanelHeader selectedLayer={selectedLayer} />
+        <aside className="right-sidebar">
+          {/* Mode-specific panel at top */}
           {isCollageMode && activeCollageRule !== null ? (
-            <>
+            <div className="rs-mode-section">
+              <div className="rs-mode-label"><SlidersHorizontal size={11} />מצב קולאז׳</div>
               <CollageModePanel rule={activeCollageRule} selectedLayer={selectedLayer} />
-              <span className="panel-sep" />
-            </>
+            </div>
           ) : null}
           {isGridMode && activeGridRule !== null ? (
-            <>
+            <div className="rs-mode-section">
+              <div className="rs-mode-label"><SlidersHorizontal size={11} />מצב גריד</div>
               <GridModePanel
                 assignmentCount={currentDocument.gridImageAssignments.filter((assignment) => assignment.gridId === activeGridRule.id).length}
                 rule={activeGridRule}
@@ -962,11 +1446,11 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
                 onRegenerate={handleRegenerateGrid}
                 onResetCrops={() => handleResetGridCrops(activeGridRule)}
               />
-              <span className="panel-sep" />
-            </>
+            </div>
           ) : null}
           {isMaskMode && activeMaskRule !== null ? (
-            <>
+            <div className="rs-mode-section">
+              <div className="rs-mode-label"><SlidersHorizontal size={11} />מצב מסכה</div>
               <MaskModePanel
                 assignmentCount={currentDocument.maskImageAssignments.filter((assignment) => assignment.maskId === activeMaskRule.id).length}
                 rule={activeMaskRule}
@@ -979,59 +1463,69 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
                 onRegenerate={handleRegenerateMask}
                 onResetCrops={() => handleResetMaskCrops(activeMaskRule)}
               />
-              <span className="panel-sep" />
-            </>
+            </div>
           ) : null}
-          <LayerInspector
-            selectedLayer={selectedLayer}
-            hasTextStyleClipboard={hasTextStyleClipboard}
-            onDelete={handleDeleteSelected}
-            onPatch={patchSelectedLayer}
-            onApplyPreset={(preset) => {
-              if (selectedLayer?.type === "text") {
-                applyTextPreset(currentPage.id, selectedLayer.id, preset);
-              }
-            }}
-            onCopyTextStyle={() => {
-              if (selectedLayer?.type === "text") {
-                copyTextStyle(currentPage.id, selectedLayer.id);
-                setStatus("סגנון טקסט הועתק");
-              }
-            }}
-            onPasteTextStyle={() => {
-              if (selectedLayer?.type === "text") {
-                pasteTextStyle(currentPage.id, [selectedLayer.id]);
-                setStatus("סגנון טקסט הודבק");
-              }
-            }}
-            onTextChange={updateSelectedText}
-          />
-          <span className="panel-sep" />
-          <DocumentEnvironmentPanel
-            activePage={currentPage}
-            activePageId={currentPage.id}
-            document={currentDocument}
-            onAddGuide={handleAddGuide}
-            onAddPage={handleAddPage}
-            onApplyPageSetup={handleApplyPageSetup}
-            onDuplicatePage={() => duplicatePage(currentPage.id)}
-            onRemovePage={() => removePage(currentPage.id)}
-            onSelectPage={(pageId) => {
-              setActivePage(pageId);
-              clearSelection();
-            }}
-            viewport={viewport}
-          />
-          <span className="panel-sep" />
-          <LayerList
-            assets={currentDocument.assets}
-            layers={currentPage.layers}
-            selectedLayerIds={selectedLayerIds}
-            selectedLayerId={selectedLayerId}
-            onMove={(layerId, direction) => moveLayer(currentPage.id, layerId, direction)}
-            onReorder={(layerIdsTopToBottom) => reorderLayers(currentPage.id, layerIdsTopToBottom)}
-            onSelect={(layerId) => setSelection([layerId])}
-          />
+
+          {/* Contextual inspector body */}
+          <div className="rs-body">
+            {selectedLayer === null ? (
+              <EmptyInspectorState />
+            ) : selectedLayer.type === "text" ? (
+              <>
+                <div className="rs-inspector-header">
+                  <span className="rs-inspector-name">{selectedLayer.name}</span>
+                  <span className="rs-inspector-type">טקסט</span>
+                </div>
+                <TextStudio
+                  hasTextStyleClipboard={hasTextStyleClipboard}
+                  layer={selectedLayer}
+                  onApplyPreset={(preset) => applyTextPreset(currentPage.id, selectedLayer.id, preset)}
+                  onCopyTextStyle={() => {
+                    copyTextStyle(currentPage.id, selectedLayer.id);
+                    setStatus("סגנון טקסט הועתק");
+                  }}
+                  onDelete={handleDeleteSelected}
+                  onPatch={patchSelectedLayer}
+                  onPasteTextStyle={() => {
+                    pasteTextStyle(currentPage.id, [selectedLayer.id]);
+                    setStatus("סגנון טקסט הודבק");
+                  }}
+                  onTextChange={updateSelectedText}
+                />
+              </>
+            ) : (selectedLayer.type === "image" || selectedLayer.type === "frame") ? (
+              <>
+                <div className="rs-inspector-header">
+                  <span className="rs-inspector-name">{selectedLayer.name}</span>
+                  <span className="rs-inspector-type">{selectedLayer.type === "image" ? "תמונה" : "פריים"}</span>
+                </div>
+                <ImageStudio
+                  layer={selectedLayer}
+                  assets={currentDocument.assets}
+                  onDelete={handleDeleteSelected}
+                  onPatch={patchSelectedLayer}
+                  onUpdateAsset={updateAsset}
+                />
+              </>
+            ) : (
+              <>
+                <div className="rs-inspector-header">
+                  <span className="rs-inspector-name">{selectedLayer.name}</span>
+                  <span className="rs-inspector-type">{selectedLayer.type}</span>
+                </div>
+                <LayerInspector
+                  selectedLayer={selectedLayer}
+                  hasTextStyleClipboard={hasTextStyleClipboard}
+                  onDelete={handleDeleteSelected}
+                  onPatch={patchSelectedLayer}
+                  onApplyPreset={() => undefined}
+                  onCopyTextStyle={() => undefined}
+                  onPasteTextStyle={() => undefined}
+                  onTextChange={updateSelectedText}
+                />
+              </>
+            )}
+          </div>
         </aside>
       </section>
 
@@ -1096,7 +1590,23 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
       </footer>
 
       <input ref={imageInputRef} accept="image/*" hidden multiple onChange={handleImageInput} type="file" />
+      <input ref={replaceImageInputRef} accept="image/*" hidden onChange={(e) => void handleReplaceImageInput(e)} type="file" />
       <input ref={projectInputRef} accept=".json,.spp.json,.spp" hidden onChange={(event) => void handleProjectLoadLifecycle(event)} type="file" />
+
+      {showFontsBrowser && (
+        <div className="util-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowFontsBrowser(false); }}>
+          <GoogleFontsBrowser
+            previewText={selectedLayer?.type === "text" ? selectedLayer.text : undefined}
+            onUseFont={(family) => {
+              if (selectedLayer?.type === "text") {
+                patchSelectedLayer({ fontFamily: family } as Partial<VisualLayer>);
+              }
+              setShowFontsBrowser(false);
+            }}
+            onClose={() => setShowFontsBrowser(false)}
+          />
+        </div>
+      )}
     </main>
   );
 }
@@ -1104,6 +1614,7 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
 // ─── Tool button ──────────────────────────────────────────────────────────────
 
 function ContextToolbar({
+  dpi,
   hasTextStyleClipboard,
   selectedLayer,
   selectedLayers,
@@ -1112,15 +1623,18 @@ function ContextToolbar({
   onAddImage,
   onAddText,
   onApplyPreset,
+  onBrowseFonts,
   onCopyTextStyle,
   onDelete,
   onDuplicate,
   onMoveLayer,
   onPasteTextStyle,
   onPatch,
+  onReplaceImage,
   onToggleGrid,
   onToggleSnap
 }: {
+  dpi: number;
   hasTextStyleClipboard: boolean;
   selectedLayer: VisualLayer | null;
   selectedLayers: VisualLayer[];
@@ -1129,12 +1643,14 @@ function ContextToolbar({
   onAddImage: () => void;
   onAddText: () => void;
   onApplyPreset: (preset: TextPreset) => void;
+  onBrowseFonts: () => void;
   onCopyTextStyle: () => void;
   onDelete: () => void;
   onDuplicate: () => void;
   onMoveLayer: (direction: "forward" | "backward" | "front" | "back") => void;
   onPasteTextStyle: () => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
+  onReplaceImage: () => void;
   onToggleGrid: () => void;
   onToggleSnap: () => void;
 }): ReactElement {
@@ -1147,6 +1663,7 @@ function ContextToolbar({
         hasTextStyleClipboard={hasTextStyleClipboard}
         layer={selectedLayer}
         onApplyPreset={onApplyPreset}
+        onBrowseFonts={onBrowseFonts}
         onCopyTextStyle={onCopyTextStyle}
         onDelete={onDelete}
         onDuplicate={onDuplicate}
@@ -1156,8 +1673,21 @@ function ContextToolbar({
       />
     );
   }
+  if (selectedLayer?.type === "image" || selectedLayer?.type === "frame") {
+    return (
+      <ImageContextToolbar
+        dpi={dpi}
+        layer={selectedLayer}
+        onDelete={onDelete}
+        onDuplicate={onDuplicate}
+        onMoveLayer={onMoveLayer}
+        onPatch={onPatch}
+        onReplaceImage={onReplaceImage}
+      />
+    );
+  }
   if (selectedLayer !== null) {
-    return <PlaceholderContextToolbar label={selectedLayer.type === "image" || selectedLayer.type === "frame" ? "Image tools" : `${selectedLayer.type} tools`} onDelete={onDelete} onDuplicate={onDuplicate} onMoveLayer={onMoveLayer} />;
+    return <PlaceholderContextToolbar label={`${selectedLayer.type} tools`} onDelete={onDelete} onDuplicate={onDuplicate} onMoveLayer={onMoveLayer} />;
   }
   return <EmptyContextToolbar showGrid={showGrid} snapEnabled={snapEnabled} onAddImage={onAddImage} onAddText={onAddText} onToggleGrid={onToggleGrid} onToggleSnap={onToggleSnap} />;
 }
@@ -1196,6 +1726,7 @@ function TextContextToolbar({
   hasTextStyleClipboard,
   layer,
   onApplyPreset,
+  onBrowseFonts,
   onCopyTextStyle,
   onDelete,
   onDuplicate,
@@ -1206,6 +1737,7 @@ function TextContextToolbar({
   hasTextStyleClipboard: boolean;
   layer: Extract<VisualLayer, { type: "text" }>;
   onApplyPreset: (preset: TextPreset) => void;
+  onBrowseFonts: () => void;
   onCopyTextStyle: () => void;
   onDelete: () => void;
   onDuplicate: () => void;
@@ -1233,6 +1765,9 @@ function TextContextToolbar({
       <span className="context-toolbar-label">טקסט</span>
       <div className="context-group font-context">
         <FontSelector value={layer.fontFamily} onChange={(family) => onPatch({ fontFamily: family } as Partial<VisualLayer>)} />
+        <button className="btn btn-ghost compact" onClick={onBrowseFonts} title="גלישת Google Fonts" type="button">
+          Browse Fonts
+        </button>
         <input className="context-number" max={240} min={8} onChange={(event) => onPatch({ fontSize: Number(event.target.value) || layer.fontSize } as Partial<VisualLayer>)} title="גודל טקסט" type="number" value={layer.fontSize} />
         <input className="context-color" onChange={(event) => onPatch({ color: event.target.value, autoContrastOverridden: true } as Partial<VisualLayer>)} title="צבע טקסט" type="color" value={layer.color} />
       </div>
@@ -1316,6 +1851,353 @@ function PlaceholderContextToolbar({ label, onDelete, onDuplicate, onMoveLayer }
   return <section className="context-toolbar" aria-label={`${label} context toolbar`} data-testid="context-toolbar"><span className="context-toolbar-label">{label}</span><span className="context-muted">מוכן להרחבה בשלב הבא</span><div className="context-group"><ToolbarButton icon={Copy} label="שכפל" onClick={onDuplicate} /><ToolbarButton icon={ChevronsUp} label="הבא קדימה" onClick={() => onMoveLayer("forward")} /><ToolbarButton icon={ChevronsDown} label="שלח אחורה" onClick={() => onMoveLayer("backward")} /><ToolbarButton danger icon={Trash2} label="מחק" onClick={onDelete} /></div></section>;
 }
 
+// ─── Image Resize Control ─────────────────────────────────────────────────────
+
+type SizeUnit = "mm" | "cm" | "inch";
+
+function ImageResizeControl({
+  layer,
+  dpi,
+  onPatch,
+}: {
+  layer: Extract<VisualLayer, { type: "image" | "frame" }>;
+  dpi: number;
+  onPatch: (patch: Partial<VisualLayer>) => void;
+}): ReactElement {
+  const isFrame = layer.type === "frame";
+  const frameLayer = isFrame ? (layer as FrameLayer) : null;
+  const contentScale = frameLayer?.contentTransform.scale ?? 1;
+
+  // For frames: "virtual" content size (frame × scale). For images: actual layer size.
+  const pxW = isFrame ? layer.width * contentScale : layer.width;
+  const pxH = isFrame ? layer.height * contentScale : layer.height;
+
+  const [unit, setUnit] = useState<SizeUnit>("mm");
+  const [lockAspect, setLockAspect] = useState(true);
+
+  const fmtPx = useCallback(
+    (px: number): string => {
+      const v = unit === "mm" ? pxToMm(px, dpi) : unit === "cm" ? pxToCm(px, dpi) : pxToInch(px, dpi);
+      return v.toFixed(unit === "inch" ? 3 : 1);
+    },
+    [unit, dpi]
+  );
+
+  const wFocused = useRef(false);
+  const hFocused = useRef(false);
+  const [inputW, setInputW] = useState(() => fmtPx(pxW));
+  const [inputH, setInputH] = useState(() => fmtPx(pxH));
+
+  useEffect(() => { if (!wFocused.current) setInputW(fmtPx(pxW)); }, [pxW, fmtPx]);
+  useEffect(() => { if (!hFocused.current) setInputH(fmtPx(pxH)); }, [pxH, fmtPx]);
+
+  function displayToPx(v: number): number {
+    return unit === "mm" ? mmToPx(v, dpi) : unit === "cm" ? cmToPx(v, dpi) : inchToPx(v, dpi);
+  }
+
+  function commitWidth(str: string): void {
+    const num = parseFloat(str);
+    if (!isFinite(num) || num <= 0) return;
+    const newPxW = Math.max(8, displayToPx(num));
+    const ratio = newPxW / pxW;
+    if (isFrame && frameLayer) {
+      const newScale = Math.max(0.01, frameLayer.contentTransform.scale * ratio);
+      onPatch({ contentTransform: { ...frameLayer.contentTransform, scale: newScale } } as Partial<VisualLayer>);
+    } else {
+      onPatch((lockAspect
+        ? { width: newPxW, height: Math.max(8, pxH * ratio) }
+        : { width: newPxW }) as Partial<VisualLayer>);
+    }
+  }
+
+  function commitHeight(str: string): void {
+    const num = parseFloat(str);
+    if (!isFinite(num) || num <= 0) return;
+    const newPxH = Math.max(8, displayToPx(num));
+    const ratio = newPxH / pxH;
+    if (isFrame && frameLayer) {
+      const newScale = Math.max(0.01, frameLayer.contentTransform.scale * ratio);
+      onPatch({ contentTransform: { ...frameLayer.contentTransform, scale: newScale } } as Partial<VisualLayer>);
+    } else {
+      onPatch((lockAspect
+        ? { width: Math.max(8, pxW * ratio), height: newPxH }
+        : { height: newPxH }) as Partial<VisualLayer>);
+    }
+  }
+
+  return (
+    <div className="context-group ctx-resize-group">
+      <span className="ctx-resize-label">גודל</span>
+      <select
+        className="context-select compact ctx-resize-unit"
+        title="יחידת מידה"
+        value={unit}
+        onChange={(e) => setUnit(e.target.value as SizeUnit)}
+      >
+        <option value="mm">מ"מ</option>
+        <option value="cm">ס"מ</option>
+        <option value="inch">אינץ'</option>
+      </select>
+      <label className="ctx-resize-dim" title="רוחב">
+        <span className="ctx-resize-axis">W</span>
+        <input
+          className="ctx-resize-input"
+          min="0.1"
+          step={unit === "inch" ? 0.001 : 0.1}
+          type="number"
+          value={inputW}
+          onFocus={() => { wFocused.current = true; }}
+          onChange={(e) => setInputW(e.target.value)}
+          onBlur={(e) => { wFocused.current = false; commitWidth(e.target.value); }}
+          onKeyDown={(e) => { if (e.key === "Enter") { commitWidth(e.currentTarget.value); e.currentTarget.blur(); } }}
+        />
+      </label>
+      <button
+        className={`ctx-aspect-lock${lockAspect ? " on" : ""}${isFrame ? " disabled" : ""}`}
+        disabled={isFrame}
+        title={lockAspect ? "שמור יחס (פעיל)" : "שמור יחס (כבוי)"}
+        type="button"
+        onClick={() => setLockAspect((v) => !v)}
+      >
+        {lockAspect ? <Link2 size={11} /> : <Unlink2 size={11} />}
+      </button>
+      <label className="ctx-resize-dim" title="גובה">
+        <span className="ctx-resize-axis">H</span>
+        <input
+          className="ctx-resize-input"
+          min="0.1"
+          step={unit === "inch" ? 0.001 : 0.1}
+          type="number"
+          value={inputH}
+          onFocus={() => { hFocused.current = true; }}
+          onChange={(e) => setInputH(e.target.value)}
+          onBlur={(e) => { hFocused.current = false; commitHeight(e.target.value); }}
+          onKeyDown={(e) => { if (e.key === "Enter") { commitHeight(e.currentTarget.value); e.currentTarget.blur(); } }}
+        />
+      </label>
+    </div>
+  );
+}
+
+// ─── Image Context Toolbar ────────────────────────────────────────────────────
+
+function ImageContextToolbar({
+  dpi,
+  layer,
+  onDelete,
+  onDuplicate,
+  onMoveLayer,
+  onPatch,
+  onReplaceImage
+}: {
+  dpi: number;
+  layer: Extract<VisualLayer, { type: "image" | "frame" }>;
+  onDelete: () => void;
+  onDuplicate: () => void;
+  onMoveLayer: (direction: "forward" | "backward" | "front" | "back") => void;
+  onPatch: (patch: Partial<VisualLayer>) => void;
+  onReplaceImage: () => void;
+}): ReactElement {
+  const isFrame = layer.type === "frame";
+
+  // ─── Visual effects helpers ────────────────────────────────────────────────
+  const vfxStack: VisualEffectStack =
+    ("visualEffects" in layer && layer.visualEffects !== undefined)
+      ? layer.visualEffects
+      : { version: 1, enabled: true, effects: [] };
+
+  function patchVfx(next: VisualEffectStack): void {
+    onPatch({ visualEffects: next } as Partial<VisualLayer>);
+  }
+
+  const shadowEffect = vfxStack.effects.find((e) => e.params.type === "dropShadow");
+  const shadowEnabled = shadowEffect !== undefined && shadowEffect.enabled;
+  const shadowParams = shadowEffect?.params as DropShadowEffect | undefined;
+
+  function setShadowEnabled(enabled: boolean): void {
+    if (!enabled) {
+      patchVfx({ ...vfxStack, effects: vfxStack.effects.filter((e) => e.params.type !== "dropShadow") });
+      return;
+    }
+    if (shadowEffect) {
+      patchVfx({ ...vfxStack, effects: vfxStack.effects.map((e) => e.id === shadowEffect.id ? { ...e, enabled: true } : e) });
+    } else {
+      patchVfx({ ...vfxStack, effects: [...vfxStack.effects, makeDefaultEffect("dropShadow")] });
+    }
+  }
+
+  function patchShadow(patch: Partial<DropShadowEffect>): void {
+    if (!shadowEffect) {
+      const newFx = makeDefaultEffect("dropShadow");
+      patchVfx({ ...vfxStack, effects: [...vfxStack.effects, { ...newFx, enabled: true, params: { ...newFx.params, ...patch } as VisualEffectParams }] });
+      return;
+    }
+    patchVfx({ ...vfxStack, effects: vfxStack.effects.map((e) => e.id === shadowEffect.id ? { ...e, enabled: true, params: { ...e.params, ...patch } as VisualEffectParams } : e) });
+  }
+
+  const strokeEffect = vfxStack.effects.find((e) => e.params.type === "stroke");
+  const strokeEnabled = strokeEffect !== undefined && strokeEffect.enabled;
+  const strokeParams = strokeEffect?.params as StrokeEffect | undefined;
+
+  function setStrokeEnabled(enabled: boolean): void {
+    if (!enabled) {
+      patchVfx({ ...vfxStack, effects: vfxStack.effects.filter((e) => e.params.type !== "stroke") });
+      return;
+    }
+    if (strokeEffect) {
+      patchVfx({ ...vfxStack, effects: vfxStack.effects.map((e) => e.id === strokeEffect.id ? { ...e, enabled: true } : e) });
+    } else {
+      patchVfx({ ...vfxStack, effects: [...vfxStack.effects, makeDefaultEffect("stroke")] });
+    }
+  }
+
+  function patchStroke(patch: Partial<StrokeEffect>): void {
+    if (!strokeEffect) {
+      const newFx = makeDefaultEffect("stroke");
+      patchVfx({ ...vfxStack, effects: [...vfxStack.effects, { ...newFx, enabled: true, params: { ...newFx.params, ...patch } as VisualEffectParams }] });
+      return;
+    }
+    patchVfx({ ...vfxStack, effects: vfxStack.effects.map((e) => e.id === strokeEffect.id ? { ...e, enabled: true, params: { ...e.params, ...patch } as VisualEffectParams } : e) });
+  }
+
+  // ─── Shape / metadata helpers ─────────────────────────────────────────────
+  const imageShape = (layer.metadata["imageShape"] as string | undefined) ?? "rect";
+  const cornerRadius = (layer.metadata["imageCornerRadius"] as number | undefined) ?? 0;
+  const flipH = (layer.metadata["flipH"] as boolean | undefined) ?? false;
+  const flipV = (layer.metadata["flipV"] as boolean | undefined) ?? false;
+
+  function patchMeta(patch: Record<string, string | number | boolean | null>): void {
+    onPatch({ metadata: { ...layer.metadata, ...patch } as Record<string, import("@/types/primitives").JsonValue> });
+  }
+
+  // ─── Fit mode ─────────────────────────────────────────────────────────────
+  const fitMode = "fitMode" in layer ? (layer.fitMode as string) : "fit";
+
+  // ─── Corner radius (FrameLayer has its own field, ImageLayer uses metadata) ──
+  const frameCornerRadius = isFrame ? ((layer as Extract<VisualLayer, { type: "frame" }>).cornerRadius ?? 0) : cornerRadius;
+
+  function setCornerRadius(v: number): void {
+    if (isFrame) {
+      onPatch({ cornerRadius: v } as Partial<VisualLayer>);
+    } else {
+      patchMeta({ imageCornerRadius: v });
+    }
+  }
+
+  return (
+    <section className="context-toolbar image-mode" aria-label="Image context toolbar" data-testid="context-toolbar">
+      <span className="context-toolbar-label">{isFrame ? "פריים" : "תמונה"}</span>
+
+      {/* Replace */}
+      <div className="context-group">
+        <button className="context-icon img-replace-btn" onClick={onReplaceImage} title="החלף תמונה" type="button">
+          <Replace size={14} />
+          <span className="ctx-btn-label">החלף</span>
+        </button>
+      </div>
+
+      {/* Resize */}
+      <ImageResizeControl dpi={dpi} layer={layer} onPatch={onPatch} />
+
+      {/* Fit Mode */}
+      <div className="context-group">
+        <select
+          className="context-select compact"
+          title="מצב התאמה"
+          value={fitMode}
+          onChange={(e) => onPatch({ fitMode: e.target.value as "fit" | "fill" | "stretch" } as Partial<VisualLayer>)}
+        >
+          <option value="fit">Fit</option>
+          <option value="fill">Fill</option>
+          <option value="stretch">Stretch</option>
+        </select>
+      </div>
+
+      {/* Shape (only for free ImageLayer) */}
+      {!isFrame && (
+        <ToolbarMenu label="Shape" title="צורת תמונה">
+          <div className="context-menu-actions shape-picker">
+            {(["rect", "rounded", "circle", "ellipse"] as const).map((s) => (
+              <button
+                className={`context-menu-button${imageShape === s ? " on" : ""}`}
+                key={s}
+                type="button"
+                onClick={() => patchMeta({ imageShape: s })}
+              >
+                {s === "rect" && <><Square size={13} /> מרובע</>}
+                {s === "rounded" && <><SquareRoundCorner size={13} /> עגול</>}
+                {s === "circle" && <><Circle size={13} /> עיגול</>}
+                {s === "ellipse" && <><Circle size={13} /> אליפסה</>}
+              </button>
+            ))}
+          </div>
+        </ToolbarMenu>
+      )}
+
+      {/* Corner Radius */}
+      <div className="context-group">
+        <CompactRange label="Radius" min={0} max={80} value={frameCornerRadius} onChange={setCornerRadius} />
+      </div>
+
+      {/* Border / Stroke */}
+      <ToolbarMenu label="Border" title="מסגרת">
+        <label className="check-line">
+          <input checked={strokeEnabled} type="checkbox" onChange={(e) => setStrokeEnabled(e.target.checked)} />
+          הפעלה
+        </label>
+        {strokeEnabled && strokeParams !== undefined ? (
+          <>
+            <input className="context-color wide" type="color" value={strokeParams.color} onChange={(e) => patchStroke({ color: e.target.value })} />
+            <SliderField label="עובי" min={0} max={40} value={strokeParams.width} onChange={(v) => patchStroke({ width: v })} unit=" px" />
+            <SliderField label="שקיפות" min={0} max={1} step={0.01} decimals={2} value={strokeParams.opacity} onChange={(v) => patchStroke({ opacity: v })} />
+          </>
+        ) : null}
+      </ToolbarMenu>
+
+      {/* Shadow */}
+      <ToolbarMenu label="Shadow" title="צל">
+        <div className="context-menu-actions">
+          <button className="context-menu-button" type="button" onClick={() => patchShadow({ color: "#000000", opacity: 0.22, blur: 16, offsetX: 0, offsetY: 8, spread: 0 })}>Soft</button>
+          <button className="context-menu-button" type="button" onClick={() => patchShadow({ color: "#000000", opacity: 0.55, blur: 3, offsetX: 5, offsetY: 5, spread: 0 })}>Hard</button>
+          <button className="context-menu-button" type="button" onClick={() => patchShadow({ color: "#111111", opacity: 0.8, blur: 0, offsetX: 8, offsetY: 8, spread: 0 })}>Retro</button>
+        </div>
+        <label className="check-line">
+          <input checked={shadowEnabled} type="checkbox" onChange={(e) => setShadowEnabled(e.target.checked)} />
+          הפעלה
+        </label>
+        {shadowEnabled && shadowParams !== undefined ? (
+          <>
+            <input className="context-color wide" type="color" value={shadowParams.color} onChange={(e) => patchShadow({ color: e.target.value })} />
+            <SliderField label="שקיפות" min={0} max={1} step={0.01} decimals={2} value={shadowParams.opacity} onChange={(v) => patchShadow({ opacity: v })} />
+            <SliderField label="טשטוש" min={0} max={80} value={shadowParams.blur} onChange={(v) => patchShadow({ blur: v })} unit=" px" />
+            <SliderField label="X" min={-80} max={80} value={shadowParams.offsetX} onChange={(v) => patchShadow({ offsetX: v })} />
+            <SliderField label="Y" min={-80} max={80} value={shadowParams.offsetY} onChange={(v) => patchShadow({ offsetY: v })} />
+          </>
+        ) : null}
+      </ToolbarMenu>
+
+      {/* Opacity + Rotate + Flip */}
+      <div className="context-group">
+        <CompactRange label="Opacity" min={0} max={1} step={0.01} value={layer.opacity} onChange={(v) => onPatch({ opacity: v } as Partial<VisualLayer>)} />
+      </div>
+      <div className="context-group">
+        <ToolbarButton icon={RotateCw} label="סובב 90°" onClick={() => onPatch({ rotation: ((layer.rotation ?? 0) + 90) % 360 } as Partial<VisualLayer>)} />
+        <ToolbarButton active={flipH} icon={FlipHorizontal} label="היפוך אופקי" onClick={() => patchMeta({ flipH: !flipH })} />
+        <ToolbarButton active={flipV} icon={FlipVertical} label="היפוך אנכי" onClick={() => patchMeta({ flipV: !flipV })} />
+      </div>
+
+      {/* Arrange + Actions */}
+      <div className="context-group">
+        <ToolbarButton icon={Copy} label="שכפל" onClick={onDuplicate} />
+        <ToolbarButton active={layer.locked} icon={layer.locked ? Lock : Unlock} label={layer.locked ? "שחרר נעילה" : "נעל שכבה"} onClick={() => onPatch({ locked: !layer.locked } as Partial<VisualLayer>)} />
+        <ToolbarButton icon={ChevronsUp} label="הבא קדימה" onClick={() => onMoveLayer("forward")} />
+        <ToolbarButton icon={ChevronsDown} label="שלח אחורה" onClick={() => onMoveLayer("backward")} />
+        <ToolbarButton danger icon={Trash2} label="מחק" onClick={onDelete} />
+      </div>
+    </section>
+  );
+}
+
 function ToolbarButton({ active = false, danger = false, icon: Icon, label, onClick }: { active?: boolean; danger?: boolean; icon: LucideIcon; label: string; onClick: () => void; }): ReactElement {
   return <button className={`context-icon ${active ? "on" : ""} ${danger ? "danger" : ""}`} onClick={onClick} title={label} type="button"><Icon size={14} /></button>;
 }
@@ -1325,7 +2207,41 @@ function ToolbarMenu({ children, label, title }: { children: ReactNode; label: s
 }
 
 function CompactRange({ label, min, max, step = 1, value, onChange }: { label: string; min: number; max: number; step?: number; value: number; onChange: (value: number) => void; }): ReactElement {
-  return <label className="compact-range" title={label}><span>{label}</span><input max={max} min={min} onChange={(event) => onChange(Number(event.target.value))} step={step} type="range" value={value} /></label>;
+  const [localValue, setLocalValue] = useState(value);
+  const isDragging = useRef(false);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!isDragging.current) setLocalValue(value);
+  }, [value]);
+
+  function commit(v: number): void {
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => { rafRef.current = null; onChange(v); });
+  }
+
+  return (
+    <label className="compact-range" title={label}>
+      <span>{label}</span>
+      <input
+        max={max}
+        min={min}
+        step={step}
+        type="range"
+        value={localValue}
+        onPointerDown={() => { isDragging.current = true; }}
+        onPointerUp={(e) => {
+          isDragging.current = false;
+          const v = Number(e.currentTarget.value);
+          setLocalValue(v);
+          if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+          rafRef.current = null;
+          onChange(v);
+        }}
+        onChange={(e) => { const v = Number(e.target.value); setLocalValue(v); commit(v); }}
+      />
+    </label>
+  );
 }
 
 function createTextEffect(effectType: TextEffect["effectType"]): TextEffect {
@@ -1361,6 +2277,868 @@ function PanelHeader({ selectedLayer }: { selectedLayer: VisualLayer | null }): 
       <h2 className="panel-title">{selectedLayer === null ? "מסמך" : selectedLayer.name}</h2>
       <span className="panel-pill">{selectedLayer === null ? "ללא בחירה" : selectedLayer.type}</span>
     </header>
+  );
+}
+
+// ─── Accordion section ────────────────────────────────────────────────────────
+
+function AccordionSection({
+  title,
+  children,
+  defaultOpen = true
+}: {
+  title: string;
+  children: ReactNode;
+  defaultOpen?: boolean;
+}): ReactElement {
+  return (
+    <details className="accordion-section" open={defaultOpen}>
+      <summary>
+        {title}
+        <ChevronDown className="accordion-chevron" size={14} />
+      </summary>
+      <div className="accordion-content">
+        {children}
+      </div>
+    </details>
+  );
+}
+
+// ─── Empty inspector state ────────────────────────────────────────────────────
+
+function EmptyInspectorState(): ReactElement {
+  return (
+    <div className="empty-inspector">
+      <Layers className="empty-inspector-icon" size={32} />
+      <strong>לא נבחרה שכבה</strong>
+      <p>בחר אובייקט בקנבס<br />כדי לערוך את מאפייניו.</p>
+    </div>
+  );
+}
+
+// ─── Text Studio ──────────────────────────────────────────────────────────────
+
+function TextStudio({
+  hasTextStyleClipboard,
+  layer,
+  onApplyPreset,
+  onCopyTextStyle,
+  onDelete,
+  onPatch,
+  onPasteTextStyle,
+  onTextChange
+}: {
+  hasTextStyleClipboard: boolean;
+  layer: Extract<VisualLayer, { type: "text" }>;
+  onApplyPreset: (preset: TextPreset) => void;
+  onCopyTextStyle: () => void;
+  onDelete: () => void;
+  onPatch: (patch: Partial<VisualLayer>) => void;
+  onPasteTextStyle: () => void;
+  onTextChange: (text: string) => void;
+}): ReactElement {
+  return (
+    <>
+      <AccordionSection title="טיפוגרפיה" defaultOpen={true}>
+        <TextControls
+          hasTextStyleClipboard={hasTextStyleClipboard}
+          layer={layer}
+          onApplyPreset={onApplyPreset}
+          onCopyTextStyle={onCopyTextStyle}
+          onPasteTextStyle={onPasteTextStyle}
+          onPatch={onPatch}
+          onTextChange={onTextChange}
+        />
+      </AccordionSection>
+      <AccordionSection title="מיקום ונעילה" defaultOpen={false}>
+        <div className="field-grid">
+          <Metric label="X" value={layer.x} />
+          <Metric label="Y" value={layer.y} />
+          <Metric label="W" value={layer.width} />
+          <Metric label="H" value={layer.height} />
+        </div>
+        <div className="quick-controls">
+          <button
+            className={layer.visible ? "toggle on" : "toggle"}
+            onClick={() => onPatch({ visible: !layer.visible } as Partial<VisualLayer>)}
+            type="button"
+          >
+            {layer.visible ? <Eye size={14} /> : <EyeOff size={14} />}
+            תצוגה
+          </button>
+          <button
+            className={layer.locked ? "toggle on" : "toggle"}
+            onClick={() => onPatch({ locked: !layer.locked } as Partial<VisualLayer>)}
+            type="button"
+          >
+            {layer.locked ? <Lock size={14} /> : <Unlock size={14} />}
+            נעילה
+          </button>
+        </div>
+      </AccordionSection>
+      <div className="accordion-content">
+        <button className="btn-block btn-danger" onClick={onDelete} type="button">
+          <Trash2 size={14} />
+          מחק שכבה
+        </button>
+      </div>
+    </>
+  );
+}
+
+// ─── Smart Tips Panel ────────────────────────────────────────────────────────
+
+import { PHOTO_TIPS, TIP_CATEGORIES, CATEGORY_LABELS, PARAM_MAP } from "@/data/photoTipsData";
+import type { PhotoTip } from "@/data/photoTipsData";
+
+function SmartTipsPanel({
+  layer,
+  onPatch
+}: {
+  layer: VisualLayer;
+  onPatch: (patch: Partial<VisualLayer>) => void;
+}): ReactElement {
+  const [selectedCategory, setSelectedCategory] = useState(TIP_CATEGORIES[0] ?? "Light");
+  const [selectedTipId, setSelectedTipId] = useState<string | null>(null);
+
+  const imageLayer = layer.type === "image" ? layer : null;
+
+  const tipsInCategory = PHOTO_TIPS.filter((t) => t.category === selectedCategory);
+  const tip = PHOTO_TIPS.find((t) => t.id === selectedTipId) ?? tipsInCategory[0] ?? null;
+
+  // Select first tip of new category
+  useEffect(() => {
+    setSelectedTipId(tipsInCategory[0]?.id ?? null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCategory]);
+
+  function applyFix(params: Record<string, unknown>): void {
+    if (imageLayer === null) return;
+    const adj = { ...imageLayer.colorAdjustments };
+    const extras = { ...((layer.metadata["imageEditParams"] as Record<string, number> | undefined) ?? {}) };
+
+    for (const [key, raw] of Object.entries(params)) {
+      const mapping = PARAM_MAP[key];
+      if (mapping === undefined) continue;
+      const numVal = typeof raw === "number" ? raw : 0;
+      const scaled = mapping.scale !== undefined ? numVal * mapping.scale : numVal;
+      if (mapping.field === "adj") {
+        (adj as Record<string, number>)[mapping.key] = Math.round(scaled);
+      } else {
+        extras[mapping.key] = Math.round(scaled);
+      }
+    }
+
+    onPatch({
+      colorAdjustments: adj,
+      metadata: { ...layer.metadata, imageEditParams: extras as Record<string, import("@/types/primitives").JsonValue> }
+    } as Partial<VisualLayer>);
+  }
+
+  const canApply = tip !== null && tip.future_auto_fix.enabled && imageLayer !== null;
+
+  return (
+    <div className="smart-tips-panel">
+      {/* Category tabs */}
+      <div className="tips-categories">
+        {TIP_CATEGORIES.map((cat) => (
+          <button
+            className={`tips-cat-btn${selectedCategory === cat ? " active" : ""}`}
+            key={cat}
+            type="button"
+            onClick={() => setSelectedCategory(cat)}
+          >
+            {CATEGORY_LABELS[cat] ?? cat}
+          </button>
+        ))}
+      </div>
+
+      {/* Tip list */}
+      <div className="tips-list">
+        {tipsInCategory.map((t) => (
+          <button
+            className={`tips-item${(selectedTipId ?? tipsInCategory[0]?.id) === t.id ? " active" : ""}`}
+            key={t.id}
+            type="button"
+            onClick={() => setSelectedTipId(t.id)}
+          >
+            {t.title}
+          </button>
+        ))}
+      </div>
+
+      {/* Tip detail */}
+      {tip !== null && (
+        <div className="tip-detail">
+          <h4 className="tip-title">{tip.title}</h4>
+          {tip.problem && <p className="tip-problem">{tip.problem}</p>}
+
+          <div className="tip-section-label">תסמינים</div>
+          <ul className="tip-list-items">
+            {tip.symptoms.map((s, i) => <li key={i}>{s}</li>)}
+          </ul>
+
+          <div className="tip-section-label">סדר תיקון מומלץ</div>
+          <ol className="tip-steps">
+            {tip.recommended_steps.map((step, i) => (
+              <li key={i}>
+                <strong>{step.tool}</strong>: {step.action}
+                {step.suggested_range && (
+                  <span className="tip-range"> ({step.suggested_range})</span>
+                )}
+              </li>
+            ))}
+          </ol>
+
+          {tip.warnings.length > 0 && (
+            <>
+              <div className="tip-section-label">⚠ אזהרות</div>
+              <ul className="tip-list-items warnings">
+                {tip.warnings.map((w, i) => <li key={i}>{w}</li>)}
+              </ul>
+            </>
+          )}
+
+          {canApply && (
+            <button
+              className="apply-fix-btn"
+              type="button"
+              onClick={() => applyFix(tip.future_auto_fix.params)}
+            >
+              <Sparkles size={13} />
+              החל תיקון מהיר
+            </button>
+          )}
+          {!canApply && imageLayer === null && (
+            <p className="tip-no-image">בחר שכבת תמונה כדי להחיל תיקון</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Image Studio — Fast React/Konva Quick Adjustments ───────────────────────
+
+type EngineParams = Record<string, number | boolean | string>;
+
+type QuickSliderParam = {
+  key: string;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  default: number;
+  hint: string;
+};
+
+const QUICK_LIGHT_PARAMS: QuickSliderParam[] = [
+  {
+    key: "exposure",
+    label: "חשיפה",
+    min: -25,
+    max: 25,
+    step: 1,
+    default: 0,
+    hint: "תיקון חשיפה עדין — לא שורף לבן ולא מחשיך מדי"
+  },
+  {
+    key: "brightness",
+    label: "בהירות",
+    min: -28,
+    max: 28,
+    step: 1,
+    default: 0,
+    hint: "בהירות כללית בטווח נורמלי להדפסה"
+  },
+  {
+    key: "contrast",
+    label: "קונטרסט",
+    min: -35,
+    max: 35,
+    step: 1,
+    default: 0,
+    hint: "קונטרסט מתון, בלי תוצאה שרופה או קשה מדי"
+  },
+  {
+    key: "luminance",
+    label: "לומיננס",
+    min: -25,
+    max: 25,
+    step: 1,
+    default: 0,
+    hint: "הבהרה/הכהיה עדינה דרך HSL"
+  }
+];
+
+const QUICK_COLOR_PARAMS: QuickSliderParam[] = [
+  {
+    key: "saturation",
+    label: "רוויה",
+    min: -40,
+    max: 40,
+    step: 1,
+    default: 0,
+    hint: "חיזוק או החלשה מתונה של צבעים"
+  },
+  {
+    key: "hue",
+    label: "גוון",
+    min: -25,
+    max: 25,
+    step: 1,
+    default: 0,
+    hint: "הסטת גוון עדינה בלבד"
+  },
+  {
+    key: "blur",
+    label: "טשטוש קל",
+    min: 0,
+    max: 5,
+    step: 0.5,
+    default: 0,
+    hint: "טשטוש קל ומהיר — לטשטוש חזק עדיף עורך מתקדם"
+  }
+];
+
+const QUICK_EFFECT_PARAMS: QuickSliderParam[] = [
+  {
+    key: "threshold",
+    label: "סף שחור/לבן",
+    min: 0,
+    max: 100,
+    step: 1,
+    default: 0,
+    hint: "0 = כבוי. שימושי להכנה לחריטה/לייזר"
+  },
+  {
+    key: "posterize",
+    label: "פוסטר / פחות צבעים",
+    min: 0,
+    max: 6,
+    step: 1,
+    default: 0,
+    hint: "0 = כבוי. ערכים נמוכים שומרים על אפקט עדין"
+  }
+];
+
+const QUICK_CHECKBOXES = [
+  { key: "black_white", label: "שחור לבן" },
+  { key: "sepia", label: "ספיה / וינטג׳" },
+  { key: "invert", label: "היפוך צבעים" },
+  { key: "remove_white", label: "הסרת רקע לבן/בהיר" },
+  { key: "color_pop", label: "השארת צבע נבחר" }
+] as const;
+
+function imageParamValue(params: EngineParams, key: string, fallback: number): number {
+  const value = params[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function imageParamBool(params: EngineParams, key: string): boolean {
+  return params[key] === true;
+}
+
+function imageParamString(params: EngineParams, key: string, fallback: string): string {
+  const value = params[key];
+  return typeof value === "string" ? value : fallback;
+}
+
+function cleanImageParams(params: EngineParams): EngineParams {
+  const cleaned: EngineParams = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (typeof value === "boolean") {
+      if (value) cleaned[key] = value;
+      continue;
+    }
+    if (typeof value === "number") {
+      if (value !== 0) cleaned[key] = value;
+      continue;
+    }
+    if (typeof value === "string") {
+      if (value.trim() !== "") cleaned[key] = value;
+    }
+  }
+  return cleaned;
+}
+
+function QuickSlider({
+  param,
+  params,
+  onChange
+}: {
+  param: QuickSliderParam;
+  params: EngineParams;
+  onChange: (key: string, value: number) => void;
+}): ReactElement {
+  const value = imageParamValue(params, param.key, param.default);
+  const isDirty = value !== param.default;
+
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, marginBottom: 3 }}>
+        <span title={param.hint} style={{ color: isDirty ? "var(--color-accent,#7C6FE0)" : "inherit" }}>
+          {param.label}
+        </span>
+        <span style={{ opacity: 0.7 }}>{value}</span>
+      </div>
+      <input
+        type="range"
+        min={param.min}
+        max={param.max}
+        step={param.step}
+        value={value}
+        onChange={(event) => onChange(param.key, Number(event.target.value))}
+        style={{ width: "100%", accentColor: isDirty ? "#7C6FE0" : undefined }}
+      />
+    </div>
+  );
+}
+
+function ImageStudio({
+  layer,
+  assets,
+  onDelete,
+  onPatch,
+  onUpdateAsset,
+}: {
+  layer: VisualLayer;
+  assets: Asset[];
+  onDelete: () => void;
+  onPatch: (patch: Partial<VisualLayer>) => void;
+  onUpdateAsset: (asset: Asset) => void;
+}): ReactElement {
+  const [studioTab, setStudioTab] = useState<"quick" | "tips">("quick");
+  const [advancedBusy, setAdvancedBusy] = useState(false);
+
+  const savedParams = useMemo(
+    () => (layer.metadata["imageEditParams"] ?? {}) as EngineParams,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [layer.metadata["imageEditParams"]]
+  );
+
+  const assetId = layer.type === "image" ? layer.assetId : (layer.type === "frame" ? layer.imageAssetId : undefined);
+  const asset = assets.find((a) => a.id === assetId);
+
+  function patchQuickParams(params: EngineParams): void {
+    onPatch({
+      metadata: {
+        ...layer.metadata,
+        imageEditParams: cleanImageParams(params) as unknown as import("@/types/primitives").JsonValue
+      }
+    });
+  }
+
+  function updateParam(key: string, value: number | boolean | string): void {
+    patchQuickParams({
+      ...savedParams,
+      [key]: value
+    });
+  }
+
+  function resetQuickParams(): void {
+    patchQuickParams({});
+  }
+
+  async function openAdvancedEditor(): Promise<void> {
+    if (!asset || advancedBusy) return;
+
+    setAdvancedBusy(true);
+    try {
+      const updatedAsset = await openImageEditorForAsset(asset);
+      if (updatedAsset) {
+        onUpdateAsset(updatedAsset);
+
+        // The advanced editor bakes its changes into the image pixels.
+        // Reset quick Konva filters so they do not keep altering the edited result.
+        patchQuickParams({});
+      }
+    } finally {
+      setAdvancedBusy(false);
+    }
+  }
+
+  const hasAnyQuickAdjustments = Object.values(savedParams).some((value) => value !== 0 && value !== false && value !== "");
+  const colorPopEnabled = imageParamBool(savedParams, "color_pop");
+  const removeWhiteEnabled = imageParamBool(savedParams, "remove_white");
+
+  return (
+    <>
+      <div className="studio-tab-bar">
+        <button
+          className={`studio-tab${studioTab === "quick" ? " active" : ""}`}
+          type="button"
+          onClick={() => setStudioTab("quick")}
+        >
+          <SlidersHorizontal size={12} /> עריכה מהירה
+        </button>
+        <button
+          className={`studio-tab${studioTab === "tips" ? " active" : ""}`}
+          type="button"
+          onClick={() => setStudioTab("tips")}
+        >
+          <Sparkles size={12} /> טיפים
+        </button>
+      </div>
+
+      {studioTab === "tips" && <SmartTipsPanel layer={layer} onPatch={onPatch} />}
+
+      {studioTab === "quick" && (
+        <>
+          <AccordionSection title="שכבה" defaultOpen={true}>
+            <div className="field-grid">
+              <Metric label="X" value={layer.x} />
+              <Metric label="Y" value={layer.y} />
+              <Metric label="W" value={layer.width} />
+              <Metric label="H" value={layer.height} />
+            </div>
+            <div className="quick-controls">
+              <button
+                className={layer.visible ? "toggle on" : "toggle"}
+                onClick={() => onPatch({ visible: !layer.visible })}
+                type="button"
+              >
+                {layer.visible ? <Eye size={14} /> : <EyeOff size={14} />} תצוגה
+              </button>
+              <button
+                className={layer.locked ? "toggle on" : "toggle"}
+                onClick={() => onPatch({ locked: !layer.locked })}
+                type="button"
+              >
+                {layer.locked ? <Lock size={14} /> : <Unlock size={14} />} נעילה
+              </button>
+            </div>
+            <SliderField
+              decimals={2}
+              label="שקיפות"
+              max={1}
+              min={0}
+              step={0.01}
+              value={layer.opacity}
+              onChange={(value) => onPatch({ opacity: value } as Partial<VisualLayer>)}
+            />
+          </AccordionSection>
+
+          <AccordionSection title="תאורה וצבע — React / Konva" defaultOpen={true}>
+            <p style={{ margin: "0 0 10px", fontSize: 11, color: "var(--color-text-secondary,#888)", lineHeight: 1.5 }}>
+              הכלים כאן עובדים מיידית על הקנבס, בלי Python. הטווחים מוגבלים בכוונה כדי לקבל תוצאה טבעית ולא קיצונית.
+            </p>
+
+            {QUICK_LIGHT_PARAMS.map((param) => (
+              <QuickSlider key={param.key} param={param} params={savedParams} onChange={updateParam} />
+            ))}
+
+            {QUICK_COLOR_PARAMS.map((param) => (
+              <QuickSlider key={param.key} param={param} params={savedParams} onChange={updateParam} />
+            ))}
+          </AccordionSection>
+
+          <AccordionSection title="אפקטים מהירים" defaultOpen={false}>
+            {QUICK_CHECKBOXES.map((checkbox) => {
+              const checked = imageParamBool(savedParams, checkbox.key);
+              return (
+                <label key={checkbox.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, marginBottom: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(event) => updateParam(checkbox.key, event.target.checked)}
+                  />
+                  {checkbox.label}
+                </label>
+              );
+            })}
+
+            {QUICK_EFFECT_PARAMS.map((param) => (
+              <QuickSlider key={param.key} param={param} params={savedParams} onChange={updateParam} />
+            ))}
+
+            {removeWhiteEnabled && (
+              <QuickSlider
+                param={{
+                  key: "remove_white_tolerance",
+                  label: "רגישות רקע לבן",
+                  min: 5,
+                  max: 55,
+                  step: 1,
+                  default: 22,
+                  hint: "כמה גוונים בהירים יוסרו. לשמור מתון כדי לא לפגוע בפרטים בהירים"
+                }}
+                params={savedParams}
+                onChange={updateParam}
+              />
+            )}
+
+            {colorPopEnabled && (
+              <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--color-border,#2a2a3e)" }}>
+                <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 12, marginBottom: 8 }}>
+                  צבע להשארה
+                  <input
+                    type="color"
+                    value={imageParamString(savedParams, "color_pop_color", "#ff0000")}
+                    onChange={(event) => updateParam("color_pop_color", event.target.value)}
+                    style={{ width: 42, height: 28 }}
+                  />
+                </label>
+                <QuickSlider
+                  param={{
+                    key: "color_pop_tolerance",
+                    label: "רגישות צבע",
+                    min: 5,
+                    max: 85,
+                    step: 1,
+                    default: 28,
+                    hint: "כמה צבעים קרובים לצבע הנבחר יישארו צבעוניים"
+                  }}
+                  params={savedParams}
+                  onChange={updateParam}
+                />
+                <QuickSlider
+                  param={{
+                    key: "color_pop_background",
+                    label: "דהיית שאר הצבעים",
+                    min: 50,
+                    max: 100,
+                    step: 5,
+                    default: 100,
+                    hint: "100 = שאר התמונה שחור־לבן מלא, ערך נמוך משאיר מעט צבע"
+                  }}
+                  params={savedParams}
+                  onChange={updateParam}
+                />
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <button
+                className="btn btn-ghost"
+                type="button"
+                disabled={!hasAnyQuickAdjustments}
+                onClick={resetQuickParams}
+              >
+                ↺ איפוס מהיר
+              </button>
+            </div>
+          </AccordionSection>
+
+          <AccordionSection title="עריכה מתקדמת" defaultOpen={false}>
+            <p style={{ margin: "0 0 10px", fontSize: 11, color: "var(--color-text-secondary,#888)", lineHeight: 1.5 }}>
+              לכלים כבדים כמו AI, הסרת רקע חכמה, שחזור פנים, LUT, ניקוי רעש ועיבוד איכותי — פתח את עורך התמונות המלא.
+            </p>
+            <button
+              className="btn-block btn-primary"
+              type="button"
+              disabled={!asset || advancedBusy}
+              onClick={() => void openAdvancedEditor()}
+            >
+              <Sparkles size={14} />
+              {advancedBusy ? "פותח עורך…" : "פתח עריכה מתקדמת"}
+            </button>
+          </AccordionSection>
+
+          <AccordionSection title="אפקטים ויזואליים (FX)" defaultOpen={false}>
+            <VisualEffectsControls layer={layer} onPatch={onPatch} />
+          </AccordionSection>
+
+          <div className="accordion-content">
+            <button className="btn-block btn-danger" onClick={onDelete} type="button">
+              <Trash2 size={14} /> מחק שכבה
+            </button>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+
+
+// ─── Pages panel (left sidebar pages tab) ────────────────────────────────────
+
+function PagesPanel({
+  activePageId,
+  document,
+  onAddPage,
+  onDuplicatePage,
+  onRemovePage,
+  onSelectPage
+}: {
+  activePageId: string;
+  document: Document;
+  onAddPage: () => void;
+  onDuplicatePage: () => void;
+  onRemovePage: () => void;
+  onSelectPage: (pageId: string) => void;
+}): ReactElement {
+  return (
+    <div className="pages-panel">
+      <div className="page-panel-section-title">עמודים</div>
+      <div className="page-thumbs-list">
+        {document.pages.map((page, index) => (
+          <button
+            className={`page-thumb-btn ${page.id === activePageId ? "active" : ""}`}
+            key={page.id}
+            onClick={() => onSelectPage(page.id)}
+            type="button"
+          >
+            <div className="page-thumb-preview">{index + 1}</div>
+            <span>עמוד {index + 1}</span>
+          </button>
+        ))}
+      </div>
+      <div className="button-row">
+        <button className="toggle" onClick={onAddPage} type="button"><Plus size={14} />חדש</button>
+        <button className="toggle" onClick={onDuplicatePage} type="button"><Copy size={14} />שכפל</button>
+        <button className="toggle" disabled={document.pages.length <= 1} onClick={onRemovePage} type="button"><Trash2 size={14} />מחק</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Page settings panel (left sidebar settings tab) ─────────────────────────
+
+function PageSettingsPanel({
+  activePage,
+  document,
+  viewport,
+  onAddGuide,
+  onApplyPageSetup
+}: {
+  activePage: Document["pages"][number];
+  document: Document;
+  viewport: ViewportStore;
+  onAddGuide: (axis: "x" | "y") => void;
+  onApplyPageSetup: (setup: PageSetup) => void;
+}): ReactElement {
+  const [presetId, setPresetId] = useState(String(activePage.setup.metadata?.presetId ?? "a4"));
+  const [units, setUnits] = useState<Unit>(activePage.setup.units);
+  const [dpi, setDpi] = useState(activePage.setup.dpi);
+  const [orientation, setOrientation] = useState(activePage.orientation);
+  const [customSize, setCustomSize] = useState(String(activePage.setup.metadata?.presetId ?? "a4") === "custom");
+  const [customWidth, setCustomWidth] = useState(pxToUnit(activePage.width, activePage.setup.units, activePage.setup.dpi));
+  const [customHeight, setCustomHeight] = useState(pxToUnit(activePage.height, activePage.setup.units, activePage.setup.dpi));
+  const [bleed, setBleed] = useState(pxToUnit(activePage.bleed.top, activePage.setup.units, activePage.setup.dpi));
+  const [margins, setMargins] = useState(pxToUnit(activePage.margins.top, activePage.setup.units, activePage.setup.dpi));
+  const [safeArea, setSafeArea] = useState(pxToUnit(activePage.setup.safeArea.top, activePage.setup.units, activePage.setup.dpi));
+
+  useEffect(() => {
+    setPresetId(String(activePage.setup.metadata?.presetId ?? "a4"));
+    setCustomSize(String(activePage.setup.metadata?.presetId ?? "a4") === "custom");
+    setUnits(activePage.setup.units);
+    setDpi(activePage.setup.dpi);
+    setOrientation(activePage.orientation);
+    setCustomWidth(pxToUnit(activePage.width, activePage.setup.units, activePage.setup.dpi));
+    setCustomHeight(pxToUnit(activePage.height, activePage.setup.units, activePage.setup.dpi));
+    setBleed(pxToUnit(activePage.bleed.top, activePage.setup.units, activePage.setup.dpi));
+    setMargins(pxToUnit(activePage.margins.top, activePage.setup.units, activePage.setup.dpi));
+    setSafeArea(pxToUnit(activePage.setup.safeArea.top, activePage.setup.units, activePage.setup.dpi));
+  }, [activePage.id]);
+
+  function handlePresetChange(nextPresetId: string): void {
+    const preset = PAGE_PRESETS.find((item) => item.id === nextPresetId) ?? PAGE_PRESETS[1];
+    setPresetId(nextPresetId);
+    setCustomSize(preset.id === "custom");
+    setUnits(preset.units);
+    setDpi(preset.dpi);
+    setCustomWidth(preset.width);
+    setCustomHeight(preset.height);
+    setBleed(preset.bleed ?? 0);
+    setMargins(preset.margins ?? 0);
+    setSafeArea(preset.margins ?? 0);
+  }
+
+  function applySettings(): void {
+    const preset = PAGE_PRESETS.find((item) => item.id === presetId) ?? PAGE_PRESETS[1];
+    const sourcePreset = customSize
+      ? { ...preset, width: customWidth, height: customHeight, units, dpi }
+      : { ...preset, dpi };
+    const nextSetup = pageSetupFromPreset(sourcePreset, orientation);
+    const bleedPx = unitToPx(bleed, units, dpi);
+    const marginsPx = unitToPx(margins, units, dpi);
+    const safeAreaPx = unitToPx(safeArea, units, dpi);
+    onApplyPageSetup({
+      ...nextSetup,
+      units,
+      dpi,
+      bleed: { top: bleedPx, right: bleedPx, bottom: bleedPx, left: bleedPx },
+      margins: { top: marginsPx, right: marginsPx, bottom: marginsPx, left: marginsPx },
+      safeArea: { top: safeAreaPx, right: safeAreaPx, bottom: safeAreaPx, left: safeAreaPx }
+    });
+  }
+
+  return (
+    <div className="page-settings-panel">
+      <div className="page-panel-section-title">הגדרות עמוד</div>
+
+      <label className="field">
+        <span className="field-label">מידת עמוד</span>
+        <select className="text-input" onChange={(event) => handlePresetChange(event.target.value)} value={presetId}>
+          {PAGE_PRESETS.map((preset) => (
+            <option key={preset.id} value={preset.id}>{preset.name}</option>
+          ))}
+        </select>
+      </label>
+
+      <div className="seg">
+        <button className={orientation === "portrait" ? "on" : ""} onClick={() => setOrientation("portrait")} type="button">לאורך</button>
+        <button className={orientation === "landscape" ? "on" : ""} onClick={() => setOrientation("landscape")} type="button">לרוחב</button>
+        <button disabled type="button">כפולה</button>
+      </div>
+
+      <label className="check-line">
+        <input checked={customSize} onChange={(event) => setCustomSize(event.target.checked)} type="checkbox" />
+        מידה מותאמת אישית
+      </label>
+
+      <div className="field-grid">
+        <label className="field">
+          <span className="field-label">יחידות</span>
+          <select className="text-input" onChange={(event) => setUnits(event.target.value as Unit)} value={units}>
+            <option value="mm">מ״מ</option>
+            <option value="cm">ס״מ</option>
+            <option value="inch">אינץ׳</option>
+            <option value="px">פיקסלים</option>
+          </select>
+        </label>
+        <label className="field">
+          <span className="field-label">DPI</span>
+          <input className="text-input" max={1200} min={72} onChange={(event) => setDpi(Number(event.target.value) || 300)} type="number" value={dpi} />
+        </label>
+        <label className="field">
+          <span className="field-label">רוחב</span>
+          <input className="text-input" disabled={!customSize} min={1} onChange={(event) => setCustomWidth(Number(event.target.value) || 1)} type="number" value={Math.round(customWidth * 100) / 100} />
+        </label>
+        <label className="field">
+          <span className="field-label">גובה</span>
+          <input className="text-input" disabled={!customSize} min={1} onChange={(event) => setCustomHeight(Number(event.target.value) || 1)} type="number" value={Math.round(customHeight * 100) / 100} />
+        </label>
+        <label className="field">
+          <span className="field-label">בליד</span>
+          <input className="text-input" min={0} onChange={(event) => setBleed(Number(event.target.value) || 0)} type="number" value={bleed} />
+        </label>
+        <label className="field">
+          <span className="field-label">שוליים</span>
+          <input className="text-input" min={0} onChange={(event) => setMargins(Number(event.target.value) || 0)} type="number" value={margins} />
+        </label>
+        <label className="field">
+          <span className="field-label">אזור בטוח</span>
+          <input className="text-input" min={0} onChange={(event) => setSafeArea(Number(event.target.value) || 0)} type="number" value={safeArea} />
+        </label>
+      </div>
+
+      <button className="btn-block" onClick={applySettings} type="button">החלת הגדרות</button>
+
+      <div className="page-panel-section-title" style={{ marginTop: 6 }}>תצוגה</div>
+      <div className="button-row">
+        <button className={viewport.showRulers ? "toggle on" : "toggle"} onClick={viewport.toggleRulers} type="button">סרגלים</button>
+        <button className={viewport.showGrid ? "toggle on" : "toggle"} onClick={viewport.toggleGrid} type="button">גריד</button>
+        <button className={viewport.showGuides ? "toggle on" : "toggle"} onClick={viewport.toggleGuides} type="button">קווי עזר</button>
+        <button className={viewport.snapEnabled ? "toggle on" : "toggle"} onClick={viewport.toggleSnap} type="button">הצמדה</button>
+      </div>
+      <div className="button-row">
+        <button className="toggle" onClick={() => onAddGuide("x")} type="button">קו אנכי</button>
+        <button className="toggle" onClick={() => onAddGuide("y")} type="button">קו אופקי</button>
+      </div>
+    </div>
   );
 }
 
@@ -1780,23 +3558,51 @@ function SliderField({
   decimals?: number;
   unit?: string;
 }): ReactElement {
+  // Local state for immediate visual feedback — avoids the store round-trip lag.
+  const [localValue, setLocalValue] = useState(value);
+  const isDragging = useRef(false);
+  const rafRef = useRef<number | null>(null);
+
+  // Sync from external value only when the user is not dragging.
+  useEffect(() => {
+    if (!isDragging.current) setLocalValue(value);
+  }, [value]);
+
+  function commit(v: number): void {
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      onChange(v);
+    });
+  }
+
   return (
     <label className="field slider-field">
       <div className="slider-header">
         <span className="field-label">{label}</span>
-        <span className="slider-value">
-          {value.toFixed(decimals)}
-          {unit}
-        </span>
+        <span className="slider-value">{localValue.toFixed(decimals)}{unit}</span>
       </div>
       <input
         className="slider"
         max={max}
         min={min}
-        onChange={(e) => onChange(Number(e.target.value))}
         step={step}
         type="range"
-        value={value}
+        value={localValue}
+        onPointerDown={() => { isDragging.current = true; }}
+        onPointerUp={(e) => {
+          isDragging.current = false;
+          const v = Number(e.currentTarget.value);
+          setLocalValue(v);
+          if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+          rafRef.current = null;
+          onChange(v);
+        }}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          setLocalValue(v);
+          commit(v);
+        }}
       />
     </label>
   );
@@ -3121,6 +4927,91 @@ function LayerList({
         </div>
       ))}
     </section>
+  );
+}
+
+// ─── Canvas Context Menu ──────────────────────────────────────────────────────
+
+function CanvasContextMenu({
+  target,
+  imageEditorAvailable,
+  imageEditorBusy,
+  photoshopConfigured,
+  colorLabConfigured,
+  onClose,
+  onOpenImageEditor,
+  onOpenInPhotoshop,
+  onOpenInColorLab
+}: {
+  target: CanvasContextMenuTarget;
+  imageEditorAvailable: boolean;
+  imageEditorBusy: boolean;
+  photoshopConfigured: boolean;
+  colorLabConfigured: boolean;
+  onClose: () => void;
+  onOpenImageEditor: () => void;
+  onOpenInPhotoshop: () => void;
+  onOpenInColorLab: () => void;
+}): ReactElement {
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(event: MouseEvent): void {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        onClose();
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [onClose]);
+
+  useEffect(() => {
+    function handleKey(event: KeyboardEvent): void {
+      if (event.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={menuRef}
+      className="canvas-context-menu"
+      style={{ left: target.screenX, top: target.screenY }}
+    >
+      <button
+        className="ctx-item"
+        disabled={imageEditorBusy || !imageEditorAvailable}
+        title={imageEditorAvailable ? undefined : "עורך התמונות לא זמין (נדרש Electron + Python)"}
+        onClick={imageEditorAvailable ? onOpenImageEditor : undefined}
+      >
+        <span className="ctx-icon">🎨</span>
+        {imageEditorBusy ? "פותח עורך…" : "ערוך בעורך התמונות"}
+      </button>
+      {target.hasImage && (
+        <>
+          <div className="ctx-divider" />
+          <button
+            className="ctx-item"
+            disabled={!photoshopConfigured}
+            title={photoshopConfigured ? "ערוך בפוטושופ" : "Photoshop לא מוגדר — הגדר ב'כלי עזר'"}
+            onClick={onOpenInPhotoshop}
+          >
+            <span className="ctx-icon">Ps</span>
+            ערוך ב-Photoshop
+          </button>
+          <button
+            className="ctx-item"
+            disabled={!colorLabConfigured}
+            title={colorLabConfigured ? "פתח ב-ColorLab" : "ColorLab לא מוגדר — הגדר ב'כלי עזר'"}
+            onClick={onOpenInColorLab}
+          >
+            <span className="ctx-icon">🎨</span>
+            פתח ב-ColorLab
+          </button>
+        </>
+      )}
+    </div>
   );
 }
 

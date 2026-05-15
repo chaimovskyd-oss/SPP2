@@ -23,10 +23,17 @@ export function buildDiagonalBands(
       { x: clamp01(xLeft + shear), y: 1 }
     ];
 
-    // Bounding box of vertices
+    // Bounding box of vertices. Store vertices LOCAL to the slot bbox, not global page coords.
+    // KonvaLayerNode expects normalized vertices inside the FrameLayer bounds.
     const xs = vertices.map((v) => v.x);
-    const x = Math.min(...xs);
-    const w = Math.max(...xs) - x;
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const x = minX;
+    const w = Math.max(0.001, maxX - minX);
+    const localVertices = vertices.map((v) => ({
+      x: (v.x - minX) / w,
+      y: v.y,
+    }));
 
     return createCollageSlot({
       x,
@@ -34,7 +41,7 @@ export function buildDiagonalBands(
       w,
       h: 1,
       shape: "diagonalPolygon",
-      shapeParams: { vertices }
+      shapeParams: { vertices: localVertices }
     });
   });
 }

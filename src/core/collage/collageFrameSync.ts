@@ -17,15 +17,29 @@ function slotShapeToFrameShape(shape: CollageSlot["shape"]): FrameLayer["shape"]
     case "ellipse": return "ellipse";
     case "heart": return "svgPath";
     case "rounded": return "rect";
+    case "puzzle": return "puzzle" as FrameLayer["shape"];
+    // Polygon clips are handled by KonvaLayerNode through collage metadata.
+    case "polygon":
+    case "diagonalPolygon":
     default: return "rect";
   }
+}
+
+function collageGlobalMaskForRule(rule: CollageRule, pageW: number, pageH: number): import("@/types/primitives").JsonValue | null {
+  if (rule.activeFamily === "shapedHeart") {
+    return { enabled: true, shape: "heart", canvasW: pageW, canvasH: pageH, marginPx: Math.min(pageW, pageH) * 0.04 } as unknown as import("@/types/primitives").JsonValue;
+  }
+  if (rule.activeFamily === "shapedCircle") {
+    return { enabled: true, shape: "circle", canvasW: pageW, canvasH: pageH, marginPx: Math.min(pageW, pageH) * 0.04 } as unknown as import("@/types/primitives").JsonValue;
+  }
+  return null;
 }
 
 function createCollageFrameLayer(
   slot: CollageSlot,
   pageW: number,
   pageH: number,
-  ruleId: ID,
+  rule: CollageRule,
   assignment: CollageImageAssignment | undefined,
   zIndex: number
 ): FrameLayer {
@@ -35,13 +49,20 @@ function createCollageFrameLayer(
   const h = slot.h * pageH;
 
   const collageFrameMeta: CollageFrameMetadata = {
-    collageRuleId: ruleId,
+    collageRuleId: rule.id,
     slotId: slot.id,
     slotType: slot.type,
     isCollageFrame: true,
     layoutManaged: true,
-    slotShape: slot.shape
-  };
+    slotShape: slot.shape,
+    vertices: slot.shapeParams.vertices,
+    pathData: slot.shapeParams.pathData,
+    puzzleTabs: slot.shapeParams.puzzleTabs,
+    edgeConfig: slot.edgeConfig,
+    rotationDeg: slot.rotationDeg,
+    zIndex: slot.zIndex,
+    globalMask: collageGlobalMaskForRule(rule, pageW, pageH) as unknown as never
+  } as CollageFrameMetadata & { globalMask?: import("@/types/primitives").JsonValue };
 
   return {
     version: 1,
@@ -56,7 +77,7 @@ function createCollageFrameLayer(
     y,
     width: w,
     height: h,
-    rotation: 0,
+    rotation: slot.shape === "polygon" || slot.shape === "diagonalPolygon" ? 0 : slot.rotationDeg,
     zIndex,
     selected: false,
     behaviorMode: "layoutLocked",
@@ -70,7 +91,10 @@ function createCollageFrameLayer(
     cornerRadius: slot.shape === "rounded" ? Math.min(w, h) * (slot.shapeParams.cornerRadius ?? 0.08) : 0,
     lockedFrame: true,
     lockedContent: false,
-    metadata: { collageFrame: collageFrameMeta as unknown as import("@/types/primitives").JsonValue }
+    metadata: {
+      collageFrame: collageFrameMeta as unknown as import("@/types/primitives").JsonValue,
+      collageEdgeConfig: slot.edgeConfig as unknown as import("@/types/primitives").JsonValue
+    }
   };
 }
 
@@ -83,7 +107,7 @@ export function buildCollageFrameLayers(rule: CollageRule, page: Page): FrameLay
   const existingZMax = page.layers.length;
 
   return slots.map((slot, i) =>
-    createCollageFrameLayer(slot, page.width, page.height, rule.id, assignmentMap.get(slot.id), existingZMax + i)
+    createCollageFrameLayer(slot, page.width, page.height, rule, assignmentMap.get(slot.id), existingZMax + i)
   );
 }
 

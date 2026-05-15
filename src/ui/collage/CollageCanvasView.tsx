@@ -18,6 +18,7 @@ interface CollageCanvasViewProps {
 }
 
 const DIVIDER_COLOR = "rgba(34,211,238,0.7)";
+/* Non-SplitTree layouts are intentionally not editable with canvas dividers. */
 
 export function CollageCanvasView({
   rule,
@@ -38,14 +39,15 @@ export function CollageCanvasView({
   const stageW = Math.round(page.width * scale);
   const stageH = Math.round(page.height * scale);
 
-  // Collect dividers for split tree
-  const dividers = isSplitTree && rule.splitTree
+  // Split tree dividers (only for splitTree family)
+  const splitDividers = isSplitTree && rule.splitTree
     ? collectDividers(rule.splitTree)
     : [];
 
-  function handleDividerDrag(nodeId: string, e: Konva.KonvaEventObject<DragEvent>): void {
+
+  function handleSplitDividerDrag(nodeId: string, e: Konva.KonvaEventObject<DragEvent>): void {
     const node = e.target;
-    const divider = dividers.find((d) => d.nodeId === nodeId);
+    const divider = splitDividers.find((d) => d.nodeId === nodeId);
     if (!divider || !rule.splitTree) return;
 
     let newRatio: number;
@@ -66,6 +68,8 @@ export function CollageCanvasView({
       )
     }));
   }
+
+
 
   // Map slotId → frameId for selection bridging
   const slotToFrame = new Map<ID, ID>();
@@ -99,8 +103,8 @@ export function CollageCanvasView({
         stageRef={stageRef}
       />
 
-      {/* Split tree dividers overlay */}
-      {isSplitTree && dividers.length > 0 && (
+      {/* Dividers overlay (split tree) */}
+      {isSplitTree && splitDividers.length > 0 && (
         <Stage
           width={stageW}
           height={stageH}
@@ -109,7 +113,7 @@ export function CollageCanvasView({
           style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}
         >
           <Layer>
-            {dividers.map((d) => {
+            {splitDividers.map((d) => {
               const pts = d.direction === "H"
                 ? [d.position * page.width, d.start * page.height, d.position * page.width, d.end * page.height]
                 : [d.start * page.width, d.position * page.height, d.end * page.width, d.position * page.height];
@@ -123,7 +127,8 @@ export function CollageCanvasView({
                   draggable
                   listening
                   style={{ pointerEvents: "auto" }}
-                  onDragEnd={(e) => handleDividerDrag(d.nodeId, e)}
+                  onDragStart={() => setDraggingDivider(d.nodeId)}
+                  onDragEnd={(e) => handleSplitDividerDrag(d.nodeId, e)}
                 />
               );
             })}

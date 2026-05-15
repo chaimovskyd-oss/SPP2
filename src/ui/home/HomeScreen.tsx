@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSPropert
 import { getProjectIndexEntries, type ProjectIndexEntry } from "@/core";
 import type { ModeType } from "@/types/template";
 import { homeModes } from "../data";
+import { ExternalAppsHub } from "./ExternalAppsHub";
+import { ExternalAppsSettings } from "../utilities/ExternalAppsSettings";
 
 interface HomeScreenProps {
   onOpenMode: (mode: ModeType) => void;
@@ -13,6 +15,7 @@ export function HomeScreen({ onOpenMode, onOpenProjectFile }: HomeScreenProps): 
   const projectInputRef = useRef<HTMLInputElement>(null);
   const [projects, setProjects] = useState<ProjectIndexEntry[]>(() => getProjectIndexEntries());
   const [query, setQuery] = useState("");
+  const [showExtSettings, setShowExtSettings] = useState(false);
 
   useEffect(() => {
     function refreshProjects(): void {
@@ -108,6 +111,8 @@ export function HomeScreen({ onOpenMode, onOpenProjectFile }: HomeScreenProps): 
           })}
         </section>
 
+        <ExternalAppsHub onOpenSettings={() => setShowExtSettings(true)} />
+
         <section className="section-title">
           <h2>פרויקטים אחרונים</h2>
           <button onClick={() => projectInputRef.current?.click()} type="button">
@@ -143,6 +148,12 @@ export function HomeScreen({ onOpenMode, onOpenProjectFile }: HomeScreenProps): 
           ))}
         </section>
       </div>
+
+      {showExtSettings && (
+        <div className="util-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowExtSettings(false); }}>
+          <ExternalAppsSettings onClose={() => setShowExtSettings(false)} />
+        </div>
+      )}
     </main>
   );
 }

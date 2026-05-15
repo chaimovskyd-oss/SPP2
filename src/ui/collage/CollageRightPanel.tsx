@@ -1,15 +1,18 @@
 import { useState, type ReactElement } from "react";
 import { useDocumentStore } from "@/state/documentStore";
-import type { CollageEdgeStyle, CollageRule } from "@/types/collage";
+import { CollageMiniPreview } from "./CollageMiniPreview";
+import type { CollageEdgeStyle, CollageLayoutFamily, CollageRule, ScoredLayoutSuggestion } from "@/types/collage";
 import type { ID } from "@/types/primitives";
 
 interface CollageRightPanelProps {
   rule: CollageRule;
   selectedSlotId: ID | null;
+  suggestions: ScoredLayoutSuggestion[];
+  onSelectLayout: (family: CollageLayoutFamily) => void;
 }
 
-export function CollageRightPanel({ rule, selectedSlotId }: CollageRightPanelProps): ReactElement {
-  const [tab, setTab] = useState<"cell" | "effects" | "canvas">("cell");
+export function CollageRightPanel({ rule, selectedSlotId, suggestions, onSelectLayout }: CollageRightPanelProps): ReactElement {
+  const [tab, setTab] = useState<"color" | "effects" | "canvas" | "layouts">("color");
   const updateAdjustments = useDocumentStore((s) => s.updateCollageImageAdjustments);
   const updateEdgeConfig = useDocumentStore((s) => s.updateCollageEdgeConfig);
   const updateCanvasSettings = useDocumentStore((s) => s.updateCollageCanvasSettings);
@@ -23,8 +26,8 @@ export function CollageRightPanel({ rule, selectedSlotId }: CollageRightPanelPro
   return (
     <aside className="collage-right-panel">
       <div className="panel-tabs">
-        <button type="button" className={`panel-tab${tab === "cell" ? " active" : ""}`} onClick={() => setTab("cell")}>
-          תא
+        <button type="button" className={`panel-tab${tab === "color" ? " active" : ""}`} onClick={() => setTab("color")}>
+          צבע
         </button>
         <button type="button" className={`panel-tab${tab === "effects" ? " active" : ""}`} onClick={() => setTab("effects")}>
           אפקטים
@@ -32,16 +35,19 @@ export function CollageRightPanel({ rule, selectedSlotId }: CollageRightPanelPro
         <button type="button" className={`panel-tab${tab === "canvas" ? " active" : ""}`} onClick={() => setTab("canvas")}>
           קנבס
         </button>
+        <button type="button" className={`panel-tab${tab === "layouts" ? " active" : ""}`} onClick={() => setTab("layouts")}>
+          פריסות
+        </button>
       </div>
 
-      {tab === "cell" && (
+      {tab === "color" && (
         <div className="panel-section">
           {!selectedSlotId || !assignment ? (
-            <p className="panel-hint">בחר תא בקנבס</p>
+            <p className="panel-hint">בחר תא בקנבס לכוונון צבע</p>
           ) : (
             <>
               <div className="panel-field">
-                <label>בהירות: {adj?.brightness.toFixed(2)}</label>
+                <label>בהירות: {(adj?.brightness ?? 1).toFixed(2)}</label>
                 <input
                   type="range" min={0.2} max={2} step={0.05}
                   value={adj?.brightness ?? 1}
@@ -49,7 +55,7 @@ export function CollageRightPanel({ rule, selectedSlotId }: CollageRightPanelPro
                 />
               </div>
               <div className="panel-field">
-                <label>ניגודיות: {adj?.contrast.toFixed(2)}</label>
+                <label>ניגודיות: {(adj?.contrast ?? 1).toFixed(2)}</label>
                 <input
                   type="range" min={0.2} max={2} step={0.05}
                   value={adj?.contrast ?? 1}
@@ -57,7 +63,7 @@ export function CollageRightPanel({ rule, selectedSlotId }: CollageRightPanelPro
                 />
               </div>
               <div className="panel-field">
-                <label>רוויה: {adj?.saturation.toFixed(2)}</label>
+                <label>רוויה: {(adj?.saturation ?? 1).toFixed(2)}</label>
                 <input
                   type="range" min={0} max={2} step={0.05}
                   value={adj?.saturation ?? 1}
@@ -65,7 +71,7 @@ export function CollageRightPanel({ rule, selectedSlotId }: CollageRightPanelPro
                 />
               </div>
               <div className="panel-field">
-                <label>חשיפה (EV): {adj?.exposureEV.toFixed(1)}</label>
+                <label>חשיפה (EV): {(adj?.exposureEV ?? 0).toFixed(1)}</label>
                 <input
                   type="range" min={-3} max={3} step={0.1}
                   value={adj?.exposureEV ?? 0}
@@ -145,6 +151,22 @@ export function CollageRightPanel({ rule, selectedSlotId }: CollageRightPanelPro
               />
               &nbsp;צל כללי
             </label>
+          </div>
+        </div>
+      )}
+
+      {tab === "layouts" && (
+        <div className="collage-layouts-list" style={{ overflowY: "auto", flex: 1 }}>
+          <div className="collage-layouts-scroll">
+            {suggestions.map((suggestion, i) => (
+              <CollageMiniPreview
+                key={suggestion.family}
+                suggestion={suggestion}
+                isSelected={suggestion.family === rule.activeFamily}
+                isTop={i === 0}
+                onClick={() => onSelectLayout(suggestion.family)}
+              />
+            ))}
           </div>
         </div>
       )}

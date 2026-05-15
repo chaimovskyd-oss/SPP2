@@ -12,7 +12,16 @@ export type CollageSlotShape =
   | "heart"
   | "polygon"
   | "diagonalPolygon"
+  | "puzzle"
   | "svgPath";
+
+export type PuzzleTabType = "flat" | "knob" | "socket";
+export interface PuzzleTabs {
+  top: PuzzleTabType;
+  right: PuzzleTabType;
+  bottom: PuzzleTabType;
+  left: PuzzleTabType;
+}
 
 export interface CollageSlotShapeParams {
   cornerRadius?: number;
@@ -20,6 +29,11 @@ export interface CollageSlotShapeParams {
   rotation?: number;
   vertices?: Array<{ x: number; y: number }>;
   pathData?: string;
+  // Puzzle-specific
+  puzzleTabs?: PuzzleTabs;
+  puzzleRows?: number;
+  puzzleCols?: number;
+  puzzleSeed?: number;
 }
 
 // ─── Edge effects ─────────────────────────────────────────────────────────────
@@ -87,6 +101,7 @@ export type CollageLayoutFamily =
   | "diamondCenter"  // central diamond (rotated 45°) + surrounding
   | "frameCollage"   // images arranged as border frame
   | "plusCross"      // images in + / cross pattern
+  | "puzzle"         // jigsaw puzzle pieces (interlocking tabs + sockets)
   | "custom";        // template-applied
 
 // ─── Layout params (used when regenerating slots) ─────────────────────────────
@@ -167,6 +182,8 @@ export interface CollageImageAssignment extends VersionedEntity {
     exposureEV: number;
     vignette: number;
   };
+  /** Extended per-image parameters matching ImageStudio's imageEditParams schema (delta -100..100). */
+  imageEditParams?: Record<string, number>;
   visualEffects?: VisualEffectStack;
   edgeConfig?: CollageEdgeConfig;
   hasManualCrop?: boolean;
@@ -281,6 +298,12 @@ export interface CollageFrameMetadata {
   isCollageFrame: true;
   layoutManaged: true;
   slotShape: CollageSlotShape;
+  /** Normalized polygon vertices inside the slot bounding box. */
+  vertices?: Array<{ x: number; y: number }>;
+  pathData?: string;
+  puzzleTabs?: PuzzleTabs;
+  edgeConfig?: CollageEdgeConfig;
+  rotationDeg?: number;
   zIndex?: number;
 }
 

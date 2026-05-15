@@ -229,6 +229,17 @@ export function reIndexAssignments(
   return _oldAssignments;
 }
 
+
+function collageGlobalMaskForRule(rule: CollageRule, canvasW: number, canvasH: number): import("@/types/primitives").JsonValue | null {
+  if (rule.activeFamily === "shapedHeart") {
+    return { enabled: true, shape: "heart", canvasW, canvasH, marginPx: Math.min(canvasW, canvasH) * 0.04 } as unknown as import("@/types/primitives").JsonValue;
+  }
+  if (rule.activeFamily === "shapedCircle") {
+    return { enabled: true, shape: "circle", canvasW, canvasH, marginPx: Math.min(canvasW, canvasH) * 0.04 } as unknown as import("@/types/primitives").JsonValue;
+  }
+  return null;
+}
+
 // ─── Frame sync ───────────────────────────────────────────────────────────────
 
 export function syncFrameLayersToPage(
@@ -243,6 +254,7 @@ export function syncFrameLayersToPage(
   });
 
   const sortedSlots = [...rule.cachedSlots].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+  const globalMask = collageGlobalMaskForRule(rule, canvasW, canvasH);
 
   const newFrameLayers: FrameLayer[] = sortedSlots.map((slot, i) => {
     const assignment = rule.imageAssignments.find(a => a.slotId === slot.id);
@@ -273,8 +285,26 @@ export function syncFrameLayersToPage(
           isCollageFrame: true,
           layoutManaged: true,
           slotShape: slot.shape,
+          vertices: slot.shapeParams.vertices,
+          pathData: slot.shapeParams.pathData,
+          edgeConfig: slot.edgeConfig,
+          globalMask,
           zIndex: slot.zIndex ?? 0,
-        } as unknown as import("@/types/primitives").JsonValue
+          ...(slot.shape === "puzzle" && slot.shapeParams.puzzleTabs
+            ? { puzzleTabs: slot.shapeParams.puzzleTabs }
+            : {}),
+        } as unknown as import("@/types/primitives").JsonValue,
+        // Mirror color adjustments, extras, and edge config so FrameNode can apply them
+        // without looking up the collage rule at render time.
+        collageColorAdj: assignment?.colorAdjustments != null
+          ? assignment.colorAdjustments as unknown as import("@/types/primitives").JsonValue
+          : null,
+        collageImageEditParams: (assignment?.imageEditParams != null && Object.keys(assignment.imageEditParams).length > 0)
+          ? assignment.imageEditParams as unknown as import("@/types/primitives").JsonValue
+          : null,
+        collageEdgeConfig: assignment?.edgeConfig != null
+          ? assignment.edgeConfig as unknown as import("@/types/primitives").JsonValue
+          : null
       }
     });
   });
@@ -292,6 +322,7 @@ function mapSlotShape(shape: CollageSlot["shape"]): FrameLayer["shape"] {
     case "ellipse": return "ellipse";
     case "heart": return "svgPath";
     case "rounded": return "rect";
+    case "puzzle": return "puzzle";
     default: return "rect";
   }
 }

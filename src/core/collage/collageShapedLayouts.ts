@@ -130,31 +130,288 @@ export function buildShapedCollageSlots(
   spacingPx: number,
   marginPx?: number
 ): CollageSlot[] {
-  const mPx = marginPx ?? spacingPx * 3;
-  const usableW = canvasW - 2 * mPx;
-  const usableH = canvasH - 2 * mPx;
-  const cxPx = canvasW / 2;
-  const cyPx = canvasH / 2;
-  // Shape inscribes into the smaller usable dimension (correct circle on print)
-  const shapeSizePx = Math.min(usableW, usableH) * 0.92;
+  // IMPORTANT: Heart/Circle in the old collage app are not “each cell is a
+  // heart/circle”. They are a normal/semi-normal grid clipped by ONE global
+  // silhouette mask. We therefore generate rectangular internal slots inside
+  // the tight mask bounds. The actual heart/circle silhouette is applied later
+  // by KonvaLayerNode using metadata.globalMask on each collage frame.
+  return buildMaskedShapeGridSlots(shape, imageCount, canvasW, canvasH, spacingPx, marginPx ?? spacingPx * 3);
+}
 
-  const slotShape = shape === "circle" ? "circle" as const : "heart" as const;
-  const insideFn = shape === "circle"
-    ? (px: number, py: number) => isInsideCirclePx(px, py, cxPx, cyPx, shapeSizePx / 2)
-    : (px: number, py: number) => isInsideHeartPx(px, py, cxPx, cyPx, shapeSizePx / 2);
+interface ShapeBoundsPx {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
 
-  const { slots } = packCellsInShape(
-    imageCount, cxPx, cyPx, shapeSizePx,
-    canvasW, canvasH, spacingPx, insideFn, slotShape
-  );
+function buildMaskedShapeGridSlots(
+  shape: "circle" | "heart",
+  imageCount: number,
+  canvasW: number,
+  canvasH: number,
+  spacingPx: number,
+  marginPx: number
+): CollageSlot[] {
+  if (imageCount <= 0) return [];
+
+  const bounds = shape === "circle"
+    ? circleMaskBounds(canvasW, canvasH, marginPx)
+    : heartMaskBounds(canvasW, canvasH, marginPx);
+
+  // Choose a rows×cols configuration that gives photo-friendly cells.
+  // This mirrors the old Python pack_cells_in_shape approach: build a grid
+  // inside the tight mask bbox, then the global silhouette clips the outside.
+  const targetAR = 4 / 3;
+  let bestRows = 1;
+  let bestCols = imageCount;
+  let bestScore = -Infinity;
+
+  for (let rows = 1; rows <= imageCount; rows++) {
+    const cols = Math.ceil(imageCount / rows);
+    const cw = (bounds.w - spacingPx * (cols - 1)) / cols;
+    const ch = (bounds.h - spacingPx * (rows - 1)) / rows;
+    if (cw < 20 || ch < 20) continue;
+    const ar = cw / Math.max(1, ch);
+    const arScore = Math.exp(-Math.abs(Math.log(ar / targetAR)) * 1.2);
+    const densityPenalty = Math.max(0, rows * cols - imageCount) * 0.035;
+    const score = arScore - densityPenalty;
+    if (score > bestScore) {
+      bestScore = score;
+      bestRows = rows;
+      bestCols = cols;
+    }
+  }
+
+  const cellW = (bounds.w - spacingPx * (bestCols - 1)) / bestCols;
+  const cellH = (bounds.h - spacingPx * (bestRows - 1)) / bestRows;
+  const slots: CollageSlot[] = [];
+  let placed = 0;
+
+  for (let row = 0; row < bestRows && placed < imageCount; row++) {
+    const cellsInRow = Math.min(bestCols, imageCount - placed);
+    const rowOffsetX = (bestCols - cellsInRow) * (cellW + spacingPx) / 2;
+    for (let col = 0; col < cellsInRow && placed < imageCount; col++) {
+      const x = bounds.x + rowOffsetX + col * (cellW + spacingPx);
+      const y = bounds.y + row * (cellH + spacingPx);
+      slots.push(createCollageSlot({
+        type: "image",
+        shape: "rect",
+        role: placed === 0 && imageCount <= 5 ? "hero" : "standard",
+        label: shape === "heart" ? `לב ${placed + 1}` : `עיגול ${placed + 1}`,
+        x: x / canvasW,
+        y: y / canvasH,
+        w: Math.max(1, cellW) / canvasW,
+        h: Math.max(1, cellH) / canvasH,
+        metadata: { globalMaskShape: shape }
+      }));
+      placed++;
+    }
+  }
+
   return slots;
+}
+
+function circleMaskBounds(canvasW: number, canvasH: number, marginPx: number): ShapeBoundsPx {
+  const d = Math.max(1, Math.min(canvasW, canvasH) - 2 * marginPx);
+  return { x: (canvasW - d) / 2, y: (canvasH - d) / 2, w: d, h: d };
+}
+
+function heartMaskBounds(canvasW: number, canvasH: number, marginPx: number): ShapeBoundsPx {
+  // Same parametric heart family as the old Python renderer. Sample points,
+  // scale to the available canvas, then return the tight pixel bbox.
+  const pts: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < 720; i++) {
+    const t = (i / 720) * Math.PI * 2;
+    const x = 16 * Math.sin(t) ** 3;
+    const y = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
+    pts.push({ x, y });
+  }
+  const minX = Math.min(...pts.map((p) => p.x));
+  const maxX = Math.max(...pts.map((p) => p.x));
+  const minY = Math.min(...pts.map((p) => p.y));
+  const maxY = Math.max(...pts.map((p) => p.y));
+  const srcW = Math.max(1, maxX - minX);
+  const srcH = Math.max(1, maxY - minY);
+  const scale = Math.min((canvasW - 2 * marginPx) / srcW, (canvasH - 2 * marginPx) / srcH);
+  const w = srcW * scale;
+  const h = srcH * scale;
+  return { x: (canvasW - w) / 2, y: (canvasH - h) / 2, w, h };
+}
+
+// ─── Artistic non-overlapping shaped recipes ─────────────────────────────────
+
+function distributeCounts(total: number, weights: number[]): number[] {
+  const counts = weights.map(() => 0);
+  if (total <= 0 || weights.length === 0) return counts;
+  const sum = weights.reduce((a, b) => a + b, 0) || 1;
+  const raw = weights.map((w) => (w / sum) * total);
+  let used = 0;
+  for (let i = 0; i < raw.length; i++) {
+    counts[i] = Math.floor(raw[i]);
+    used += counts[i];
+  }
+  while (used < total) {
+    let best = 0;
+    let bestFraction = -1;
+    for (let i = 0; i < raw.length; i++) {
+      const fraction = raw[i] - Math.floor(raw[i]);
+      if (fraction > bestFraction) { bestFraction = fraction; best = i; }
+    }
+    counts[best]++;
+    raw[best] = Math.floor(raw[best]);
+    used++;
+  }
+  return counts;
+}
+
+function gridRegion(
+  count: number,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  spacingPx: number,
+  canvasW: number,
+  canvasH: number,
+  maxCols?: number
+): CollageSlot[] {
+  if (count <= 0 || w <= 12 || h <= 12) return [];
+  const cols = Math.min(count, Math.max(1, maxCols ?? Math.ceil(Math.sqrt(count * (w / Math.max(h, 1))))));
+  const rows = Math.ceil(count / cols);
+  const cellW = (w - spacingPx * (cols - 1)) / cols;
+  const cellH = (h - spacingPx * (rows - 1)) / rows;
+  if (cellW <= 8 || cellH <= 8) return [];
+  return Array.from({ length: count }, (_, i) => {
+    const row = Math.floor(i / cols);
+    const rowStart = row * cols;
+    const rowCount = Math.min(cols, count - rowStart);
+    const wCell = rowCount < cols ? (w - spacingPx * (rowCount - 1)) / rowCount : cellW;
+    const xCell = rowCount < cols ? x + (i - rowStart) * (wCell + spacingPx) : x + (i % cols) * (cellW + spacingPx);
+    const yCell = y + row * (cellH + spacingPx);
+    return createCollageSlot({ type: "image", x: xCell / canvasW, y: yCell / canvasH, w: wCell / canvasW, h: cellH / canvasH });
+  });
+}
+
+function buildArtisticHeartSlots(
+  imageCount: number,
+  canvasW: number,
+  canvasH: number,
+  spacingPx: number,
+  marginPx: number
+): CollageSlot[] {
+  if (imageCount <= 1) {
+    return [createCollageSlot({
+      type: "image", role: "hero", shape: "heart",
+      x: marginPx / canvasW, y: marginPx / canvasH,
+      w: (canvasW - 2 * marginPx) / canvasW,
+      h: (canvasH - 2 * marginPx) / canvasH
+    })];
+  }
+
+  const usableW = canvasW - 2 * marginPx;
+  const usableH = canvasH - 2 * marginPx;
+  const cx = marginPx + usableW / 2;
+  const cy = marginPx + usableH / 2;
+  const heroW = Math.min(usableW * 0.34, usableH * 0.34);
+  const heroH = Math.min(usableH * 0.42, usableW * 0.42);
+  const heroX = cx - heroW / 2;
+  const heroY = cy - heroH / 2;
+
+  const hero = createCollageSlot({
+    type: "image",
+    role: "hero",
+    shape: "heart",
+    x: heroX / canvasW,
+    y: heroY / canvasH,
+    w: heroW / canvasW,
+    h: heroH / canvasH,
+    zIndex: 20,
+    label: "לב מרכזי"
+  });
+
+  const topH = Math.max(0, heroY - marginPx - spacingPx);
+  const midH = heroH;
+  const bottomY = heroY + heroH + spacingPx;
+  const bottomH = Math.max(0, marginPx + usableH - bottomY);
+  const leftW = Math.max(0, heroX - marginPx - spacingPx);
+  const rightX = heroX + heroW + spacingPx;
+  const rightW = Math.max(0, marginPx + usableW - rightX);
+
+  const regions = [
+    { x: marginPx, y: marginPx, w: usableW, h: topH, weight: 1.25, cols: 2 },
+    { x: marginPx, y: heroY, w: leftW, h: midH, weight: 1.0, cols: 1 },
+    { x: rightX, y: heroY, w: rightW, h: midH, weight: 1.0, cols: 1 },
+    { x: marginPx, y: bottomY, w: usableW, h: bottomH, weight: 1.45, cols: 3 },
+  ].filter((r) => r.w > 16 && r.h > 16);
+
+  const counts = distributeCounts(imageCount - 1, regions.map((r) => r.weight * r.w * r.h));
+  const slots: CollageSlot[] = [hero];
+  regions.forEach((r, i) => slots.push(...gridRegion(counts[i], r.x, r.y, r.w, r.h, spacingPx, canvasW, canvasH, r.cols)));
+  return slots.slice(0, imageCount);
+}
+
+function buildArtisticCircleSlots(
+  imageCount: number,
+  canvasW: number,
+  canvasH: number,
+  spacingPx: number,
+  marginPx: number
+): CollageSlot[] {
+  if (imageCount <= 1) {
+    return [createCollageSlot({
+      type: "image", role: "hero", shape: "circle",
+      x: marginPx / canvasW, y: marginPx / canvasH,
+      w: (canvasW - 2 * marginPx) / canvasW,
+      h: (canvasH - 2 * marginPx) / canvasH
+    })];
+  }
+
+  const usableW = canvasW - 2 * marginPx;
+  const usableH = canvasH - 2 * marginPx;
+  const cx = marginPx + usableW / 2;
+  const cy = marginPx + usableH / 2;
+  const heroD = Math.min(usableW, usableH) * 0.34;
+  const heroX = cx - heroD / 2;
+  const heroY = cy - heroD / 2;
+
+  const hero = createCollageSlot({
+    type: "image",
+    role: "hero",
+    shape: "circle",
+    x: heroX / canvasW,
+    y: heroY / canvasH,
+    w: heroD / canvasW,
+    h: heroD / canvasH,
+    zIndex: 20,
+    label: "עיגול מרכזי"
+  });
+
+  const topH = Math.max(0, heroY - marginPx - spacingPx);
+  const midH = heroD;
+  const bottomY = heroY + heroD + spacingPx;
+  const bottomH = Math.max(0, marginPx + usableH - bottomY);
+  const leftW = Math.max(0, heroX - marginPx - spacingPx);
+  const rightX = heroX + heroD + spacingPx;
+  const rightW = Math.max(0, marginPx + usableW - rightX);
+  const regions = [
+    { x: marginPx, y: marginPx, w: usableW, h: topH, weight: 1.1, cols: 3 },
+    { x: marginPx, y: heroY, w: leftW, h: midH, weight: 1.0, cols: 1 },
+    { x: rightX, y: heroY, w: rightW, h: midH, weight: 1.0, cols: 1 },
+    { x: marginPx, y: bottomY, w: usableW, h: bottomH, weight: 1.25, cols: 3 },
+  ].filter((r) => r.w > 16 && r.h > 16);
+
+  const counts = distributeCounts(imageCount - 1, regions.map((r) => r.weight * r.w * r.h));
+  const slots: CollageSlot[] = [hero];
+  regions.forEach((r, i) => slots.push(...gridRegion(counts[i], r.x, r.y, r.w, r.h, spacingPx, canvasW, canvasH, r.cols)));
+  return slots.slice(0, imageCount);
 }
 
 // ─── Diamond center layout ───────────────────────────────────────────────────
 
 /**
- * Central image rotated 45° (diamond) with surrounding rectangular cells.
- * The center diamond appears to "float" above the surrounding grid.
+ * Stable centre-diamond composition. Surrounding cells are kept outside the
+ * diamond bounding box so photos do not accidentally stack on top of each other.
  */
 export function buildDiamondCenterSlots(
   imageCount: number,
@@ -169,53 +426,49 @@ export function buildDiamondCenterSlots(
 
   const usableW = canvasW - 2 * marginPx;
   const usableH = canvasH - 2 * marginPx;
-  const cxPx = canvasW / 2;
-  const cyPx = canvasH / 2;
-
-  // Diamond (rotated square) in the center
-  // A square rotated 45° with diagonal = D occupies D×D bounding box
-  // Use ~38% of canvas width as the diamond diagonal
-  const diamondDiag = Math.min(usableW, usableH) * 0.42;
-  const diamondSide = diamondDiag / Math.SQRT2; // side of the actual square before rotation
+  const cx = marginPx + usableW / 2;
+  const cy = marginPx + usableH / 2;
+  const diamondD = Math.min(usableW, usableH) * 0.34;
+  const dx = cx - diamondD / 2;
+  const dy = cy - diamondD / 2;
 
   const diamondSlot = createCollageSlot({
     type: "image",
     role: "hero",
-    x: (cxPx - diamondDiag / 2) / canvasW,
-    y: (cyPx - diamondDiag / 2) / canvasH,
-    w: diamondDiag / canvasW,
-    h: diamondDiag / canvasH,
-    rotationDeg: 45,
-    zIndex: imageCount, // on top
+    shape: "polygon",
+    shapeParams: { vertices: [
+      { x: 0.5, y: 0 },
+      { x: 1, y: 0.5 },
+      { x: 0.5, y: 1 },
+      { x: 0, y: 0.5 }
+    ] },
+    x: dx / canvasW,
+    y: dy / canvasH,
+    w: diamondD / canvasW,
+    h: diamondD / canvasH,
+    zIndex: 20,
+    label: "יהלום מרכזי"
   });
 
-  if (imageCount === 1) return [diamondSlot];
+  const topH = Math.max(0, dy - marginPx - spacingPx);
+  const bottomY = dy + diamondD + spacingPx;
+  const bottomH = Math.max(0, marginPx + usableH - bottomY);
+  const leftW = Math.max(0, dx - marginPx - spacingPx);
+  const rightX = dx + diamondD + spacingPx;
+  const rightW = Math.max(0, marginPx + usableW - rightX);
+  const middleH = diamondD;
 
-  // Surrounding cells fill the 4 corners + edges
-  // Place 4 triangular/corner zones — use simple grid and take cells that don't
-  // overlap too much with the diamond
-  const surrounding = imageCount - 1;
+  const regions = [
+    { x: marginPx, y: marginPx, w: usableW, h: topH, weight: 1.1, cols: 2 },
+    { x: marginPx, y: dy, w: leftW, h: middleH, weight: 0.9, cols: 1 },
+    { x: rightX, y: dy, w: rightW, h: middleH, weight: 0.9, cols: 1 },
+    { x: marginPx, y: bottomY, w: usableW, h: bottomH, weight: 1.2, cols: 2 },
+  ].filter((r) => r.w > 16 && r.h > 16);
 
-  // Simple: place surrounding cells in a grid, the diamond overlaps them visually
-  // Use a 2-column grid on each side (left-half, right-half)
-  const halfSurrounding = Math.ceil(surrounding / 2);
-  const leftCount = halfSurrounding;
-  const rightCount = surrounding - leftCount;
-
-  const leftSlots = makeSimpleGridSlots(
-    leftCount,
-    marginPx, marginPx,
-    (cxPx - diamondDiag / 2 - spacingPx) - marginPx, usableH,
-    spacingPx, canvasW, canvasH
-  );
-  const rightSlots = makeSimpleGridSlots(
-    rightCount,
-    cxPx + diamondDiag / 2 + spacingPx, marginPx,
-    canvasW - marginPx - (cxPx + diamondDiag / 2 + spacingPx), usableH,
-    spacingPx, canvasW, canvasH
-  );
-
-  return [diamondSlot, ...leftSlots, ...rightSlots];
+  const counts = distributeCounts(imageCount - 1, regions.map((r) => r.weight * r.w * r.h));
+  const slots: CollageSlot[] = [diamondSlot];
+  regions.forEach((r, i) => slots.push(...gridRegion(counts[i], r.x, r.y, r.w, r.h, spacingPx, canvasW, canvasH, r.cols)));
+  return slots.slice(0, imageCount);
 }
 
 /** Simple grid helper for sub-regions (no last-row-stretch, just uniform grid) */
@@ -223,20 +476,7 @@ function makeSimpleGridSlots(
   count: number, x0: number, y0: number, availW: number, availH: number,
   spacingPx: number, canvasW: number, canvasH: number
 ): CollageSlot[] {
-  if (count <= 0 || availW < 20 || availH < 20) return [];
-  const cols = Math.max(1, count <= 2 ? 1 : 2);
-  const rows = Math.ceil(count / cols);
-  const cellW = (availW - spacingPx * (cols - 1)) / cols;
-  const cellH = (availH - spacingPx * (rows - 1)) / rows;
-  return Array.from({ length: count }, (_, i) => {
-    const r = Math.floor(i / cols), c = i % cols;
-    return createCollageSlot({
-      type: "image",
-      x: (x0 + c * (cellW + spacingPx)) / canvasW,
-      y: (y0 + r * (cellH + spacingPx)) / canvasH,
-      w: cellW / canvasW, h: cellH / canvasH
-    });
-  });
+  return gridRegion(count, x0, y0, availW, availH, spacingPx, canvasW, canvasH);
 }
 
 // ─── Frame (border) layout ────────────────────────────────────────────────────

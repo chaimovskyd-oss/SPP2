@@ -143,8 +143,6 @@ export function CollageScreen({ ruleId, onBackHome }: CollageScreenProps): React
       <div className="collage-main">
         <CollageLeftPanel
           rule={rule}
-          suggestions={suggestions}
-          onSelectLayout={handleSelectLayout}
         />
 
         <main className="collage-canvas-area">
@@ -165,6 +163,8 @@ export function CollageScreen({ ruleId, onBackHome }: CollageScreenProps): React
         <CollageRightPanel
           rule={rule}
           selectedSlotId={selectedSlotId}
+          suggestions={suggestions}
+          onSelectLayout={handleSelectLayout}
         />
       </div>
     </div>

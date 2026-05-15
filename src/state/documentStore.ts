@@ -24,6 +24,7 @@ import { applyTextPresetToLayer, applyTextStylePatch, extractTextStylePatch } fr
 import { measureTextLayerSize } from "@/core/text/measurement";
 import { createCollageImageAssignment, createCollageRule as collageRuleFactory } from "@/core/collage/collageFactory";
 import { applyLayoutFamily, applyNewImagePool, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
+import { clampContentTransformToFillBounds } from "@/core/rendering/frameFitEngine";
 import type { Asset, Document, Page } from "@/types/document";
 import type { LinkedGroupPatch } from "@/core/layers/linkedGroups";
 import type { ContentTransform, FrameLayer, LinkedGroup, VisualLayer } from "@/types/layers";
@@ -59,6 +60,7 @@ export interface DocumentState {
   reorderPages: (pageIds: string[]) => void;
   updatePage: (page: Page) => void;
   addAsset: (asset: Asset) => void;
+  updateAsset: (asset: Asset) => void;
   addLayer: (pageId: string, layer: VisualLayer) => void;
   addAssetAndLayer: (pageId: string, asset: Asset, layer: VisualLayer) => void;
   updateLayer: (pageId: string, layer: VisualLayer) => void;
@@ -93,9 +95,12 @@ export interface DocumentState {
   swapCollageImages: (ruleId: ID, slotIdA: ID, slotIdB: ID) => void;
   updateCollageImageTransform: (ruleId: ID, slotId: ID, transform: ContentTransform) => void;
   updateCollageImageAdjustments: (ruleId: ID, slotId: ID, adjustments: Partial<CollageImageAssignment["colorAdjustments"]>) => void;
+  updateCollageImageEditParams: (ruleId: ID, slotId: ID, params: Record<string, number>) => void;
   updateCollageImageEffects: (ruleId: ID, slotId: ID, effects: VisualEffectStack) => void;
   updateCollageEdgeConfig: (ruleId: ID, slotId: ID, edgeConfig: CollageEdgeConfig) => void;
+  applyCollageEdgeConfigToAll: (ruleId: ID, edgeConfig: CollageEdgeConfig) => void;
   updateCollageCanvasSettings: (ruleId: ID, settings: Partial<CollageCanvasSettings>) => void;
+  updateCollageCachedSlots: (ruleId: ID, newSlots: import("@/types/collage").CollageSlot[]) => void;
 }
 
 export const useDocumentStore = create<DocumentState>((set, get) => ({
@@ -207,6 +212,11 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       }
       return commitDocumentAction(state, addAssetAction(asset));
     }),
+  updateAsset: (asset) =>
+    get().applyDocumentChange("UPDATE_ASSET", (doc) => ({
+      ...doc,
+      assets: doc.assets.map((a) => (a.id === asset.id ? asset : a))
+    })),
   addLayer: (pageId, layer) =>
     set((state) => {
       if (state.document === null) {
@@ -594,11 +604,91 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
   swapCollageImages: (ruleId, slotIdA, slotIdB) =>
     set((state) => {
-      if (state.document === null) return state;
+      if (state.document === null || slotIdA === slotIdB) return state;
       const rule = state.document.collageRules.find((r) => r.id === ruleId);
       if (!rule) return state;
       const assignA = rule.imageAssignments.find((a) => a.slotId === slotIdA);
       const assignB = rule.imageAssignments.find((a) => a.slotId === slotIdB);
+      if (assignA === undefined || assignB === undefined) return state;
+
+      // Keep non-null aliases for nested helper functions.
+      // TypeScript does not reliably preserve narrowing for variables captured by closures.
+      const swapA = assignA;
+      const swapB = assignB;
+      const resetContentTransform: ContentTransform = { version: 1, offsetX: 0, offsetY: 0, scale: 1, rotation: 0 };
+
+      const page = state.document.pages.find((p) => p.id === rule.pageId);
+      if (!page) return state;
+
+      function swapAssignment(a: CollageImageAssignment): CollageImageAssignment {
+        if (a.slotId === slotIdA) {
+          return {
+            ...a,
+            assetId: swapB.assetId,
+            contentTransform: resetContentTransform,
+            fitMode: swapB.fitMode,
+            colorAdjustments: swapB.colorAdjustments,
+            visualEffects: swapB.visualEffects,
+            edgeConfig: swapB.edgeConfig,
+            hasManualCrop: swapB.hasManualCrop,
+            hasManualTransform: false,
+            imageEditParams: swapB.imageEditParams
+          } as CollageImageAssignment;
+        }
+        if (a.slotId === slotIdB) {
+          return {
+            ...a,
+            assetId: swapA.assetId,
+            contentTransform: resetContentTransform,
+            fitMode: swapA.fitMode,
+            colorAdjustments: swapA.colorAdjustments,
+            visualEffects: swapA.visualEffects,
+            edgeConfig: swapA.edgeConfig,
+            hasManualCrop: swapA.hasManualCrop,
+            hasManualTransform: false,
+            imageEditParams: swapA.imageEditParams
+          } as CollageImageAssignment;
+        }
+        return a;
+      }
+
+      function syncLayerForSwap(layer: VisualLayer): VisualLayer {
+        if (layer.type !== "frame") return layer;
+        const meta = layer.metadata["collageFrame"] as { collageRuleId?: string; slotId?: string } | undefined;
+        if (meta?.collageRuleId !== ruleId) return layer;
+        if (meta.slotId === slotIdA) {
+          return {
+            ...layer,
+            imageAssetId: swapB.assetId,
+            contentTransform: resetContentTransform,
+            fitMode: swapB.fitMode,
+            visualEffects: swapB.visualEffects ?? layer.visualEffects,
+            metadata: {
+              ...layer.metadata,
+              collageColorAdj: swapB.colorAdjustments as unknown as import("@/types/primitives").JsonValue,
+              collageImageEditParams: swapB.imageEditParams as unknown as import("@/types/primitives").JsonValue,
+              collageEdgeConfig: swapB.edgeConfig as unknown as import("@/types/primitives").JsonValue
+            }
+          } as VisualLayer;
+        }
+        if (meta.slotId === slotIdB) {
+          return {
+            ...layer,
+            imageAssetId: swapA.assetId,
+            contentTransform: resetContentTransform,
+            fitMode: swapA.fitMode,
+            visualEffects: swapA.visualEffects ?? layer.visualEffects,
+            metadata: {
+              ...layer.metadata,
+              collageColorAdj: swapA.colorAdjustments as unknown as import("@/types/primitives").JsonValue,
+              collageImageEditParams: swapA.imageEditParams as unknown as import("@/types/primitives").JsonValue,
+              collageEdgeConfig: swapA.edgeConfig as unknown as import("@/types/primitives").JsonValue
+            }
+          } as VisualLayer;
+        }
+        return layer;
+      }
+
       return commitDocumentAction(
         state,
         createInlineAction(
@@ -606,23 +696,18 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
           (doc) => ({
             ...doc,
             collageRules: doc.collageRules.map((r) =>
-              r.id === ruleId
-                ? {
-                    ...r,
-                    imageAssignments: r.imageAssignments.map((a) => {
-                      if (a.slotId === slotIdA && assignB) return { ...a, assetId: assignB.assetId };
-                      if (a.slotId === slotIdB && assignA) return { ...a, assetId: assignA.assetId };
-                      return a;
-                    })
-                  }
-                : r
+              r.id === ruleId ? { ...r, imageAssignments: r.imageAssignments.map(swapAssignment) } : r
+            ),
+            pages: doc.pages.map((p) =>
+              p.id === rule.pageId ? { ...p, layers: p.layers.map(syncLayerForSwap) } : p
             )
           }),
           (doc) => ({
             ...doc,
             collageRules: doc.collageRules.map((r) =>
               r.id === ruleId ? { ...r, imageAssignments: rule.imageAssignments } : r
-            )
+            ),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? page : p)
           })
         )
       );
@@ -668,9 +753,9 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         state,
         createInlineAction(
           "UpdateCollageImageAdjustmentsAction",
-          (doc) => ({
-            ...doc,
-            collageRules: doc.collageRules.map((r) =>
+          (doc) => {
+            // 1. Update the CollageRule assignment
+            const updatedRules = doc.collageRules.map((r) =>
               r.id === ruleId
                 ? {
                     ...r,
@@ -681,19 +766,82 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
                     )
                   }
                 : r
-            )
-          }),
+            );
+            // Resolve the merged adj so we can mirror it into FrameLayer metadata
+            const updatedAdj = updatedRules
+              .find((r) => r.id === ruleId)
+              ?.imageAssignments.find((a) => a.slotId === slotId)
+              ?.colorAdjustments;
+
+            // 2. Mirror adj → FrameLayer.metadata.collageColorAdj so FrameNode can
+            //    apply Konva filters without a separate store lookup at render time.
+            const updatedPages = updatedAdj != null
+              ? doc.pages.map((p) => ({
+                  ...p,
+                  layers: p.layers.map((l) => {
+                    const cf = (l.metadata as Record<string, unknown>)["collageFrame"] as
+                      | { slotId?: string }
+                      | undefined;
+                    if (l.type !== "frame" || cf?.slotId !== slotId) return l;
+                    return {
+                      ...l,
+                      metadata: { ...l.metadata, collageColorAdj: updatedAdj as unknown as import("@/types/primitives").JsonValue }
+                    };
+                  })
+                }))
+              : doc.pages;
+
+            return { ...doc, collageRules: updatedRules, pages: updatedPages };
+          },
           (doc) => {
             const prev = state.document!.collageRules.find((r) => r.id === ruleId);
+            const prevAdj = prev?.imageAssignments.find((a) => a.slotId === slotId)?.colorAdjustments;
             return {
               ...doc,
               collageRules: doc.collageRules.map((r) =>
                 r.id === ruleId ? { ...r, imageAssignments: prev?.imageAssignments ?? r.imageAssignments } : r
-              )
+              ),
+              pages: prevAdj != null
+                ? doc.pages.map((p) => ({
+                    ...p,
+                    layers: p.layers.map((l) => {
+                      const cf = (l.metadata as Record<string, unknown>)["collageFrame"] as
+                        | { slotId?: string }
+                        | undefined;
+                      if (l.type !== "frame" || cf?.slotId !== slotId) return l;
+                      return { ...l, metadata: { ...l.metadata, collageColorAdj: prevAdj as unknown as import("@/types/primitives").JsonValue } };
+                    })
+                  }))
+                : doc.pages
             };
           }
         )
       );
+    }),
+
+  updateCollageImageEditParams: (ruleId, slotId, params) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const updatedRules = state.document.collageRules.map((r) =>
+        r.id === ruleId
+          ? { ...r, imageAssignments: r.imageAssignments.map((a) => a.slotId === slotId ? { ...a, imageEditParams: params } : a) }
+          : r
+      );
+      // Mirror to frame metadata so FrameNode can read without store lookup
+      const updatedPages = state.document.pages.map((p) => ({
+        ...p,
+        layers: p.layers.map((l) => {
+          if (l.type !== "frame") return l;
+          const cf = l.metadata["collageFrame"] as { slotId?: string; collageRuleId?: string } | undefined;
+          if (cf?.collageRuleId !== ruleId || cf?.slotId !== slotId) return l;
+          return { ...l, metadata: { ...l.metadata, collageImageEditParams: params as unknown as import("@/types/primitives").JsonValue } };
+        })
+      }));
+      return {
+        ...state,
+        document: { ...state.document, collageRules: updatedRules, pages: updatedPages },
+        revision: state.revision + 1,
+      };
     }),
 
   updateCollageImageEffects: (ruleId, slotId, effects) =>
@@ -732,34 +880,78 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   updateCollageEdgeConfig: (ruleId, slotId, edgeConfig) =>
     set((state) => {
       if (state.document === null) return state;
+      const prevEdgeConfig = state.document.collageRules
+        .find((r) => r.id === ruleId)
+        ?.imageAssignments.find((a) => a.slotId === slotId)
+        ?.edgeConfig;
       return commitDocumentAction(
         state,
         createInlineAction(
           "UpdateCollageEdgeConfigAction",
-          (doc) => ({
-            ...doc,
-            collageRules: doc.collageRules.map((r) =>
+          (doc) => {
+            const updatedRules = doc.collageRules.map((r) =>
               r.id === ruleId
-                ? {
-                    ...r,
-                    imageAssignments: r.imageAssignments.map((a) =>
-                      a.slotId === slotId ? { ...a, edgeConfig } : a
-                    )
-                  }
+                ? { ...r, imageAssignments: r.imageAssignments.map((a) => a.slotId === slotId ? { ...a, edgeConfig } : a) }
                 : r
-            )
-          }),
+            );
+            // Mirror edgeConfig → FrameLayer.metadata.collageEdgeConfig so FrameNode can render it
+            const updatedPages = doc.pages.map((p) => ({
+              ...p,
+              layers: p.layers.map((l) => {
+                if (l.type !== "frame") return l;
+                const cf = l.metadata["collageFrame"] as { slotId?: string; collageRuleId?: string } | undefined;
+                if (cf?.collageRuleId !== ruleId || cf?.slotId !== slotId) return l;
+                return { ...l, metadata: { ...l.metadata, collageEdgeConfig: edgeConfig as unknown as import("@/types/primitives").JsonValue } };
+              })
+            }));
+            return { ...doc, collageRules: updatedRules, pages: updatedPages };
+          },
           (doc) => {
             const prev = state.document!.collageRules.find((r) => r.id === ruleId);
+            const revertedPages = doc.pages.map((p) => ({
+              ...p,
+              layers: p.layers.map((l) => {
+                if (l.type !== "frame") return l;
+                const cf = l.metadata["collageFrame"] as { slotId?: string; collageRuleId?: string } | undefined;
+                if (cf?.collageRuleId !== ruleId || cf?.slotId !== slotId) return l;
+                return { ...l, metadata: { ...l.metadata, collageEdgeConfig: (prevEdgeConfig ?? null) as unknown as import("@/types/primitives").JsonValue } };
+              })
+            }));
             return {
               ...doc,
               collageRules: doc.collageRules.map((r) =>
                 r.id === ruleId ? { ...r, imageAssignments: prev?.imageAssignments ?? r.imageAssignments } : r
-              )
+              ),
+              pages: revertedPages
             };
           }
         )
       );
+    }),
+
+  applyCollageEdgeConfigToAll: (ruleId, edgeConfig) =>
+    set((state) => {
+      if (state.document === null) return state;
+      // Update all assignments' edgeConfig and mirror to frame layers
+      const updatedRules = state.document.collageRules.map((r) =>
+        r.id === ruleId
+          ? { ...r, imageAssignments: r.imageAssignments.map((a) => ({ ...a, edgeConfig })) }
+          : r
+      );
+      const updatedPages = state.document.pages.map((p) => ({
+        ...p,
+        layers: p.layers.map((l) => {
+          if (l.type !== "frame") return l;
+          const cf = l.metadata["collageFrame"] as { collageRuleId?: string } | undefined;
+          if (cf?.collageRuleId !== ruleId) return l;
+          return { ...l, metadata: { ...l.metadata, collageEdgeConfig: edgeConfig as unknown as import("@/types/primitives").JsonValue } };
+        })
+      }));
+      return {
+        ...state,
+        document: { ...state.document, collageRules: updatedRules, pages: updatedPages },
+        revision: state.revision + 1,
+      };
     }),
 
   updateCollageCanvasSettings: (ruleId, settings) =>
@@ -784,6 +976,45 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
           })
         )
       );
+    }),
+
+  updateCollageCachedSlots: (ruleId, newSlots) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const rule = state.document.collageRules.find((r) => r.id === ruleId);
+      if (!rule) return state;
+      const page = state.document.pages.find((p) => p.id === rule.pageId);
+      if (!page) return state;
+
+      // Re-clamp every assignment's contentTransform so images still fill their new cell size
+      const reclampedAssignments = rule.imageAssignments.map((assignment) => {
+        const slot = newSlots.find((s) => s.id === assignment.slotId);
+        if (!slot) return assignment;
+        const asset = state.document!.assets.find((a) => a.id === assignment.assetId);
+        if (!asset?.width || !asset?.height) return assignment;
+        const slotW = slot.w * page.width;
+        const slotH = slot.h * page.height;
+        const clamped = clampContentTransformToFillBounds(
+          assignment.contentTransform,
+          slotW, slotH,
+          asset.width, asset.height,
+          assignment.fitMode, 0
+        );
+        return { ...assignment, contentTransform: clamped };
+      });
+
+      const updatedRule = { ...rule, cachedSlots: newSlots, imageAssignments: reclampedAssignments };
+      const { page: updatedPage, frameIds } = syncFrameLayersToPage(page, updatedRule, page.width, page.height);
+      const finalRule = { ...updatedRule, frameIds };
+      return {
+        ...state,
+        document: {
+          ...state.document,
+          collageRules: state.document.collageRules.map((r) => r.id === ruleId ? finalRule : r),
+          pages: state.document.pages.map((p) => p.id === rule.pageId ? updatedPage : p),
+        },
+        revision: state.revision + 1,
+      };
     }),
 
   undo: () =>

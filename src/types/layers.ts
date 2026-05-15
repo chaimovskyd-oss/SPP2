@@ -77,7 +77,7 @@ export interface FaceAnchorData extends VersionedEntity {
 export interface FrameLayer extends BaseLayer {
   type: "frame";
   behaviorMode: FrameBehaviorMode;
-  shape: "rect" | "circle" | "ellipse" | "polygon" | "svgPath" | "customMask";
+  shape: "rect" | "circle" | "ellipse" | "polygon" | "svgPath" | "customMask" | "puzzle";
   contentType: "image" | "text" | "mixed" | "empty";
   imageAssetId?: ID;
   textLayerId?: ID;

@@ -3,20 +3,46 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "SPP v2 architecture proof for a modular print-design Electron app.",
-  "main": "dist-electron/main.js",
+  "description": "SPP v2 architecture proof for a modular print-design Electron app",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
+    "electron": "vite build && electron .",
+    "pack": "vite build && electron-builder --dir --win dir",
+    "dist": "vite build && electron-builder --win portable",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
+  "build": {
+    "appId": "com.hadish.spp2",
+    "productName": "SPP2",
+    "asar": false,
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "image.editor.engine/**/*",
+      "print.preview.engine/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        "dir",
+        "portable"
+      ]
+    }
+  },
   "dependencies": {
+    "@types/qrcode": "^1.5.6",
     "@vitejs/plugin-react": "^5.1.1",
     "konva": "^10.0.12",
     "lucide-react": "^0.555.0",
     "pdf-lib": "^1.17.1",
+    "qrcode": "^1.5.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-konva": "^19.0.10",
@@ -26,9 +52,12 @@
     "@playwright/test": "^1.59.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
-    "electron": "^39.2.7",
+    "concurrently": "^9.2.1",
+    "electron": "^39.8.10",
+    "electron-builder": "^26.8.1",
     "typescript": "^5.9.3",
     "vite": "^7.2.4",
-    "vitest": "^4.0.14"
+    "vitest": "^4.0.14",
+    "wait-on": "^9.0.10"
   }
 }

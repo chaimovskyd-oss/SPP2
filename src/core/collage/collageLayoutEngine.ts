@@ -2,6 +2,7 @@ import { createCollageSlot } from "./collageFactory";
 import { computeSplitTreeSlots, buildSplitTree } from "./collageSplitTree";
 import { buildDiagonalBands } from "./collageDiagonal";
 import { buildShapedCollageSlots, buildDiamondCenterSlots, buildFrameCollageSlots, buildPlusCrossSlots } from "./collageShapedLayouts";
+import { buildPuzzleSlots } from "./collagePuzzle";
 import type { CollageLayoutFamily, CollageLayoutParams, CollageSlot } from "@/types/collage";
 
 // ─── Core building block (port of Python _make_grid_cells) ──────────────────
@@ -314,6 +315,10 @@ function generatePlusCrossSlots(p: CollageLayoutParams): CollageSlot[] {
   return buildPlusCrossSlots(p.imageCount, p.canvasW, p.canvasH, p.spacingPx, p.marginPx);
 }
 
+function generatePuzzleSlots(p: CollageLayoutParams): CollageSlot[] {
+  return buildPuzzleSlots({ ...p, seed: 42 });
+}
+
 function generateRingCollageSlots(p: CollageLayoutParams): CollageSlot[] {
   // Ring segments arranged in a donut
   const { imageCount: n, canvasW, canvasH } = p;
@@ -374,6 +379,7 @@ export const LAYOUT_REGISTRY: CollageLayoutFamilyDef[] = [
   { family: "diamondCenter",   name: "Diamond",         nameHe: "יהלום",          minImages: 2,  maxImages: 20,  mode: "creative", generate: generateDiamondCenterSlots },
   { family: "frameCollage",    name: "Frame",           nameHe: "מסגרת",          minImages: 4,  maxImages: 24,  mode: "creative", generate: generateFrameCollageSlots },
   { family: "plusCross",       name: "Plus / Cross",    nameHe: "צלב",            minImages: 5,  maxImages: 20,  mode: "creative", generate: generatePlusCrossSlots },
+  { family: "puzzle",          name: "Puzzle",          nameHe: "פאזל",            minImages: 1,  maxImages: 50,  mode: "both",     generate: generatePuzzleSlots },
 ];
 
 export function computeSlots(family: CollageLayoutFamily, params: CollageLayoutParams): CollageSlot[] {

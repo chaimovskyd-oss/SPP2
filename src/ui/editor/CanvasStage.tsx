@@ -13,7 +13,7 @@ import type { Asset, Page } from "@/types/document";
 import type { Rect as RectType } from "@/types/primitives";
 import type { TextLayer, VisualLayer } from "@/types/layers";
 import { SCREEN_HELPER_NODE_NAME } from "./canvasNodeNames";
-import { KonvaLayerNode } from "./KonvaLayerNode";
+import { KonvaLayerNode, type CanvasContextMenuTarget } from "./KonvaLayerNode";
 
 // ─── Guide color palette ──────────────────────────────────────────────────────
 const GUIDE_COLORS: Partial<Record<SnapLineKind, string>> = {
@@ -38,6 +38,7 @@ interface CanvasStageProps {
   editingLayerId: string | null;
   onBeginTextEdit: (layerId: string) => void;
   onEndTextEdit: () => void;
+  onLayerContextMenu?: (target: CanvasContextMenuTarget) => void;
   stageRef: React.RefObject<Konva.Stage | null>;
 }
 
@@ -53,6 +54,7 @@ export function CanvasStage({
   editingLayerId,
   onBeginTextEdit,
   onEndTextEdit,
+  onLayerContextMenu,
   stageRef
 }: CanvasStageProps): React.ReactElement {
   const transformerRef = useRef<Konva.Transformer>(null);
@@ -400,6 +402,7 @@ export function CanvasStage({
                 onBeginTextEdit={onBeginTextEdit}
                 onChange={handleLayerChange}
                 onSelect={(layerId) => onSelectLayer(layerId)}
+                onContextMenu={onLayerContextMenu}
               />
             ))}
           {marqueeRect !== null ? (

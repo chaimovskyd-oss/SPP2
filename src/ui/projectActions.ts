@@ -266,6 +266,40 @@ export function exportStageJpg(stage: Konva.Stage, documentName: string, page: P
   downloadDataUrl(`${safeFilename(documentName)}.jpg`, dataUrl);
 }
 
+export interface PrintableStageImage {
+  dataUrl: string;
+  mimeType: "image/png" | "image/jpeg";
+  widthPx: number;
+  heightPx: number;
+  widthMm: number;
+  heightMm: number;
+  dpi: number;
+}
+
+/**
+ * Render the current Konva stage as a clean print image without helper nodes.
+ * Unlike exportStagePng/exportStageJpg, this does not download anything.
+ * It returns a data URL that Electron can write to a temp file and pass to
+ * the Python Print Preview module.
+ */
+export function exportStagePrintImage(
+  stage: Konva.Stage,
+  page: Page,
+  mimeType: "image/png" | "image/jpeg" = "image/png"
+): PrintableStageImage {
+  const dataUrl = renderPrintableStage(stage, mimeType, page);
+  const dpi = page.setup.dpi || 300;
+  return {
+    dataUrl,
+    mimeType,
+    widthPx: page.width,
+    heightPx: page.height,
+    widthMm: (page.width / dpi) * 25.4,
+    heightMm: (page.height / dpi) * 25.4,
+    dpi
+  };
+}
+
 export async function exportStagePdf(stage: Konva.Stage, documentName: string, sourcePage: Page): Promise<void> {
   const { PDFDocument } = await import("pdf-lib");
   const dataUrl = renderPrintableStage(stage, "image/png", sourcePage);
