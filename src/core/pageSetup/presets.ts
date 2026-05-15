@@ -24,6 +24,7 @@ export const PAGE_PRESETS: PagePreset[] = [
   { id: "photo_10x15", name: "10x15", category: "photo", width: 100, height: 150, units: "mm", dpi: 300, margins: 0, printIntent: "photo" },
   { id: "photo_13x18", name: "13x18", category: "photo", width: 130, height: 180, units: "mm", dpi: 300, margins: 0, printIntent: "photo" },
   { id: "photo_15x20", name: "15x20", category: "photo", width: 150, height: 200, units: "mm", dpi: 300, margins: 0, printIntent: "photo" },
+  { id: "photo_20x20", name: "20×20", category: "photo", width: 200, height: 200, units: "mm", dpi: 300, margins: 0, printIntent: "photo" },
   { id: "photo_20x30", name: "20x30", category: "photo", width: 200, height: 300, units: "mm", dpi: 300, margins: 0, printIntent: "photo" },
   { id: "instagram", name: "Instagram", category: "social", width: 1080, height: 1350, units: "px", dpi: 72, margins: 0, printIntent: "photo" },
   { id: "story", name: "סטורי", category: "social", width: 1080, height: 1920, units: "px", dpi: 72, margins: 0, printIntent: "photo" },

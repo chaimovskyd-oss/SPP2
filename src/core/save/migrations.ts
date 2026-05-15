@@ -2,6 +2,7 @@ import { defaultViewportState } from "@/core/defaults";
 import { createProjectMetadata } from "@/core/projectMetadata";
 import { migrateProjectTextLayers } from "@/core/text/migration";
 import { APP_VERSION, PROJECT_FORMAT_VERSION, PROJECT_SCHEMA_VERSION, type ProjectEnvelope } from "@/types/project";
+import type { CollageRule } from "@/types/collage";
 
 export interface ProjectMigration {
   fromSchema: number;
@@ -93,6 +94,56 @@ export const PROJECT_MIGRATIONS: ProjectMigration[] = [
         maskPresets: project.document.maskPresets ?? []
       }
     })
+  },
+  {
+    fromSchema: 5,
+    toSchema: 6,
+    description: "Add Collage Mode rule collection (Phase 5)",
+    migrate: (project) => ({
+      ...project,
+      schemaVersion: 6,
+      document: {
+        ...project.document,
+        collageRules: ((project.document as unknown) as Record<string, unknown>).collageRules as CollageRule[] ?? []
+      }
+    })
+  },
+  {
+    fromSchema: 6,
+    toSchema: 7,
+    description: "Collage architecture refactor: layouts[] snapshot → activeFamily + spacingMM + marginMM + cachedSlots",
+    migrate: (project) => ({
+      ...project,
+      schemaVersion: 7,
+      document: {
+        ...project.document,
+        collageRules: (
+          (((project.document as unknown) as Record<string, unknown>).collageRules as Array<Record<string, unknown>> | undefined) ?? []
+        ).map((rule) => {
+          // If rule already has the new shape, pass through
+          if (rule.activeFamily !== undefined && rule.cachedSlots !== undefined) return rule;
+
+          // Old shape: layouts[] + activeLayoutId
+          const layouts = (rule.layouts as Array<Record<string, unknown>> | undefined) ?? [];
+          const activeLayoutId = rule.activeLayoutId as string | undefined;
+          const activeLayout = layouts.find((l) => l.id === activeLayoutId) ?? layouts[0];
+          const cachedSlots = (activeLayout?.slots as CollageRule["cachedSlots"] | undefined) ?? [];
+          const activeFamily = (activeLayout?.family as CollageRule["activeFamily"] | undefined) ?? "grid";
+
+          const { layouts: _layouts, activeLayoutId: _activeLayoutId, ...rest } = rule;
+          void _layouts; void _activeLayoutId;
+
+          return {
+            ...rest,
+            activeFamily,
+            spacingMM: 3,
+            marginMM: 4,
+            cachedSlots,
+            splitTree: (activeLayout?.splitTree as CollageRule["splitTree"] | undefined) ?? undefined,
+          };
+        }) as unknown as CollageRule[]
+      }
+    })
   }
 ];
 
@@ -117,6 +168,7 @@ export function normalizeProjectEnvelope(input: unknown): ProjectEnvelope {
       maskImageAssignments: input.document.maskImageAssignments ?? [],
       maskTextOverlayRules: input.document.maskTextOverlayRules ?? [],
       maskPresets: input.document.maskPresets ?? [],
+      collageRules: ((input.document as unknown) as Record<string, unknown>).collageRules as CollageRule[] ?? [],
       viewport: input.document.viewport ?? { ...defaultViewportState },
       assets: input.document.assets ?? [],
       pages: input.document.pages.map((page) => ({

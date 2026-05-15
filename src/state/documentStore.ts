@@ -22,10 +22,22 @@ import { applyLinkedGroupPatch, withMemberOverride, removeLinkedGroupMember } fr
 import { touchProjectMetadata } from "@/core/projectMetadata";
 import { applyTextPresetToLayer, applyTextStylePatch, extractTextStylePatch } from "@/core/text/presets";
 import { measureTextLayerSize } from "@/core/text/measurement";
+import { createCollageImageAssignment, createCollageRule as collageRuleFactory } from "@/core/collage/collageFactory";
+import { applyLayoutFamily, applyNewImagePool, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import type { Asset, Document, Page } from "@/types/document";
 import type { LinkedGroupPatch } from "@/core/layers/linkedGroups";
 import type { ContentTransform, FrameLayer, LinkedGroup, VisualLayer } from "@/types/layers";
 import type { TextPreset, TextStylePatch } from "@/types/text";
+import type {
+  CollageCanvasSettings,
+  CollageEdgeConfig,
+  CollageImageAssignment,
+  CollageLayout,
+  CollageLayoutFamily,
+  CollageRule
+} from "@/types/collage";
+import type { ID } from "@/types/primitives";
+import type { VisualEffectStack } from "@/types/visualEffects";
 
 export interface DocumentState {
   document: Document | null;
@@ -67,6 +79,23 @@ export interface DocumentState {
   applyDocumentChange: (type: string, updater: (document: Document) => Document, activePageId?: string | null) => void;
   undo: () => void;
   redo: () => void;
+  // ─── Collage actions ─────────────────────────────────────────────────────
+  /** Apply a new layout family AND remap assignments by index AND sync FrameLayers — one undoable op */
+  applyCollageLayoutFamily: (ruleId: ID, family: CollageLayoutFamily, canvasW: number, canvasH: number) => void;
+  createCollageRule: (pageId: ID, firstLayout: CollageLayout, assetIds: ID[]) => void;
+  deleteCollageRule: (ruleId: ID) => void;
+  setActiveCollageLayout: (ruleId: ID, layoutId: ID) => void;
+  setCollageLayouts: (ruleId: ID, layouts: CollageLayout[]) => void;
+  addImagesToCollage: (ruleId: ID, assetIds: ID[]) => void;
+  removeImageFromCollage: (ruleId: ID, assetId: ID) => void;
+  assignImageToSlot: (ruleId: ID, slotId: ID, assetId: ID) => void;
+  removeImageFromSlot: (ruleId: ID, slotId: ID) => void;
+  swapCollageImages: (ruleId: ID, slotIdA: ID, slotIdB: ID) => void;
+  updateCollageImageTransform: (ruleId: ID, slotId: ID, transform: ContentTransform) => void;
+  updateCollageImageAdjustments: (ruleId: ID, slotId: ID, adjustments: Partial<CollageImageAssignment["colorAdjustments"]>) => void;
+  updateCollageImageEffects: (ruleId: ID, slotId: ID, effects: VisualEffectStack) => void;
+  updateCollageEdgeConfig: (ruleId: ID, slotId: ID, edgeConfig: CollageEdgeConfig) => void;
+  updateCollageCanvasSettings: (ruleId: ID, settings: Partial<CollageCanvasSettings>) => void;
 }
 
 export const useDocumentStore = create<DocumentState>((set, get) => ({
@@ -330,6 +359,433 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       const updated = removeLinkedGroupMember(group, memberId);
       return { linkedGroups: state.linkedGroups.map((g) => (g.id === groupId ? updated : g)) };
     }),
+  // ─── Collage actions ─────────────────────────────────────────────────────
+  applyCollageLayoutFamily: (ruleId, family, canvasW, canvasH) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const rule = state.document.collageRules.find((r) => r.id === ruleId);
+      if (!rule) return state;
+      const page = state.document.pages.find((p) => p.id === rule.pageId);
+      if (!page) return state;
+
+      const dpi = page.setup?.dpi ?? 300;
+      const newRule = applyLayoutFamily(rule, family, canvasW, canvasH, dpi);
+      const { page: newPage, frameIds } = syncFrameLayersToPage(page, newRule, canvasW, canvasH);
+      const finalRule = { ...newRule, frameIds };
+
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "ApplyCollageLayoutFamilyAction",
+          (doc) => ({
+            ...doc,
+            collageRules: doc.collageRules.map((r) => r.id === ruleId ? finalRule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? newPage : p),
+          }),
+          (doc) => {
+            // undo: restore original rule and re-sync frames
+            const { page: origPage } = syncFrameLayersToPage(
+              doc.pages.find((p) => p.id === rule.pageId) ?? page,
+              rule,
+              canvasW,
+              canvasH
+            );
+            return {
+              ...doc,
+              collageRules: doc.collageRules.map((r) => r.id === ruleId ? rule : r),
+              pages: doc.pages.map((p) => p.id === rule.pageId ? origPage : p),
+            };
+          }
+        )
+      );
+    }),
+
+  createCollageRule: (pageId, firstLayout, assetIds) =>
+    set((state) => {
+      if (state.document === null) return state;
+      if (state.document.collageRules.some((r) => r.pageId === pageId)) {
+        console.warn("createCollageRule: page already has a CollageRule");
+        return state;
+      }
+      const rule = collageRuleFactory(pageId, firstLayout.family, firstLayout.slots, assetIds);
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "CreateCollageRuleAction",
+          (doc) => ({ ...doc, collageRules: [...doc.collageRules, rule] }),
+          (doc) => ({ ...doc, collageRules: doc.collageRules.filter((r) => r.id !== rule.id) })
+        )
+      );
+    }),
+
+  deleteCollageRule: (ruleId) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const rule = state.document.collageRules.find((r) => r.id === ruleId);
+      if (!rule) return state;
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "DeleteCollageRuleAction",
+          (doc) => ({
+            ...doc,
+            collageRules: doc.collageRules.filter((r) => r.id !== ruleId),
+            pages: doc.pages.map((p) =>
+              p.id === rule.pageId
+                ? { ...p, layers: p.layers.filter((l) => !rule.frameIds.includes(l.id)) }
+                : p
+            )
+          }),
+          (doc) => ({ ...doc, collageRules: [...doc.collageRules, rule] })
+        )
+      );
+    }),
+
+  setActiveCollageLayout: (_ruleId, _layoutId) => {
+    // Deprecated: use applyCollageLayoutFamily instead
+    console.warn("setActiveCollageLayout is deprecated — use applyCollageLayoutFamily");
+  },
+
+  setCollageLayouts: (_ruleId, _layouts) => {
+    // Deprecated: use applyCollageLayoutFamily instead
+    console.warn("setCollageLayouts is deprecated — use applyCollageLayoutFamily");
+  },
+
+  addImagesToCollage: (ruleId, assetIds) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const rule = state.document.collageRules.find((r) => r.id === ruleId);
+      if (!rule) return state;
+      const page = state.document.pages.find((p) => p.id === rule.pageId);
+      if (!page) return state;
+
+      const dpi = page.setup?.dpi ?? 300;
+      const newPool = [...rule.imagePool, ...assetIds.filter((id) => !rule.imagePool.includes(id))];
+      const newRule = applyNewImagePool(rule, newPool, page.width, page.height, dpi);
+      const { page: newPage, frameIds } = syncFrameLayersToPage(page, newRule, page.width, page.height);
+      const finalRule = { ...newRule, frameIds };
+
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "AddImagesToCollageAction",
+          (doc) => ({
+            ...doc,
+            collageRules: doc.collageRules.map((r) => r.id === ruleId ? finalRule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? newPage : p),
+          }),
+          (doc) => {
+            const { page: origPage } = syncFrameLayersToPage(
+              doc.pages.find((p) => p.id === rule.pageId) ?? page,
+              rule, page.width, page.height
+            );
+            return {
+              ...doc,
+              collageRules: doc.collageRules.map((r) => r.id === ruleId ? rule : r),
+              pages: doc.pages.map((p) => p.id === rule.pageId ? origPage : p),
+            };
+          }
+        )
+      );
+    }),
+
+  removeImageFromCollage: (ruleId, assetId) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const rule = state.document.collageRules.find((r) => r.id === ruleId);
+      if (!rule) return state;
+      const page = state.document.pages.find((p) => p.id === rule.pageId);
+      if (!page) return state;
+
+      const dpi = page.setup?.dpi ?? 300;
+      const newPool = rule.imagePool.filter((id) => id !== assetId);
+      const newRule = applyNewImagePool(rule, newPool, page.width, page.height, dpi);
+      const { page: newPage, frameIds } = syncFrameLayersToPage(page, newRule, page.width, page.height);
+      const finalRule = { ...newRule, frameIds };
+
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "RemoveImageFromCollageAction",
+          (doc) => ({
+            ...doc,
+            collageRules: doc.collageRules.map((r) => r.id === ruleId ? finalRule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? newPage : p),
+          }),
+          (doc) => {
+            const { page: origPage } = syncFrameLayersToPage(
+              doc.pages.find((p) => p.id === rule.pageId) ?? page,
+              rule, page.width, page.height
+            );
+            return {
+              ...doc,
+              collageRules: doc.collageRules.map((r) => r.id === ruleId ? rule : r),
+              pages: doc.pages.map((p) => p.id === rule.pageId ? origPage : p),
+            };
+          }
+        )
+      );
+    }),
+
+  assignImageToSlot: (ruleId, slotId, assetId) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const rule = state.document.collageRules.find((r) => r.id === ruleId);
+      if (!rule) return state;
+      const newAssignment = createCollageImageAssignment(ruleId, assetId, slotId);
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "AssignImageToSlotAction",
+          (doc) => ({
+            ...doc,
+            collageRules: doc.collageRules.map((r) =>
+              r.id === ruleId
+                ? {
+                    ...r,
+                    imageAssignments: [
+                      ...r.imageAssignments.filter((a) => a.slotId !== slotId),
+                      newAssignment
+                    ]
+                  }
+                : r
+            )
+          }),
+          (doc) => {
+            const prev = state.document!.collageRules.find((r) => r.id === ruleId);
+            return {
+              ...doc,
+              collageRules: doc.collageRules.map((r) =>
+                r.id === ruleId ? { ...r, imageAssignments: prev?.imageAssignments ?? r.imageAssignments } : r
+              )
+            };
+          }
+        )
+      );
+    }),
+
+  removeImageFromSlot: (ruleId, slotId) =>
+    set((state) => {
+      if (state.document === null) return state;
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "RemoveImageFromSlotAction",
+          (doc) => ({
+            ...doc,
+            collageRules: doc.collageRules.map((r) =>
+              r.id === ruleId
+                ? { ...r, imageAssignments: r.imageAssignments.filter((a) => a.slotId !== slotId) }
+                : r
+            )
+          }),
+          (doc) => {
+            const prev = state.document!.collageRules.find((r) => r.id === ruleId);
+            return {
+              ...doc,
+              collageRules: doc.collageRules.map((r) =>
+                r.id === ruleId ? { ...r, imageAssignments: prev?.imageAssignments ?? r.imageAssignments } : r
+              )
+            };
+          }
+        )
+      );
+    }),
+
+  swapCollageImages: (ruleId, slotIdA, slotIdB) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const rule = state.document.collageRules.find((r) => r.id === ruleId);
+      if (!rule) return state;
+      const assignA = rule.imageAssignments.find((a) => a.slotId === slotIdA);
+      const assignB = rule.imageAssignments.find((a) => a.slotId === slotIdB);
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "SwapCollageImagesAction",
+          (doc) => ({
+            ...doc,
+            collageRules: doc.collageRules.map((r) =>
+              r.id === ruleId
+                ? {
+                    ...r,
+                    imageAssignments: r.imageAssignments.map((a) => {
+                      if (a.slotId === slotIdA && assignB) return { ...a, assetId: assignB.assetId };
+                      if (a.slotId === slotIdB && assignA) return { ...a, assetId: assignA.assetId };
+                      return a;
+                    })
+                  }
+                : r
+            )
+          }),
+          (doc) => ({
+            ...doc,
+            collageRules: doc.collageRules.map((r) =>
+              r.id === ruleId ? { ...r, imageAssignments: rule.imageAssignments } : r
+            )
+          })
+        )
+      );
+    }),
+
+  updateCollageImageTransform: (ruleId, slotId, transform) =>
+    set((state) => {
+      if (state.document === null) return state;
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "UpdateCollageImageTransformAction",
+          (doc) => ({
+            ...doc,
+            collageRules: doc.collageRules.map((r) =>
+              r.id === ruleId
+                ? {
+                    ...r,
+                    imageAssignments: r.imageAssignments.map((a) =>
+                      a.slotId === slotId ? { ...a, contentTransform: transform, hasManualTransform: true } : a
+                    )
+                  }
+                : r
+            )
+          }),
+          (doc) => {
+            const prev = state.document!.collageRules.find((r) => r.id === ruleId);
+            return {
+              ...doc,
+              collageRules: doc.collageRules.map((r) =>
+                r.id === ruleId ? { ...r, imageAssignments: prev?.imageAssignments ?? r.imageAssignments } : r
+              )
+            };
+          }
+        )
+      );
+    }),
+
+  updateCollageImageAdjustments: (ruleId, slotId, adjustments) =>
+    set((state) => {
+      if (state.document === null) return state;
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "UpdateCollageImageAdjustmentsAction",
+          (doc) => ({
+            ...doc,
+            collageRules: doc.collageRules.map((r) =>
+              r.id === ruleId
+                ? {
+                    ...r,
+                    imageAssignments: r.imageAssignments.map((a) =>
+                      a.slotId === slotId
+                        ? { ...a, colorAdjustments: { ...a.colorAdjustments, ...adjustments } }
+                        : a
+                    )
+                  }
+                : r
+            )
+          }),
+          (doc) => {
+            const prev = state.document!.collageRules.find((r) => r.id === ruleId);
+            return {
+              ...doc,
+              collageRules: doc.collageRules.map((r) =>
+                r.id === ruleId ? { ...r, imageAssignments: prev?.imageAssignments ?? r.imageAssignments } : r
+              )
+            };
+          }
+        )
+      );
+    }),
+
+  updateCollageImageEffects: (ruleId, slotId, effects) =>
+    set((state) => {
+      if (state.document === null) return state;
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "UpdateCollageImageEffectsAction",
+          (doc) => ({
+            ...doc,
+            collageRules: doc.collageRules.map((r) =>
+              r.id === ruleId
+                ? {
+                    ...r,
+                    imageAssignments: r.imageAssignments.map((a) =>
+                      a.slotId === slotId ? { ...a, visualEffects: effects } : a
+                    )
+                  }
+                : r
+            )
+          }),
+          (doc) => {
+            const prev = state.document!.collageRules.find((r) => r.id === ruleId);
+            return {
+              ...doc,
+              collageRules: doc.collageRules.map((r) =>
+                r.id === ruleId ? { ...r, imageAssignments: prev?.imageAssignments ?? r.imageAssignments } : r
+              )
+            };
+          }
+        )
+      );
+    }),
+
+  updateCollageEdgeConfig: (ruleId, slotId, edgeConfig) =>
+    set((state) => {
+      if (state.document === null) return state;
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "UpdateCollageEdgeConfigAction",
+          (doc) => ({
+            ...doc,
+            collageRules: doc.collageRules.map((r) =>
+              r.id === ruleId
+                ? {
+                    ...r,
+                    imageAssignments: r.imageAssignments.map((a) =>
+                      a.slotId === slotId ? { ...a, edgeConfig } : a
+                    )
+                  }
+                : r
+            )
+          }),
+          (doc) => {
+            const prev = state.document!.collageRules.find((r) => r.id === ruleId);
+            return {
+              ...doc,
+              collageRules: doc.collageRules.map((r) =>
+                r.id === ruleId ? { ...r, imageAssignments: prev?.imageAssignments ?? r.imageAssignments } : r
+              )
+            };
+          }
+        )
+      );
+    }),
+
+  updateCollageCanvasSettings: (ruleId, settings) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const prev = state.document.collageRules.find((r) => r.id === ruleId);
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "UpdateCollageCanvasSettingsAction",
+          (doc) => ({
+            ...doc,
+            collageRules: doc.collageRules.map((r) =>
+              r.id === ruleId ? { ...r, canvasSettings: { ...r.canvasSettings, ...settings } } : r
+            )
+          }),
+          (doc) => ({
+            ...doc,
+            collageRules: doc.collageRules.map((r) =>
+              r.id === ruleId ? { ...r, canvasSettings: prev?.canvasSettings ?? r.canvasSettings } : r
+            )
+          })
+        )
+      );
+    }),
+
   undo: () =>
     set((state) => {
       if (state.document === null) {

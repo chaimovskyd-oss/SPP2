@@ -43,6 +43,7 @@ export function createDocument(options: CreateDocumentOptions): Document {
     maskImageAssignments: [],
     maskTextOverlayRules: [],
     maskPresets: [],
+    collageRules: [],
     viewport: options.viewport ?? { ...defaultViewportState },
     metadata: options.metadata ?? {}
   };

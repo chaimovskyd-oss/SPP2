@@ -104,3 +104,30 @@ export const DEFAULT_SHORTCUTS: Shortcut[] = [
   { key: "v", action: "tool.move" },
   { key: "t", action: "tool.text" }
 ];
+
+// ─── Collage Mode shortcuts ───────────────────────────────────────────────────
+
+export const COLLAGE_SHORTCUTS: Shortcut[] = [
+  { key: "Tab", action: "collage.nextCell" },
+  { key: "Tab", shift: true, action: "collage.prevCell" },
+  { key: "ArrowLeft", action: "collage.panLeft" },
+  { key: "ArrowRight", action: "collage.panRight" },
+  { key: "ArrowUp", action: "collage.panUp" },
+  { key: "ArrowDown", action: "collage.panDown" },
+  { key: "+", action: "collage.zoomIn" },
+  { key: "-", action: "collage.zoomOut" },
+  { key: "r", action: "collage.rotateCell" },
+  { key: "s", action: "collage.swapMode" },
+  { key: "e", ctrl: true, action: "collage.export" },
+  { key: "Escape", action: "collage.deselect" },
+  // Layouts 1-9
+  { key: "1", action: "collage.layout1" },
+  { key: "2", action: "collage.layout2" },
+  { key: "3", action: "collage.layout3" },
+  { key: "4", action: "collage.layout4" },
+  { key: "5", action: "collage.layout5" },
+  { key: "6", action: "collage.layout6" },
+  { key: "7", action: "collage.layout7" },
+  { key: "8", action: "collage.layout8" },
+  { key: "9", action: "collage.layout9" }
+];

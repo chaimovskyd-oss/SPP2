@@ -3,8 +3,8 @@ import type { LinkedGroup } from "./layers";
 import type { BatchJob } from "./batch";
 
 export const PROJECT_FORMAT_VERSION = 1;
-export const PROJECT_SCHEMA_VERSION = 5;
-export const APP_VERSION = "0.4.0-phase4-mask";
+export const PROJECT_SCHEMA_VERSION = 7;
+export const APP_VERSION = "0.5.0-phase5-collage";
 
 export type ProjectState =
   | "clean"

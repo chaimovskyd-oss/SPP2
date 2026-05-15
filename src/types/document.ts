@@ -3,6 +3,7 @@ import type { ID, Guide, Margins, Metadata, PageSetup, VersionedEntity, Viewport
 import type { Preset } from "./preset";
 import type { GridImageAssignment, GridLayoutRule, GridTextOverlayRule } from "./grid";
 import type { MaskImageAssignment, MaskLayoutRule, MaskPreset, MaskTextOverlayRule } from "./mask";
+import type { CollageRule } from "./collage";
 
 export interface Asset extends VersionedEntity {
   id: ID;
@@ -58,6 +59,7 @@ export interface Document extends VersionedEntity {
   maskImageAssignments: MaskImageAssignment[];
   maskTextOverlayRules: MaskTextOverlayRule[];
   maskPresets: MaskPreset[];
+  collageRules: CollageRule[];
   viewport: ViewportState;
   metadata: Metadata;
 }

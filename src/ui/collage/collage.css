@@ -1,0 +1,289 @@
+/* ═══════════════════════════════════════════════════════
+   COLLAGE MODE – Phase 5
+   ═══════════════════════════════════════════════════════ */
+
+/* ─── Wizard overlay ─────────────────────────────────── */
+.collage-wizard-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.7);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+.collage-wizard {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px;
+  width: min(90vw, 680px);
+  max-height: 90vh;
+  overflow-y: auto;
+  position: relative;
+}
+.collage-wizard-close {
+  position: absolute; top: 16px; right: 16px;
+  background: none; border: none; color: var(--text-secondary); cursor: pointer;
+}
+.wizard-steps {
+  display: flex; gap: 12px; justify-content: center;
+  margin-bottom: 24px;
+}
+.wizard-step-dot {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; color: var(--text-secondary);
+  transition: var(--t);
+}
+.wizard-step-dot.active { border-color: var(--accent); color: var(--accent); }
+.wizard-step-dot.done { background: var(--accent); border-color: var(--accent); color: #fff; }
+.wizard-body { display: flex; flex-direction: column; gap: 16px; }
+.wizard-body h2 { font-size: 18px; font-weight: 600; margin: 0; }
+.wizard-body-wide { width: 100%; }
+.wizard-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+.wizard-count { font-size: 13px; color: var(--text-secondary); }
+.wizard-field { display: flex; flex-direction: column; gap: 6px; }
+.wizard-field label { font-size: 13px; color: var(--text-secondary); }
+.wizard-field input[type=range] { accent-color: var(--accent); }
+.wizard-row { display: flex; align-items: center; gap: 8px; }
+.wizard-complexity-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.wizard-presets-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 8px;
+}
+.preset-card {
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: var(--radius-btn); padding: 8px 4px;
+  font-size: 12px; color: var(--text-primary); cursor: pointer;
+  transition: var(--t);
+}
+.preset-card.selected, .preset-card:hover { border-color: var(--accent); color: var(--accent); }
+.wizard-thumb-grid {
+  display: flex; flex-wrap: wrap; gap: 8px;
+}
+.wizard-thumb-item {
+  position: relative; width: 64px; height: 64px;
+}
+.wizard-thumb-item img {
+  width: 100%; height: 100%; object-fit: cover; border-radius: 4px;
+}
+.wizard-thumb-remove {
+  position: absolute; top: -4px; right: -4px;
+  background: var(--danger); border: none; border-radius: 50%;
+  width: 16px; height: 16px;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; cursor: pointer;
+}
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: 8px; padding: 32px;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  color: var(--text-secondary); cursor: pointer; transition: var(--t);
+}
+.drop-zone.dragover { border-color: var(--accent); background: var(--accent-glow); }
+
+/* ─── Mini preview cards ─────────────────────────────── */
+.collage-mini-preview {
+  background: var(--bg-surface); border: 2px solid var(--border);
+  border-radius: 8px; padding: 8px; cursor: pointer;
+  text-align: right; position: relative;
+  transition: var(--t); width: 100%;
+}
+.collage-mini-preview:hover { border-color: var(--accent-hover); }
+.collage-mini-preview.selected { border-color: var(--accent); }
+.collage-thumb { overflow: hidden; border-radius: 4px; }
+.collage-thumb svg { display: block; width: 100%; height: auto; }
+.collage-badge-top {
+  position: absolute; top: 6px; right: 6px;
+  background: var(--accent); color: #fff; font-size: 10px; font-weight: 600;
+  padding: 2px 6px; border-radius: 10px;
+}
+.collage-preview-info {
+  display: flex; align-items: center; gap: 4px; margin-top: 6px; flex-wrap: wrap;
+}
+.collage-preview-name { font-size: 12px; font-weight: 500; flex: 1; }
+.collage-family-badge {
+  font-size: 10px; background: var(--bg-elevated);
+  border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px;
+  color: var(--text-secondary);
+}
+.collage-score { font-size: 11px; color: var(--accent); font-weight: 600; }
+.collage-score-bar {
+  height: 3px; background: var(--bg-base); border-radius: 2px; margin-top: 4px;
+}
+.collage-score-fill { height: 100%; background: var(--accent); border-radius: 2px; }
+.collage-layouts-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;
+}
+
+/* ─── CollageScreen layout ───────────────────────────── */
+.collage-screen {
+  display: flex; flex-direction: column; height: 100vh;
+  background: var(--bg-base); color: var(--text-primary);
+}
+.collage-toolbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 16px;
+  background: var(--bg-surface); border-bottom: 1px solid var(--border);
+  height: 48px;
+}
+.collage-toolbar-center { flex: 1; text-align: center; }
+.collage-active-label { font-size: 13px; color: var(--text-secondary); }
+.collage-toolbar-actions { display: flex; gap: 8px; }
+.collage-main {
+  display: flex; flex: 1; overflow: hidden;
+}
+
+/* ─── Panels ─────────────────────────────────────────── */
+.collage-left-panel,
+.collage-right-panel {
+  width: 220px; flex-shrink: 0;
+  background: var(--bg-surface); border-inline-end: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.collage-right-panel { border-inline-end: none; border-inline-start: 1px solid var(--border); }
+.panel-tabs {
+  display: flex; border-bottom: 1px solid var(--border);
+}
+.panel-tab {
+  flex: 1; padding: 10px 8px;
+  background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--text-secondary); font-size: 12px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+  transition: var(--t);
+}
+.panel-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.panel-section {
+  padding: 12px; display: flex; flex-direction: column; gap: 12px;
+  overflow-y: auto; flex: 1;
+}
+.panel-field { display: flex; flex-direction: column; gap: 4px; }
+.panel-field label { font-size: 12px; color: var(--text-secondary); }
+.panel-field input[type=range] { accent-color: var(--accent); }
+.panel-field select {
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  color: var(--text-primary); border-radius: 4px; padding: 4px 8px; font-size: 12px;
+}
+.panel-hint { font-size: 12px; color: var(--text-tertiary); text-align: center; margin-top: 32px; }
+
+/* ─── Canvas area ────────────────────────────────────── */
+.collage-canvas-area {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  overflow: auto; padding: 24px;
+}
+.collage-canvas-preview {
+  position: relative; background: #fff;
+  box-shadow: 0 4px 32px rgba(0,0,0,.4);
+  max-width: 100%; max-height: 100%;
+}
+.collage-canvas-svg { width: 100%; display: block; }
+.collage-slot-overlay {
+  position: absolute; cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 0.15s;
+}
+.collage-slot-overlay:hover { border-color: rgba(124,111,224,.5); }
+.collage-slot-overlay.selected { border-color: #22d3ee; }
+.collage-slot-overlay.empty { border: 2px dashed rgba(0,0,0,.3); }
+.collage-slot-empty-label {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  font-size: 11px; color: rgba(0,0,0,.4);
+}
+.collage-screen-empty {
+  display: flex; align-items: center; justify-content: center;
+  height: 100vh; color: var(--text-secondary);
+}
+
+/* ─── Image pool ─────────────────────────────────────── */
+.collage-images-tab { display: flex; flex-direction: column; gap: 8px; padding: 8px; flex: 1; overflow-y: auto; }
+.collage-image-pool {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.collage-pool-item {
+  position: relative; width: 48px; height: 48px;
+  border-radius: 4px; overflow: visible;
+}
+.collage-pool-item img {
+  width: 100%; height: 100%; object-fit: cover; border-radius: 4px;
+  border: 2px solid var(--border);
+}
+.collage-pool-item.unassigned img { border-color: var(--warning); }
+.collage-pool-placeholder {
+  width: 100%; height: 100%;
+  background: var(--bg-elevated); border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.collage-pool-remove {
+  position: absolute; top: -4px; right: -4px;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 50%; width: 14px; height: 14px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-secondary); cursor: pointer; font-size: 10px;
+}
+.collage-unassigned-section { margin-top: 8px; }
+.collage-unassigned-section h4 { font-size: 11px; color: var(--warning); margin: 0 0 6px; }
+.collage-unassigned-grid { display: flex; flex-wrap: wrap; gap: 4px; }
+.collage-unassigned-item { width: 40px; height: 40px; }
+.collage-unassigned-item img { width: 100%; height: 100%; object-fit: cover; border-radius: 3px; opacity: 0.7; }
+.collage-layouts-list { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+.collage-layouts-scroll { overflow-y: auto; flex: 1; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.btn-full { width: 100%; justify-content: center; }
+
+/* ─── Wizard customer section ────────────────────────── */
+.wizard-customer-section { display: flex; flex-direction: column; gap: 8px; }
+.wizard-customer-row { display: flex; align-items: center; gap: 8px; }
+.wizard-customer-row label { font-size: 12px; color: var(--text-secondary); width: 60px; flex-shrink: 0; }
+.wizard-input {
+  flex: 1; background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: var(--radius-input); padding: 6px 10px;
+  color: var(--text-primary); font-size: 13px;
+  transition: border-color var(--t);
+}
+.wizard-input:focus { outline: none; border-color: var(--accent); }
+.wizard-divider { height: 1px; background: var(--border); margin: 4px 0; }
+
+/* ─── Custom size fields ─────────────────────────────── */
+.wizard-custom-size { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.wizard-custom-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wizard-custom-row label { font-size: 12px; color: var(--text-secondary); }
+.wizard-size-input { width: 70px; flex: none !important; }
+.wizard-select {
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  color: var(--text-primary); border-radius: 4px; padding: 5px 8px; font-size: 12px;
+}
+
+/* ─── Orientation buttons ────────────────────────────── */
+.wizard-orientation-row { display: flex; gap: 12px; }
+.wizard-orientation-btn {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 12px 8px;
+  background: var(--bg-surface); border: 2px solid var(--border);
+  border-radius: 8px; cursor: pointer; color: var(--text-secondary);
+  font-size: 12px; transition: var(--t); position: relative;
+}
+.wizard-orientation-btn:hover { border-color: var(--accent-hover); color: var(--text-primary); }
+.wizard-orientation-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
+.orientation-icon {
+  display: block; border: 2px solid currentColor; border-radius: 2px;
+}
+.portrait-icon { width: 24px; height: 32px; }
+.landscape-icon { width: 32px; height: 24px; }
+.orientation-check { position: absolute; top: 6px; right: 6px; }
+
+/* ─── CollageModePanel (inside EditorScreen right panel) */
+.collage-mode-panel { display: flex; flex-direction: column; }
+.collage-add-images-btn { width: 100%; justify-content: center; gap: 6px; }
+.collage-panel-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.panel-section-label { font-size: 11px; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+.btn-xs { padding: 3px 6px; font-size: 11px; }
+
+/* ─── Canvas view ────────────────────────────────────── */
+.collage-canvas-view { position: relative; display: inline-block; }
+.collage-swap-banner {
+  position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+  background: var(--warning); color: #000;
+  font-size: 12px; font-weight: 600;
+  padding: 6px 16px; border-radius: 20px;
+  z-index: 10; white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0,0,0,.3);
+}

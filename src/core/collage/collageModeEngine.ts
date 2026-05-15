@@ -1,0 +1,322 @@
+import { createId } from "@/core/ids";
+import { createFrameLayer, defaultContentTransform } from "@/core/layers/factory";
+import { mmToPx } from "@/core/units/conversion";
+import { buildSplitTree } from "./collageSplitTree";
+import { LAYOUT_REGISTRY, computeSlots } from "./collageLayoutEngine";
+import { scoreLayout } from "./collageScoring";
+import { createCollageImageAssignment, createCollageSlot } from "./collageFactory";
+import type {
+  CollageComplexityMode,
+  CollageImageAssignment,
+  CollageImageInput,
+  CollageLayoutFamily,
+  CollageLayoutParams,
+  CollageRule,
+  CollageSlot,
+  CollageTemplate,
+  ScoredLayoutSuggestion,
+  CollageSplitNode,
+} from "@/types/collage";
+import type { Page } from "@/types/document";
+import type { FrameLayer } from "@/types/layers";
+import type { ID } from "@/types/primitives";
+
+// ─── 1. Generate scored suggestions (in-memory only, never stored) ────────────
+
+export function generateCollageSuggestions(
+  imageInputs: CollageImageInput[],
+  canvasW: number,
+  canvasH: number,
+  spacingPx: number,
+  marginPx: number,
+  mode: CollageComplexityMode,
+  splitTree?: CollageSplitNode,
+): ScoredLayoutSuggestion[] {
+  const imageCount = imageInputs.length;
+  if (imageCount === 0) return [];
+
+  const params: CollageLayoutParams = { imageCount, canvasW, canvasH, spacingPx, marginPx, splitTree };
+
+  const seen = new Set<string>();
+  const candidates: ScoredLayoutSuggestion[] = [];
+
+  for (const def of LAYOUT_REGISTRY) {
+    if (imageCount < def.minImages || imageCount > def.maxImages) continue;
+    if (mode === "simple" && def.mode === "creative") continue;
+
+    const slots = def.generate(params);
+    const key = slots.map(s => `${s.x.toFixed(3)},${s.y.toFixed(3)},${s.w.toFixed(3)},${s.h.toFixed(3)}`).join("|");
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const result = scoreLayout(slots, imageInputs);
+    candidates.push({
+      family: def.family,
+      name: def.name,
+      nameHe: def.nameHe,
+      slots,
+      score: result.score,
+      scoreBreakdown: {
+        aspectRatioScore: result.aspectRatioScore,
+        faceSafetyScore: result.faceSafetyScore,
+        balanceScore: result.balanceScore,
+        diversityScore: result.diversityScore,
+      },
+    });
+  }
+
+  return candidates.sort((a, b) => b.score - a.score);
+}
+
+// ─── 2. Apply a layout family ─────────────────────────────────────────────────
+
+export function applyLayoutFamily(
+  rule: CollageRule,
+  newFamily: CollageLayoutFamily,
+  canvasW: number,
+  canvasH: number,
+  dpi = 300,
+): CollageRule {
+  const spacingPx = mmToPx(rule.spacingMM, dpi);
+  const marginPx = mmToPx(rule.marginMM, dpi);
+  const imageCount = rule.imagePool.length;
+
+  const splitTree = newFamily === "splitTree"
+    ? (rule.activeFamily === "splitTree" && rule.splitTree
+        ? rule.splitTree
+        : buildSplitTree(imageCount))
+    : undefined;
+
+  const params: CollageLayoutParams = { imageCount, canvasW, canvasH, spacingPx, marginPx, splitTree };
+  const newSlots = computeSlots(newFamily, params);
+
+  // Port of Python: cell.image_index = i — assign pool[0]→slot[0], pool[1]→slot[1]
+  // This is always correct regardless of previous layout's hero/non-hero structure
+  const newAssignments = assignByPoolOrder(rule.imagePool, newSlots, rule.id, rule.imageAssignments);
+
+  return {
+    ...rule,
+    activeFamily: newFamily,
+    splitTree,
+    cachedSlots: newSlots,
+    imageAssignments: newAssignments,
+  };
+}
+
+// ─── 3. Reflow (same family, new canvas size or spacing) ─────────────────────
+
+export function reflowCollage(
+  rule: CollageRule,
+  canvasW: number,
+  canvasH: number,
+  dpi = 300,
+): CollageRule {
+  const spacingPx = mmToPx(rule.spacingMM, dpi);
+  const marginPx = mmToPx(rule.marginMM, dpi);
+  const imageCount = rule.imagePool.length;
+  const params: CollageLayoutParams = { imageCount, canvasW, canvasH, spacingPx, marginPx, splitTree: rule.splitTree };
+  const newSlots = computeSlots(rule.activeFamily, params);
+  // Reflow keeps same family — just re-assign by pool order to new slots
+  const newAssignments = assignByPoolOrder(rule.imagePool, newSlots, rule.id, rule.imageAssignments);
+  return { ...rule, cachedSlots: newSlots, imageAssignments: newAssignments };
+}
+
+// ─── 4. Add / remove images ───────────────────────────────────────────────────
+
+export function applyNewImagePool(
+  rule: CollageRule,
+  newPool: ID[],
+  canvasW: number,
+  canvasH: number,
+  dpi = 300,
+): CollageRule {
+  const spacingPx = mmToPx(rule.spacingMM, dpi);
+  const marginPx = mmToPx(rule.marginMM, dpi);
+  const imageCount = newPool.length;
+
+  const splitTree = rule.activeFamily === "splitTree"
+    ? buildSplitTree(imageCount) // rebuild tree for new count
+    : undefined;
+
+  const params: CollageLayoutParams = { imageCount, canvasW, canvasH, spacingPx, marginPx, splitTree };
+  const newSlots = computeSlots(rule.activeFamily, params);
+  // Simple pool-order assignment — always assigns ALL pool images, no gaps
+  const newAssignments = assignByPoolOrder(newPool, newSlots, rule.id, rule.imageAssignments);
+
+  return { ...rule, imagePool: newPool, cachedSlots: newSlots, imageAssignments: newAssignments, splitTree };
+}
+
+// ─── 5. Apply saved template ──────────────────────────────────────────────────
+
+export function applyCollageTemplate(
+  rule: CollageRule,
+  template: CollageTemplate,
+): CollageRule {
+  const scaledSlots: CollageSlot[] = template.slots.map(slot => ({
+    ...slot,
+    id: createId("slot"),
+    rotationDeg: slot.rotationDeg ?? 0,
+    zIndex: slot.zIndex ?? 0,
+  }));
+
+  const imageSlots = scaledSlots.filter(s => s.type === "image");
+  const availImages = rule.imagePool.slice(0, imageSlots.length);
+  const newAssignments: CollageImageAssignment[] = availImages.map((assetId, i) =>
+    createCollageImageAssignment(rule.id, assetId, imageSlots[i]!.id)
+  );
+
+  return {
+    ...rule,
+    activeFamily: "custom",
+    splitTree: template.splitTree,
+    cachedSlots: scaledSlots,
+    imageAssignments: newAssignments,
+  };
+}
+
+// ─── Pool-order assignment (port of Python cell.image_index = i) ─────────────
+
+/**
+ * Assign images from pool to slots in order: pool[0]→imageSlot[0], pool[1]→imageSlot[1], ...
+ * This is the correct algorithm from the Python app — simple, always produces
+ * exactly pool.length assignments (no gaps, no missing images).
+ *
+ * Keeps old contentTransform if the same assetId ends up in a slot with similar
+ * aspect ratio (< 0.3 change), so manual crops are preserved when possible.
+ */
+const RESET_TRANSFORM = { version: 1 as const, offsetX: 0, offsetY: 0, scale: 1, rotation: 0 };
+
+export function assignByPoolOrder(
+  imagePool: ID[],
+  newSlots: CollageSlot[],
+  ruleId: ID,
+  oldAssignments: CollageImageAssignment[] = [],
+): CollageImageAssignment[] {
+  const imageSlots = newSlots.filter(s => s.type === "image");
+  const oldByAsset = new Map(oldAssignments.map(a => [a.assetId, a]));
+
+  return imagePool.slice(0, imageSlots.length).map((assetId, i) => {
+    const slot = imageSlots[i]!;
+    const prev = oldByAsset.get(assetId);
+
+    if (prev) {
+      // Keep color adjustments and effects, but ALWAYS reset content transform.
+      // The old transform was calibrated for a different slot size — keeping it
+      // causes images to render completely outside their new frames.
+      return {
+        ...prev,
+        slotId: slot.id,
+        contentTransform: RESET_TRANSFORM,  // reset so smart crop re-applies
+        hasManualTransform: false,           // allow smart crop to recalculate
+      };
+    }
+
+    return createCollageImageAssignment(ruleId, assetId, slot.id);
+  });
+}
+
+/**
+ * @deprecated Use assignByPoolOrder directly.
+ * Kept for compatibility — now delegates to pool-order assignment.
+ */
+export function reIndexAssignments(
+  _oldAssignments: CollageImageAssignment[],
+  _oldSlots: CollageSlot[],
+  _newSlots: CollageSlot[],
+): CollageImageAssignment[] {
+  // This function no longer does complex re-indexing.
+  // Callers should use assignByPoolOrder(imagePool, newSlots, ruleId, oldAssignments) instead.
+  return _oldAssignments;
+}
+
+// ─── Frame sync ───────────────────────────────────────────────────────────────
+
+export function syncFrameLayersToPage(
+  page: Page,
+  rule: CollageRule,
+  canvasW: number,
+  canvasH: number,
+): { page: Page; frameIds: ID[] } {
+  const otherLayers = page.layers.filter(l => {
+    const meta = (l.metadata as Record<string, unknown>).collageFrame as { collageRuleId?: string } | undefined;
+    return meta?.collageRuleId !== rule.id;
+  });
+
+  const sortedSlots = [...rule.cachedSlots].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+
+  const newFrameLayers: FrameLayer[] = sortedSlots.map((slot, i) => {
+    const assignment = rule.imageAssignments.find(a => a.slotId === slot.id);
+
+    return createFrameLayer({
+      name: slot.label || (slot.type === "empty" ? "תא ריק" : `תא ${i + 1}`),
+      rect: {
+        x: slot.x * canvasW,
+        y: slot.y * canvasH,
+        width: slot.w * canvasW,
+        height: slot.h * canvasH,
+      },
+      behaviorMode: "layoutLocked",
+      shape: mapSlotShape(slot.shape),
+      contentType: slot.type === "empty" ? "empty" : (assignment?.assetId ? "image" : "empty"),
+      imageAssetId: assignment?.assetId,
+      contentTransform: assignment?.contentTransform,
+      fitMode: assignment?.fitMode ?? "fill",
+      cornerRadius: slot.shapeParams.cornerRadius,
+      lockedFrame: true,
+      lockedContent: false,
+      zIndex: (otherLayers.length + i),
+      metadata: {
+        collageFrame: {
+          collageRuleId: rule.id,
+          slotId: slot.id,
+          slotType: slot.type,
+          isCollageFrame: true,
+          layoutManaged: true,
+          slotShape: slot.shape,
+          zIndex: slot.zIndex ?? 0,
+        } as unknown as import("@/types/primitives").JsonValue
+      }
+    });
+  });
+
+  const frameIds = newFrameLayers.map(f => f.id);
+  return {
+    page: { ...page, layers: [...otherLayers, ...newFrameLayers] },
+    frameIds,
+  };
+}
+
+function mapSlotShape(shape: CollageSlot["shape"]): FrameLayer["shape"] {
+  switch (shape) {
+    case "circle": return "circle";
+    case "ellipse": return "ellipse";
+    case "heart": return "svgPath";
+    case "rounded": return "rect";
+    default: return "rect";
+  }
+}
+
+// ─── Legacy compat: kept so old imports still compile ────────────────────────
+
+export interface CollageSuggestionsResult {
+  layouts: ScoredLayoutSuggestion[];
+  bestLayoutId: string | null;
+}
+
+/** @deprecated Use generateCollageSuggestions instead */
+export function generateScoredLayoutSuggestions(
+  images: CollageImageInput[],
+  canvasW: number,
+  canvasH: number,
+  options: { imageCount: number; canvasAspectW: number; canvasAspectH: number; spacingPx: number; marginPx: number; complexityMode: CollageComplexityMode }
+): CollageSuggestionsResult {
+  const suggestions = generateCollageSuggestions(
+    images, canvasW, canvasH,
+    options.spacingPx, options.marginPx,
+    options.complexityMode
+  );
+  return {
+    layouts: suggestions,
+    bestLayoutId: suggestions[0]?.family ?? null,
+  };
+}

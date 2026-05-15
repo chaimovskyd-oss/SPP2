@@ -107,6 +107,9 @@ import {
 } from "../projectActions";
 import { CanvasStage } from "./CanvasStage";
 import { useProjectLifecycleStore } from "@/state/projectLifecycleStore";
+import { CollageModePanel } from "@/ui/collage/CollageModePanel";
+import { applySmartCropToAssignment } from "@/core/collage/collageFrameSync";
+import { syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import {
   getFontFavorites,
   getGroupedFonts,
@@ -118,6 +121,25 @@ type ToolId = "move" | "text" | "image" | "layers";
 
 interface EditorScreenProps {
   onBackHome: () => void;
+}
+
+async function runInitialSmartCrop(
+  rule: import("@/types/collage").CollageRule,
+  page: import("@/types/document").Page,
+  assets: import("@/types/document").Asset[]
+): Promise<void> {
+  const updateTransform = useDocumentStore.getState().updateCollageImageTransform;
+  for (const assignment of rule.imageAssignments) {
+    if (assignment.hasManualTransform) continue;
+    const asset = assets.find((a) => a.id === assignment.assetId);
+    if (!asset) continue;
+    const slot = rule.cachedSlots.find((s) => s.id === assignment.slotId);
+    if (!slot) continue;
+    const newTransform = await applySmartCropToAssignment(
+      assignment, asset, slot.w * page.width, slot.h * page.height
+    );
+    updateTransform(rule.id, assignment.slotId, newTransform);
+  }
 }
 
 export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
@@ -182,14 +204,52 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
     () => document?.maskRules.find((rule) => rule.id === document.metadata["activeMaskId"]) ?? document?.maskRules[0] ?? null,
     [document]
   );
+  const activeCollageRule = useMemo(
+    () => {
+      if (!document || !activePage) return null;
+      return document.collageRules.find((r) => r.pageId === activePage.id) ?? null;
+    },
+    [document, activePage]
+  );
   const isGridMode = document?.metadata["mode"] === "grid";
   const isMaskMode = document?.metadata["mode"] === "mask";
+  const isCollageMode = document?.metadata["mode"] === "collage";
 
   useEffect(() => {
     if (document?.viewport !== undefined) {
       viewport.setViewport(document.viewport);
     }
   }, [document?.id]);
+
+  // Initial sync: ensure collage FrameLayers exist when collage document first loads
+  // Also apply smart crop to all initial assignments
+  useEffect(() => {
+    if (!isCollageMode || !activeCollageRule || !document) return;
+
+    const needsSync = activeCollageRule.frameIds.length === 0;
+    if (needsSync) {
+      const rule = activeCollageRule;
+      const page = document.pages.find((p) => p.id === rule.pageId);
+      if (page) {
+        const { page: updatedPage, frameIds } = syncFrameLayersToPage(page, rule, page.width, page.height);
+        const updatedRule = { ...rule, frameIds };
+        const synced = {
+          ...document,
+          collageRules: document.collageRules.map((r) => r.id === rule.id ? updatedRule : r),
+          pages: document.pages.map((p) => p.id === rule.pageId ? updatedPage : p)
+        };
+        setDocument(synced);
+      }
+    }
+
+    // Run smart crop async for all assignments
+    const rule = activeCollageRule;
+    const page = document.pages.find((p) => p.id === rule.pageId);
+    if (!page) return;
+
+    void runInitialSmartCrop(rule, page, document.assets);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCollageRule?.id]);
 
   useEffect(() => {
     if (document === null) {
@@ -882,6 +942,12 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
 
         <aside className="right-panel">
           <PanelHeader selectedLayer={selectedLayer} />
+          {isCollageMode && activeCollageRule !== null ? (
+            <>
+              <CollageModePanel rule={activeCollageRule} selectedLayer={selectedLayer} />
+              <span className="panel-sep" />
+            </>
+          ) : null}
           {isGridMode && activeGridRule !== null ? (
             <>
               <GridModePanel

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import { Group, Image as KonvaImage, Rect, Text } from "react-konva";
+import { Group, Image as KonvaImage, Line, Rect, Text } from "react-konva";
 import Konva from "konva";
 import { resolveCanvasAssetPath } from "@/core/assets/assetManager";
 import { clampContentTransformToFillBounds, computeContentRect, type ContentRect } from "@/core/rendering/frameFitEngine";
@@ -539,6 +539,10 @@ function FrameNode({
   const blurRadius = fx.softEdge?.radius ?? 0;
   const isGridCell = layer.metadata["gridCell"] !== undefined;
   const isMaskFrame = layer.metadata["maskFrame"] !== undefined;
+  const collageFrameMeta = layer.metadata["collageFrame"] as { isCollageFrame?: boolean; layoutManaged?: boolean; slotType?: string } | undefined;
+  const isCollageFrame = collageFrameMeta?.isCollageFrame === true;
+  const isCollageEmpty = isCollageFrame && collageFrameMeta?.slotType === "empty";
+  const collageSelectColor = "#22d3ee";
 
   useEffect(() => {
     const node = blurRef.current;
@@ -551,6 +555,7 @@ function FrameNode({
   const frameIsDraggable =
     !isGridCell &&
     !isMaskFrame &&
+    !isCollageFrame &&
     !layer.locked &&
     !layer.lockedFrame &&
     (layer.behaviorMode === "freeform" || layoutEditMode);
@@ -691,10 +696,36 @@ function FrameNode({
           y={0}
           width={layer.width}
           height={layer.height}
-          fill={layer.fill?.color ?? (image === null ? "#e8e5e1" : "#ffffff")}
+          fill={isCollageEmpty ? "#e8eaf0" : (layer.fill?.color ?? (image === null ? "#e8e5e1" : "#ffffff"))}
           opacity={layer.fill?.opacity ?? 1}
           listening={false}
         />
+        {/* Empty collage slot placeholder */}
+        {isCollageEmpty && (
+          <>
+            <Text
+              x={0}
+              y={layer.height / 2 - 14}
+              width={layer.width}
+              text="+"
+              fontSize={Math.min(32, layer.width * 0.3)}
+              fill="rgba(0,0,0,0.25)"
+              align="center"
+              listening={false}
+            />
+            <Text
+              x={0}
+              y={layer.height / 2 + 8}
+              width={layer.width}
+              text="תא ריק"
+              fontSize={Math.max(8, Math.min(13, layer.width * 0.12))}
+              fill="rgba(0,0,0,0.3)"
+              align="center"
+              fontFamily="Arial"
+              listening={false}
+            />
+          </>
+        )}
         {/* תמונה בתוך הפריים */}
         {image !== null && contentRect !== null && (
           <KonvaImage
@@ -731,9 +762,9 @@ function FrameNode({
           width={layer.width}
           height={layer.height}
           fill="transparent"
-          stroke={fx.stroke?.color ?? (selected ? "#7C6FE0" : "#b8b2aa")}
+          stroke={fx.stroke?.color ?? (selected ? (isCollageFrame ? collageSelectColor : "#7C6FE0") : (isCollageEmpty ? "#bbbdc8" : "#b8b2aa"))}
           strokeWidth={fx.stroke?.width ?? (selected ? 2.5 : 1)}
-          dash={fx.stroke !== undefined ? undefined : [8, 8]}
+          dash={fx.stroke !== undefined ? undefined : (isCollageEmpty ? [6, 4] : [8, 8])}
           cornerRadius={cornerRadius}
           listening={false}
         />
@@ -752,8 +783,12 @@ function FrameNode({
       )}
 
       {/* אינדיקטור מצב עריכת פריסה */}
-      {layoutEditMode && selected && (
+      {layoutEditMode && selected && !isCollageFrame && (
         <Rect x={0} y={0} width={layer.width} height={layer.height} fill="transparent" stroke="#F59E0B" strokeWidth={2} dash={[6, 4]} cornerRadius={cornerRadius} listening={false} />
+      )}
+      {/* Collage cell selected highlight */}
+      {isCollageFrame && selected && (
+        <Rect x={0} y={0} width={layer.width} height={layer.height} fill="rgba(34,211,238,0.08)" stroke={collageSelectColor} strokeWidth={2.5} cornerRadius={cornerRadius} listening={false} />
       )}
     </Group>
   );

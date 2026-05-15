@@ -5,7 +5,8 @@ import {
   Package,
   Palette,
   Printer,
-  Users
+  Users,
+  GalleryHorizontalEnd
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ModeType } from "@/types/template";
@@ -39,6 +40,13 @@ export const homeModes: HomeMode[] = [
     description: "מסגרות עגולות, צורות וחיתוכים לתמונות.",
     icon: Images,
     color: "#E06FA8"
+  },
+  {
+    id: "collage",
+    title: "קולאז'",
+    description: "עיצוב קולאז' אוטומטי עם פריסות חכמות ותמונות מרובות.",
+    icon: GalleryHorizontalEnd,
+    color: "#E06F6F"
   },
   {
     id: "class_photo",
