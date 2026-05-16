@@ -9,9 +9,10 @@ import { ExternalAppsSettings } from "../utilities/ExternalAppsSettings";
 interface HomeScreenProps {
   onOpenMode: (mode: ModeType) => void;
   onOpenProjectFile: (file: File) => void;
+  onOpenSettings?: () => void;
 }
 
-export function HomeScreen({ onOpenMode, onOpenProjectFile }: HomeScreenProps): ReactElement {
+export function HomeScreen({ onOpenMode, onOpenProjectFile, onOpenSettings }: HomeScreenProps): ReactElement {
   const projectInputRef = useRef<HTMLInputElement>(null);
   const [projects, setProjects] = useState<ProjectIndexEntry[]>(() => getProjectIndexEntries());
   const [query, setQuery] = useState("");
@@ -89,7 +90,7 @@ export function HomeScreen({ onOpenMode, onOpenProjectFile }: HomeScreenProps): 
         <section className="modes-grid" aria-label="מצבי עבודה">
           {homeModes.map((mode) => {
             const Icon = mode.icon;
-            const isReady = mode.id === "free" || mode.id === "grid" || mode.id === "mask";
+            const isReady = mode.id === "free" || mode.id === "grid" || mode.id === "mask" || mode.id === "collage" || mode.id === "photo_print";
             return (
               <button
                 className="mode-card"
@@ -111,7 +112,7 @@ export function HomeScreen({ onOpenMode, onOpenProjectFile }: HomeScreenProps): 
           })}
         </section>
 
-        <ExternalAppsHub onOpenSettings={() => setShowExtSettings(true)} />
+        <ExternalAppsHub onOpenSettings={onOpenSettings ?? (() => setShowExtSettings(true))} />
 
         <section className="section-title">
           <h2>פרויקטים אחרונים</h2>

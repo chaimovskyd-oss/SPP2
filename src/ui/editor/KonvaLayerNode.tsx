@@ -1112,7 +1112,7 @@ function FrameNode({
           <Circle
             x={layer.width / 2}
             y={layer.height / 2}
-            radius={Math.max(24, Math.min(42, Math.min(layer.width, layer.height) * 0.13))}
+            radius={Math.max(44, Math.min(180, Math.min(layer.width, layer.height) * 0.32))}
             fill="rgba(0,0,0,0.001)"
             stroke="transparent"
             onMouseEnter={(event) => { setSwapAnchorHovered(true); const container = event.target.getStage()?.container(); if (container) container.style.cursor = "pointer"; }}
@@ -1124,13 +1124,13 @@ function FrameNode({
             <Circle
               x={layer.width / 2}
               y={layer.height / 2}
-              radius={Math.max(16, Math.min(28, Math.min(layer.width, layer.height) * 0.09))}
+              radius={Math.max(24, Math.min(48, Math.min(layer.width, layer.height) * 0.15))}
               fill={activeSwapSlotId === slotId ? "rgba(124,111,224,0.96)" : "rgba(34,211,238,0.92)"}
               stroke="#ffffff"
-              strokeWidth={2.5}
-              shadowColor="rgba(0,0,0,0.38)"
-              shadowBlur={8}
-              shadowOpacity={0.5}
+              strokeWidth={3}
+              shadowColor="rgba(0,0,0,0.42)"
+              shadowBlur={12}
+              shadowOpacity={0.6}
               listening={false}
             />
           )}

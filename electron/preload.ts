@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld("spp", {
     heightMm: number;
     dpi: number;
     mimeType: string;
+    orientation?: "portrait" | "landscape";
   }): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke("spp:open-print-preview", payload),
 

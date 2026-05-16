@@ -49,3 +49,4 @@ export * from "./text/presets";
 export * from "./transform/alignmentEngine";
 export * from "./units/conversion";
 export * from "./workers/workerBridge";
+export * from "./photoPrint/photoPrintModeEngine";

@@ -172,6 +172,8 @@ export function createCollageModeDocument(
     maskTextOverlayRules: [],
     maskPresets: [],
     collageRules: [rule],
+    photoPrintRules: [],
+    photoPrintImageAssignments: [],
     viewport: {
       version: 1,
       zoom: 1,

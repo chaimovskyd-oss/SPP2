@@ -126,6 +126,7 @@ ipcMain.handle("spp:open-print-preview", async (_event, payload: {
   heightMm?: number;
   dpi?: number;
   mimeType?: string;
+  orientation?: "portrait" | "landscape";
 }): Promise<{ success: boolean; error?: string }> => {
   const engineDir = getPrintPreviewEngineDir();
   const scriptPath = path.join(engineDir, "launch_spp2_print_preview.py");
@@ -148,7 +149,8 @@ ipcMain.handle("spp:open-print-preview", async (_event, payload: {
     "--width-px", String(payload.widthPx ?? 0),
     "--height-px", String(payload.heightPx ?? 0),
     "--dpi", String(payload.dpi ?? 300),
-    "--mime-type", payload.mimeType ?? "image/png"
+    "--mime-type", payload.mimeType ?? "image/png",
+    "--orientation", payload.orientation ?? ((payload.widthPx ?? 0) >= (payload.heightPx ?? 0) ? "landscape" : "portrait")
   ];
 
   return new Promise((resolve) => {

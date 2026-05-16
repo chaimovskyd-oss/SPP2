@@ -274,6 +274,7 @@ export interface PrintableStageImage {
   widthMm: number;
   heightMm: number;
   dpi: number;
+  orientation: "portrait" | "landscape";
 }
 
 /**
@@ -296,7 +297,8 @@ export function exportStagePrintImage(
     heightPx: page.height,
     widthMm: (page.width / dpi) * 25.4,
     heightMm: (page.height / dpi) * 25.4,
-    dpi
+    dpi,
+    orientation: page.orientation ?? (page.width >= page.height ? "landscape" : "portrait")
   };
 }
 

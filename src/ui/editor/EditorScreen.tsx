@@ -138,6 +138,9 @@ import { isImageEditorAvailable, openImageEditorForAsset } from "@/services/imag
 import { isPrintPreviewAvailable, openPrintPreviewForRenderedPage } from "@/services/printPreviewService";
 import { useProjectLifecycleStore } from "@/state/projectLifecycleStore";
 import { CollageModePanel } from "@/ui/collage/CollageModePanel";
+import { PhotoPrintModePanel } from "@/ui/photoPrint/PhotoPrintModePanel";
+import { regeneratePhotoPrint } from "@/core/photoPrint/photoPrintModeEngine";
+import type { PhotoPrintRule } from "@/types/photoPrint";
 import { CollageLayoutsPanel } from "@/ui/collage/CollageLayoutsPanel";
 import { UtilitiesMenu } from "@/ui/utilities/UtilitiesMenu";
 import { GoogleFontsBrowser } from "@/ui/utilities/GoogleFontsBrowser";
@@ -264,6 +267,13 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
   const isGridMode = document?.metadata["mode"] === "grid";
   const isMaskMode = document?.metadata["mode"] === "mask";
   const isCollageMode = document?.metadata["mode"] === "collage";
+  const isPhotoPrintMode = document?.metadata["mode"] === "photo_print";
+  const activePhotoPrintRule = useMemo((): PhotoPrintRule | null => {
+    if (!document || !isPhotoPrintMode) return null;
+    const ruleId = document.metadata["activePhotoPrintId"];
+    if (typeof ruleId !== "string") return document.photoPrintRules[0] ?? null;
+    return document.photoPrintRules.find((r) => r.id === ruleId) ?? null;
+  }, [document, isPhotoPrintMode]);
 
   // Auto-switch left tab to collage layouts when entering collage mode
   useEffect(() => {
@@ -1462,6 +1472,20 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
                 onDeleteSelectedImage={() => handleDeleteMaskImage(activeMaskRule)}
                 onRegenerate={handleRegenerateMask}
                 onResetCrops={() => handleResetMaskCrops(activeMaskRule)}
+              />
+            </div>
+          ) : null}
+
+          {isPhotoPrintMode && activePhotoPrintRule !== null ? (
+            <div className="rs-mode-section">
+              <div className="rs-mode-label"><SlidersHorizontal size={11} />פיתוח תמונות</div>
+              <PhotoPrintModePanel
+                rule={activePhotoPrintRule}
+                document={currentDocument}
+                onRegenerate={(patch) => {
+                  const updated = regeneratePhotoPrint(currentDocument, activePhotoPrintRule.id, patch);
+                  setDocument(updated);
+                }}
               />
             </div>
           ) : null}

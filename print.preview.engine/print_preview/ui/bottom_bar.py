@@ -20,7 +20,7 @@ class PrintPreviewBottomBar(QFrame):
         layout.setContentsMargins(22, 12, 22, 12)
         layout.setSpacing(12)
 
-        layout.addWidget(QLabel("Zoom"))
+        layout.addWidget(QLabel("זום"))
 
         self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
         self.zoom_slider.setMinimum(10)
@@ -37,10 +37,10 @@ class PrintPreviewBottomBar(QFrame):
         self.btn_prev = QPushButton("◀")
         self.btn_prev.setFixedWidth(40)
         self.btn_prev.setMinimumHeight(38)
-        self.btn_prev.setToolTip("Previous page")
+        self.btn_prev.setToolTip("עמוד קודם")
         layout.addWidget(self.btn_prev)
 
-        self.page_label = QLabel("Page 1 / 1")
+        self.page_label = QLabel("עמוד 1 / 1")
         self.page_label.setMinimumWidth(108)
         self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.page_label)
@@ -48,7 +48,7 @@ class PrintPreviewBottomBar(QFrame):
         self.btn_next = QPushButton("▶")
         self.btn_next.setFixedWidth(40)
         self.btn_next.setMinimumHeight(38)
-        self.btn_next.setToolTip("Next page")
+        self.btn_next.setToolTip("עמוד הבא")
         layout.addWidget(self.btn_next)
         layout.addSpacing(10)
 
@@ -62,19 +62,19 @@ class PrintPreviewBottomBar(QFrame):
         self.btn_refresh = QPushButton("↻")
         self.btn_refresh.setFixedWidth(40)
         self.btn_refresh.setMinimumHeight(38)
-        self.btn_refresh.setToolTip("Refresh preview (force re-render)")
+        self.btn_refresh.setToolTip("רענון תצוגה")
 
-        self.btn_save_settings = QPushButton("שמור הגדרות הדפסה")
+        self.btn_save_settings = QPushButton("שמור הגדרות")
         self.btn_save_settings.setObjectName("PrimaryButton")
         self.btn_save_settings.setMinimumHeight(38)
-        self.btn_save_settings.setMinimumWidth(170)
+        self.btn_save_settings.setMinimumWidth(132)
 
-        self.btn_export = QPushButton("Export")
+        self.btn_export = QPushButton("ייצוא")
         self.btn_export.setObjectName("WarnButton")
         self.btn_export.setMinimumHeight(38)
         self.btn_export.setMinimumWidth(92)
 
-        self.btn_print = QPushButton("Print")
+        self.btn_print = QPushButton("הדפס")
         self.btn_print.setObjectName("SuccessButton")
         self.btn_print.setMinimumHeight(38)
         self.btn_print.setMinimumWidth(92)
@@ -122,13 +122,13 @@ class PrintPreviewBottomBar(QFrame):
         if state.warnings:
             self.state_label.setText(" | ".join(state.warnings))
         else:
-            self.state_label.setText("Print will use the exact preview settings shown here.")
+            self.state_label.setText("ההדפסה תשתמש בדיוק בהגדרות שמוצגות כאן.")
 
         self.btn_print.setEnabled(state.can_print)
 
         idx = getattr(state, "page_index", 0)
         count = getattr(state, "page_count", 1)
-        self.page_label.setText(f"Page {idx + 1} / {count}")
+        self.page_label.setText(f"עמוד {idx + 1} / {count}")
         self._update_nav_buttons(idx, count)
 
     def _update_nav_buttons(self, page_index: int, page_count: int):
@@ -136,7 +136,7 @@ class PrintPreviewBottomBar(QFrame):
         self.btn_next.setEnabled(page_index < page_count - 1)
 
     def set_page_info(self, current: int, total: int):
-        self.page_label.setText(f"Page {current} / {total}")
+        self.page_label.setText(f"עמוד {current} / {total}")
 
     def set_zoom_percent(self, value: int):
         clamped = max(self.zoom_slider.minimum(), min(self.zoom_slider.maximum(), int(value)))

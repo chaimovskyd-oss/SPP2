@@ -1,9 +1,10 @@
-import { Suspense, lazy, useMemo, useState, type ReactElement } from "react";
-import { cleanupRecovery, createGridModeDocument, createMaskModeDocument, createProjectEnvelope, discardRecoveryRecord, getLatestRecoveryRecord, restoreRecoveryRecord, withProjectMetadata, type AutosaveRecord } from "@/core";
+import { Suspense, lazy, useEffect, useMemo, useState, type ReactElement } from "react";
+import { cleanupRecovery, createGridModeDocument, createMaskModeDocument, createPhotoPrintModeDocument, createProjectEnvelope, discardRecoveryRecord, getLatestRecoveryRecord, restoreRecoveryRecord, withProjectMetadata, type AutosaveRecord } from "@/core";
 import { createPage } from "@/core/document/factory";
 import { createCollageModeDocument } from "@/core/collage/collageFactory";
 import { syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import { importImageAsset } from "@/core/assets/assetManager";
+import { defaultGridSettings, defaultSnapSettings, mmToPx } from "@/core";
 import type { Asset } from "@/types/document";
 import type { PageSetup } from "@/types/primitives";
 import type { ProjectCustomerInfo } from "@/types/project";
@@ -11,6 +12,7 @@ import type { GridCreateOptions } from "@/types/grid";
 import type { MaskCreateOptions } from "@/types/mask";
 import type { ModeType } from "@/types/template";
 import type { CollageWizardResult } from "./collage/CollageSetupWizard";
+import type { PhotoPrintWizardResult } from "@/types/photoPrint";
 import { useDocumentStore } from "@/state/documentStore";
 import { useSelectionStore } from "@/state/selectionStore";
 import { useViewportStore } from "@/state/viewportStore";
@@ -19,6 +21,9 @@ import { HomeScreen } from "./home/HomeScreen";
 import { createFreeModeDocument, loadProject } from "./projectActions";
 import { DocumentSetupScreen } from "./setup/DocumentSetupScreen";
 import { CollageSetupWizard } from "./collage/CollageSetupWizard";
+import { PhotoPrintSetupWizard } from "./photoPrint/PhotoPrintSetupWizard";
+import "./photoPrint/photoPrint.css";
+import { SettingsWindow } from "./settings/SettingsWindow";
 
 const EditorScreen = lazy(() =>
   import("./editor/EditorScreen").then((module) => ({
@@ -27,7 +32,7 @@ const EditorScreen = lazy(() =>
 );
 
 export function App(): ReactElement {
-  const [screen, setScreen] = useState<"home" | "setup" | "editor" | "collage-wizard">("home");
+  const [screen, setScreen] = useState<"home" | "setup" | "editor" | "collage-wizard" | "photo-print-wizard">("home");
   const [pendingMode, setPendingMode] = useState<ModeType>("free");
   const [recoveryRecord, setRecoveryRecord] = useState<AutosaveRecord | null>(() => {
     cleanupRecovery();
@@ -39,12 +44,30 @@ export function App(): ReactElement {
   const clearSelection = useSelectionStore((state) => state.clearSelection);
   const resetViewport = useViewportStore((state) => state.resetViewport);
 
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [isCreatingPhotoPrint, setIsCreatingPhotoPrint] = useState(false);
+  const [creatingProgress, setCreatingProgress] = useState("");
   const canShowEditor = useMemo(() => screen === "editor" && document !== null, [document, screen]);
+
+  // Global Ctrl+, shortcut to open settings from anywhere in the app
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent): void {
+      if (e.ctrlKey && e.key === "," && !e.metaKey && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        setSettingsOpen((v) => !v);
+      }
+    }
+    // Use globalThis.document to avoid shadowing by the Zustand store's `document` variable
+    globalThis.document.addEventListener("keydown", onKeyDown);
+    return () => globalThis.document.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   function openMode(mode: ModeType): void {
     setPendingMode(mode);
     if (mode === "collage") {
       setScreen("collage-wizard");
+    } else if (mode === "photo_print") {
+      setScreen("photo-print-wizard");
     } else {
       setScreen("setup");
     }
@@ -119,6 +142,87 @@ export function App(): ReactElement {
     setScreen("editor");
   }
 
+  async function handlePhotoPrintWizardComplete(result: PhotoPrintWizardResult): Promise<void> {
+    const { images, pageWidthMm, pageHeightMm, pageDpi, pageOrientation, pagePresetId, printOptions, customerInfo } = result;
+
+    // Show loading screen immediately
+    setScreen("home");
+    setIsCreatingPhotoPrint(true);
+    setCreatingProgress(`מייבא תמונות (0/${images.length})...`);
+
+    // Import all assets in parallel for speed
+    const importedAssets: Asset[] = await Promise.all(
+      images.map(async (imgEntry, i): Promise<Asset> => {
+        try {
+          const { asset } = await importImageAsset(imgEntry.file, [], { createPreview: false });
+          setCreatingProgress(`מייבא תמונות (${i + 1}/${images.length})...`);
+          return asset;
+        } catch {
+          return {
+            version: 1,
+            id: crypto.randomUUID(),
+            name: imgEntry.file.name,
+            kind: "image",
+            status: "ready",
+            originalPath: imgEntry.url,
+            previewPath: imgEntry.url,
+            thumbnailPath: imgEntry.url,
+            mimeType: imgEntry.file.type || "image/jpeg",
+            width: imgEntry.width,
+            height: imgEntry.height,
+            fileSize: imgEntry.file.size,
+            metadata: {}
+          };
+        }
+      })
+    );
+
+    setCreatingProgress("מייצר דפי הדפסה...");
+
+    const shortW = Math.min(pageWidthMm, pageHeightMm);
+    const longH = Math.max(pageWidthMm, pageHeightMm);
+    const finalW = pageOrientation === "portrait" ? shortW : longH;
+    const finalH = pageOrientation === "portrait" ? longH : shortW;
+
+    const setup: PageSetup = {
+      version: 1,
+      units: "mm",
+      dpi: pageDpi,
+      orientation: pageOrientation,
+      size: { width: Math.round(mmToPx(finalW, pageDpi)), height: Math.round(mmToPx(finalH, pageDpi)) },
+      bleed: { top: 0, right: 0, bottom: 0, left: 0 },
+      margins: { top: 0, right: 0, bottom: 0, left: 0 },
+      safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
+      printIntent: "photo",
+      snapSettings: { ...defaultSnapSettings },
+      gridSettings: { ...defaultGridSettings },
+      metadata: { presetId: pagePresetId }
+    };
+
+    const projectMetadata = {
+      ...customerInfo,
+      projectType: "PhotoPrint" as const
+    };
+
+    const inputs = importedAssets.map((asset, i) => ({
+      asset,
+      copies: images[i]?.copies ?? printOptions.globalCopies ?? 1
+    }));
+
+    const docName = customerInfo?.customerName
+      ? `פיתוח תמונות — ${customerInfo.customerName}`
+      : "פיתוח תמונות";
+
+    const doc = createPhotoPrintModeDocument(docName, setup, inputs, printOptions, projectMetadata);
+    const envelope = beginProject(createProjectEnvelope({ document: doc, linkedGroups: [], batchJobs: [] }));
+    setDocument(withProjectMetadata(envelope.document, envelope.metadata));
+    resetViewport();
+    clearSelection();
+    setIsCreatingPhotoPrint(false);
+    setCreatingProgress("");
+    setScreen("editor");
+  }
+
   function createDocument(setup: PageSetup, options?: { grid?: Partial<GridCreateOptions>; mask?: Partial<MaskCreateOptions> }, customerInfo?: ProjectCustomerInfo): void {
     const name = pendingMode === "free" ? "פרויקט חופשי חדש" : `פרויקט ${pendingMode}`;
     const projectMetadata = {
@@ -176,24 +280,53 @@ export function App(): ReactElement {
     );
   }
 
+  if (screen === "photo-print-wizard") {
+    return (
+      <PhotoPrintSetupWizard
+        onComplete={(result) => void handlePhotoPrintWizardComplete(result)}
+        onCancel={() => setScreen("home")}
+      />
+    );
+  }
+
+  if (isCreatingPhotoPrint) {
+    return (
+      <div className="pp-creating-screen">
+        <div className="pp-spinner" />
+        <div className="pp-creating-title">מכין דפי הדפסה...</div>
+        {creatingProgress && <div className="pp-creating-sub">{creatingProgress}</div>}
+      </div>
+    );
+  }
+
   if (screen === "setup") {
     return <DocumentSetupScreen modeName={pendingMode} onBack={() => setScreen("home")} onCreate={createDocument} />;
   }
 
-  return canShowEditor ? (
-    <Suspense fallback={<main className="loading-screen">טוען את סביבת העריכה...</main>}>
-      <EditorScreen onBackHome={backHome} />
-    </Suspense>
-  ) : (
+  return (
     <>
-      {recoveryRecord !== null ? (
-        <div className="recovery-banner">
-          <span>נמצאה שמירה אוטומטית אחרונה: {recoveryRecord.projectName}</span>
-          <button className="btn btn-accent" onClick={restoreRecovery} type="button">שחזר</button>
-          <button className="btn btn-ghost" onClick={() => { discardRecoveryRecord(recoveryRecord.id); setRecoveryRecord(null); }} type="button">התעלם</button>
-        </div>
-      ) : null}
-      <HomeScreen onOpenMode={openMode} onOpenProjectFile={(file) => void openProjectFile(file)} />
+      {canShowEditor ? (
+        <Suspense fallback={<main className="loading-screen">טוען את סביבת העריכה...</main>}>
+          <EditorScreen onBackHome={backHome} />
+        </Suspense>
+      ) : (
+        <>
+          {recoveryRecord !== null ? (
+            <div className="recovery-banner">
+              <span>נמצאה שמירה אוטומטית אחרונה: {recoveryRecord.projectName}</span>
+              <button className="btn btn-accent" onClick={restoreRecovery} type="button">שחזר</button>
+              <button className="btn btn-ghost" onClick={() => { discardRecoveryRecord(recoveryRecord.id); setRecoveryRecord(null); }} type="button">התעלם</button>
+            </div>
+          ) : null}
+          <HomeScreen
+            onOpenMode={openMode}
+            onOpenProjectFile={(file) => void openProjectFile(file)}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+        </>
+      )}
+
+      <SettingsWindow open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </>
   );
 }

@@ -35,7 +35,7 @@ class PrintPreviewWindow(QMainWindow):
         self._guides_renderer = GuidesRenderer()
         self._driver_service = WindowsPrinterDriverService()
 
-        self.setWindowTitle("Print Preview Studio")
+        self.setWindowTitle("SPP2 · תצוגת הדפסה")
         self.setMinimumSize(1040, 700)
         self._apply_safe_initial_size()
 
@@ -76,7 +76,7 @@ class PrintPreviewWindow(QMainWindow):
 
         self.setStyleSheet(APP_STYLESHEET)
 
-        self.statusBar().showMessage("Preview ready")
+        self.statusBar().showMessage("תצוגת ההדפסה מוכנה")
 
         controller.printer_settings_requested.connect(self._on_printer_settings_requested)
         controller.preview_state_changed.connect(self._update_status_bar)
@@ -149,13 +149,13 @@ class PrintPreviewWindow(QMainWindow):
     def _on_printer_settings_requested(self):
         printer_name = self.controller.get_settings().printer_name
         if not printer_name:
-            QMessageBox.warning(self, "Printer Driver Settings", "Select a valid printer before opening driver settings.")
+            QMessageBox.warning(self, "הגדרות דרייבר מדפסת", "בחר מדפסת תקינה לפני פתיחת הגדרות הדרייבר.")
             return
         if not self._driver_service.is_available():
             QMessageBox.warning(
                 self,
-                "Printer Driver Settings",
-                "Native Windows printer driver preferences are only available on Windows.",
+                "הגדרות דרייבר מדפסת",
+                "הגדרות הדרייבר המקוריות זמינות כרגע רק ב-Windows.",
             )
             return
 
@@ -165,7 +165,7 @@ class PrintPreviewWindow(QMainWindow):
                 parent_hwnd=int(self.winId()) if self.winId() else None,
             )
         except Exception as exc:
-            QMessageBox.warning(self, "Printer Driver Settings", str(exc))
+            QMessageBox.warning(self, "הגדרות דרייבר מדפסת", str(exc))
             return
 
         if driver_result is None:
@@ -177,7 +177,7 @@ class PrintPreviewWindow(QMainWindow):
 
     def _on_print_requested(self, preview_state):
         if not preview_state.can_print:
-            QMessageBox.warning(self, "Print Unavailable", "No valid printer is configured for the current preview.")
+            QMessageBox.warning(self, "הדפסה לא זמינה", "לא הוגדרה מדפסת תקינה לתצוגה הנוכחית.")
             return
         self._render_preview_state_to_printer(preview_state)
 
@@ -186,13 +186,13 @@ class PrintPreviewWindow(QMainWindow):
 
         page_states = preview_state.pages or []
         if not page_states:
-            QMessageBox.warning(self, "Print Failed", "No pages are available to print.")
+            QMessageBox.warning(self, "ההדפסה נכשלה", "אין עמודים זמינים להדפסה.")
             return
 
         printer = preview_state.printer
         painter = QPainter()
         if not painter.begin(printer):
-            QMessageBox.warning(self, "Print Failed", "Could not start the print job.")
+            QMessageBox.warning(self, "ההדפסה נכשלה", "לא ניתן היה להתחיל את עבודת ההדפסה.")
             return
 
         try:
@@ -226,18 +226,18 @@ class PrintPreviewWindow(QMainWindow):
                     preview_state.settings,
                 )
         except Exception as exc:
-            QMessageBox.warning(self, "Print Failed", str(exc))
+            QMessageBox.warning(self, "ההדפסה נכשלה", str(exc))
             return
         finally:
             painter.end()
 
         self.statusBar().showMessage(
-            f"Sent {len(page_states)} page(s) to {preview_state.printer_name or 'printer'}"
+            f"נשלחו {len(page_states)} עמודים אל {preview_state.printer_name or 'המדפסת'}"
         )
         QMessageBox.information(
             self,
-            "Print Sent",
-            f"The print job was sent successfully to {preview_state.printer_name or 'the selected printer'}.",
+            "ההדפסה נשלחה",
+            f"עבודת ההדפסה נשלחה בהצלחה אל {preview_state.printer_name or 'המדפסת שנבחרה'}.",
         )
         self.close()
 
@@ -248,7 +248,7 @@ class PrintPreviewWindow(QMainWindow):
 
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "Export Preview",
+            "ייצוא תצוגת הדפסה",
             "",
             "PNG Image (*.png);;JPEG Image (*.jpg)",
         )
@@ -277,10 +277,10 @@ class PrintPreviewWindow(QMainWindow):
                     page_path = target.with_name(f"{target.stem}_page_{index:02d}{target.suffix}")
                 result.save(str(page_path), format=fmt, dpi=(preview_state.settings.dpi, preview_state.settings.dpi))
         except Exception as exc:
-            QMessageBox.warning(self, "Export Failed", str(exc))
+            QMessageBox.warning(self, "הייצוא נכשל", str(exc))
             return
 
-        self.statusBar().showMessage(f"Exported {len(page_states)} page(s)")
+        self.statusBar().showMessage(f"יוצאו {len(page_states)} עמודים")
 
     def _compute_target_rect_px(self, printer, metrics, settings) -> QRectF:
         dpi = float(printer.resolution() or self.controller.get_settings().dpi or 300)
@@ -316,19 +316,19 @@ class PrintPreviewWindow(QMainWindow):
             return None
 
     def _update_status_bar(self, state):
-        preset_name = state.settings.print_color_preset_name or "None"
+        preset_name = state.settings.print_color_preset_name or "ללא"
         if not getattr(state.settings, "print_color_preset_enabled", False):
-            preset_name = "None"
-        icc_status = "ON" if getattr(state.settings, "enable_color_management", False) else "OFF"
-        profile_name = getattr(state.settings, "output_profile", None) or "None"
+            preset_name = "ללא"
+        icc_status = "פעיל" if getattr(state.settings, "enable_color_management", False) else "כבוי"
+        profile_name = getattr(state.settings, "output_profile", None) or "ללא"
         message = (
-            f"Printer: {state.printer_name or 'None'}"
-            f"  |  Scale: {state.metrics.scale * 100:.1f}%"
+            f"מדפסת: {state.printer_name or 'ללא'}"
+            f"  |  קנ״מ: {state.metrics.scale * 100:.1f}%"
             f"  |  ICC: {icc_status}"
-            f"  |  Profile: {profile_name}"
-            f"  |  Preset: {preset_name}"
-            f"  |  Page {state.page_index + 1}/{state.page_count}"
-            f"  |  Ink: {state.ink_level} ({state.ink_coverage_percent:.1f}%)"
+            f"  |  פרופיל: {profile_name}"
+            f"  |  פריסט: {preset_name}"
+            f"  |  עמוד {state.page_index + 1}/{state.page_count}"
+            f"  |  דיו: {state.ink_level} ({state.ink_coverage_percent:.1f}%)"
         )
         self.statusBar().showMessage(message)
 
@@ -344,6 +344,6 @@ class PrintPreviewWindow(QMainWindow):
     def _show_about(self):
         QMessageBox.information(
             self,
-            "About Print Preview",
-            "Print Preview Studio\nPreview, export, and print share the same state and page order.",
+            "אודות תצוגת ההדפסה",
+            "SPP2 Print Preview\nהתצוגה, הייצוא וההדפסה משתמשים באותן הגדרות ובאותו סדר עמודים.",
         )

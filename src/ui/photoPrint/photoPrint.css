@@ -1,0 +1,418 @@
+/* ═══════════════════════════════════════════════════════
+   PHOTO PRINT MODE – Phase 5
+   ═══════════════════════════════════════════════════════ */
+
+/* ─── Loading screen ─────────────────────────────────── */
+.pp-creating-screen {
+  position: fixed; inset: 0;
+  background: var(--bg-base);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  z-index: 900;
+}
+.pp-spinner {
+  width: 48px; height: 48px;
+  border: 4px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: pp-spin 0.8s linear infinite;
+}
+@keyframes pp-spin { to { transform: rotate(360deg); } }
+.pp-creating-title {
+  font-size: 18px; font-weight: 600;
+  color: var(--text-primary);
+}
+.pp-creating-sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* ─── Layout mode toggle ─────────────────────────────── */
+.pp-mode-toggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.pp-mode-btn {
+  flex: 1;
+  padding: 8px 14px;
+  background: none;
+  border: none;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: var(--t);
+}
+.pp-mode-btn:not(:last-child) { border-right: 1px solid var(--border); }
+.pp-mode-btn.active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.pp-mode-btn:hover:not(.active) {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+/* ─── Split grid selector ────────────────────────────── */
+.pp-split-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.pp-split-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 6px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  cursor: pointer;
+  color: var(--text-primary);
+  transition: var(--t);
+}
+.pp-split-btn:hover { border-color: var(--accent-hover, var(--accent)); }
+.pp-split-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-glow, rgba(99,102,241,0.1));
+  color: var(--accent);
+}
+.pp-split-label { font-size: 13px; font-weight: 600; }
+.pp-split-sub { font-size: 11px; color: var(--text-secondary); }
+
+/* ─── Better selection states (wizard presets) ───────── */
+.wizard-preset-btn {
+  padding: 6px 10px;
+  border: 1.5px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: var(--t);
+  text-align: center;
+}
+.wizard-preset-btn:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+.wizard-preset-btn.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* ─── PhotoPrint side panel ──────────────────────────── */
+.pp-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.pp-panel-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+.pp-panel-tab {
+  flex: 1;
+  padding: 8px 6px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--t);
+  border-bottom: 2px solid transparent;
+}
+.pp-panel-tab:hover { color: var(--text-primary); }
+.pp-panel-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.pp-panel-body { padding: 0 2px; }
+.pp-panel-section { display: flex; flex-direction: column; gap: 8px; }
+.pp-panel-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.pp-panel-info {
+  font-size: 13px;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pp-panel-badge {
+  font-size: 11px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: var(--text-secondary);
+}
+.pp-panel-divider { height: 1px; background: var(--border); margin: 2px 0; }
+.pp-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pp-panel-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.pp-panel-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.pp-panel-slider-row input[type=range] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+.pp-panel-val {
+  font-size: 12px;
+  color: var(--text-primary);
+  min-width: 44px;
+  text-align: right;
+}
+.pp-preset-grid-sm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.pp-preset-sm {
+  padding: 3px 8px;
+  border: 1.5px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: var(--t);
+}
+.pp-preset-sm:hover { border-color: var(--accent); color: var(--text-primary); }
+.pp-preset-sm.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.pp-split-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.pp-split-count-btn {
+  padding: 4px 8px;
+  border: 1.5px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--t);
+}
+.pp-split-count-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+.pp-split-count-btn.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.pp-toggle-row {
+  display: flex;
+  gap: 4px;
+}
+.pp-toggle-btn {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1.5px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: var(--t);
+}
+.pp-toggle-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+.pp-toggle-btn.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* ─── Drop zone ──────────────────────────────────────── */
+.pp-drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: 10px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 14px;
+  transition: var(--t);
+}
+.pp-drop-zone:hover,
+.pp-drop-zone--active {
+  border-color: var(--accent);
+  background: var(--accent-glow, rgba(99,102,241,0.06));
+  color: var(--text-primary);
+}
+
+/* ─── Thumbnail list ─────────────────────────────────── */
+.pp-thumb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.pp-thumb-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-surface);
+}
+.pp-thumb-img-wrap {
+  position: relative;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+}
+.pp-thumb-img-wrap img {
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 5px;
+}
+.pp-res-warn {
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  font-size: 12px;
+  background: #f59e0b;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.pp-thumb-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+.pp-thumb-name {
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pp-thumb-copies {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.pp-thumb-copies input {
+  width: 48px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: center;
+}
+.pp-thumb-remove {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: var(--t);
+}
+.pp-thumb-remove:hover { color: #ef4444; background: rgba(239,68,68,.1); }
+
+/* ─── Warning banner ─────────────────────────────────── */
+.pp-warning {
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(239,68,68,.1);
+  border: 1px solid rgba(239,68,68,.3);
+  color: #ef4444;
+  font-size: 13px;
+}
+
+/* ─── Layout summary ─────────────────────────────────── */
+.pp-layout-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 6px 10px;
+  background: var(--bg-surface);
+  border-radius: 8px;
+}
+.pp-rotated-badge {
+  font-size: 11px;
+  background: var(--accent-glow, rgba(99,102,241,0.15));
+  color: var(--accent);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* ─── Summary table ──────────────────────────────────── */
+.pp-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.pp-summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg-surface);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.pp-summary-row strong {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent);
+}

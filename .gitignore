@@ -25,8 +25,7 @@ Thumbs.db
 
 # python cache
 __pycache__/
-*.pyc
-*.pyo
+
 
 # generated assets
 thumbnails/
@@ -41,7 +40,7 @@ weights/
 **/weights/
 *.onnx
 *.npy
-*.mp4
+
 
 # specific heavy folders
 image.editor.engine/gfpgan/weights/

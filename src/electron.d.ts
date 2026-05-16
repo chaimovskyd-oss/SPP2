@@ -12,6 +12,12 @@ interface SppElectronAPI {
   watchFile: (watchId: string, filePath: string) => Promise<{ error?: string }>;
   unwatchFile: (watchId: string) => Promise<void>;
   onFileChanged: (callback: (watchId: string, filePath: string) => void) => () => void;
+  // Settings-related IPC stubs — implemented in a future Electron update
+  openLogsFolder?: () => Promise<void>;
+  openSettingsFile?: () => Promise<void>;
+  openCacheFolder?: () => Promise<void>;
+  clearCache?: () => Promise<{ freed: number }>;
+  pickFolder?: () => Promise<{ path?: string }>;
 }
 
 declare global {

@@ -23,6 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--height-px", type=int, default=0)
     parser.add_argument("--dpi", type=int, default=300)
     parser.add_argument("--mime-type", default="image/png")
+    parser.add_argument("--orientation", choices=["portrait", "landscape", "auto"], default="auto")
     return parser.parse_args()
 
 
@@ -55,17 +56,19 @@ def main() -> int:
             height_px=args.height_px,
             dpi=args.dpi,
             source_file=str(image_path),
+            orientation=(args.orientation if args.orientation != "auto" else ("landscape" if args.width_mm >= args.height_mm else "portrait")),
         )
         controller.set_page(page)
         # Keep output DPI aligned with the SPP2 document by default.
         controller.set_dpi(args.dpi)
+        controller.set_output_orientation(page.orientation)
 
         window = PrintPreviewWindow(controller)
-        window.setWindowTitle(f"SPP2 Print Preview — {args.document_name}")
+        window.setWindowTitle(f"SPP2 תצוגת הדפסה — {args.document_name}")
         window.show()
         return int(app.exec())
     except Exception as exc:
-        QMessageBox.critical(None, "SPP2 Print Preview", str(exc))
+        QMessageBox.critical(None, "SPP2 תצוגת הדפסה", str(exc))
         print(str(exc), file=sys.stderr)
         return 1
 

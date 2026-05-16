@@ -37,11 +37,11 @@ class PrintPreviewWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        self._title = QLabel("Print Preview")
+        self._title = QLabel("תצוגת הדפסה")
         self._title.setObjectName("CanvasTitle")
 
         self._subtitle = QLabel(
-            "White sheet = printer paper. Output size, placement, guides, and print all share the same state."
+            "הדף הלבן הוא נייר המדפסת. הגודל, המיקום, קווי העזר וההדפסה משתמשים באותן הגדרות."
         )
         self._subtitle.setObjectName("CanvasSubtle")
         self._subtitle.setWordWrap(True)
@@ -179,7 +179,7 @@ class PrintPreviewWidget(QWidget):
         badge_rect = QRectF(page_rect.left() + 4, page_rect.top() + 4, page_rect.width() - 8, 16)
 
         if getattr(settings, "print_color_preset_enabled", False):
-            preset_name = getattr(settings, "print_color_preset_name", "") or "Custom"
+            preset_name = getattr(settings, "print_color_preset_name", "") or "מותאם אישית"
             painter.setPen(QColor("#A78BFA"))
             painter.drawText(badge_rect, Qt.AlignmentFlag.AlignRight, preset_name)
 
@@ -207,9 +207,9 @@ class PrintPreviewWidget(QWidget):
         info_font.setBold(True)
         painter.setFont(info_font)
         text = (
-            f"Printed Size: {metrics.output_width_mm:.0f} x {metrics.output_height_mm:.0f} mm"
-            f"  |  Scale: {metrics.scale * 100:.1f} %"
-            f"  |  Page {preview_state.page_index + 1} / {preview_state.page_count}"
+            f"גודל מודפס: {metrics.output_width_mm:.0f} x {metrics.output_height_mm:.0f} mm"
+            f"  |  קנ״מ: {metrics.scale * 100:.1f} %"
+            f"  |  עמוד {preview_state.page_index + 1} / {preview_state.page_count}"
         )
         painter.drawText(
             QRectF(full_rect.left(), page_rect.bottom() + 10, full_rect.width(), 28),

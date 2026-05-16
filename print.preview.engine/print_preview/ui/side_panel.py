@@ -25,22 +25,22 @@ from print_preview.ui.section_card import SectionCard
 
 _SCALE_MODE_MAP = {
     "100 %": "100",
-    "Fit to Page": "fit_page",
-    "Fit to Printable Area": "fit_printable",
-    "Custom": "custom",
+    "התאם לדף": "fit_page",
+    "התאם לאזור ההדפסה": "fit_printable",
+    "מותאם אישית": "custom",
 }
 _ALIGN_MODE_MAP = {
-    "Center": "center",
-    "Top Left": "top_left",
-    "Custom Offset": "custom",
+    "מרכז": "center",
+    "שמאל עליון": "top_left",
+    "היסט מותאם": "custom",
 }
 _ORIENTATION_MAP = {
-    "Auto": "auto",
-    "Portrait": "portrait",
-    "Landscape": "landscape",
+    "אוטומטי מ-SPP2": "auto",
+    "לאורך": "portrait",
+    "לרוחב": "landscape",
 }
-_GUIDE_STYLES = ["Dashed", "Dotted", "Solid"]
-_GUIDE_COLORS = ["Black", "Gray", "White", "Blue", "Red"]
+_GUIDE_STYLES = ["מקווקו", "מנוקד", "רציף"]
+_GUIDE_COLORS = ["שחור", "אפור", "לבן", "כחול", "אדום"]
 
 
 class PrintPreviewSidePanel(QFrame):
@@ -48,8 +48,8 @@ class PrintPreviewSidePanel(QFrame):
 
     printer_settings_clicked = Signal()
 
-    _PRESET_NONE   = "(None)"
-    _PRESET_CUSTOM = "Custom"
+    _PRESET_NONE   = "(ללא)"
+    _PRESET_CUSTOM = "מותאם אישית"
 
     def __init__(self, controller):
         super().__init__()
@@ -66,10 +66,10 @@ class PrintPreviewSidePanel(QFrame):
         outer.setSpacing(0)
 
         self._tabs = QTabWidget()
-        self._tabs.addTab(self._build_setup_tab(),    "Setup")
-        self._tabs.addTab(self._build_color_tab(),    "Color")
-        self._tabs.addTab(self._build_guides_tab(),   "Guides")
-        self._tabs.addTab(self._build_warnings_tab(), "Warnings")
+        self._tabs.addTab(self._build_setup_tab(),    "הגדרות")
+        self._tabs.addTab(self._build_color_tab(),    "צבע")
+        self._tabs.addTab(self._build_guides_tab(),   "קווי עזר")
+        self._tabs.addTab(self._build_warnings_tab(), "בדיקות")
         outer.addWidget(self._tabs)
 
         controller.metrics_changed.connect(self._refresh_page_info)
@@ -114,14 +114,14 @@ class PrintPreviewSidePanel(QFrame):
     # ── Section builders ──────────────────────────────────────────────────────
 
     def _build_profile_section(self):
-        card = SectionCard("Saved Print Settings", "Select a saved print profile.")
+        card = SectionCard("פרופילי הדפסה", "בחירת הגדרות הדפסה שמורות.")
 
         row = QHBoxLayout()
         row.setSpacing(10)
         self.profile_combo = QComboBox()
         self._rebuild_profile_combo()
         row.addWidget(self.profile_combo, 1)
-        self.btn_profile_manage = QPushButton("Manage")
+        self.btn_profile_manage = QPushButton("ניהול")
         self.btn_profile_manage.setMinimumWidth(78)
         self.btn_profile_manage.setMinimumHeight(36)
         row.addWidget(self.btn_profile_manage)
@@ -137,7 +137,7 @@ class PrintPreviewSidePanel(QFrame):
         return card
 
     def _build_printer_section(self):
-        card = SectionCard("Printer", "Choose a printer and open its native driver settings.")
+        card = SectionCard("מדפסת", "בחירת מדפסת ופתיחת הגדרות הדרייבר המקוריות.")
         row = QVBoxLayout()
 
         self.printer_combo = QComboBox()
@@ -148,10 +148,10 @@ class PrintPreviewSidePanel(QFrame):
             if default_printer:
                 self.printer_combo.setCurrentText(default_printer)
         else:
-            self.printer_combo.addItem("No Printer Configured")
+            self.printer_combo.addItem("לא זוהתה מדפסת")
             self.printer_combo.setEnabled(False)
 
-        btn_settings = QPushButton("Printer Driver Settings...")
+        btn_settings = QPushButton("הגדרות דרייבר מדפסת")
         btn_settings.setMinimumHeight(36)
         row.addWidget(self.printer_combo)
         row.addWidget(btn_settings)
@@ -173,7 +173,7 @@ class PrintPreviewSidePanel(QFrame):
         return card
 
     def _build_page_section(self):
-        card = SectionCard("Print Setup", "Live paper, printable-area, and orientation info.")
+        card = SectionCard("הגדרת הדפסה", "מידע חי על הדף, אזור ההדפסה והכיוון.")
         form = QFormLayout()
 
         self._lbl_design_page = QLabel("-")
@@ -181,25 +181,25 @@ class PrintPreviewSidePanel(QFrame):
         self._lbl_printable   = QLabel("-")
         self._lbl_margins     = QLabel("-")
         for label, widget in (
-            ("Design Page",    self._lbl_design_page),
-            ("Printer Paper",  self._lbl_paper),
-            ("Printable Area", self._lbl_printable),
-            ("Margins",        self._lbl_margins),
+            ("גודל עבודה",    self._lbl_design_page),
+            ("נייר מדפסת",  self._lbl_paper),
+            ("אזור הדפסה", self._lbl_printable),
+            ("שוליים",        self._lbl_margins),
         ):
             widget.setObjectName("MetricValue")
             form.addRow(label, widget)
 
         self.orientation_combo = QComboBox()
         self.orientation_combo.addItems(list(_ORIENTATION_MAP.keys()))
-        form.addRow("Output Orientation", self.orientation_combo)
+        form.addRow("כיוון הדפסה", self.orientation_combo)
         card.layout.addLayout(form)
 
-        self.chk_mirror_output = QCheckBox("Mirror Output")
+        self.chk_mirror_output = QCheckBox("היפוך מראה")
         self.chk_mirror_output.toggled.connect(self.controller.set_mirror_output)
         card.layout.addWidget(self.chk_mirror_output)
 
         self._mirror_warning_label = QLabel(
-            "Ensure printer mirror setting is OFF when using software mirror."
+            "שים לב: אם משתמשים בהיפוך מתוך SPP2, ודא שהיפוך בדרייבר המדפסת כבוי."
         )
         self._mirror_warning_label.setObjectName("WarningBanner")
         self._mirror_warning_label.setWordWrap(True)
@@ -211,12 +211,12 @@ class PrintPreviewSidePanel(QFrame):
         return card
 
     def _build_scale_section(self):
-        card = SectionCard("Scale & Placement", "Print scale changes real output size.")
+        card = SectionCard("גודל ומיקום", "שינוי קנה מידה משנה את גודל ההדפסה בפועל.")
 
         form = QFormLayout()
         self.scale_combo = QComboBox()
         self.scale_combo.addItems(list(_SCALE_MODE_MAP.keys()))
-        self.scale_combo.setCurrentText("Fit to Printable Area")
+        self.scale_combo.setCurrentText("התאם לאזור ההדפסה")
 
         self.custom_scale_spin = QDoubleSpinBox()
         self.custom_scale_spin.setRange(1.0, 500.0)
@@ -239,12 +239,12 @@ class PrintPreviewSidePanel(QFrame):
         self._lbl_printed_size = QLabel("-")
         self._lbl_printed_size.setObjectName("MetricValue")
 
-        form.addRow("Scale Mode",    self.scale_combo)
-        form.addRow("Custom Scale",  self.custom_scale_spin)
-        form.addRow("Alignment",     self.align_combo)
-        form.addRow("Offset X",      self.align_offset_x)
-        form.addRow("Offset Y",      self.align_offset_y)
-        form.addRow("Printed Size",  self._lbl_printed_size)
+        form.addRow("מצב התאמה",    self.scale_combo)
+        form.addRow("קנה מידה",  self.custom_scale_spin)
+        form.addRow("יישור",     self.align_combo)
+        form.addRow("היסט X",      self.align_offset_x)
+        form.addRow("היסט Y",      self.align_offset_y)
+        form.addRow("גודל מודפס",  self._lbl_printed_size)
         card.layout.addLayout(form)
 
         self.scale_combo.currentTextChanged.connect(self._on_scale_mode_changed)
@@ -261,13 +261,13 @@ class PrintPreviewSidePanel(QFrame):
         return card
 
     def _build_icc_section(self):
-        card = SectionCard("Color Management", "Print color preset is applied before ICC conversion.")
+        card = SectionCard("ניהול צבע", "פריסט צבע מוחל לפני המרת ICC.")
 
-        preset_title = QLabel("Print Color Preset")
+        preset_title = QLabel("פריסט צבע להדפסה")
         preset_title.setObjectName("PanelTitle")
         card.layout.addWidget(preset_title)
 
-        preset_hint = QLabel("Presets affect image content only, never the paper background.")
+        preset_hint = QLabel("הפריסטים משפיעים על תוכן התמונה בלבד, לא על רקע הנייר.")
         preset_hint.setObjectName("PanelSubtle")
         preset_hint.setWordWrap(True)
         card.layout.addWidget(preset_hint)
@@ -280,9 +280,9 @@ class PrintPreviewSidePanel(QFrame):
 
         preset_buttons = QHBoxLayout()
         preset_buttons.setSpacing(10)
-        self.btn_preset_edit     = QPushButton("Edit")
-        self.btn_preset_save_as  = QPushButton("Save As")
-        self.btn_preset_manage   = QPushButton("Manage")
+        self.btn_preset_edit     = QPushButton("עריכה")
+        self.btn_preset_save_as  = QPushButton("שמירה בשם")
+        self.btn_preset_manage   = QPushButton("ניהול")
         for btn in (self.btn_preset_edit, self.btn_preset_save_as, self.btn_preset_manage):
             btn.setMinimumHeight(36)
             preset_buttons.addWidget(btn)
@@ -305,11 +305,11 @@ class PrintPreviewSidePanel(QFrame):
         sep.setObjectName("Separator")
         card.layout.addWidget(sep)
 
-        icc_title = QLabel("ICC Color Management")
+        icc_title = QLabel("ניהול צבע ICC")
         icc_title.setObjectName("PanelTitle")
         card.layout.addWidget(icc_title)
 
-        self.chk_icc = QCheckBox("Enable Color Management")
+        self.chk_icc = QCheckBox("הפעל ניהול צבע")
         card.layout.addWidget(self.chk_icc)
 
         self.icc_source = QComboBox()
@@ -320,12 +320,12 @@ class PrintPreviewSidePanel(QFrame):
         self.icc_intent.addItems(self._icc.available_rendering_intents())
 
         form = QFormLayout()
-        form.addRow("Source Profile",    self.icc_source)
-        form.addRow("Output Profile",    self.icc_output)
-        form.addRow("Rendering Intent",  self.icc_intent)
+        form.addRow("פרופיל מקור",    self.icc_source)
+        form.addRow("פרופיל פלט",    self.icc_output)
+        form.addRow("כוונת המרה",  self.icc_intent)
         card.layout.addLayout(form)
 
-        self.chk_soft_proof = QCheckBox("Soft Proof Preview")
+        self.chk_soft_proof = QCheckBox("תצוגת Soft Proof")
         card.layout.addWidget(self.chk_soft_proof)
 
         self.chk_icc.toggled.connect(
@@ -346,13 +346,13 @@ class PrintPreviewSidePanel(QFrame):
         return card
 
     def _build_guides_section(self):
-        card = SectionCard("Production Guides", "Bleed, safe area, and crop marks (mm).")
+        card = SectionCard("קווי עזר", "בליד, אזור בטוח וסימוני חיתוך במ״מ.")
         guide_defs = (
-            ("Show Image Border", "show_image_border", True),
-            ("Show Cut Lines",    "show_cut_lines",    True),
-            ("Print Cut Lines",   "print_cut_lines",   False),
-            ("Show Safe Area",    "show_safe_area",    False),
-            ("Show Bleed",        "show_bleed",        False),
+            ("הצג גבול תמונה", "show_image_border", True),
+            ("הצג קווי חיתוך",    "show_cut_lines",    True),
+            ("הדפס קווי חיתוך",   "print_cut_lines",   False),
+            ("הצג אזור בטוח",    "show_safe_area",    False),
+            ("הצג בליד",        "show_bleed",        False),
         )
         for label, attr, default in guide_defs:
             chk = QCheckBox(label)
@@ -378,10 +378,10 @@ class PrintPreviewSidePanel(QFrame):
         self.safe_area_spin.setDecimals(1)
         self.safe_area_spin.setSuffix(" mm")
         self.safe_area_spin.setValue(3.0)
-        form.addRow("Line Style", self.guide_style_combo)
-        form.addRow("Line Color", self.guide_color_combo)
-        form.addRow("Bleed",      self.bleed_spin)
-        form.addRow("Safe Area",  self.safe_area_spin)
+        form.addRow("סגנון קו", self.guide_style_combo)
+        form.addRow("צבע קו", self.guide_color_combo)
+        form.addRow("בליד",      self.bleed_spin)
+        form.addRow("אזור בטוח",  self.safe_area_spin)
         card.layout.addLayout(form)
 
         self.guide_style_combo.currentTextChanged.connect(self.controller.set_guide_style)
@@ -391,7 +391,7 @@ class PrintPreviewSidePanel(QFrame):
         return card
 
     def _build_quality_section(self):
-        card = SectionCard("Quality / Warnings", "Warnings update dynamically from the preview state.")
+        card = SectionCard("איכות והתראות", "ההתראות מתעדכנות אוטומטית לפי מצב ההדפסה.")
         self._quality_warnings: list[QLabel] = []
         for _ in range(8):
             lbl = QLabel("")
@@ -402,8 +402,8 @@ class PrintPreviewSidePanel(QFrame):
             self._quality_warnings.append(lbl)
 
         row = QHBoxLayout()
-        btn_fix     = QPushButton("Suggest Fix")
-        btn_upscale = QPushButton("Run AI Upscale")
+        btn_fix     = QPushButton("הצע תיקון")
+        btn_upscale = QPushButton("שיפור AI")
         btn_fix.setMinimumHeight(36)
         btn_upscale.setMinimumHeight(36)
         row.addWidget(btn_fix)
@@ -416,20 +416,20 @@ class PrintPreviewSidePanel(QFrame):
     def _rebuild_profile_combo(self):
         blocker = QSignalBlocker(self.profile_combo)
         self.profile_combo.clear()
-        self.profile_combo.addItem("(No Profile)")
+        self.profile_combo.addItem("(ללא פרופיל)")
         for name in PrintProfileManager.list_names():
             self.profile_combo.addItem(name)
         del blocker
 
     def _on_profile_selected(self, text: str):
-        if not text or text == "(No Profile)":
+        if not text or text == "(ללא פרופיל)":
             return
         profile = PrintProfileManager.get_profile(text)
         if profile is None:
-            self._profile_status.setText(f"Profile '{text}' could not be loaded.")
+            self._profile_status.setText(f"לא ניתן לטעון את הפרופיל '{text}'.")
             return
         self.controller.apply_print_settings(profile.settings)
-        self._profile_status.setText(f"Loaded profile '{profile.name}'.")
+        self._profile_status.setText(f"הפרופיל '{profile.name}' נטען.")
 
     def _save_profile_named(self, name: str):
         profile = PrintProfileManager.save_from_settings(name, self.controller.get_settings())
@@ -438,11 +438,11 @@ class PrintPreviewSidePanel(QFrame):
         blocker = QSignalBlocker(self.profile_combo)
         self.profile_combo.setCurrentText(profile.name)
         del blocker
-        self._profile_status.setText(f"Saved profile '{profile.name}'.")
+        self._profile_status.setText(f"הפרופיל '{profile.name}' נשמר.")
 
     def _on_profile_save(self):
         current_name = self.profile_combo.currentText().strip()
-        if not current_name or current_name == "(No Profile)":
+        if not current_name or current_name == "(ללא פרופיל)":
             self._on_profile_save_as()
             return
         self._save_profile_named(current_name)
@@ -452,9 +452,9 @@ class PrintPreviewSidePanel(QFrame):
 
     def _on_profile_save_as(self):
         suggested = self.controller.get_settings().active_print_profile_name or ""
-        if not suggested or suggested == "(No Profile)":
+        if not suggested or suggested == "(ללא פרופיל)":
             suggested = ""
-        name, ok = QInputDialog.getText(self, "Save Print Profile", "Profile name:", text=suggested)
+        name, ok = QInputDialog.getText(self, "שמירת פרופיל הדפסה", "שם הפרופיל:", text=suggested)
         if not ok or not name.strip():
             return
         self._save_profile_named(name.strip())
@@ -462,10 +462,10 @@ class PrintPreviewSidePanel(QFrame):
     def _on_profile_manage(self):
         names = PrintProfileManager.list_names()
         if not names:
-            QMessageBox.information(self, "Manage Profiles", "No saved print profiles yet.")
+            QMessageBox.information(self, "ניהול פרופילים", "עדיין אין פרופילי הדפסה שמורים.")
             return
         name, ok = QInputDialog.getItem(
-            self, "Delete Print Profile", "Profile:", names, editable=False
+            self, "מחיקת פרופיל הדפסה", "פרופיל:", names, editable=False
         )
         if not ok or not name:
             return
@@ -473,7 +473,7 @@ class PrintPreviewSidePanel(QFrame):
         self._rebuild_profile_combo()
         if self.controller.get_settings().active_print_profile_name == name:
             self.controller.apply_print_settings({"active_print_profile_name": ""})
-        self._profile_status.setText(f"Deleted profile '{name}'.")
+        self._profile_status.setText(f"הפרופיל '{name}' נמחק.")
 
     # ── Slot handlers ─────────────────────────────────────────────────────────
 
@@ -507,8 +507,8 @@ class PrintPreviewSidePanel(QFrame):
             f"{metrics.printable_width_mm:.0f} x {metrics.printable_height_mm:.0f} mm"
         )
         self._lbl_margins.setText(
-            f"T {metrics.margin_top_mm:.1f}  B {metrics.margin_bottom_mm:.1f}  "
-            f"L {metrics.margin_left_mm:.1f}  R {metrics.margin_right_mm:.1f} mm"
+            f"עליון {metrics.margin_top_mm:.1f}  תחתון {metrics.margin_bottom_mm:.1f}  "
+            f"שמאל {metrics.margin_left_mm:.1f}  ימין {metrics.margin_right_mm:.1f} mm"
         )
 
     def _refresh_scale_info(self, metrics=None):
@@ -538,8 +538,8 @@ class PrintPreviewSidePanel(QFrame):
         if text == self._PRESET_CUSTOM:
             current_values = self.controller.get_preset_values()
             if current_values:
-                self.controller.set_preset("Custom", current_values)
-                self._preset_status.setText("Custom adjustments active.")
+                self.controller.set_preset("מותאם אישית", current_values)
+                self._preset_status.setText("התאמות ידניות פעילות.")
             else:
                 self.controller.clear_preset()
                 self._preset_status.setText(
@@ -562,19 +562,19 @@ class PrintPreviewSidePanel(QFrame):
 
         dlg = PresetEditorDialog(original_values or None, parent=self)
         dlg.preview_values_changed.connect(
-            lambda values: self.controller.set_preset("Custom", values)
+            lambda values: self.controller.set_preset("מותאם אישית", values)
         )
 
         if dlg.exec():
             new_values = dlg.get_values()
-            self.controller.set_preset("Custom", new_values)
+            self.controller.set_preset("מותאם אישית", new_values)
             blocker = QSignalBlocker(self.preset_combo)
             self.preset_combo.setCurrentText(self._PRESET_CUSTOM)
             del blocker
-            self._preset_status.setText("Custom adjustments active.")
+            self._preset_status.setText("התאמות ידניות פעילות.")
         else:
             if original_values:
-                self.controller.set_preset(original_name or "Custom", original_values)
+                self.controller.set_preset(original_name or "מותאם אישית", original_values)
             else:
                 self.controller.clear_preset()
 
@@ -583,7 +583,7 @@ class PrintPreviewSidePanel(QFrame):
         if not current_values:
             QMessageBox.information(
                 self,
-                "Save Preset",
+                "שמירת פריסט",
                 'No active adjustments to save.\n\nClick "Edit" first to define values.',
             )
             return
@@ -591,13 +591,13 @@ class PrintPreviewSidePanel(QFrame):
         if suggested in (self._PRESET_NONE, self._PRESET_CUSTOM, ""):
             suggested = ""
         name, ok = QInputDialog.getText(
-            self, "Save Print Color Preset", "Preset name:", text=suggested
+            self, "שמירת פריסט צבע", "שם הפריסט:", text=suggested
         )
         if not ok or not name.strip():
             return
         name = name.strip()
         if name in (self._PRESET_NONE, self._PRESET_CUSTOM):
-            QMessageBox.warning(self, "Save Preset", f'"{name}" is a reserved name.')
+            QMessageBox.warning(self, "שמירת פריסט", f'"{name}" is a reserved name.')
             return
         PresetService.save(
             name,
@@ -650,19 +650,19 @@ class PrintPreviewSidePanel(QFrame):
     def _sync_from_preview_state(self, state):
         # Printer status
         status = (
-            f"Using: {state.printer_name}"
+            f"בשימוש: {state.printer_name}"
             if state.has_valid_printer and state.printer_name
-            else "No valid printer configured yet."
+            else "עדיין לא הוגדרה מדפסת תקינה."
         )
         driver_bits: list[str] = []
         if getattr(state.settings, "driver_orientation", None):
-            driver_bits.append(f"orientation: {state.settings.driver_orientation}")
+            driver_bits.append(f"כיוון: {state.settings.driver_orientation}")
         if getattr(state.settings, "driver_paper_name", None):
-            driver_bits.append(f"paper: {state.settings.driver_paper_name}")
+            driver_bits.append(f"נייר: {state.settings.driver_paper_name}")
         if getattr(state.settings, "driver_color_mode", None):
-            driver_bits.append(f"color: {state.settings.driver_color_mode}")
+            driver_bits.append(f"צבע: {state.settings.driver_color_mode}")
         if int(getattr(state.settings, "driver_copies", 1) or 1) > 1:
-            driver_bits.append(f"copies: {state.settings.driver_copies}")
+            driver_bits.append(f"עותקים: {state.settings.driver_copies}")
         if driver_bits:
             status += "\n" + " | ".join(driver_bits)
         self._printer_status_label.setText(status)
@@ -672,23 +672,23 @@ class PrintPreviewSidePanel(QFrame):
         target_profile = (
             active_profile_name
             if self.profile_combo.findText(active_profile_name) >= 0
-            else "(No Profile)"
+            else "(ללא פרופיל)"
         )
         if self.profile_combo.currentText() != target_profile:
             blocker = QSignalBlocker(self.profile_combo)
             self.profile_combo.setCurrentText(target_profile)
             del blocker
         self._profile_status.setText(
-            f"Active profile: {active_profile_name}"
+            f"פרופיל פעיל: {active_profile_name}"
             if active_profile_name
-            else "No saved print profile loaded."
+            else "לא נטען פרופיל הדפסה שמור."
         )
 
         # Orientation
         orientation_value = getattr(state.settings, "output_orientation", "auto")
         orientation_text = next(
             (label for label, mode in _ORIENTATION_MAP.items() if mode == orientation_value),
-            "Auto",
+            "אוטומטי מ-SPP2",
         )
         if self.orientation_combo.currentText() != orientation_text:
             blocker = QSignalBlocker(self.orientation_combo)
@@ -716,7 +716,7 @@ class PrintPreviewSidePanel(QFrame):
         # Scale
         combo_text = next(
             (label for label, mode in _SCALE_MODE_MAP.items() if mode == state.settings.scale_mode),
-            "Fit to Printable Area",
+            "התאם לאזור ההדפסה",
         )
         if self.scale_combo.currentText() != combo_text:
             blocker = QSignalBlocker(self.scale_combo)
@@ -733,7 +733,7 @@ class PrintPreviewSidePanel(QFrame):
         # Alignment
         align_text = next(
             (label for label, mode in _ALIGN_MODE_MAP.items() if mode == state.settings.align_mode),
-            "Center",
+            "מרכז",
         )
         if self.align_combo.currentText() != align_text:
             blocker = QSignalBlocker(self.align_combo)
@@ -816,7 +816,7 @@ class PrintPreviewSidePanel(QFrame):
         # Warnings — also update Warnings tab badge
         self.update_quality_warnings(state.warnings)
         warning_count = len(state.warnings)
-        tab_text = f"Warnings ({warning_count})" if warning_count else "Warnings"
+        tab_text = f"בדיקות ({warning_count})" if warning_count else "בדיקות"
         self._tabs.setTabText(3, tab_text)
 
     def update_quality_warnings(self, warnings: list[str]) -> None:

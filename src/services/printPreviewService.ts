@@ -22,6 +22,7 @@ interface SppPrintApi {
     heightMm: number;
     dpi: number;
     mimeType: string;
+    orientation?: "portrait" | "landscape";
   }) => Promise<PrintPreviewResult>;
 }
 
@@ -52,6 +53,7 @@ export async function openPrintPreviewForRenderedPage(request: PrintPreviewOpenR
     widthMm: request.widthMm,
     heightMm: request.heightMm,
     dpi: request.dpi,
-    mimeType: request.mimeType
+    mimeType: request.mimeType,
+    orientation: request.orientation
   });
 }

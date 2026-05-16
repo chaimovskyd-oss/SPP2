@@ -25,15 +25,15 @@ class PrintPreviewTopBar(QFrame):
         layout.setContentsMargins(16, 10, 16, 10)
         layout.setSpacing(10)
 
-        title = QLabel("Print Preview Studio")
+        title = QLabel("SPP2 · תצוגת הדפסה")
         title.setObjectName("PanelTitle")
         layout.addWidget(title)
         layout.addSpacing(18)
 
-        self.file_menu_button = self._build_menu_button("File", self._build_file_menu())
-        self.view_menu_button = self._build_menu_button("View", self._build_view_menu())
-        self.print_menu_button = self._build_menu_button("Print", self._build_print_menu())
-        self.help_menu_button = self._build_menu_button("Help", self._build_help_menu())
+        self.file_menu_button = self._build_menu_button("קובץ", self._build_file_menu())
+        self.view_menu_button = self._build_menu_button("תצוגה", self._build_view_menu())
+        self.print_menu_button = self._build_menu_button("הדפסה", self._build_print_menu())
+        self.help_menu_button = self._build_menu_button("עזרה", self._build_help_menu())
 
         for button in (
             self.file_menu_button,
@@ -42,12 +42,12 @@ class PrintPreviewTopBar(QFrame):
             self.help_menu_button,
         ):
             button.setMinimumHeight(36)
-            button.setMinimumWidth(72)
+            button.setMinimumWidth(78)
             layout.addWidget(button)
 
         layout.addStretch()
 
-        self.btn_printer_settings = QPushButton("Printer Driver Settings...")
+        self.btn_printer_settings = QPushButton("הגדרות דרייבר מדפסת")
         self.btn_printer_settings.setObjectName("PrimaryButton")
         self.btn_printer_settings.setMinimumHeight(36)
         self.btn_printer_settings.clicked.connect(self.printer_settings_requested)
@@ -62,28 +62,28 @@ class PrintPreviewTopBar(QFrame):
 
     def _build_file_menu(self) -> QMenu:
         menu = QMenu(self)
-        menu.addAction("Export", self.export_requested.emit)
-        menu.addAction("Print", self.print_requested.emit)
+        menu.addAction("ייצוא תמונה", self.export_requested.emit)
+        menu.addAction("הדפסה", self.print_requested.emit)
         menu.addSeparator()
-        menu.addAction("Close", self.close_requested.emit)
+        menu.addAction("סגירה", self.close_requested.emit)
         return menu
 
     def _build_view_menu(self) -> QMenu:
         menu = QMenu(self)
-        menu.addAction("Zoom In", self.zoom_in_requested.emit)
-        menu.addAction("Zoom Out", self.zoom_out_requested.emit)
-        menu.addAction("Reset Zoom", self.reset_zoom_requested.emit)
+        menu.addAction("הגדל תצוגה", self.zoom_in_requested.emit)
+        menu.addAction("הקטן תצוגה", self.zoom_out_requested.emit)
+        menu.addAction("איפוס זום", self.reset_zoom_requested.emit)
         menu.addSeparator()
-        menu.addAction("Toggle Guides", self.toggle_guides_requested.emit)
+        menu.addAction("הצג/הסתר קווי עזר", self.toggle_guides_requested.emit)
         return menu
 
     def _build_print_menu(self) -> QMenu:
         menu = QMenu(self)
-        menu.addAction("Printer Driver Settings", self.printer_settings_requested.emit)
-        menu.addAction("Print", self.print_requested.emit)
+        menu.addAction("הגדרות דרייבר מדפסת", self.printer_settings_requested.emit)
+        menu.addAction("הדפסה", self.print_requested.emit)
         return menu
 
     def _build_help_menu(self) -> QMenu:
         menu = QMenu(self)
-        menu.addAction("About", self.about_requested.emit)
+        menu.addAction("אודות", self.about_requested.emit)
         return menu
