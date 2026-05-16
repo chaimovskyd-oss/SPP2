@@ -3,6 +3,7 @@ import { createProjectMetadata } from "@/core/projectMetadata";
 import { migrateProjectTextLayers } from "@/core/text/migration";
 import { APP_VERSION, PROJECT_FORMAT_VERSION, PROJECT_SCHEMA_VERSION, type ProjectEnvelope } from "@/types/project";
 import type { CollageRule } from "@/types/collage";
+import { DEFAULT_IMAGE_LAYER_EFFECTS } from "@/types/layers";
 
 export interface ProjectMigration {
   fromSchema: number;
@@ -109,6 +110,19 @@ export const PROJECT_MIGRATIONS: ProjectMigration[] = [
     })
   },
   {
+    fromSchema: 7,
+    toSchema: 8,
+    description: "Add Class Photo Mode rule collection (Phase 6)",
+    migrate: (project) => ({
+      ...project,
+      schemaVersion: 8,
+      document: {
+        ...project.document,
+        classPhotoRules: ((project.document as unknown) as Record<string, unknown>).classPhotoRules as import("@/types/classPhoto").ClassPhotoLayoutRule[] ?? []
+      }
+    })
+  },
+  {
     fromSchema: 6,
     toSchema: 7,
     description: "Collage architecture refactor: layouts[] snapshot → activeFamily + spacingMM + marginMM + cachedSlots",
@@ -144,6 +158,62 @@ export const PROJECT_MIGRATIONS: ProjectMigration[] = [
         }) as unknown as CollageRule[]
       }
     })
+  },
+  {
+    fromSchema: 8,
+    toSchema: 9,
+    description: "איחוד color adjustments לשדה effects מוקלד על כל ImageLayer",
+    migrate: (project) => ({
+      ...project,
+      schemaVersion: 9,
+      document: {
+        ...project.document,
+        pages: project.document.pages.map((page) => ({
+          ...page,
+          layers: page.layers.map((layer) => {
+            if (layer.type !== "image") return layer;
+            const meta = (layer.metadata?.["imageEditParams"] ?? {}) as Record<string, unknown>;
+            const num = (k: string): number => (typeof meta[k] === "number" ? (meta[k] as number) : 0);
+            return {
+              ...layer,
+              effects: {
+                version: 1,
+                brightness: num("brightness"),
+                contrast: num("contrast"),
+                saturation: num("saturation"),
+                exposure: num("exposure"),
+                hue: num("hue"),
+                grayscale: meta["black_white"] === true,
+                blur: num("blur"),
+                shadow: null,
+                outline: null
+              }
+            };
+          })
+        }))
+      }
+    })
+  },
+  {
+    fromSchema: 9,
+    toSchema: 10,
+    description: "הוספת שדה pixelMask לשכבות תמונה (Image Edit Mode)",
+    migrate: (project) => ({
+      ...project,
+      schemaVersion: 10,
+      document: {
+        ...project.document,
+        pages: project.document.pages.map((page) => ({
+          ...page,
+          layers: page.layers.map((layer) => {
+            if (layer.type !== "image") return layer;
+            const imgLayer = layer as typeof layer & { pixelMask?: unknown };
+            if (imgLayer.pixelMask !== undefined) return layer;
+            return { ...layer, pixelMask: undefined };
+          })
+        }))
+      }
+    })
   }
 ];
 
@@ -169,10 +239,21 @@ export function normalizeProjectEnvelope(input: unknown): ProjectEnvelope {
       maskTextOverlayRules: input.document.maskTextOverlayRules ?? [],
       maskPresets: input.document.maskPresets ?? [],
       collageRules: ((input.document as unknown) as Record<string, unknown>).collageRules as CollageRule[] ?? [],
+      classPhotoRules: (((input.document as unknown) as Record<string, unknown>).classPhotoRules as Array<Record<string, unknown>> | undefined ?? []).map((r) => ({
+        ...r,
+        titleTextEffects: (r["titleTextEffects"] as unknown[]) ?? [],
+        footerTextEffects: (r["footerTextEffects"] as unknown[]) ?? []
+      })) as import("@/types/classPhoto").ClassPhotoLayoutRule[],
       viewport: input.document.viewport ?? { ...defaultViewportState },
       assets: input.document.assets ?? [],
       pages: input.document.pages.map((page) => ({
         ...page,
+        layers: page.layers.map((layer) => {
+          if (layer.type !== "image") return layer;
+          const imgLayer = layer as typeof layer & { effects?: unknown };
+          if (imgLayer.effects !== undefined) return layer;
+          return { ...layer, effects: { ...DEFAULT_IMAGE_LAYER_EFFECTS } };
+        }),
         setup: page.setup ?? {
           version: 1,
           units: "px",

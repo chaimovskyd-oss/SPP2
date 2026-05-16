@@ -4,7 +4,7 @@
  * All rendering paths (free ImageLayer, FrameLayer in collage/grid/mask)
  * use these utilities so the visual result is identical regardless of mode.
  */
-import type { ColorAdjustments } from "@/types/layers";
+import type { ColorAdjustments, ImageLayerEffects } from "@/types/layers";
 
 // ─── Shared output format ─────────────────────────────────────────────────────
 
@@ -108,3 +108,70 @@ export function collageAdjToKonva(adj: CollageColorAdj, extras?: Record<string, 
 }
 
 export { NEUTRAL as KONVA_COLOR_NEUTRAL };
+
+// ─── ImageLayerEffects → Konva ────────────────────────────────────────────────
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+export interface KonvaEffectsShadow {
+  shadowColor: string;
+  shadowOffsetX: number;
+  shadowOffsetY: number;
+  shadowBlur: number;
+  shadowOpacity: number;
+  shadowEnabled: boolean;
+}
+
+export interface KonvaEffectsOutline {
+  stroke: string;
+  strokeWidth: number;
+  strokeEnabled: boolean;
+}
+
+export interface ImageEffectsKonva extends KonvaColorParams {
+  blurRadius: number;
+  shadow: KonvaEffectsShadow | null;
+  outline: KonvaEffectsOutline | null;
+}
+
+export function imageEffectsToKonva(effects: ImageLayerEffects): ImageEffectsKonva {
+  const brightness = clamp(effects.exposure / 175 + effects.brightness / 220, -0.55, 0.55);
+  const contrast = clamp(effects.contrast, -55, 55);
+  const saturation = clamp(1 + effects.saturation / 200, 0.6, 1.6);
+  const hue = clamp(effects.hue, -60, 60);
+  const grayscale = effects.grayscale;
+  const blurRadius = clamp(effects.blur, 0, 8);
+
+  const hasAny =
+    Math.abs(brightness) > 0.001 ||
+    Math.abs(contrast) > 0.001 ||
+    Math.abs(saturation - 1) > 0.001 ||
+    Math.abs(hue) > 0.001 ||
+    grayscale ||
+    blurRadius > 0;
+
+  const shadow =
+    effects.shadow !== null && effects.shadow.enabled
+      ? {
+          shadowColor: effects.shadow.color,
+          shadowOffsetX: effects.shadow.offsetX,
+          shadowOffsetY: effects.shadow.offsetY,
+          shadowBlur: effects.shadow.blur,
+          shadowOpacity: effects.shadow.opacity,
+          shadowEnabled: true
+        }
+      : null;
+
+  const outline =
+    effects.outline !== null && effects.outline.enabled
+      ? {
+          stroke: effects.outline.color,
+          strokeWidth: effects.outline.width,
+          strokeEnabled: true
+        }
+      : null;
+
+  return { needsCache: hasAny, brightness, contrast, saturation, hue, grayscale, hasAny, blurRadius, shadow, outline };
+}

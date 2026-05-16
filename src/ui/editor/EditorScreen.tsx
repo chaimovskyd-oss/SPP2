@@ -8,6 +8,7 @@ import {
   Circle,
   Clipboard,
   Copy,
+  Eraser,
   Download,
   FileDown,
   FileText,
@@ -46,8 +47,11 @@ import {
   Unlock,
   Undo2,
   X,
+  Zap,
   ZoomIn,
-  ZoomOut
+  ZoomOut,
+  UserRound as UserRoundIcon,
+  Smile as SmileIcon
 } from "lucide-react";
 import {
   useCallback,
@@ -97,15 +101,19 @@ import {
   withProjectMetadata,
   type AlignmentCommand
 } from "@/core";
-import { importImageAsset } from "@/core/assets/assetManager";
+import { importImageAsset, createMaskAsset } from "@/core/assets/assetManager";
 import { measureTextLayerSize } from "@/core/text/measurement";
 import { BUILTIN_TEXT_PRESETS } from "@/core/text/presets";
 import { useDocumentStore } from "@/state/documentStore";
 import { useSelectionStore } from "@/state/selectionStore";
+import { useImageEditStore } from "@/state/imageEditStore";
+import { ImageEditToolbar } from "./ImageEditToolbar";
+import { ImageEditFloatingBar } from "./ImageEditFloatingBar";
 import { CropUI } from "./CropUI";
 import { useViewportStore, type ViewportStore } from "@/state/viewportStore";
 import type { Asset, Document } from "@/types/document";
-import type { BlendMode, FrameLayer, VisualLayer } from "@/types/layers";
+import type { BlendMode, FrameLayer, ImageLayerEffects, VisualLayer } from "@/types/layers";
+import { DEFAULT_IMAGE_LAYER_EFFECTS } from "@/types/layers";
 import type { GridLayoutRule } from "@/types/grid";
 import type { MaskLayoutRule } from "@/types/mask";
 import type { PageSetup, Unit } from "@/types/primitives";
@@ -127,18 +135,26 @@ import {
   exportStagePdf,
   exportStagePng,
   exportStagePrintImage,
+  buildMultiPagePdf,
   loadProject,
   savePortableProject,
   saveProject
 } from "../projectActions";
+import type { PrintableStageImage } from "../projectActions";
 import { CanvasStage } from "./CanvasStage";
+import { CanvasErrorBoundary } from "./CanvasErrorBoundary";
 import { CollageGridOverlay } from "./CollageGridOverlay";
 import type { CanvasContextMenuTarget } from "./KonvaLayerNode";
 import { isImageEditorAvailable, openImageEditorForAsset } from "@/services/imageEditorService";
 import { isPrintPreviewAvailable, openPrintPreviewForRenderedPage } from "@/services/printPreviewService";
+import { PrintRangeDialog } from "@/ui/print/PrintRangeDialog";
+import type { PrintRangeMode } from "@/ui/print/printRangeUtils";
+import { getPagesForPrint } from "@/ui/print/printRangeUtils";
+import { loadLastPrintSettings, saveLastPrintSettings } from "@/ui/print/lastPrintSettings";
 import { useProjectLifecycleStore } from "@/state/projectLifecycleStore";
 import { CollageModePanel } from "@/ui/collage/CollageModePanel";
 import { PhotoPrintModePanel } from "@/ui/photoPrint/PhotoPrintModePanel";
+import { ClassPhotoModePanel } from "@/ui/classPhoto/ClassPhotoModePanel";
 import { regeneratePhotoPrint } from "@/core/photoPrint/photoPrintModeEngine";
 import type { PhotoPrintRule } from "@/types/photoPrint";
 import { CollageLayoutsPanel } from "@/ui/collage/CollageLayoutsPanel";
@@ -155,11 +171,13 @@ import {
   toggleFontFavorite,
   type FontEntry
 } from "./fonts";
+import { GraphicsLibraryPanel } from "@/ui/emoji/EmojiLibraryPanel";
 
 type ToolId = "move" | "text" | "image" | "layers";
 
 interface EditorScreenProps {
   onBackHome: () => void;
+  onOpenClassPhotoWizard?: () => void;
 }
 
 async function runInitialSmartCrop(
@@ -181,22 +199,28 @@ async function runInitialSmartCrop(
   }
 }
 
-export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
+export function EditorScreen({ onBackHome, onOpenClassPhotoWizard }: EditorScreenProps): ReactElement {
   const stageRef = useRef<Konva.Stage | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const replaceImageInputRef = useRef<HTMLInputElement>(null);
+  const classPhotoAddInputRef = useRef<HTMLInputElement>(null);
   const projectInputRef = useRef<HTMLInputElement>(null);
   const autosaveRef = useRef(new AutosaveManager({ intervalMs: 1000 * 60 * 2, debounceMs: 3000, actionThreshold: 20 }));
   const lastAutosavedRevisionRef = useRef(0);
   const [tool, setTool] = useState<ToolId>("move");
-  const [leftTab, setLeftTab] = useState<"layers" | "pages" | "settings" | "collage">("layers");
+  const [leftTab, setLeftTab] = useState<"layers" | "pages" | "settings" | "collage" | "emoji">("layers");
+  const [collageSwapSourceSlotId, setCollageSwapSourceSlotId] = useState<string | null>(null);
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [status, setStatus] = useState("שמירה אוטומטית מוכנה");
   const [canvasContextMenu, setCanvasContextMenu] = useState<CanvasContextMenuTarget | null>(null);
+  const [layerContextMenu, setLayerContextMenu] = useState<{ layerId: string; screenX: number; screenY: number } | null>(null);
+  const [effectsClipboard, setEffectsClipboard] = useState<ImageLayerEffects | null>(null);
   const [imageEditorBusy, setImageEditorBusy] = useState(false);
   const [showFontsBrowser, setShowFontsBrowser] = useState(false);
   const [extWatchId, setExtWatchId] = useState<string | null>(null);
   const [showBackHomeDialog, setShowBackHomeDialog] = useState(false);
+  const [showPrintDialog, setShowPrintDialog] = useState(false);
+  const [isPrintBusy, setIsPrintBusy] = useState(false);
   const [saveDropdownOpen, setSaveDropdownOpen] = useState(false);
   const [dynamicGridMode, setDynamicGridMode] = useState(false);
   const utilSettings = useUtilitiesSettings();
@@ -217,6 +241,8 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
   const applyDocumentChange = useDocumentStore((state) => state.applyDocumentChange);
   const updateCollageCachedSlots = useDocumentStore((state) => state.updateCollageCachedSlots);
   const updateCollageImageTransform = useDocumentStore((state) => state.updateCollageImageTransform);
+  const swapCollageImages = useDocumentStore((state) => state.swapCollageImages);
+  const replaceCollageImage = useDocumentStore((state) => state.replaceCollageImage);
   const addAsset = useDocumentStore((state) => state.addAsset);
   const updateAsset = useDocumentStore((state) => state.updateAsset);
   const applyTextPreset = useDocumentStore((state) => state.applyTextPreset);
@@ -234,6 +260,12 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
   const clearSelection = useSelectionStore((state) => state.clearSelection);
   const layoutEditMode = useSelectionStore((state) => state.layoutEditMode);
   const toggleLayoutEditMode = useSelectionStore((state) => state.toggleLayoutEditMode);
+  const imageEditMode = useImageEditStore((s) => s.imageEditMode);
+  const imageEditLayerId = useImageEditStore((s) => s.editingLayerId);
+  const imageActiveTool = useImageEditStore((s) => s.activeTool);
+  const cropPreview = useImageEditStore((s) => s.cropPreview);
+  const enterImageEditMode = useImageEditStore((s) => s.enterImageEditMode);
+  const exitImageEditMode = useImageEditStore((s) => s.exitImageEditMode);
   const viewport = useViewportStore();
   const lifecycle = useProjectLifecycleStore();
 
@@ -268,6 +300,11 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
   const isMaskMode = document?.metadata["mode"] === "mask";
   const isCollageMode = document?.metadata["mode"] === "collage";
   const isPhotoPrintMode = document?.metadata["mode"] === "photo_print";
+  const isClassPhotoMode = document?.metadata["mode"] === "class_photo";
+  const activeClassPhotoRule = useMemo(() => {
+    if (!document || !isClassPhotoMode || !activePage) return null;
+    return document.classPhotoRules.find((r) => r.pageId === activePage.id) ?? document.classPhotoRules[0] ?? null;
+  }, [document, isClassPhotoMode, activePage]);
   const activePhotoPrintRule = useMemo((): PhotoPrintRule | null => {
     if (!document || !isPhotoPrintMode) return null;
     const ruleId = document.metadata["activePhotoPrintId"];
@@ -317,6 +354,68 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
     void runInitialSmartCrop(rule, page, document.assets);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCollageRule?.id]);
+
+  // Reset swap source when leaving collage mode or changing page
+  useEffect(() => {
+    if (!isCollageMode) setCollageSwapSourceSlotId(null);
+  }, [isCollageMode, activeCollageRule?.id]);
+
+  // Broadcast swap state so KonvaLayerNode dots appear/disappear correctly
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("spp2:collage-swap-mode-change", {
+      detail: { slotId: collageSwapSourceSlotId }
+    }));
+  }, [collageSwapSourceSlotId]);
+
+  // Listen for blue-dot anchor clicks from KonvaLayerNode
+  useEffect(() => {
+    function onAnchorClick(event: Event): void {
+      if (!isCollageMode || !activeCollageRule) return;
+      const slotId = (event as CustomEvent<{ slotId: string }>).detail?.slotId;
+      if (!slotId) return;
+
+      setCollageSwapSourceSlotId((current) => {
+        if (!current) {
+          return slotId;
+        }
+        if (current === slotId) {
+          return null;
+        }
+        swapCollageImages(activeCollageRule.id, current, slotId);
+        return null;
+      });
+    }
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") setCollageSwapSourceSlotId(null);
+    }
+    window.addEventListener("spp2:collage-slot-anchor-click", onAnchorClick);
+    window.addEventListener("keydown", onKeyDown);
+    // handled inside this effect so it always has the latest handleDeleteSelection
+    return () => {
+      window.removeEventListener("spp2:collage-slot-anchor-click", onAnchorClick);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCollageMode, activeCollageRule?.id, swapCollageImages]);
+
+  // DELETE key deletes the current selection when in image edit mode
+  useEffect(() => {
+    if (!imageEditMode) return;
+    function onImageEditKey(event: KeyboardEvent): void {
+      if (event.key === "Delete" || event.key === "Backspace") {
+        const target = event.target as HTMLElement;
+        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+        event.preventDefault();
+        handleDeleteSelection();
+      }
+      if (event.key === "Escape") {
+        handleImageEditCancel();
+      }
+    }
+    window.addEventListener("keydown", onImageEditKey);
+    return () => window.removeEventListener("keydown", onImageEditKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageEditMode, imageEditLayerId]);
 
   useEffect(() => {
     if (document === null) {
@@ -467,6 +566,34 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
       setExtWatchId(watchId);
       setStatus("ColorLab נפתח — שמור לעדכון אוטומטי");
     }
+  }
+
+  function handleInsertGraphic(fileUrl: string, name: string, fallbackUrl?: string): void {
+    void (async () => {
+      try {
+        const tryFetch = async (url: string): Promise<Blob | null> => {
+          try {
+            const res = await fetch(url);
+            if (res.ok) return res.blob();
+          } catch {}
+          return null;
+        };
+        let blob = await tryFetch(fileUrl);
+        if (!blob && fallbackUrl) blob = await tryFetch(fallbackUrl);
+        if (!blob) { setStatus("שגיאה בטעינת גרפיקה"); return; }
+        const isSvg = fileUrl.includes(".svg") || (fallbackUrl ?? "").includes(".svg");
+        const ext  = isSvg ? "svg" : "png";
+        const mime = isSvg ? "image/svg+xml" : "image/png";
+        const file = new File([blob], `${name}.${ext}`, { type: mime });
+        const { asset } = await importImageAsset(file, currentDocument.assets, { createPreview: true });
+        const layer = createFreeImageLayer(asset, currentPage.width, currentPage.height);
+        addAssetAndLayer(currentPage.id, asset, layer);
+        setSelection([layer.id]);
+        setStatus(`"${name}" נוסף`);
+      } catch {
+        setStatus("שגיאה בהוספת גרפיקה");
+      }
+    })();
   }
 
   function handleInsertQRToCanvas(dataUrl: string): void {
@@ -641,7 +768,9 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
     event.target.value = "";
   }
 
-  // Replace image: swap only the asset on the currently selected image/frame layer
+  // Replace image: swap the asset on the currently selected image/frame layer.
+  // For collage frames, also updates imagePool + imageAssignments so layout rebuilds
+  // don't revert to the old image.
   async function handleReplaceImageInput(event: ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -654,14 +783,34 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
     if (selectedLayer.type === "image") {
       updateLayer(currentPage.id, { ...selectedLayer, assetId: asset.id });
     } else {
-      // FrameLayer: update imageAssetId, keep all existing frame properties
-      updateLayer(currentPage.id, { ...selectedLayer, imageAssetId: asset.id, contentType: "image" });
+      // Check if this is a collage frame — use replaceCollageImage so imagePool stays in sync
+      const collageMeta = selectedLayer.metadata["collageFrame"] as { collageRuleId?: string; slotId?: string; isCollageFrame?: boolean } | undefined;
+      if (isCollageMode && activeCollageRule && collageMeta?.isCollageFrame && collageMeta.slotId) {
+        replaceCollageImage(activeCollageRule.id, collageMeta.slotId, asset.id);
+      } else {
+        updateLayer(currentPage.id, { ...selectedLayer, imageAssetId: asset.id, contentType: "image" });
+      }
     }
     setStatus("תמונה הוחלפה");
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>): void {
     event.preventDefault();
+    // Graphics library drag (new)
+    const graphicUrl = event.dataTransfer.getData("graphic/url");
+    if (graphicUrl) {
+      const name     = event.dataTransfer.getData("graphic/name") || "גרפיקה";
+      const fallback = event.dataTransfer.getData("graphic/fallback") || undefined;
+      handleInsertGraphic(graphicUrl, name, fallback);
+      return;
+    }
+    // Legacy emoji drag (backward compat)
+    const emojiUrl = event.dataTransfer.getData("emoji/url") || event.dataTransfer.getData("emoji/cdn");
+    if (emojiUrl) {
+      const name = event.dataTransfer.getData("emoji/name") || "אמוג'י";
+      handleInsertGraphic(emojiUrl, name);
+      return;
+    }
     void handleImageFiles(event.dataTransfer.files);
   }
 
@@ -842,35 +991,121 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
     setStatus("JPG exported");
   }
 
-  async function handlePrintPreview(): Promise<void> {
-    const stage = stageRef.current;
-    if (stage === null) return;
-
+  function handlePrintPreview(): void {
     if (!isPrintPreviewAvailable()) {
       setStatus("מודול ההדפסה זמין רק בהרצה דרך Electron");
       return;
     }
+    setShowPrintDialog(true);
+  }
 
-    setStatus("מכין קובץ נקי להדפסה…");
+  async function handlePrintFromDialog(mode: PrintRangeMode, customRange: string | undefined): Promise<void> {
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    const allPages = currentDocument.pages;
+    const rangeResult = getPagesForPrint(mode, customRange, allPages.length, currentPageIndex);
+
+    if ("error" in rangeResult) {
+      setStatus(rangeResult.error);
+      return;
+    }
+
+    const pageIndices = rangeResult;
+    saveLastPrintSettings({ printRangeMode: mode, customPageRange: customRange });
+    setIsPrintBusy(true);
+    setStatus("מכין עמודים להדפסה…");
 
     try {
-      const rendered = exportStagePrintImage(stage, currentPage, "image/png");
-      const pageName = typeof currentPage.metadata["name"] === "string" ? currentPage.metadata["name"] : undefined;
-      const result = await openPrintPreviewForRenderedPage({
-        ...rendered,
-        documentName: currentDocument.name,
-        pageName
-      });
+      if (pageIndices.length === 1) {
+        // Single page → Python print preview (existing flow)
+        const page = allPages[pageIndices[0]];
+        if (!page) { setStatus("עמוד לא נמצא"); return; }
 
-      if (!result.success) {
-        setStatus(`שגיאה בפתיחת הדפסה: ${result.error ?? "לא ידוע"}`);
-        return;
+        if (page.id !== currentPage.id) {
+          setActivePage(page.id);
+          await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+        }
+
+        const rendered = exportStagePrintImage(stage, page, "image/png");
+        const pageName = typeof page.metadata["name"] === "string" ? page.metadata["name"] : undefined;
+
+        setShowPrintDialog(false);
+        const result = await openPrintPreviewForRenderedPage({
+          ...rendered,
+          documentName: currentDocument.name,
+          pageName
+        });
+
+        if (!result.success) {
+          setStatus(`שגיאה בפתיחת הדפסה: ${result.error ?? "לא ידוע"}`);
+          return;
+        }
+        setStatus("חלון הדפסה נפתח");
+
+      } else {
+        // Multi-page → render all pages sequentially → PDF → open with OS viewer
+        const originalPageId = currentPage.id;
+        const renderedPages: PrintableStageImage[] = [];
+
+        for (const idx of pageIndices) {
+          const page = allPages[idx];
+          if (!page) continue;
+          setActivePage(page.id);
+          await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+          renderedPages.push(exportStagePrintImage(stage, page, "image/png"));
+        }
+
+        setActivePage(originalPageId);
+
+        if (renderedPages.length === 0) {
+          setStatus("לא נמצאו עמודים להדפסה");
+          return;
+        }
+
+        const pdfBytes = await buildMultiPagePdf(renderedPages);
+
+        // Convert Uint8Array → base64 data URL in safe chunks
+        let binary = "";
+        const chunkSize = 8192;
+        for (let i = 0; i < pdfBytes.length; i += chunkSize) {
+          binary += String.fromCharCode(...pdfBytes.subarray(i, i + chunkSize));
+        }
+        const pdfDataUrl = `data:application/pdf;base64,${btoa(binary)}`;
+
+        const sppApi = (window as Window & { spp?: { writeTempImage?: (d: string, e: string) => Promise<string>; openPath?: (p: string) => Promise<{ error?: string }> } }).spp;
+        if (!sppApi?.writeTempImage || !sppApi?.openPath) {
+          setStatus("שגיאה: IPC לפתיחת PDF אינו זמין");
+          return;
+        }
+
+        const pdfPath = await sppApi.writeTempImage(pdfDataUrl, "pdf");
+        setShowPrintDialog(false);
+        const openResult = await sppApi.openPath(pdfPath);
+        if (openResult?.error) {
+          setStatus(`שגיאה בפתיחת PDF: ${openResult.error}`);
+          return;
+        }
+        setStatus(`נפתח PDF להדפסה — ${renderedPages.length} עמודים`);
       }
-
-      setStatus("חלון הדפסה נפתח");
-    } catch (error) {
-      setStatus(`שגיאה בהכנת הדפסה: ${error instanceof Error ? error.message : "לא ידוע"}`);
+    } catch (err) {
+      setStatus(`שגיאה בהדפסה: ${err instanceof Error ? err.message : "לא ידוע"}`);
+    } finally {
+      setIsPrintBusy(false);
     }
+  }
+
+  async function handlePrintOneCopy(): Promise<void> {
+    if (!isPrintPreviewAvailable()) {
+      setStatus("מודול ההדפסה זמין רק בהרצה דרך Electron");
+      return;
+    }
+    const last = loadLastPrintSettings();
+    if (!last) {
+      setShowPrintDialog(true);
+      return;
+    }
+    await handlePrintFromDialog(last.printRangeMode, last.customPageRange);
   }
 
   function handleDeleteSelected(): void {
@@ -914,6 +1149,106 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
     updateLayer(currentPage.id, { ...nextLayer, width: size.width, height: size.height });
   }
 
+  function handleImageEditApply(): void {
+    if (imageEditLayerId === null || activePage === null) {
+      exitImageEditMode();
+      return;
+    }
+    const layer = activePage.layers.find((l) => l.id === imageEditLayerId);
+    if (layer?.type !== "image") {
+      exitImageEditMode();
+      return;
+    }
+    if (imageActiveTool === "crop" && cropPreview !== null) {
+      updateLayer(activePage.id, { ...layer, crop: cropPreview });
+      exitImageEditMode();
+      return;
+    }
+    // Apply selection (wand / rect-select) as mask — erase selected region
+    const storeState = useImageEditStore.getState();
+    const selMask = storeState.selectionMask;
+    if ((imageActiveTool === "wand" || imageActiveTool === "rect-select") && selMask !== null) {
+      void handleApplyMaskFromSelection(selMask.data, selMask.width, selMask.height).then(() => {
+        exitImageEditMode();
+      });
+      return;
+    }
+    exitImageEditMode();
+  }
+
+  function handleDeleteSelection(): void {
+    const storeState = useImageEditStore.getState();
+    if (!storeState.imageEditMode) return;
+    const selMask = storeState.selectionMask;
+    if (selMask === null || imageEditLayerId === null || activePage === null) return;
+    const layer = activePage.layers.find((l) => l.id === imageEditLayerId);
+    if (layer?.type !== "image") return;
+    void handleApplyMaskFromSelection(selMask.data, selMask.width, selMask.height);
+    useImageEditStore.getState().clearSelection();
+  }
+
+  function handleImageEditCancel(): void {
+    exitImageEditMode();
+  }
+
+  function handleImageEditResetCrop(): void {
+    if (imageEditLayerId === null || activePage === null) return;
+    const layer = activePage.layers.find((l) => l.id === imageEditLayerId);
+    if (layer?.type !== "image") return;
+    updateLayer(activePage.id, { ...layer, crop: { x: 0, y: 0, width: 1, height: 1 } });
+  }
+
+  function handleImageEditResetMask(): void {
+    if (imageEditLayerId === null || activePage === null) return;
+    const layer = activePage.layers.find((l) => l.id === imageEditLayerId);
+    if (layer?.type !== "image") return;
+    updateLayer(activePage.id, { ...layer, pixelMask: undefined });
+  }
+
+  async function handleApplyMaskFromSelection(selectionData: Uint8Array, width: number, height: number): Promise<void> {
+    if (imageEditLayerId === null || activePage === null) return;
+    const layer = activePage.layers.find((l) => l.id === imageEditLayerId);
+    if (layer?.type !== "image") return;
+
+    const canvas = window.document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (ctx === null) return;
+
+    const existing = layer.pixelMask !== undefined
+      ? currentDocument.assets.find((a) => a.id === layer.pixelMask!.assetId)
+      : null;
+
+    if (existing?.previewPath !== undefined) {
+      await new Promise<void>((resolve) => {
+        const img = new Image();
+        img.onload = () => { ctx.drawImage(img, 0, 0, width, height); resolve(); };
+        img.src = existing.previewPath!;
+      });
+    } else {
+      ctx.fillStyle = "white";
+      ctx.fillRect(0, 0, width, height);
+    }
+
+    // Apply selection as mask (erase selected pixels)
+    const imageDataObj = ctx.getImageData(0, 0, width, height);
+    for (let i = 0; i < selectionData.length; i++) {
+      if (selectionData[i] > 128) {
+        imageDataObj.data[i * 4 + 3] = 0;
+      }
+    }
+    ctx.putImageData(imageDataObj, 0, 0);
+
+    const dataUrl = canvas.toDataURL("image/png");
+    const maskAsset = createMaskAsset(dataUrl, width, height, layer.id);
+    addAsset(maskAsset);
+    updateLayer(activePage.id, {
+      ...layer,
+      pixelMask: { version: 1, assetId: maskAsset.id, width, height }
+    });
+  }
+
   function patchSelectedLayer(patch: Partial<VisualLayer>): void {
     if (selectedLayer === null) return;
     const nextLayer = { ...selectedLayer, ...patch } as VisualLayer;
@@ -955,6 +1290,26 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
   function handleResetGridCrops(rule: GridLayoutRule): void {
     applyDocumentChange("ResetGridCropsCommand", (doc) => resetGridCrops(doc, rule.id), currentPage.id);
     setStatus("Grid crops reset");
+  }
+
+  async function handleClassPhotoAddFiles(files: FileList): Promise<void> {
+    if (!activeClassPhotoRule) return;
+    const { createClassPhotoPersonRecord: makeRecord } = await import("@/core/classPhoto/classPhotoFactory");
+    const { addPeopleToClassPhoto } = useDocumentStore.getState();
+    const fileArr = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    const imported: import("@/types/document").Asset[] = [];
+    const newRecords: import("@/types/classPhoto").ClassPhotoPersonRecord[] = [];
+    const maxOrder = activeClassPhotoRule.personRecords.reduce((m, r) => Math.max(m, r.orderIndex), -1);
+    for (let i = 0; i < fileArr.length; i++) {
+      const file = fileArr[i];
+      if (!file) continue;
+      try {
+        const { asset } = await importImageAsset(file, [], { createPreview: true });
+        imported.push(asset);
+        newRecords.push(makeRecord(asset.id, file.name, "child", maxOrder + 1 + i));
+      } catch { /* skip */ }
+    }
+    if (newRecords.length > 0) addPeopleToClassPhoto(activeClassPhotoRule.id, newRecords, imported);
   }
 
   function handleAddGridFilenameText(rule: GridLayoutRule): void {
@@ -1012,6 +1367,17 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
 
   return (
     <main className="canvas-shell" data-testid="editor-screen">
+      {/* Print range dialog */}
+      {showPrintDialog && (
+        <PrintRangeDialog
+          totalPages={currentDocument.pages.length}
+          currentPageIndex={currentPageIndex}
+          onPrint={(mode, range) => { void handlePrintFromDialog(mode, range); }}
+          onPrintOneCopy={() => { void handlePrintOneCopy(); }}
+          onCancel={() => { if (!isPrintBusy) setShowPrintDialog(false); }}
+          isBusy={isPrintBusy}
+        />
+      )}
       {/* Back-home confirmation dialog */}
       {showBackHomeDialog && (
         <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.45)" }}>
@@ -1197,11 +1563,21 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
           <button
             className="btn btn-ghost"
             type="button"
-            title="הדפסה / תצוגה לפני הדפסה"
-            onClick={() => { void handlePrintPreview(); }}
+            title="הדפסה — בחר עמודים להדפסה"
+            onClick={handlePrintPreview}
           >
             <FileText size={14} />
             הדפסה
+          </button>
+          <button
+            className="btn btn-ghost"
+            type="button"
+            title="הדפס עותק אחד לפי הגדרות אחרונות"
+            onClick={() => { void handlePrintOneCopy(); }}
+            style={{ fontSize: 12, opacity: 0.8 }}
+          >
+            <Zap size={13} />
+            עותק אחד
           </button>
           {/* Send to client buttons */}
           {currentDocument.metadata.customerEmail && (
@@ -1231,8 +1607,11 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
       </header>
 
       <ContextToolbar
+        canvasWidth={currentPage.width}
+        canvasHeight={currentPage.height}
         dpi={currentPage.setup.dpi}
         hasTextStyleClipboard={hasTextStyleClipboard}
+        imageEditMode={imageEditMode}
         selectedLayer={selectedLayer}
         selectedLayers={selectedLayers}
         showGrid={viewport.showGrid}
@@ -1253,6 +1632,16 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
         }}
         onDelete={handleDeleteSelected}
         onDuplicate={handleDuplicateSelected}
+        onEnterImageEditMode={() => {
+          if (selectedLayer?.type === "image") {
+            enterImageEditMode(selectedLayer.id, selectedLayer.crop ?? undefined);
+          }
+        }}
+        onImageEditApply={handleImageEditApply}
+        onImageEditCancel={handleImageEditCancel}
+        onImageEditDeleteSelection={handleDeleteSelection}
+        onImageEditResetCrop={handleImageEditResetCrop}
+        onImageEditResetMask={handleImageEditResetMask}
         onMoveLayer={(direction) => {
           if (selectedLayer !== null) {
             moveLayer(currentPage.id, selectedLayer.id, direction);
@@ -1265,7 +1654,6 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
           }
         }}
         onPatch={patchSelectedLayer}
-        onReplaceImage={() => replaceImageInputRef.current?.click()}
         onToggleGrid={viewport.toggleGrid}
         onToggleSnap={viewport.toggleSnap}
       />
@@ -1292,8 +1680,17 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
                 testId="tool-dynamic-grid"
               />
             )}
+            {isClassPhotoMode && (
+              <ToolButton
+                active={false}
+                icon={UserRoundIcon}
+                label="הוסף לתמונת מחזור"
+                onClick={() => classPhotoAddInputRef.current?.click()}
+                testId="tool-class-photo-add"
+              />
+            )}
           </div>
-          <nav className="ls-nav" aria-label="סעיפי לוח שמאל">
+          <nav className={`ls-nav ${isCollageMode ? "ls-nav--5col" : "ls-nav--4col"}`} aria-label="סעיפי לוח שמאל">
             {isCollageMode && (
               <button
                 aria-pressed={leftTab === "collage"}
@@ -1332,8 +1729,17 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
               <Settings size={15} />
               הגדרות
             </button>
+            <button
+              aria-pressed={leftTab === "emoji"}
+              className={`ls-nav-btn ${leftTab === "emoji" ? "active" : ""}`}
+              onClick={() => setLeftTab("emoji")}
+              type="button"
+            >
+              <SmileIcon size={15} />
+              גרפיקה
+            </button>
           </nav>
-          <div className="ls-content">
+          <div className={`ls-content ${leftTab === "emoji" ? "ls-content--emoji" : ""}`}>
             {leftTab === "collage" && isCollageMode && activeCollageRule !== null && (
               <CollageLayoutsPanel rule={activeCollageRule} />
             )}
@@ -1346,6 +1752,15 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
                 onMove={(layerId, direction) => moveLayer(currentPage.id, layerId, direction)}
                 onReorder={(layerIdsTopToBottom) => reorderLayers(currentPage.id, layerIdsTopToBottom)}
                 onSelect={(layerId) => setSelection([layerId])}
+                onSelectMany={(layerIds) => setSelection(layerIds)}
+                onToggleVisibility={(layerId) => {
+                  const layer = currentPage.layers.find((l) => l.id === layerId);
+                  if (layer !== undefined) updateLayer(currentPage.id, { ...layer, visible: !layer.visible });
+                }}
+                onLayerContextMenu={(layerId, screenX, screenY) => {
+                  if (!selectedLayerIds.includes(layerId)) setSelection([layerId]);
+                  setLayerContextMenu({ layerId, screenX, screenY });
+                }}
               />
             )}
             {leftTab === "pages" && (
@@ -1370,6 +1785,9 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
                 onApplyPageSetup={handleApplyPageSetup}
               />
             )}
+            {leftTab === "emoji" && (
+              <GraphicsLibraryPanel onInsertGraphic={handleInsertGraphic} />
+            )}
           </div>
         </aside>
 
@@ -1386,28 +1804,49 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
         >
           <div className="ruler-top" />
           <div className="ruler-side" />
-          <CanvasStage
-            assets={currentDocument.assets}
-            editingLayerId={editingLayerId}
-            layoutEditMode={layoutEditMode}
-            page={currentPage}
-            selectedLayerIds={selectedLayerIds}
-            selectedLayerId={selectedLayerId}
-            stageRef={stageRef}
-            onBeginTextEdit={(layerId) => {
-              setSelection([layerId]);
-              setEditingLayerId(layerId);
-              setTool("text");
-            }}
-            onEndTextEdit={() => setEditingLayerId(null)}
-            onLayerChange={handleCanvasLayerChange}
-            onSelectLayer={(layerId) => (layerId === null ? clearSelection() : setSelection([layerId]))}
-            onSelectLayers={(layerIds) => setSelection(layerIds)}
-            onLayerContextMenu={(target) => {
-              setCanvasContextMenu(target);
-              setSelection([target.layerId]);
-            }}
-          />
+          <CanvasErrorBoundary>
+            <CanvasStage
+              assets={currentDocument.assets}
+              editingLayerId={editingLayerId}
+              layoutEditMode={layoutEditMode}
+              page={currentPage}
+              selectedLayerIds={selectedLayerIds}
+              selectedLayerId={selectedLayerId}
+              stageRef={stageRef}
+              onBeginTextEdit={(layerId) => {
+                setSelection([layerId]);
+                setEditingLayerId(layerId);
+                setTool("text");
+              }}
+              onEndTextEdit={() => setEditingLayerId(null)}
+              onLayerChange={handleCanvasLayerChange}
+              onSelectLayer={(layerId) => (layerId === null ? clearSelection() : setSelection([layerId]))}
+              onSelectLayers={(layerIds) => setSelection(layerIds)}
+              onLayerContextMenu={(target) => {
+                setCanvasContextMenu(target);
+                setSelection([target.layerId]);
+              }}
+              onMaskPainted={(layerId, maskDataUrl, width, height) => {
+                if (activePage === null) return;
+                const layer = activePage.layers.find((l) => l.id === layerId);
+                if (layer?.type !== "image") return;
+                const maskAsset = createMaskAsset(maskDataUrl, width, height, layerId);
+                addAsset(maskAsset);
+                updateLayer(activePage.id, {
+                  ...layer,
+                  pixelMask: { version: 1, assetId: maskAsset.id, width, height }
+                });
+              }}
+            />
+          </CanvasErrorBoundary>
+          {/* Image Edit floating params bar */}
+          {imageEditMode && <ImageEditFloatingBar />}
+          {/* Collage swap mode banner */}
+          {isCollageMode && collageSwapSourceSlotId !== null && (
+            <div className="collage-swap-banner">
+              מצב החלפה — לחץ על נקודה כחולה בתמונה שנייה להחלפה | Esc לביטול
+            </div>
+          )}
           {/* Dynamic collage grid overlay */}
           {isCollageMode && dynamicGridMode && activeCollageRule !== null && (
             <CollageGridOverlay
@@ -1431,6 +1870,40 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
               onOpenInColorLab={() => void handleOpenInColorLab(canvasContextMenu)}
             />
           )}
+          {layerContextMenu !== null && (() => {
+            const ctxLayer = currentPage.layers.find((l) => l.id === layerContextMenu.layerId);
+            const ctxIsImage = ctxLayer?.type === "image";
+            const ctxSelectedImageLayers = selectedLayerIds
+              .flatMap((id) => {
+                const l = currentPage.layers.find((layer) => layer.id === id);
+                return l?.type === "image" ? [l] : [];
+              });
+            return (
+              <LayerContextMenu
+                target={layerContextMenu}
+                isImageLayer={ctxIsImage}
+                hasEffectsClipboard={effectsClipboard !== null}
+                onClose={() => setLayerContextMenu(null)}
+                onMoveToFront={() => moveLayer(currentPage.id, layerContextMenu.layerId, "front")}
+                onMoveToBack={() => moveLayer(currentPage.id, layerContextMenu.layerId, "back")}
+                onDuplicate={handleDuplicateSelected}
+                onDelete={handleDeleteSelected}
+                onCopyEffects={() => {
+                  if (ctxLayer?.type === "image") {
+                    setEffectsClipboard({ ...ctxLayer.effects });
+                    setStatus("אפקטים הועתקו");
+                  }
+                }}
+                onPasteEffects={() => {
+                  if (effectsClipboard === null) return;
+                  ctxSelectedImageLayers.forEach((imgLayer) => {
+                    updateLayer(currentPage.id, { ...imgLayer, effects: { ...effectsClipboard } });
+                  });
+                  setStatus("אפקטים הודבקו");
+                }}
+              />
+            );
+          })()}
         </div>
 
         <aside className="right-sidebar">
@@ -1438,7 +1911,7 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
           {isCollageMode && activeCollageRule !== null ? (
             <div className="rs-mode-section">
               <div className="rs-mode-label"><SlidersHorizontal size={11} />מצב קולאז׳</div>
-              <CollageModePanel rule={activeCollageRule} selectedLayer={selectedLayer} />
+              <CollageModePanel rule={activeCollageRule} selectedLayer={selectedLayer} onReplaceImage={() => replaceImageInputRef.current?.click()} />
             </div>
           ) : null}
           {isGridMode && activeGridRule !== null ? (
@@ -1475,7 +1948,6 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
               />
             </div>
           ) : null}
-
           {isPhotoPrintMode && activePhotoPrintRule !== null ? (
             <div className="rs-mode-section">
               <div className="rs-mode-label"><SlidersHorizontal size={11} />פיתוח תמונות</div>
@@ -1486,6 +1958,16 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
                   const updated = regeneratePhotoPrint(currentDocument, activePhotoPrintRule.id, patch);
                   setDocument(updated);
                 }}
+              />
+            </div>
+          ) : null}
+          {isClassPhotoMode && activeClassPhotoRule !== null ? (
+            <div className="rs-mode-section">
+              <div className="rs-mode-label"><SlidersHorizontal size={11} />תמונת מחזור</div>
+              <ClassPhotoModePanel
+                rule={activeClassPhotoRule}
+                selectedLayer={selectedLayer}
+                onBackToWizard={() => onOpenClassPhotoWizard?.()}
               />
             </div>
           ) : null}
@@ -1522,6 +2004,17 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
                 <div className="rs-inspector-header">
                   <span className="rs-inspector-name">{selectedLayer.name}</span>
                   <span className="rs-inspector-type">{selectedLayer.type === "image" ? "תמונה" : "פריים"}</span>
+                  {!(selectedLayer.type === "frame" && (selectedLayer.metadata["collageFrame"] as { isCollageFrame?: boolean } | undefined)?.isCollageFrame === true) && (
+                    <button
+                      className="rs-replace-btn"
+                      title="החלף תמונה"
+                      type="button"
+                      onClick={() => replaceImageInputRef.current?.click()}
+                    >
+                      <Replace size={13} />
+                      החלף
+                    </button>
+                  )}
                 </div>
                 <ImageStudio
                   layer={selectedLayer}
@@ -1616,6 +2109,7 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
       <input ref={imageInputRef} accept="image/*" hidden multiple onChange={handleImageInput} type="file" />
       <input ref={replaceImageInputRef} accept="image/*" hidden onChange={(e) => void handleReplaceImageInput(e)} type="file" />
       <input ref={projectInputRef} accept=".json,.spp.json,.spp" hidden onChange={(event) => void handleProjectLoadLifecycle(event)} type="file" />
+      <input ref={classPhotoAddInputRef} accept="image/*" hidden multiple onChange={(e) => { if (e.target.files) void handleClassPhotoAddFiles(e.target.files); e.target.value = ""; }} type="file" />
 
       {showFontsBrowser && (
         <div className="util-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowFontsBrowser(false); }}>
@@ -1638,8 +2132,11 @@ export function EditorScreen({ onBackHome }: EditorScreenProps): ReactElement {
 // ─── Tool button ──────────────────────────────────────────────────────────────
 
 function ContextToolbar({
+  canvasWidth,
+  canvasHeight,
   dpi,
   hasTextStyleClipboard,
+  imageEditMode,
   selectedLayer,
   selectedLayers,
   showGrid,
@@ -1651,15 +2148,23 @@ function ContextToolbar({
   onCopyTextStyle,
   onDelete,
   onDuplicate,
+  onEnterImageEditMode,
+  onImageEditApply,
+  onImageEditCancel,
+  onImageEditDeleteSelection,
+  onImageEditResetCrop,
+  onImageEditResetMask,
   onMoveLayer,
   onPasteTextStyle,
   onPatch,
-  onReplaceImage,
   onToggleGrid,
   onToggleSnap
 }: {
+  canvasWidth: number;
+  canvasHeight: number;
   dpi: number;
   hasTextStyleClipboard: boolean;
+  imageEditMode: boolean;
   selectedLayer: VisualLayer | null;
   selectedLayers: VisualLayer[];
   showGrid: boolean;
@@ -1671,13 +2176,29 @@ function ContextToolbar({
   onCopyTextStyle: () => void;
   onDelete: () => void;
   onDuplicate: () => void;
+  onEnterImageEditMode: () => void;
+  onImageEditApply: () => void;
+  onImageEditCancel: () => void;
+  onImageEditDeleteSelection: () => void;
+  onImageEditResetCrop: () => void;
+  onImageEditResetMask: () => void;
   onMoveLayer: (direction: "forward" | "backward" | "front" | "back") => void;
   onPasteTextStyle: () => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
-  onReplaceImage: () => void;
   onToggleGrid: () => void;
   onToggleSnap: () => void;
 }): ReactElement {
+  if (imageEditMode && (selectedLayer?.type === "image" || selectedLayer?.type === "frame")) {
+    return (
+      <ImageEditToolbar
+        onApply={onImageEditApply}
+        onCancel={onImageEditCancel}
+        onDeleteSelection={onImageEditDeleteSelection}
+        onResetCrop={onImageEditResetCrop}
+        onResetMask={onImageEditResetMask}
+      />
+    );
+  }
   if (selectedLayers.length > 1) {
     return <MixedSelectionToolbar selectedLayers={selectedLayers} onDelete={onDelete} onDuplicate={onDuplicate} onMoveLayer={onMoveLayer} />;
   }
@@ -1700,13 +2221,15 @@ function ContextToolbar({
   if (selectedLayer?.type === "image" || selectedLayer?.type === "frame") {
     return (
       <ImageContextToolbar
+        canvasWidth={canvasWidth}
+        canvasHeight={canvasHeight}
         dpi={dpi}
         layer={selectedLayer}
         onDelete={onDelete}
         onDuplicate={onDuplicate}
+        onEnterImageEditMode={onEnterImageEditMode}
         onMoveLayer={onMoveLayer}
         onPatch={onPatch}
-        onReplaceImage={onReplaceImage}
       />
     );
   }
@@ -2006,23 +2529,29 @@ function ImageResizeControl({
 // ─── Image Context Toolbar ────────────────────────────────────────────────────
 
 function ImageContextToolbar({
+  canvasWidth,
+  canvasHeight,
   dpi,
   layer,
   onDelete,
   onDuplicate,
+  onEnterImageEditMode,
   onMoveLayer,
   onPatch,
-  onReplaceImage
 }: {
+  canvasWidth: number;
+  canvasHeight: number;
   dpi: number;
   layer: Extract<VisualLayer, { type: "image" | "frame" }>;
   onDelete: () => void;
   onDuplicate: () => void;
+  onEnterImageEditMode: () => void;
   onMoveLayer: (direction: "forward" | "backward" | "front" | "back") => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
-  onReplaceImage: () => void;
 }): ReactElement {
   const isFrame = layer.type === "frame";
+  const isCollageFrameProp = isFrame &&
+    (layer.metadata["collageFrame"] as { isCollageFrame?: boolean } | undefined)?.isCollageFrame === true;
 
   // ─── Visual effects helpers ────────────────────────────────────────────────
   const vfxStack: VisualEffectStack =
@@ -2108,17 +2637,43 @@ function ImageContextToolbar({
     }
   }
 
+  // ─── Fit to canvas ────────────────────────────────────────────────────────
+  function fitToCanvas(mode: "fill" | "fit"): void {
+    const imgW = layer.width;
+    const imgH = layer.height;
+    if (imgW <= 0 || imgH <= 0) return;
+    const scaleX = canvasWidth / imgW;
+    const scaleY = canvasHeight / imgH;
+    const scale = mode === "fill" ? Math.max(scaleX, scaleY) : Math.min(scaleX, scaleY);
+    const newW = imgW * scale;
+    const newH = imgH * scale;
+    const newX = (canvasWidth - newW) / 2;
+    const newY = (canvasHeight - newH) / 2;
+    onPatch({ width: newW, height: newH, x: newX, y: newY } as Partial<VisualLayer>);
+  }
+
   return (
     <section className="context-toolbar image-mode" aria-label="Image context toolbar" data-testid="context-toolbar">
-      <span className="context-toolbar-label">{isFrame ? "פריים" : "תמונה"}</span>
 
-      {/* Replace */}
-      <div className="context-group">
-        <button className="context-icon img-replace-btn" onClick={onReplaceImage} title="החלף תמונה" type="button">
-          <Replace size={14} />
-          <span className="ctx-btn-label">החלף</span>
-        </button>
-      </div>
+      {/* Fit to canvas */}
+      <ToolbarMenu label="התאם לקנבס" title="התאם לקנבס">
+        <div className="context-menu-actions">
+          <button
+            className="context-menu-button"
+            type="button"
+            onClick={(e) => { fitToCanvas("fill"); (e.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open"); }}
+          >
+            התאמה מלאה
+          </button>
+          <button
+            className="context-menu-button"
+            type="button"
+            onClick={(e) => { fitToCanvas("fit"); (e.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open"); }}
+          >
+            התאמה חלקית
+          </button>
+        </div>
+      </ToolbarMenu>
 
       {/* Resize */}
       <ImageResizeControl dpi={dpi} layer={layer} onPatch={onPatch} />
@@ -2209,6 +2764,16 @@ function ImageContextToolbar({
         <ToolbarButton active={flipH} icon={FlipHorizontal} label="היפוך אופקי" onClick={() => patchMeta({ flipH: !flipH })} />
         <ToolbarButton active={flipV} icon={FlipVertical} label="היפוך אנכי" onClick={() => patchMeta({ flipV: !flipV })} />
       </div>
+
+      {/* Image Edit Mode entry — only for free ImageLayer */}
+      {layer.type === "image" && (
+        <div className="context-group">
+          <button className="context-icon" title="עריכת תמונה — קרופ, מחיקה, שרביט קסם" type="button" onClick={onEnterImageEditMode}>
+            <Eraser size={14} />
+            <span className="ctx-btn-label">עריכה</span>
+          </button>
+        </div>
+      )}
 
       {/* Arrange + Actions */}
       <div className="context-group">
@@ -2689,11 +3254,13 @@ function cleanImageParams(params: EngineParams): EngineParams {
 function QuickSlider({
   param,
   params,
-  onChange
+  onChange,
+  onReset
 }: {
   param: QuickSliderParam;
   params: EngineParams;
   onChange: (key: string, value: number) => void;
+  onReset?: (key: string) => void;
 }): ReactElement {
   const value = imageParamValue(params, param.key, param.default);
   const isDirty = value !== param.default;
@@ -2704,7 +3271,20 @@ function QuickSlider({
         <span title={param.hint} style={{ color: isDirty ? "var(--color-accent,#7C6FE0)" : "inherit" }}>
           {param.label}
         </span>
-        <span style={{ opacity: 0.7 }}>{value}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 4, opacity: 0.7 }}>
+          {value}
+          {isDirty && onReset !== undefined && (
+            <button
+              aria-label="אפס ערך"
+              onClick={() => onReset(param.key)}
+              style={{ lineHeight: 1, padding: 0, fontSize: 10, color: "var(--color-accent,#7C6FE0)", background: "none", border: "none", cursor: "pointer" }}
+              title="אפס"
+              type="button"
+            >
+              ×
+            </button>
+          )}
+        </span>
       </div>
       <input
         type="range"
@@ -2735,11 +3315,22 @@ function ImageStudio({
   const [studioTab, setStudioTab] = useState<"quick" | "tips">("quick");
   const [advancedBusy, setAdvancedBusy] = useState(false);
 
-  const savedParams = useMemo(
-    () => (layer.metadata["imageEditParams"] ?? {}) as EngineParams,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [layer.metadata["imageEditParams"]]
-  );
+  // For ImageLayer: read from layer.effects; for FrameLayer: read from metadata["imageEditParams"]
+  const savedParams = useMemo((): EngineParams => {
+    if (layer.type === "image") {
+      return {
+        exposure: layer.effects.exposure,
+        brightness: layer.effects.brightness,
+        contrast: layer.effects.contrast,
+        saturation: layer.effects.saturation,
+        hue: layer.effects.hue,
+        blur: layer.effects.blur,
+        black_white: layer.effects.grayscale
+      };
+    }
+    return (layer.metadata["imageEditParams"] ?? {}) as EngineParams;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layer]);
 
   const assetId = layer.type === "image" ? layer.assetId : (layer.type === "frame" ? layer.imageAssetId : undefined);
   const asset = assets.find((a) => a.id === assetId);
@@ -2754,14 +3345,30 @@ function ImageStudio({
   }
 
   function updateParam(key: string, value: number | boolean | string): void {
-    patchQuickParams({
-      ...savedParams,
-      [key]: value
-    });
+    if (layer.type === "image") {
+      const effectsKey = key === "black_white" ? "grayscale" : key;
+      onPatch({ effects: { ...layer.effects, [effectsKey]: value } } as Partial<VisualLayer>);
+    } else {
+      patchQuickParams({ ...savedParams, [key]: value });
+    }
   }
 
   function resetQuickParams(): void {
-    patchQuickParams({});
+    if (layer.type === "image") {
+      onPatch({ effects: { ...DEFAULT_IMAGE_LAYER_EFFECTS } } as Partial<VisualLayer>);
+    } else {
+      patchQuickParams({});
+    }
+  }
+
+  function resetSingleParam(key: string): void {
+    if (layer.type === "image") {
+      const effectsKey = key === "black_white" ? "grayscale" : (key as keyof ImageLayerEffects);
+      const defaultVal = DEFAULT_IMAGE_LAYER_EFFECTS[effectsKey as keyof ImageLayerEffects];
+      onPatch({ effects: { ...layer.effects, [effectsKey]: defaultVal } } as Partial<VisualLayer>);
+    } else {
+      patchQuickParams({ ...savedParams, [key]: 0 });
+    }
   }
 
   async function openAdvancedEditor(): Promise<void> {
@@ -2782,7 +3389,11 @@ function ImageStudio({
     }
   }
 
-  const hasAnyQuickAdjustments = Object.values(savedParams).some((value) => value !== 0 && value !== false && value !== "");
+  const hasAnyQuickAdjustments = layer.type === "image"
+    ? (layer.effects.brightness !== 0 || layer.effects.contrast !== 0 || layer.effects.saturation !== 0 ||
+       layer.effects.exposure !== 0 || layer.effects.hue !== 0 || layer.effects.grayscale || layer.effects.blur > 0 ||
+       layer.effects.shadow !== null || layer.effects.outline !== null)
+    : Object.values(savedParams).some((value) => value !== 0 && value !== false && value !== "");
   const colorPopEnabled = imageParamBool(savedParams, "color_pop");
   const removeWhiteEnabled = imageParamBool(savedParams, "remove_white");
 
@@ -2849,11 +3460,11 @@ function ImageStudio({
             </p>
 
             {QUICK_LIGHT_PARAMS.map((param) => (
-              <QuickSlider key={param.key} param={param} params={savedParams} onChange={updateParam} />
+              <QuickSlider key={param.key} param={param} params={savedParams} onChange={updateParam} onReset={resetSingleParam} />
             ))}
 
             {QUICK_COLOR_PARAMS.map((param) => (
-              <QuickSlider key={param.key} param={param} params={savedParams} onChange={updateParam} />
+              <QuickSlider key={param.key} param={param} params={savedParams} onChange={updateParam} onReset={resetSingleParam} />
             ))}
           </AccordionSection>
 
@@ -4892,7 +5503,10 @@ function LayerList({
   selectedLayerId,
   onMove,
   onReorder,
-  onSelect
+  onSelect,
+  onSelectMany,
+  onToggleVisibility,
+  onLayerContextMenu
 }: {
   assets: Asset[];
   layers: VisualLayer[];
@@ -4901,6 +5515,9 @@ function LayerList({
   onMove: (layerId: string, direction: "forward" | "backward" | "front" | "back") => void;
   onReorder: (layerIdsTopToBottom: string[]) => void;
   onSelect: (layerId: string) => void;
+  onSelectMany: (layerIds: string[]) => void;
+  onToggleVisibility: (layerId: string) => void;
+  onLayerContextMenu: (layerId: string, screenX: number, screenY: number) => void;
 }): ReactElement {
   const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
   const ordered = [...layers].sort((a, b) => b.zIndex - a.zIndex);
@@ -4917,15 +5534,40 @@ function LayerList({
     setDraggingLayerId(null);
   }
 
+  function handleLayerClick(e: React.MouseEvent, layerId: string): void {
+    if (e.ctrlKey || e.metaKey) {
+      const next = selectedLayerIds.includes(layerId)
+        ? selectedLayerIds.filter((id) => id !== layerId)
+        : [...selectedLayerIds, layerId];
+      onSelectMany(next);
+    } else if (e.shiftKey) {
+      const ids = ordered.map((l) => l.id);
+      const anchorId = selectedLayerId ?? layerId;
+      const anchorIdx = ids.indexOf(anchorId);
+      const targetIdx = ids.indexOf(layerId);
+      const [from, to] = anchorIdx <= targetIdx ? [anchorIdx, targetIdx] : [targetIdx, anchorIdx];
+      onSelectMany(ids.slice(from, to + 1));
+    } else {
+      onSelect(layerId);
+    }
+  }
+
+  function handleRowContextMenu(e: React.MouseEvent, layerId: string): void {
+    e.preventDefault();
+    e.stopPropagation();
+    onLayerContextMenu(layerId, e.clientX, e.clientY);
+  }
+
   return (
     <section className="layer-list" aria-label="שכבות">
       <h3>שכבות</h3>
       {ordered.length === 0 ? <p>אין שכבות עדיין.</p> : null}
       {ordered.map((layer) => (
         <div
-          className={`layer-row ${selectedLayerIds.includes(layer.id) ? "active" : ""} ${draggingLayerId === layer.id ? "dragging" : ""}`}
+          className={`layer-row ${selectedLayerIds.includes(layer.id) ? "active" : ""} ${draggingLayerId === layer.id ? "dragging" : ""} ${!layer.visible ? "hidden" : ""}`}
           draggable
           key={layer.id}
+          onContextMenu={(e) => handleRowContextMenu(e, layer.id)}
           onDragEnd={() => setDraggingLayerId(null)}
           onDragOver={(e) => e.preventDefault()}
           onDragStart={(e) => {
@@ -4936,9 +5578,21 @@ function LayerList({
           onDrop={() => handleDrop(layer.id)}
         >
           <GripVertical className="layer-drag-handle" size={14} />
-          <button className="layer-main" onClick={() => onSelect(layer.id)} type="button">
+          <button className="layer-main" onClick={(e) => handleLayerClick(e, layer.id)} type="button">
             <LayerThumbnail assets={assets} layer={layer} />
             <strong>{layer.name}</strong>
+          </button>
+          <button
+            aria-label={layer.visible ? "הסתר שכבה" : "הצג שכבה"}
+            className={`layer-eye-btn ${!layer.visible ? "hidden" : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleVisibility(layer.id);
+            }}
+            title={layer.visible ? "הסתר שכבה" : "הצג שכבה"}
+            type="button"
+          >
+            {layer.visible ? <Eye size={13} /> : <EyeOff size={13} />}
           </button>
           <span className="layer-actions">
             <button aria-label="שלח אחורה" onClick={() => onMove(layer.id, "backward")} type="button">
@@ -4951,6 +5605,94 @@ function LayerList({
         </div>
       ))}
     </section>
+  );
+}
+
+// ─── Layer Panel Context Menu ─────────────────────────────────────────────────
+
+function LayerContextMenu({
+  target,
+  isImageLayer,
+  hasEffectsClipboard,
+  onClose,
+  onMoveToFront,
+  onMoveToBack,
+  onDuplicate,
+  onDelete,
+  onCopyEffects,
+  onPasteEffects
+}: {
+  target: { layerId: string; screenX: number; screenY: number };
+  isImageLayer: boolean;
+  hasEffectsClipboard: boolean;
+  onClose: () => void;
+  onMoveToFront: () => void;
+  onMoveToBack: () => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+  onCopyEffects: () => void;
+  onPasteEffects: () => void;
+}): ReactElement {
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(event: MouseEvent): void {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        onClose();
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [onClose]);
+
+  useEffect(() => {
+    function handleKey(event: KeyboardEvent): void {
+      if (event.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
+  function action(fn: () => void): () => void {
+    return () => { fn(); onClose(); };
+  }
+
+  return (
+    <div
+      ref={menuRef}
+      className="canvas-context-menu"
+      style={{ left: target.screenX, top: target.screenY }}
+    >
+      <button className="ctx-item" onClick={action(onMoveToFront)} type="button">
+        העבר לעליון
+      </button>
+      <button className="ctx-item" onClick={action(onMoveToBack)} type="button">
+        העבר לתחתון
+      </button>
+      <div className="ctx-divider" />
+      <button className="ctx-item" onClick={action(onDuplicate)} type="button">
+        שכפל
+      </button>
+      <button className="ctx-item" onClick={action(onDelete)} type="button">
+        מחק
+      </button>
+      {isImageLayer && (
+        <>
+          <div className="ctx-divider" />
+          <button className="ctx-item" onClick={action(onCopyEffects)} type="button">
+            העתק אפקטים
+          </button>
+          <button
+            className="ctx-item"
+            disabled={!hasEffectsClipboard}
+            onClick={action(onPasteEffects)}
+            type="button"
+          >
+            הדבק אפקטים
+          </button>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -5039,11 +5781,25 @@ function CanvasContextMenu({
   );
 }
 
+function hasAnyImageEffect(effects: ImageLayerEffects): boolean {
+  return (
+    effects.brightness !== 0 || effects.contrast !== 0 || effects.saturation !== 0 ||
+    effects.exposure !== 0 || effects.hue !== 0 || effects.grayscale || effects.blur > 0 ||
+    effects.shadow !== null || effects.outline !== null
+  );
+}
+
 function LayerThumbnail({ assets, layer }: { assets: Asset[]; layer: VisualLayer }): ReactElement {
   if (layer.type === "image") {
     const asset = assets.find((item) => item.id === layer.assetId);
+    const hasFx = hasAnyImageEffect(layer.effects);
     if (asset?.previewPath !== undefined) {
-      return <img alt="" className="layer-thumb image" src={asset.previewPath} />;
+      return (
+        <span className="layer-thumb image-wrap">
+          <img alt="" className="layer-thumb image" src={asset.previewPath} />
+          {hasFx ? <em className="fx-badge">fx</em> : null}
+        </span>
+      );
     }
   }
 

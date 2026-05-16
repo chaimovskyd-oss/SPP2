@@ -46,6 +46,7 @@ export function createDocument(options: CreateDocumentOptions): Document {
     collageRules: [],
     photoPrintRules: [],
     photoPrintImageAssignments: [],
+    classPhotoRules: [],
     viewport: options.viewport ?? { ...defaultViewportState },
     metadata: options.metadata ?? {}
   };

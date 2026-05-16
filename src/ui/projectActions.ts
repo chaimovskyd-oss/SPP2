@@ -302,6 +302,42 @@ export function exportStagePrintImage(
   };
 }
 
+/**
+ * Render a sequence of pages to PrintableStageImage objects.
+ * For each page index, the caller must have already switched the active page
+ * and allowed Konva to re-render before calling this function.
+ * This function renders the CURRENT stage state for the given page.
+ */
+export function renderCurrentPageAsPrintImage(
+  stage: Konva.Stage,
+  page: Page,
+  mimeType: "image/png" | "image/jpeg" = "image/png"
+): PrintableStageImage {
+  return exportStagePrintImage(stage, page, mimeType);
+}
+
+/**
+ * Build a multi-page PDF from an array of rendered page images.
+ * Returns the raw PDF bytes.
+ */
+export async function buildMultiPagePdf(pages: PrintableStageImage[]): Promise<Uint8Array> {
+  const { PDFDocument } = await import("pdf-lib");
+  const pdf = await PDFDocument.create();
+
+  for (const page of pages) {
+    const imageBytes = await fetch(page.dataUrl).then((r) => r.arrayBuffer());
+    const image = page.mimeType === "image/jpeg"
+      ? await pdf.embedJpg(imageBytes)
+      : await pdf.embedPng(imageBytes);
+    const widthPoints = (page.widthPx / page.dpi) * 72;
+    const heightPoints = (page.heightPx / page.dpi) * 72;
+    const pdfPage = pdf.addPage([widthPoints, heightPoints]);
+    pdfPage.drawImage(image, { x: 0, y: 0, width: widthPoints, height: heightPoints });
+  }
+
+  return pdf.save();
+}
+
 export async function exportStagePdf(stage: Konva.Stage, documentName: string, sourcePage: Page): Promise<void> {
   const { PDFDocument } = await import("pdf-lib");
   const dataUrl = renderPrintableStage(stage, "image/png", sourcePage);

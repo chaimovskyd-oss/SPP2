@@ -11,6 +11,14 @@ contextBridge.exposeInMainWorld("spp", {
   readFileBase64: (filePath: string): Promise<string> =>
     ipcRenderer.invoke("spp:read-file-base64", filePath),
 
+  /** Save a generated PDF through the native save dialog. */
+  savePdfDialog: (pdfBase64: string, suggestedName?: string): Promise<{ success: boolean; filePath?: string; error?: string }> =>
+    ipcRenderer.invoke("spp:save-pdf-dialog", pdfBase64, suggestedName),
+
+  /** Convert an Office document to PDF using LibreOffice headless. */
+  convertOfficeToPdf: (inputPath: string): Promise<{ success: boolean; pdfBase64?: string; outputPath?: string; outputName?: string; error?: string }> =>
+    ipcRenderer.invoke("spp:convert-office-to-pdf", inputPath),
+
   /**
    * Open the Python image editor for a specific file.
    * Resolves when the window is closed.
@@ -47,6 +55,10 @@ contextBridge.exposeInMainWorld("spp", {
   /** Open a folder in the system file manager. */
   openFolder: (folderPath: string): Promise<{ error?: string }> =>
     ipcRenderer.invoke("spp:open-folder", folderPath),
+
+  /** Open any file or folder with the default OS application. Used for multi-page PDF printing. */
+  openPath: (filePath: string): Promise<{ error?: string }> =>
+    ipcRenderer.invoke("spp:open-path", filePath),
 
   /** Launch an external application with an optional file argument. */
   openExternalApp: (execPath: string, fileArg?: string): Promise<{ error?: string }> =>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useImageEditStore } from "@/state/imageEditStore";
 import { Circle, Group, Image as KonvaImage, Line, Rect, Text } from "react-konva";
 import { drawPuzzlePath } from "@/core/collage/collagePuzzle";
 import { generateTornEdgePoints } from "@/core/collage/collageTornPaper";
@@ -19,7 +20,7 @@ import type {
   VisualEffectStack
 } from "@/types/visualEffects";
 import { useKonvaImage } from "./useKonvaImage";
-import { collageAdjToKonva, imageLayerAdjToKonva, type CollageColorAdj } from "@/core/rendering/colorAdjustUtils";
+import { collageAdjToKonva, imageEffectsToKonva, imageLayerAdjToKonva, type CollageColorAdj } from "@/core/rendering/colorAdjustUtils";
 import { renderTextToCanvas } from "./warpText";
 
 export interface CanvasContextMenuTarget {
@@ -188,6 +189,40 @@ function starPath(ctx: any, cx: number, cy: number, outerRadius: number, innerRa
   ctx.closePath();
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function cloudPath(ctx: any, x: number, y: number, w: number, h: number): void {
+  // Guard against degenerate dimensions
+  if (w < 4 || h < 4) {
+    ctx.rect(x, y, Math.max(w, 1), Math.max(h, 1));
+    return;
+  }
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+
+  // Cloud built from 6 overlapping circles — robust and works at any size
+  // All radii are relative to the smaller dimension
+  const r = Math.min(w, h);
+  const bumpR  = r * 0.22;   // top bumps
+  const bodyRx = w * 0.36;   // main body half-width
+  const bodyRy = h * 0.22;   // main body half-height
+  const bodyY  = cy + h * 0.08; // center of body, slightly below center
+
+  ctx.beginPath();
+  // Main body (central rectangle-ish ellipse)
+  ctx.ellipse(cx, bodyY, bodyRx, bodyRy, 0, 0, Math.PI * 2);
+  ctx.closePath();
+  ctx.beginPath();
+  // Three bumps on top
+  ctx.arc(cx - w * 0.22, bodyY - bodyRy * 0.6, bumpR * 0.9,  Math.PI, 0);
+  ctx.arc(cx,             bodyY - bodyRy * 1.0, bumpR * 1.15, Math.PI, 0);
+  ctx.arc(cx + w * 0.22,  bodyY - bodyRy * 0.6, bumpR * 0.9,  Math.PI, 0);
+  // Connect bottom
+  ctx.arc(cx + bodyRx * 0.7, bodyY, bodyRy, 0, Math.PI * 0.7);
+  ctx.arc(cx,              bodyY + bodyRy * 0.9, bodyRx * 0.5, Math.PI * 0.2, Math.PI * 0.8);
+  ctx.arc(cx - bodyRx * 0.7, bodyY, bodyRy, Math.PI * 0.3, Math.PI);
+  ctx.closePath();
+}
+
 function mapBlendMode(mode: BlendMode): string {
   const table: Record<BlendMode, string> = {
     normal: "source-over",
@@ -343,14 +378,24 @@ function TextNode({
         }
       : {};
 
+  // When this is a class-photo managed text layer (name/title/footer), use the stored
+  // layer.width/height so align="center" centers within the frame or title container.
+  // For all other text layers, always use measuredSize (natural fit).
+  const isClassPhotoText =
+    layer.metadata?.["classPhotoName"] !== undefined ||
+    layer.metadata?.["classPhotoTitle"] !== undefined ||
+    layer.metadata?.["classPhotoFooter"] !== undefined;
+  const renderWidth = isClassPhotoText && layer.width > measuredSize.width ? layer.width : measuredSize.width;
+  const renderHeight = isClassPhotoText && layer.height > measuredSize.height ? layer.height : measuredSize.height;
+
   return (
     <Text
       id={layer.id}
       name={selected ? "selected-layer" : undefined}
       x={layer.x}
       y={layer.y}
-      width={measuredSize.width}
-      height={measuredSize.height}
+      width={renderWidth}
+      height={renderHeight}
       text={layer.text}
       fontFamily={layer.fontFamily}
       fontSize={layer.fontSize}
@@ -546,9 +591,34 @@ function ImageNode({
   onChange: (layer: VisualLayer) => void;
   onContextMenu?: (target: CanvasContextMenuTarget) => void;
 }): React.ReactElement {
+  // Lock layer & use live crop preview during image-edit mode
+  const isBeingEdited = useImageEditStore((s) => s.imageEditMode && s.editingLayerId === layer.id);
+  const cropPreviewFromStore = useImageEditStore((s) =>
+    s.imageEditMode && s.editingLayerId === layer.id ? s.cropPreview : null
+  );
+
   const asset = assets.find((item) => item.id === layer.assetId);
   const image = useKonvaImage(resolveCanvasAssetPath(asset));
   const imageRef = useRef<Konva.Image | null>(null);
+  const maskedGroupRef = useRef<Konva.Group | null>(null);
+
+  // Load mask asset if pixelMask is set
+  const maskAsset = layer.pixelMask !== undefined
+    ? assets.find((a) => a.id === layer.pixelMask!.assetId)
+    : undefined;
+  const maskImage = useKonvaImage(maskAsset !== undefined ? resolveCanvasAssetPath(maskAsset) : undefined);
+
+  // Cache the masked group whenever image/mask changes so destination-in compositing works correctly
+  useEffect(() => {
+    const grp = maskedGroupRef.current;
+    if (grp === null) return;
+    if (image !== null && maskImage !== null && layer.pixelMask !== undefined) {
+      grp.cache();
+    } else {
+      grp.clearCache();
+    }
+    grp.getLayer()?.batchDraw();
+  }, [image, maskImage, layer.pixelMask, layer.width, layer.height]);
 
   const fx = useMemo(
     () => resolveFrameEffects(layer.visualEffects),
@@ -556,10 +626,7 @@ function ImageNode({
     [JSON.stringify(layer.visualEffects)]
   );
   const softEdgeBlurRadius = fx.softEdge?.radius ?? 0;
-  const quickParams = layer.metadata["imageEditParams"] as Record<string, unknown> | undefined;
-  const baseColorAdj = imageLayerAdjToKonva(layer.colorAdjustments, undefined);
-  const quickColorAdj = quickEditParamsToKonva(quickParams);
-  const colorAdj = mergeKonvaAdjustments(baseColorAdj, quickColorAdj);
+  const colorAdj = imageEffectsToKonva(layer.effects);
   const blurRadius = Math.max(softEdgeBlurRadius, colorAdj.blurRadius);
 
   // Build the active filter list for this node.
@@ -577,7 +644,9 @@ function ImageNode({
 
   const needsCache = activeFilters.length > 0;
 
-  // Cache the node whenever filters are active or image changes
+  // Cache the node whenever filters are active, image changes, or dimensions change.
+  // Dimensions must be in deps because Konva's cached bitmap is frozen at cache() time —
+  // after a resize the cache would show the old size until re-cached.
   useEffect(() => {
     const node = imageRef.current;
     if (node === null || image === null) return;
@@ -587,19 +656,23 @@ function ImageNode({
       node.clearCache();
     }
     node.getLayer()?.batchDraw();
-  }, [needsCache, image]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needsCache, image, layer.width, layer.height]);
 
-  // Shadow/glow on the outer Group so it renders outside the image bounds
-  const shadowProps = fx.shadow !== undefined
-    ? {
-        shadowColor: fx.shadow.color,
-        shadowBlur: fx.shadow.blur,
-        shadowOffsetX: fx.shadow.offsetX,
-        shadowOffsetY: fx.shadow.offsetY,
-        shadowOpacity: fx.shadow.opacity,
-        shadowEnabled: true
-      }
-    : {};
+  // Shadow on the outer Group — effects.shadow takes precedence over visualEffects dropShadow
+  const shadowProps =
+    colorAdj.shadow !== null
+      ? colorAdj.shadow
+      : fx.shadow !== undefined
+        ? {
+            shadowColor: fx.shadow.color,
+            shadowBlur: fx.shadow.blur,
+            shadowOffsetX: fx.shadow.offsetX,
+            shadowOffsetY: fx.shadow.offsetY,
+            shadowOpacity: fx.shadow.opacity,
+            shadowEnabled: true
+          }
+        : {};
 
   const groupCommon = {
     id: layer.id,
@@ -611,9 +684,9 @@ function ImageNode({
     rotation: layer.rotation,
     opacity: layer.opacity,
     visible: layer.visible,
-    draggable: !layer.locked,
-    onClick: () => onSelect(layer.id),
-    onTap: () => onSelect(layer.id),
+    draggable: !layer.locked && !isBeingEdited,
+    onClick: () => { if (!isBeingEdited) onSelect(layer.id); },
+    onTap: () => { if (!isBeingEdited) onSelect(layer.id); },
     onContextMenu: (event: Konva.KonvaEventObject<PointerEvent>) => {
       event.evt.preventDefault();
       onContextMenu?.({
@@ -676,30 +749,65 @@ function ImageNode({
   const imgScaleX = flipH ? -1 : 1;
   const imgScaleY = flipV ? -1 : 1;
 
+  // Non-destructive crop: use live preview during edit mode, else stored crop
+  const effectiveCrop = cropPreviewFromStore ?? layer.crop;
+  const hasCrop = effectiveCrop.x > 0.001 || effectiveCrop.y > 0.001
+    || effectiveCrop.width < 0.999 || effectiveCrop.height < 0.999;
+  const cropProp = hasCrop && image !== null ? {
+    crop: {
+      x: effectiveCrop.x * image.naturalWidth,
+      y: effectiveCrop.y * image.naturalHeight,
+      width: effectiveCrop.width * image.naturalWidth,
+      height: effectiveCrop.height * image.naturalHeight
+    }
+  } : {};
+
+  const hasMask = layer.pixelMask !== undefined && maskImage !== null;
+
+  const konvaImageNode = (
+    <KonvaImage
+      ref={imageRef}
+      x={imgX}
+      y={imgY}
+      scaleX={imgScaleX}
+      scaleY={imgScaleY}
+      width={layer.width}
+      height={layer.height}
+      image={image ?? undefined}
+      {...cropProp}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      filters={activeFilters as any}
+      blurRadius={blurRadius}
+      brightness={colorAdj.brightness}
+      contrast={colorAdj.contrast}
+      saturation={colorAdj.saturation}
+      hue={colorAdj.hue}
+      stroke={colorAdj.outline !== null ? colorAdj.outline.stroke : (fx.stroke?.color)}
+      strokeWidth={colorAdj.outline !== null ? colorAdj.outline.strokeWidth : (fx.stroke?.width ?? 0)}
+      strokeEnabled={colorAdj.outline !== null ? colorAdj.outline.strokeEnabled : fx.stroke !== undefined}
+    />
+  );
+
   return (
     <Group {...groupCommon} {...shadowProps}>
       {/* Inner group clips to shape/corner-radius */}
       <Group clipFunc={imageClipFunc}>
-        <KonvaImage
-          ref={imageRef}
-          x={imgX}
-          y={imgY}
-          scaleX={imgScaleX}
-          scaleY={imgScaleY}
-          width={layer.width}
-          height={layer.height}
-          image={image ?? undefined}
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          filters={activeFilters as any}
-          blurRadius={blurRadius}
-          brightness={colorAdj.brightness}
-          contrast={colorAdj.contrast}
-          saturation={colorAdj.saturation}
-          hue={colorAdj.hue}
-          stroke={fx.stroke?.color}
-          strokeWidth={fx.stroke?.width ?? 0}
-          strokeEnabled={fx.stroke !== undefined}
-        />
+        {hasMask ? (
+          // Wrap image + mask in a cached Group so destination-in is isolated
+          <Group ref={maskedGroupRef}>
+            {konvaImageNode}
+            <KonvaImage
+              x={0}
+              y={0}
+              width={layer.width}
+              height={layer.height}
+              image={maskImage ?? undefined}
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              globalCompositeOperation={"destination-in" as any}
+              listening={false}
+            />
+          </Group>
+        ) : konvaImageNode}
         {/* Color overlay */}
         {fx.colorOverlay !== undefined && (
           <Rect x={0} y={0} width={layer.width} height={layer.height} fill={fx.colorOverlay.color} opacity={fx.colorOverlay.opacity} globalCompositeOperation={mapBlendMode(fx.colorOverlay.blendMode) as "source-over"} listening={false} />
@@ -781,7 +889,8 @@ function FrameNode({
     if (node === null || image === null) return;
     if (frameNeedsCache) { node.cache(); } else { node.clearCache(); }
     node.getLayer()?.batchDraw();
-  }, [frameNeedsCache, image]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frameNeedsCache, image, layer.width, layer.height]);
 
   // האם הפריים עצמו ניתן לגרירה
   const frameIsDraggable =
@@ -841,8 +950,8 @@ function FrameNode({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const clipFunc = (ctx: any): void => {
     const pad = layer.padding;
-    const w = layer.width - pad * 2;
-    const h = layer.height - pad * 2;
+    const w = Math.max(1, layer.width - pad * 2);
+    const h = Math.max(1, layer.height - pad * 2);
 
     if (collageGlobalMask != null && drawGlobalMaskPath(ctx, collageGlobalMask, layer.x, layer.y)) {
       return;
@@ -894,6 +1003,8 @@ function FrameNode({
       starPath(ctx, pad + w / 2, pad + h / 2, Math.min(w, h) / 2, Math.min(w, h) / 4);
     } else if (layer.shape === "svgPath" && maskShape(layer) === "heart") {
       heartPath(ctx, pad, pad, w, h);
+    } else if (layer.shape === "svgPath" && maskShape(layer) === "cloud") {
+      cloudPath(ctx, pad, pad, w, h);
     } else {
       const r = Math.min(cornerRadius, w / 2, h / 2);
       ctx.moveTo(pad + r, pad);

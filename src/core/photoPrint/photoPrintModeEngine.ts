@@ -30,10 +30,8 @@ export function computeBestGridForCount(
   count: number,
   orientationPolicy: "auto" | "portrait" | "landscape" = "auto"
 ): { rows: number; cols: number } {
-  // Target: standard photo ratio (3:2 = 1.5). Penalize very square slots (bad for photos).
   const TARGET_RATIO = 1.5;
   const SQUARE_PENALTY_THRESHOLD = 1.2;
-
   let bestScore = -Infinity;
   let bestRows = 1;
   let bestCols = count;
@@ -44,20 +42,13 @@ export function computeBestGridForCount(
     const slotH = (usableHPx - (rows - 1) * gapPx) / rows;
     if (slotW <= 0 || slotH <= 0) continue;
 
-    const longSide = Math.max(slotW, slotH);
-    const shortSide = Math.min(slotW, slotH);
-    const ratio = longSide / shortSide;
     const slotIsPortrait = slotH >= slotW;
-
-    // Orientation policy filter
     if (orientationPolicy === "portrait" && !slotIsPortrait) continue;
     if (orientationPolicy === "landscape" && slotIsPortrait) continue;
 
-    // Photo-likeness score: prefer ratio close to 1.5, penalize near-square slots
+    const ratio = Math.max(slotW, slotH) / Math.min(slotW, slotH);
     const dist = Math.abs(ratio - TARGET_RATIO);
     const ratioScore = ratio < SQUARE_PENALTY_THRESHOLD ? -(dist * 3) : -dist;
-
-    // Tiebreaker: larger slot area is better
     const score = ratioScore * 10000 + slotW * slotH;
 
     if (score > bestScore) {
@@ -67,11 +58,7 @@ export function computeBestGridForCount(
     }
   }
 
-  // Fallback if orientation policy filtered everything out
-  if (bestScore === -Infinity) {
-    return computeBestGridForCount(usableWPx, usableHPx, gapPx, count, "auto");
-  }
-
+  if (bestScore === -Infinity) return computeBestGridForCount(usableWPx, usableHPx, gapPx, count, "auto");
   return { rows: bestRows, cols: bestCols };
 }
 

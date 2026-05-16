@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -98,6 +98,83 @@ ipcMain.handle("spp:read-file-base64", async (_event, filePath) => {
   const buf = fs.readFileSync(filePath);
   return buf.toString("base64");
 });
+
+ipcMain.handle("spp:save-pdf-dialog", async (_event, pdfBase64, suggestedName = "SPP2-PDF-Studio.pdf") => {
+  try {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    const result = await dialog.showSaveDialog(win, {
+      title: "שמירת PDF",
+      defaultPath: suggestedName,
+      filters: [{ name: "PDF", extensions: ["pdf"] }]
+    });
+
+    if (result.canceled || !result.filePath) {
+      return { success: false, error: "השמירה בוטלה" };
+    }
+
+    fs.writeFileSync(result.filePath, Buffer.from(pdfBase64, "base64"));
+    return { success: true, filePath: result.filePath };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+function getLibreOfficeCandidates() {
+  const candidates = [];
+  if (process.platform === "win32") {
+    candidates.push("C:\\Program Files\\LibreOffice\\program\\soffice.exe");
+    candidates.push("C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe");
+    candidates.push("soffice.exe");
+  } else if (process.platform === "darwin") {
+    candidates.push("/Applications/LibreOffice.app/Contents/MacOS/soffice");
+    candidates.push("soffice");
+  } else {
+    candidates.push("libreoffice");
+    candidates.push("soffice");
+  }
+  return candidates;
+}
+
+function runLibreOfficeConversion(sofficePath, inputPath, outDir) {
+  return new Promise((resolve) => {
+    const args = ["--headless", "--convert-to", "pdf", "--outdir", outDir, inputPath];
+    const proc = spawn(sofficePath, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout?.on("data", (chunk) => { stdout += chunk.toString(); });
+    proc.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
+    proc.on("close", (code) => resolve({ success: code === 0, stdout, stderr, code }));
+    proc.on("error", (err) => resolve({ success: false, error: err.message }));
+  });
+}
+
+ipcMain.handle("spp:convert-office-to-pdf", async (_event, inputPath) => {
+  try {
+    if (!inputPath || !fs.existsSync(inputPath)) {
+      return { success: false, error: `Office file not found: ${inputPath || "missing"}` };
+    }
+
+    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "spp2-office-pdf-"));
+    const baseName = path.basename(inputPath, path.extname(inputPath));
+    const outputPath = path.join(outDir, `${baseName}.pdf`);
+
+    let lastError = "LibreOffice was not found or conversion failed.";
+    for (const candidate of getLibreOfficeCandidates()) {
+      if (path.isAbsolute(candidate) && !fs.existsSync(candidate)) continue;
+      const result = await runLibreOfficeConversion(candidate, inputPath, outDir);
+      if (result.success && fs.existsSync(outputPath)) {
+        const pdfBase64 = fs.readFileSync(outputPath).toString("base64");
+        return { success: true, pdfBase64, outputPath, outputName: `${baseName}.pdf` };
+      }
+      lastError = result.error || result.stderr || result.stdout || lastError;
+    }
+
+    return { success: false, error: lastError };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
 
 ipcMain.handle("spp:open-image-editor", async (_event, inputPath, outputPath) => {
   const engineDir = getEngineDir();
@@ -208,6 +285,15 @@ ipcMain.handle("spp:open-url", async (_event, url) => {
 ipcMain.handle("spp:open-folder", async (_event, folderPath) => {
   try {
     const error = await shell.openPath(folderPath);
+    return error ? { error } : {};
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle("spp:open-path", async (_event, filePath) => {
+  try {
+    const error = await shell.openPath(filePath);
     return error ? { error } : {};
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };

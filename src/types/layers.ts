@@ -167,6 +167,52 @@ export interface PerspectiveCorrection extends VersionedEntity {
   corners: [{ x: number; y: number }, { x: number; y: number }, { x: number; y: number }, { x: number; y: number }];
 }
 
+export interface ImageLayerShadow {
+  enabled: boolean;
+  color: string;
+  offsetX: number;
+  offsetY: number;
+  blur: number;
+  opacity: number;
+}
+
+export interface ImageLayerOutline {
+  enabled: boolean;
+  color: string;
+  width: number;
+}
+
+export interface ImageLayerEffects extends VersionedEntity {
+  brightness: number;
+  contrast: number;
+  saturation: number;
+  exposure: number;
+  hue: number;
+  grayscale: boolean;
+  blur: number;
+  shadow: ImageLayerShadow | null;
+  outline: ImageLayerOutline | null;
+}
+
+export const DEFAULT_IMAGE_LAYER_EFFECTS: ImageLayerEffects = {
+  version: 1,
+  brightness: 0,
+  contrast: 0,
+  saturation: 0,
+  exposure: 0,
+  hue: 0,
+  grayscale: false,
+  blur: 0,
+  shadow: null,
+  outline: null
+};
+
+export interface PixelMask extends VersionedEntity {
+  assetId: ID;
+  width: number;
+  height: number;
+}
+
 export interface ImageLayer extends BaseLayer {
   type: "image";
   assetId: ID;
@@ -175,8 +221,10 @@ export interface ImageLayer extends BaseLayer {
   transform: Transform;
   filters: Filter[];
   colorAdjustments: ColorAdjustments;
+  effects: ImageLayerEffects;
   perspective?: PerspectiveCorrection;
   mask?: ID;
+  pixelMask?: PixelMask;
   visualEffects?: VisualEffectStack;
 }
 

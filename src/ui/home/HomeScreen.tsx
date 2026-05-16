@@ -90,7 +90,7 @@ export function HomeScreen({ onOpenMode, onOpenProjectFile, onOpenSettings }: Ho
         <section className="modes-grid" aria-label="מצבי עבודה">
           {homeModes.map((mode) => {
             const Icon = mode.icon;
-            const isReady = mode.id === "free" || mode.id === "grid" || mode.id === "mask" || mode.id === "collage" || mode.id === "photo_print";
+            const isReady = mode.id === "free" || mode.id === "grid" || mode.id === "mask" || mode.id === "collage" || mode.id === "photo_print" || mode.id === "pdf_tools" || mode.id === "class_photo";
             return (
               <button
                 className="mode-card"

@@ -3,10 +3,13 @@ interface SppElectronAPI {
   platform: string;
   writeTempImage: (dataUrl: string, ext: string) => Promise<string>;
   readFileBase64: (filePath: string) => Promise<string>;
+  savePdfDialog?: (pdfBase64: string, suggestedName?: string) => Promise<{ success: boolean; filePath?: string; error?: string }>;
+  convertOfficeToPdf?: (inputPath: string) => Promise<{ success: boolean; pdfBase64?: string; outputPath?: string; outputName?: string; error?: string }>;
   openImageEditor: (inputPath: string, outputPath: string) => Promise<{ success: boolean; error?: string }>;
   applyImageParams: (inputPath: string, outputPath: string, paramsJson: string) => Promise<{ success: boolean; error?: string }>;
   openUrl: (url: string) => Promise<void>;
   openFolder: (folderPath: string) => Promise<{ error?: string }>;
+  openPath?: (filePath: string) => Promise<{ error?: string }>;
   openExternalApp: (execPath: string, fileArg?: string) => Promise<{ error?: string }>;
   detectPhotoshop: () => Promise<{ path?: string }>;
   watchFile: (watchId: string, filePath: string) => Promise<{ error?: string }>;

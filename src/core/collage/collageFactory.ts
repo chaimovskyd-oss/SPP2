@@ -174,6 +174,7 @@ export function createCollageModeDocument(
     collageRules: [rule],
     photoPrintRules: [],
     photoPrintImageAssignments: [],
+    classPhotoRules: [],
     viewport: {
       version: 1,
       zoom: 1,

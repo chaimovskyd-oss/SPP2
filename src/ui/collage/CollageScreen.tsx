@@ -75,9 +75,44 @@ export function CollageScreen({ ruleId, onBackHome }: CollageScreenProps): React
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
-  // Swap mode: clicking two cells swaps their images
+  // Broadcast swap state to KonvaLayerNode instances so they can show/hide the swap dots.
+  // slotId = null  → no swap mode, hide dots
+  // slotId = actual ID → swap mode active; that slot gets the "source" (purple) style, others cyan
+  useEffect(() => {
+    const slotId = swapMode ? (selectedSlotId ?? "__swap__") : null;
+    window.dispatchEvent(new CustomEvent("spp2:collage-swap-mode-change", { detail: { slotId } }));
+  }, [swapMode, selectedSlotId]);
+
+  // Handle blue-dot anchor clicks: first click activates swap mode and selects the source;
+  // second click on a different slot performs the swap; clicking the source again cancels.
+  const handleAnchorClick = useCallback((slotId: ID): void => {
+    if (!selectedSlotId || !swapMode) {
+      setSwapMode(true);
+      setSelectedSlotId(slotId);
+    } else if (selectedSlotId === slotId) {
+      setSwapMode(false);
+      setSelectedSlotId(null);
+    } else {
+      swapCollageImages(ruleId, selectedSlotId, slotId);
+      setSwapMode(false);
+      setSelectedSlotId(null);
+    }
+  }, [selectedSlotId, swapMode, ruleId, swapCollageImages]);
+
+  useEffect(() => {
+    function onAnchorClick(event: Event): void {
+      const slotId = (event as CustomEvent<{ slotId: string }>).detail?.slotId;
+      if (slotId) handleAnchorClick(slotId);
+    }
+    window.addEventListener("spp2:collage-slot-anchor-click", onAnchorClick);
+    return () => window.removeEventListener("spp2:collage-slot-anchor-click", onAnchorClick);
+  }, [handleAnchorClick]);
+
+  // Swap mode: clicking a frame (not a dot) in swap mode selects target or completes swap.
+  // Clicking outside (null) cancels swap mode.
   function handleSelectSlot(slotId: ID | null): void {
-    if (!swapMode || !slotId) { setSelectedSlotId(slotId); return; }
+    if (!slotId) { setSelectedSlotId(null); setSwapMode(false); return; }
+    if (!swapMode) { setSelectedSlotId(slotId); return; }
     if (selectedSlotId && selectedSlotId !== slotId) {
       swapCollageImages(ruleId, selectedSlotId, slotId);
       setSwapMode(false);
@@ -146,9 +181,9 @@ export function CollageScreen({ ruleId, onBackHome }: CollageScreenProps): React
         />
 
         <main className="collage-canvas-area">
-          {swapMode && (
+          {swapMode && selectedSlotId && (
             <div className="collage-swap-banner">
-              מצב החלפה — בחר תא שני להחלפה | לחץ Esc לביטול
+              מצב החלפה — לחץ על נקודה כחולה בתמונה שנייה להחלפה | Esc לביטול
             </div>
           )}
           <CollageCanvasView

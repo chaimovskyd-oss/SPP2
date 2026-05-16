@@ -6,7 +6,8 @@ import {
   Palette,
   Printer,
   Users,
-  GalleryHorizontalEnd
+  GalleryHorizontalEnd,
+  FileText
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ModeType } from "@/types/template";
@@ -47,6 +48,13 @@ export const homeModes: HomeMode[] = [
     description: "עיצוב קולאז' אוטומטי עם פריסות חכמות ותמונות מרובות.",
     icon: GalleryHorizontalEnd,
     color: "#E06F6F"
+  },
+  {
+    id: "pdf_tools",
+    title: "PDF Studio",
+    description: "סידור, מיזוג, שינוי גודל והמרת קבצים ל-PDF.",
+    icon: FileText,
+    color: "#F0A040"
   },
   {
     id: "class_photo",

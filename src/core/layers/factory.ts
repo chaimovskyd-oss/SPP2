@@ -9,6 +9,7 @@ import type {
   ShapeLayer,
   TextLayer
 } from "@/types/layers";
+import { DEFAULT_IMAGE_LAYER_EFFECTS } from "@/types/layers";
 import type { CropRect, FitMode, Metadata, Rect } from "@/types/primitives";
 import { createDefaultTextModelFields } from "../text/defaults";
 
@@ -183,7 +184,8 @@ export function createImageLayer(options: {
       saturation: 0,
       temperature: 0,
       tint: 0
-    }
+    },
+    effects: { ...DEFAULT_IMAGE_LAYER_EFFECTS }
   };
 }
 

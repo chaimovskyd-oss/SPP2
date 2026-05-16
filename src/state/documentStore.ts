@@ -24,6 +24,9 @@ import { applyTextPresetToLayer, applyTextStylePatch, extractTextStylePatch } fr
 import { measureTextLayerSize } from "@/core/text/measurement";
 import { createCollageImageAssignment, createCollageRule as collageRuleFactory } from "@/core/collage/collageFactory";
 import { applyLayoutFamily, applyNewImagePool, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
+import { syncClassPhotoToPage } from "@/core/classPhoto/classPhotoLayoutEngine";
+import type { ClassPhotoPersonRecord, ClassPhotoFrameStyle, ClassPhotoLayoutSettings, ClassPhotoVisualBalanceSettings } from "@/types/classPhoto";
+import type { TextStyle } from "@/types/template";
 import { clampContentTransformToFillBounds } from "@/core/rendering/frameFitEngine";
 import type { Asset, Document, Page } from "@/types/document";
 import type { LinkedGroupPatch } from "@/core/layers/linkedGroups";
@@ -93,6 +96,7 @@ export interface DocumentState {
   assignImageToSlot: (ruleId: ID, slotId: ID, assetId: ID) => void;
   removeImageFromSlot: (ruleId: ID, slotId: ID) => void;
   swapCollageImages: (ruleId: ID, slotIdA: ID, slotIdB: ID) => void;
+  replaceCollageImage: (ruleId: ID, slotId: ID, newAssetId: ID) => void;
   updateCollageImageTransform: (ruleId: ID, slotId: ID, transform: ContentTransform) => void;
   updateCollageImageAdjustments: (ruleId: ID, slotId: ID, adjustments: Partial<CollageImageAssignment["colorAdjustments"]>) => void;
   updateCollageImageEditParams: (ruleId: ID, slotId: ID, params: Record<string, number>) => void;
@@ -101,6 +105,38 @@ export interface DocumentState {
   applyCollageEdgeConfigToAll: (ruleId: ID, edgeConfig: CollageEdgeConfig) => void;
   updateCollageCanvasSettings: (ruleId: ID, settings: Partial<CollageCanvasSettings>) => void;
   updateCollageCachedSlots: (ruleId: ID, newSlots: import("@/types/collage").CollageSlot[]) => void;
+  // ─── Class Photo actions ──────────────────────────────────────────────────
+  /** Regenerate the full layout from current rule settings — one undoable op */
+  regenerateClassPhoto: (ruleId: ID) => void;
+  /** Add person records (child or staff) and reflow */
+  addPeopleToClassPhoto: (ruleId: ID, records: ClassPhotoPersonRecord[], assets: import("@/types/document").Asset[]) => void;
+  /** Remove a person and compact the layout */
+  removePersonFromClassPhoto: (ruleId: ID, personId: ID) => void;
+  /** Update a person record (name, role, faceData, etc.) */
+  updateClassPhotoPerson: (ruleId: ID, personId: ID, patch: Partial<ClassPhotoPersonRecord>) => void;
+  /** Apply frame style changes to children or staff and reflow */
+  updateClassPhotoFrameStyle: (ruleId: ID, target: "child" | "staff", style: ClassPhotoFrameStyle) => void;
+  /** Update layout settings and reflow */
+  updateClassPhotoLayoutSettings: (ruleId: ID, settings: Partial<ClassPhotoLayoutSettings>) => void;
+  /** Update visual balance settings and reflow */
+  updateClassPhotoVisualBalance: (ruleId: ID, settings: Partial<ClassPhotoVisualBalanceSettings>) => void;
+  /** Update name text style for a group and push to text layers */
+  updateClassPhotoNameTextStyle: (ruleId: ID, target: "child" | "staff", style: Partial<TextStyle>) => void;
+  /** Update title or footer text */
+  updateClassPhotoText: (ruleId: ID, field: "titleText" | "footerText", text: string) => void;
+  /** Reorder person records (drag-reorder) */
+  reorderClassPhotoPersons: (ruleId: ID, orderedIds: ID[]) => void;
+  /**
+   * Copy the text style from a selected text layer and apply it to an entire
+   * group of class-photo text layers, then reflow.
+   * target: "child" | "staff" | "all_names" | "title" | "footer" | "all"
+   */
+  applyClassPhotoTextStyleToGroup: (
+    ruleId: ID,
+    sourceLayerId: ID,
+    pageId: ID,
+    target: "child" | "staff" | "all_names" | "title" | "footer" | "all"
+  ) => void;
 }
 
 export const useDocumentStore = create<DocumentState>((set, get) => ({
@@ -620,6 +656,17 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       const page = state.document.pages.find((p) => p.id === rule.pageId);
       if (!page) return state;
 
+      // Swap assetIds in imagePool so that any layout rebuild (assignByPoolOrder) produces
+      // the same slot→image mapping as the swap. Without this, re-flowing or changing the
+      // layout type would undo the swap by re-mapping pool[i]→slot[i] in the original order.
+      const newPool = [...rule.imagePool];
+      const idxA = newPool.indexOf(swapA.assetId);
+      const idxB = newPool.indexOf(swapB.assetId);
+      if (idxA !== -1 && idxB !== -1) {
+        newPool[idxA] = swapB.assetId;
+        newPool[idxB] = swapA.assetId;
+      }
+
       function swapAssignment(a: CollageImageAssignment): CollageImageAssignment {
         if (a.slotId === slotIdA) {
           return {
@@ -696,7 +743,9 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
           (doc) => ({
             ...doc,
             collageRules: doc.collageRules.map((r) =>
-              r.id === ruleId ? { ...r, imageAssignments: r.imageAssignments.map(swapAssignment) } : r
+              r.id === ruleId
+                ? { ...r, imagePool: newPool, imageAssignments: r.imageAssignments.map(swapAssignment) }
+                : r
             ),
             pages: doc.pages.map((p) =>
               p.id === rule.pageId ? { ...p, layers: p.layers.map(syncLayerForSwap) } : p
@@ -705,9 +754,76 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
           (doc) => ({
             ...doc,
             collageRules: doc.collageRules.map((r) =>
-              r.id === ruleId ? { ...r, imageAssignments: rule.imageAssignments } : r
+              r.id === ruleId
+                ? { ...r, imagePool: rule.imagePool, imageAssignments: rule.imageAssignments }
+                : r
             ),
             pages: doc.pages.map((p) => p.id === rule.pageId ? page : p)
+          })
+        )
+      );
+    }),
+
+  replaceCollageImage: (ruleId, slotId, newAssetId) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const rule = state.document.collageRules.find((r) => r.id === ruleId);
+      if (!rule) return state;
+      const assignment = rule.imageAssignments.find((a) => a.slotId === slotId);
+      if (!assignment) return state;
+      const oldAssetId = assignment.assetId;
+      const resetTransform: ContentTransform = { version: 1, offsetX: 0, offsetY: 0, scale: 1, rotation: 0 };
+
+      // Update imagePool so any future layout rebuild assigns the new asset to this slot's position
+      const newPool = rule.imagePool.map((id) => id === oldAssetId ? newAssetId : id);
+
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "ReplaceCollageImageAction",
+          (doc) => ({
+            ...doc,
+            collageRules: doc.collageRules.map((r) =>
+              r.id === ruleId ? {
+                ...r,
+                imagePool: newPool,
+                imageAssignments: r.imageAssignments.map((a) =>
+                  a.slotId === slotId
+                    ? { ...a, assetId: newAssetId, contentTransform: resetTransform, hasManualTransform: false }
+                    : a
+                )
+              } : r
+            ),
+            pages: doc.pages.map((p) =>
+              p.id === rule.pageId ? {
+                ...p,
+                layers: p.layers.map((layer) => {
+                  if (layer.type !== "frame") return layer;
+                  const meta = layer.metadata["collageFrame"] as { collageRuleId?: string; slotId?: string } | undefined;
+                  if (meta?.collageRuleId !== ruleId || meta.slotId !== slotId) return layer;
+                  return { ...layer, imageAssetId: newAssetId, contentTransform: resetTransform };
+                })
+              } : p
+            )
+          }),
+          (doc) => ({
+            ...doc,
+            collageRules: doc.collageRules.map((r) =>
+              r.id === ruleId
+                ? { ...r, imagePool: rule.imagePool, imageAssignments: rule.imageAssignments }
+                : r
+            ),
+            pages: doc.pages.map((p) =>
+              p.id === rule.pageId ? {
+                ...p,
+                layers: p.layers.map((layer) => {
+                  if (layer.type !== "frame") return layer;
+                  const meta = layer.metadata["collageFrame"] as { collageRuleId?: string; slotId?: string } | undefined;
+                  if (meta?.collageRuleId !== ruleId || meta.slotId !== slotId) return layer;
+                  return { ...layer, imageAssetId: oldAssetId };
+                })
+              } : p
+            )
           })
         )
       );
@@ -1015,6 +1131,346 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         },
         revision: state.revision + 1,
       };
+    }),
+
+  // ─── Class Photo actions ─────────────────────────────────────────────────
+  regenerateClassPhoto: (ruleId) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const rule = state.document.classPhotoRules.find((r) => r.id === ruleId);
+      if (!rule) return state;
+      const page = state.document.pages.find((p) => p.id === rule.pageId);
+      if (!page) return state;
+      const { page: newPage, rule: newRule } = syncClassPhotoToPage(page, rule);
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "RegenerateClassPhotoAction",
+          (doc) => ({
+            ...doc,
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? newRule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? newPage : p)
+          }),
+          (doc) => ({
+            ...doc,
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? rule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? page : p)
+          })
+        )
+      );
+    }),
+
+  addPeopleToClassPhoto: (ruleId, newRecords, assets) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const rule = state.document.classPhotoRules.find((r) => r.id === ruleId);
+      if (!rule) return state;
+      const page = state.document.pages.find((p) => p.id === rule.pageId);
+      if (!page) return state;
+      const maxOrder = rule.personRecords.reduce((m, r) => Math.max(m, r.orderIndex), -1);
+      const merged = [...rule.personRecords, ...newRecords.map((r, i) => ({ ...r, orderIndex: maxOrder + 1 + i }))];
+      const updatedRule = { ...rule, personRecords: merged };
+      const { page: newPage, rule: finalRule } = syncClassPhotoToPage(page, updatedRule);
+      const newAssets = assets.filter((a) => !state.document!.assets.some((ex) => ex.id === a.id));
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "AddPeopleToClassPhotoAction",
+          (doc) => ({
+            ...doc,
+            assets: [...doc.assets, ...newAssets],
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? finalRule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? newPage : p)
+          }),
+          (doc) => ({
+            ...doc,
+            assets: doc.assets.filter((a) => !newAssets.some((na) => na.id === a.id)),
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? rule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? page : p)
+          })
+        )
+      );
+    }),
+
+  removePersonFromClassPhoto: (ruleId, personId) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const rule = state.document.classPhotoRules.find((r) => r.id === ruleId);
+      if (!rule) return state;
+      const page = state.document.pages.find((p) => p.id === rule.pageId);
+      if (!page) return state;
+      const filtered = rule.personRecords.filter((r) => r.id !== personId).map((r, i) => ({ ...r, orderIndex: i }));
+      const updatedRule = { ...rule, personRecords: filtered };
+      const { page: newPage, rule: finalRule } = syncClassPhotoToPage(page, updatedRule);
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "RemovePersonFromClassPhotoAction",
+          (doc) => ({
+            ...doc,
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? finalRule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? newPage : p)
+          }),
+          (doc) => ({
+            ...doc,
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? rule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? page : p)
+          })
+        )
+      );
+    }),
+
+  updateClassPhotoPerson: (ruleId, personId, patch) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const rule = state.document.classPhotoRules.find((r) => r.id === ruleId);
+      if (!rule) return state;
+      const page = state.document.pages.find((p) => p.id === rule.pageId);
+      if (!page) return state;
+      const updatedRecords = rule.personRecords.map((r) => r.id === personId ? { ...r, ...patch } : r);
+      const updatedRule = { ...rule, personRecords: updatedRecords };
+      const { page: newPage, rule: finalRule } = syncClassPhotoToPage(page, updatedRule);
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "UpdateClassPhotoPersonAction",
+          (doc) => ({
+            ...doc,
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? finalRule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? newPage : p)
+          }),
+          (doc) => ({
+            ...doc,
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? rule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? page : p)
+          })
+        )
+      );
+    }),
+
+  updateClassPhotoFrameStyle: (ruleId, target, style) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const rule = state.document.classPhotoRules.find((r) => r.id === ruleId);
+      if (!rule) return state;
+      const page = state.document.pages.find((p) => p.id === rule.pageId);
+      if (!page) return state;
+      const updatedRule = target === "child"
+        ? { ...rule, childFrameStyle: style }
+        : { ...rule, staffFrameStyle: style };
+      const { page: newPage, rule: finalRule } = syncClassPhotoToPage(page, updatedRule);
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "UpdateClassPhotoFrameStyleAction",
+          (doc) => ({
+            ...doc,
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? finalRule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? newPage : p)
+          }),
+          (doc) => ({
+            ...doc,
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? rule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? page : p)
+          })
+        )
+      );
+    }),
+
+  updateClassPhotoLayoutSettings: (ruleId, settingsPatch) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const rule = state.document.classPhotoRules.find((r) => r.id === ruleId);
+      if (!rule) return state;
+      const page = state.document.pages.find((p) => p.id === rule.pageId);
+      if (!page) return state;
+      const updatedRule = { ...rule, layoutSettings: { ...rule.layoutSettings, ...settingsPatch } };
+      const { page: newPage, rule: finalRule } = syncClassPhotoToPage(page, updatedRule);
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "UpdateClassPhotoLayoutSettingsAction",
+          (doc) => ({
+            ...doc,
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? finalRule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? newPage : p)
+          }),
+          (doc) => ({
+            ...doc,
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? rule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? page : p)
+          })
+        )
+      );
+    }),
+
+  updateClassPhotoVisualBalance: (ruleId, balancePatch) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const rule = state.document.classPhotoRules.find((r) => r.id === ruleId);
+      if (!rule) return state;
+      const page = state.document.pages.find((p) => p.id === rule.pageId);
+      if (!page) return state;
+      const updatedRule = { ...rule, visualBalanceSettings: { ...rule.visualBalanceSettings, ...balancePatch } };
+      const { page: newPage, rule: finalRule } = syncClassPhotoToPage(page, updatedRule);
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "UpdateClassPhotoVisualBalanceAction",
+          (doc) => ({
+            ...doc,
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? finalRule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? newPage : p)
+          }),
+          (doc) => ({
+            ...doc,
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? rule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? page : p)
+          })
+        )
+      );
+    }),
+
+  updateClassPhotoNameTextStyle: (ruleId, target, stylePatch) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const rule = state.document.classPhotoRules.find((r) => r.id === ruleId);
+      if (!rule) return state;
+      const page = state.document.pages.find((p) => p.id === rule.pageId);
+      if (!page) return state;
+      const updatedRule = target === "child"
+        ? { ...rule, childNameTextStyle: { ...rule.childNameTextStyle, ...stylePatch } }
+        : { ...rule, staffNameTextStyle: { ...rule.staffNameTextStyle, ...stylePatch } };
+      const { page: newPage, rule: finalRule } = syncClassPhotoToPage(page, updatedRule);
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "UpdateClassPhotoNameTextStyleAction",
+          (doc) => ({
+            ...doc,
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? finalRule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? newPage : p)
+          }),
+          (doc) => ({
+            ...doc,
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? rule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? page : p)
+          })
+        )
+      );
+    }),
+
+  updateClassPhotoText: (ruleId, field, text) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const rule = state.document.classPhotoRules.find((r) => r.id === ruleId);
+      if (!rule) return state;
+      const page = state.document.pages.find((p) => p.id === rule.pageId);
+      if (!page) return state;
+      const updatedRule = { ...rule, [field]: text };
+      const { page: newPage, rule: finalRule } = syncClassPhotoToPage(page, updatedRule);
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "UpdateClassPhotoTextAction",
+          (doc) => ({
+            ...doc,
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? finalRule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? newPage : p)
+          }),
+          (doc) => ({
+            ...doc,
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? rule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? page : p)
+          })
+        )
+      );
+    }),
+
+  reorderClassPhotoPersons: (ruleId, orderedIds) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const rule = state.document.classPhotoRules.find((r) => r.id === ruleId);
+      if (!rule) return state;
+      const page = state.document.pages.find((p) => p.id === rule.pageId);
+      if (!page) return state;
+      const byId = new Map(rule.personRecords.map((r) => [r.id, r]));
+      const reordered = orderedIds.flatMap((id, i) => {
+        const rec = byId.get(id);
+        return rec ? [{ ...rec, orderIndex: i }] : [];
+      });
+      const updatedRule = { ...rule, personRecords: reordered };
+      const { page: newPage, rule: finalRule } = syncClassPhotoToPage(page, updatedRule);
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "ReorderClassPhotoPersonsAction",
+          (doc) => ({
+            ...doc,
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? finalRule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? newPage : p)
+          }),
+          (doc) => ({
+            ...doc,
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? rule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? page : p)
+          })
+        )
+      );
+    }),
+
+  applyClassPhotoTextStyleToGroup: (ruleId, sourceLayerId, pageId, target) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const rule = state.document.classPhotoRules.find((r) => r.id === ruleId);
+      if (!rule) return state;
+      const page = state.document.pages.find((p) => p.id === pageId);
+      if (!page) return state;
+      const sourceLayer = page.layers.find((l) => l.id === sourceLayerId);
+      if (!sourceLayer || sourceLayer.type !== "text") return state;
+
+      const patch: Partial<TextStyle> = {
+        fontFamily: sourceLayer.fontFamily,
+        fontWeight: sourceLayer.fontWeight,
+        fontSize: sourceLayer.fontSize,
+        lineHeight: sourceLayer.lineHeight,
+        letterSpacing: sourceLayer.letterSpacing,
+        color: sourceLayer.color,
+        alignment: sourceLayer.alignment,
+        direction: sourceLayer.direction
+      };
+
+      let updatedRule = rule;
+      if (target === "child" || target === "all_names" || target === "all") {
+        updatedRule = { ...updatedRule, childNameTextStyle: { ...updatedRule.childNameTextStyle, ...patch } };
+      }
+      if (target === "staff" || target === "all_names" || target === "all") {
+        updatedRule = { ...updatedRule, staffNameTextStyle: { ...updatedRule.staffNameTextStyle, ...patch } };
+      }
+      if (target === "title" || target === "all") {
+        updatedRule = { ...updatedRule, titleTextStyle: { ...updatedRule.titleTextStyle, ...patch } };
+      }
+      if (target === "footer" || target === "all") {
+        updatedRule = { ...updatedRule, footerTextStyle: { ...updatedRule.footerTextStyle, ...patch } };
+      }
+
+      const { page: newPage, rule: finalRule } = syncClassPhotoToPage(page, updatedRule);
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "ApplyClassPhotoTextStyleToGroupAction",
+          (doc) => ({
+            ...doc,
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? finalRule : r),
+            pages: doc.pages.map((p) => p.id === pageId ? newPage : p)
+          }),
+          (doc) => ({
+            ...doc,
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? rule : r),
+            pages: doc.pages.map((p) => p.id === pageId ? page : p)
+          })
+        )
+      );
     }),
 
   undo: () =>

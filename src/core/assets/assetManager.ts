@@ -142,6 +142,24 @@ export function markMissingAsset(asset: Asset): Asset {
   };
 }
 
+export function createMaskAsset(dataUrl: string, width: number, height: number, layerId: string): Asset {
+  return {
+    version: 1,
+    id: crypto.randomUUID(),
+    name: `mask_${layerId}`,
+    kind: "image",
+    status: "ready",
+    originalPath: dataUrl,
+    previewPath: dataUrl,
+    thumbnailPath: dataUrl,
+    mimeType: "image/png",
+    width,
+    height,
+    fileSize: Math.round(dataUrl.length * 0.75),
+    metadata: { isMask: true, layerId }
+  };
+}
+
 export function resolveCanvasAssetPath(asset: Asset | undefined): string | undefined {
   if (asset === undefined || asset.status === "missing") {
     return undefined;
@@ -183,6 +201,7 @@ async function readImageDimensions(src: string): Promise<{ width: number; height
 }
 
 async function resizeImageDataUrl(src: string, maxSize: number): Promise<string> {
+  const isPng = src.startsWith("data:image/png") || src.startsWith("data:image/gif") || src.startsWith("data:image/webp") || src.startsWith("data:image/svg");
   const image = await loadImage(src);
   const ratio = image.width === 0 || image.height === 0 ? 1 : Math.min(1, maxSize / Math.max(image.width, image.height));
   const canvas = document.createElement("canvas");
@@ -193,7 +212,7 @@ async function resizeImageDataUrl(src: string, maxSize: number): Promise<string>
     return src;
   }
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.86);
+  return isPng ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", 0.86);
 }
 
 async function loadImage(src: string): Promise<HTMLImageElement> {

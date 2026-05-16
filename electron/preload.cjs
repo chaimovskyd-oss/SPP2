@@ -9,6 +9,12 @@ contextBridge.exposeInMainWorld("spp", {
   readFileBase64: (filePath) =>
     ipcRenderer.invoke("spp:read-file-base64", filePath),
 
+  savePdfDialog: (pdfBase64, suggestedName) =>
+    ipcRenderer.invoke("spp:save-pdf-dialog", pdfBase64, suggestedName),
+
+  convertOfficeToPdf: (inputPath) =>
+    ipcRenderer.invoke("spp:convert-office-to-pdf", inputPath),
+
   openImageEditor: (inputPath, outputPath) =>
     ipcRenderer.invoke("spp:open-image-editor", inputPath, outputPath),
 
@@ -23,6 +29,9 @@ contextBridge.exposeInMainWorld("spp", {
 
   openFolder: (folderPath) =>
     ipcRenderer.invoke("spp:open-folder", folderPath),
+
+  openPath: (filePath) =>
+    ipcRenderer.invoke("spp:open-path", filePath),
 
   openExternalApp: (execPath, fileArg) =>
     ipcRenderer.invoke("spp:open-external-app", execPath, fileArg),

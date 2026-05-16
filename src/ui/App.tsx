@@ -4,6 +4,8 @@ import { createPage } from "@/core/document/factory";
 import { createCollageModeDocument } from "@/core/collage/collageFactory";
 import { syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import { importImageAsset } from "@/core/assets/assetManager";
+import { createClassPhotoModeDocument, defaultLayoutSettings } from "@/core/classPhoto/classPhotoFactory";
+import { syncClassPhotoToPage } from "@/core/classPhoto/classPhotoLayoutEngine";
 import { defaultGridSettings, defaultSnapSettings, mmToPx } from "@/core";
 import type { Asset } from "@/types/document";
 import type { PageSetup } from "@/types/primitives";
@@ -13,6 +15,8 @@ import type { MaskCreateOptions } from "@/types/mask";
 import type { ModeType } from "@/types/template";
 import type { CollageWizardResult } from "./collage/CollageSetupWizard";
 import type { PhotoPrintWizardResult } from "@/types/photoPrint";
+import type { ClassPhotoWizardResult } from "@/types/classPhoto";
+import type { ClassPhotoWizardInitialState } from "./classPhoto/ClassPhotoSetupWizard";
 import { useDocumentStore } from "@/state/documentStore";
 import { useSelectionStore } from "@/state/selectionStore";
 import { useViewportStore } from "@/state/viewportStore";
@@ -22,7 +26,9 @@ import { createFreeModeDocument, loadProject } from "./projectActions";
 import { DocumentSetupScreen } from "./setup/DocumentSetupScreen";
 import { CollageSetupWizard } from "./collage/CollageSetupWizard";
 import { PhotoPrintSetupWizard } from "./photoPrint/PhotoPrintSetupWizard";
+import { ClassPhotoSetupWizard } from "./classPhoto/ClassPhotoSetupWizard";
 import "./photoPrint/photoPrint.css";
+import "./classPhoto/classPhoto.css";
 import { SettingsWindow } from "./settings/SettingsWindow";
 
 const EditorScreen = lazy(() =>
@@ -31,8 +37,15 @@ const EditorScreen = lazy(() =>
   }))
 );
 
+const PdfStudioScreen = lazy(() =>
+  import("./pdf/PdfStudioScreen").then((module) => ({
+    default: module.PdfStudioScreen
+  }))
+);
+
 export function App(): ReactElement {
-  const [screen, setScreen] = useState<"home" | "setup" | "editor" | "collage-wizard" | "photo-print-wizard">("home");
+  const [screen, setScreen] = useState<"home" | "setup" | "editor" | "collage-wizard" | "photo-print-wizard" | "pdf-studio" | "class-photo-wizard">("home");
+  const [classPhotoWizardInitialState, setClassPhotoWizardInitialState] = useState<ClassPhotoWizardInitialState | undefined>(undefined);
   const [pendingMode, setPendingMode] = useState<ModeType>("free");
   const [recoveryRecord, setRecoveryRecord] = useState<AutosaveRecord | null>(() => {
     cleanupRecovery();
@@ -66,8 +79,13 @@ export function App(): ReactElement {
     setPendingMode(mode);
     if (mode === "collage") {
       setScreen("collage-wizard");
+    } else if (mode === "class_photo") {
+      setClassPhotoWizardInitialState(undefined);
+      setScreen("class-photo-wizard");
     } else if (mode === "photo_print") {
       setScreen("photo-print-wizard");
+    } else if (mode === "pdf_tools") {
+      setScreen("pdf-studio");
     } else {
       setScreen("setup");
     }
@@ -223,6 +241,169 @@ export function App(): ReactElement {
     setScreen("editor");
   }
 
+  async function handleClassPhotoWizardComplete(result: ClassPhotoWizardResult): Promise<void> {
+    const {
+      images,
+      personRecords,
+      backgroundFile,
+      pageSetup,
+      titleText,
+      footerText,
+      titleFontFamily,
+      footerFontFamily,
+      titlePresetId,
+      footerPresetId,
+      childFrameStyle,
+      staffFrameStyle,
+      layoutSettings,
+      visualBalanceSettings,
+      customerInfo
+    } = result;
+
+    // Resolve preset effects + visual style if a preset was selected
+    const { BUILTIN_TEXT_PRESETS } = await import("@/core/text/presets");
+    const titlePreset = titlePresetId ? BUILTIN_TEXT_PRESETS.find((p) => p.presetId === titlePresetId) : null;
+    const footerPreset = footerPresetId ? BUILTIN_TEXT_PRESETS.find((p) => p.presetId === footerPresetId) : null;
+    const titleEffects = titlePreset?.effects ?? [];
+    const footerEffects = footerPreset?.effects ?? [];
+    // The preset style contains color, gradient, stroke, shadow — serialize for storage
+    const titlePresetStyle = titlePreset?.style
+      ? (titlePreset.style as import("@/types/primitives").Metadata)
+      : undefined;
+    const footerPresetStyle = footerPreset?.style
+      ? (footerPreset.style as import("@/types/primitives").Metadata)
+      : undefined;
+
+    // Import each person image as a real SPP2 asset, indexed to match personRecords.
+    // In back-to-wizard flow, records already have real assetIds — reuse existing assets.
+    const existingDoc = useDocumentStore.getState().document;
+    const importedAssets: Asset[] = [];
+    const recordsWithAssetIds = personRecords.map((rec) => ({ ...rec }));
+
+    for (let i = 0; i < recordsWithAssetIds.length; i++) {
+      const rec = recordsWithAssetIds[i];
+      if (!rec) continue;
+
+      // If assetId is already real (not PLACEHOLDER_), reuse it
+      if (!rec.assetId.startsWith("PLACEHOLDER_")) {
+        const existingAsset = existingDoc?.assets.find((a) => a.id === rec.assetId);
+        if (existingAsset) {
+          importedAssets.push(existingAsset);
+          continue;
+        }
+      }
+
+      // Otherwise import the new file
+      const entry = images[i];
+      if (!entry) continue;
+      try {
+        const { asset } = await importImageAsset(entry.file, [], { createPreview: true });
+        importedAssets.push(asset);
+        rec.assetId = asset.id;
+      } catch {
+        // Fallback: create a minimal asset from blob URL
+        const fallbackAsset: Asset = {
+          version: 1,
+          id: crypto.randomUUID(),
+          name: entry.file.name,
+          kind: "image",
+          status: "ready",
+          originalPath: entry.url,
+          previewPath: entry.url,
+          thumbnailPath: entry.url,
+          mimeType: entry.file.type || "image/jpeg",
+          width: entry.width,
+          height: entry.height,
+          fileSize: entry.file.size,
+          metadata: {}
+        };
+        importedAssets.push(fallbackAsset);
+        rec.assetId = fallbackAsset.id;
+      }
+    }
+
+    // Import background image if present
+    let backgroundAssetId: string | undefined;
+    if (backgroundFile) {
+      try {
+        const { asset } = await importImageAsset(backgroundFile, [], { createPreview: false });
+        importedAssets.push(asset);
+        backgroundAssetId = asset.id;
+      } catch {
+        const bgUrl = URL.createObjectURL(backgroundFile);
+        const fallbackBg: Asset = {
+          version: 1,
+          id: crypto.randomUUID(),
+          name: backgroundFile.name,
+          kind: "image",
+          status: "ready",
+          originalPath: bgUrl,
+          previewPath: bgUrl,
+          thumbnailPath: bgUrl,
+          mimeType: backgroundFile.type || "image/jpeg",
+          metadata: {}
+        };
+        importedAssets.push(fallbackBg);
+        backgroundAssetId = fallbackBg.id;
+      }
+    }
+
+    const childCount = recordsWithAssetIds.filter((r) => r.role === "child").length;
+    const staffCount = recordsWithAssetIds.filter((r) => r.role === "staff").length;
+    const ls = layoutSettings ?? defaultLayoutSettings(pageSetup.size.width, pageSetup.size.height, childCount, staffCount);
+
+    const projectMetadata = {
+      ...customerInfo,
+      projectType: "ClassPhoto" as const
+    };
+
+    const docName = customerInfo?.customerName
+      ? `תמונת מחזור — ${customerInfo.customerName}`
+      : "תמונת מחזור";
+
+    let doc = createClassPhotoModeDocument(
+      docName,
+      pageSetup,
+      importedAssets,
+      recordsWithAssetIds,
+      titleText,
+      footerText,
+      ls,
+      visualBalanceSettings,
+      childFrameStyle,
+      staffFrameStyle,
+      titleFontFamily,
+      footerFontFamily,
+      backgroundAssetId,
+      projectMetadata,
+      titleEffects,
+      footerEffects,
+      titlePresetStyle,
+      footerPresetStyle
+    );
+
+    // Sync: generate FrameLayers + TextLayers from personRecords
+    const rule = doc.classPhotoRules[0];
+    if (rule) {
+      const page = doc.pages.find((p) => p.id === rule.pageId);
+      if (page) {
+        const { page: updatedPage, rule: updatedRule } = syncClassPhotoToPage(page, rule);
+        doc = {
+          ...doc,
+          classPhotoRules: doc.classPhotoRules.map((r) => r.id === rule.id ? updatedRule : r),
+          pages: doc.pages.map((p) => p.id === rule.pageId ? updatedPage : p)
+        };
+      }
+    }
+
+    const envelope = beginProject(createProjectEnvelope({ document: doc, linkedGroups: [], batchJobs: [] }));
+    setDocument(withProjectMetadata(envelope.document, envelope.metadata));
+    resetViewport();
+    clearSelection();
+    setClassPhotoWizardInitialState(undefined);
+    setScreen("editor");
+  }
+
   function createDocument(setup: PageSetup, options?: { grid?: Partial<GridCreateOptions>; mask?: Partial<MaskCreateOptions> }, customerInfo?: ProjectCustomerInfo): void {
     const name = pendingMode === "free" ? "פרויקט חופשי חדש" : `פרויקט ${pendingMode}`;
     const projectMetadata = {
@@ -245,6 +426,41 @@ export function App(): ReactElement {
   function backHome(): void {
     clearSelection();
     setScreen("home");
+  }
+
+  function buildClassPhotoWizardStateFromDocument(): ClassPhotoWizardInitialState | undefined {
+    const doc = useDocumentStore.getState().document;
+    if (!doc) return undefined;
+    const rule = doc.classPhotoRules[0];
+    if (!rule) return undefined;
+    const page = doc.pages.find((p) => p.id === rule.pageId);
+    if (!page) return undefined;
+
+    // Build thumbnail URLs from asset previewPath
+    const thumbnailUrls = rule.personRecords.map((rec) => {
+      const asset = doc.assets.find((a) => a.id === rec.assetId);
+      return asset?.previewPath ?? asset?.originalPath ?? "";
+    });
+
+    // Extract page preset from page setup metadata
+    const presetId = (page.setup.metadata?.["presetId"] as string | undefined) ?? "custom";
+    const orientation = page.setup.orientation ?? "portrait";
+
+    return {
+      personRecords: rule.personRecords,
+      personThumbnailUrls: thumbnailUrls,
+      imagesAlreadyImported: true,
+      presetId,
+      orientation,
+      titleText: rule.titleText,
+      footerText: rule.footerText,
+      titleFontFamily: rule.titleTextStyle.fontFamily,
+      footerFontFamily: rule.footerTextStyle.fontFamily,
+      childFrameStyle: rule.childFrameStyle,
+      staffFrameStyle: rule.staffFrameStyle,
+      layoutSettings: rule.layoutSettings,
+      visualBalanceSettings: rule.visualBalanceSettings
+    };
   }
 
   function restoreRecovery(): void {
@@ -289,6 +505,25 @@ export function App(): ReactElement {
     );
   }
 
+  if (screen === "class-photo-wizard") {
+    return (
+      <ClassPhotoSetupWizard
+        initialState={classPhotoWizardInitialState}
+        onComplete={(result) => void handleClassPhotoWizardComplete(result)}
+        onCancel={() => setScreen("home")}
+      />
+    );
+  }
+
+
+  if (screen === "pdf-studio") {
+    return (
+      <Suspense fallback={<main className="loading-screen">טוען את כלי ה-PDF...</main>}>
+        <PdfStudioScreen onBackHome={() => setScreen("home")} />
+      </Suspense>
+    );
+  }
+
   if (isCreatingPhotoPrint) {
     return (
       <div className="pp-creating-screen">
@@ -307,7 +542,13 @@ export function App(): ReactElement {
     <>
       {canShowEditor ? (
         <Suspense fallback={<main className="loading-screen">טוען את סביבת העריכה...</main>}>
-          <EditorScreen onBackHome={backHome} />
+          <EditorScreen
+            onBackHome={backHome}
+            onOpenClassPhotoWizard={() => {
+              setClassPhotoWizardInitialState(buildClassPhotoWizardStateFromDocument());
+              setScreen("class-photo-wizard");
+            }}
+          />
         </Suspense>
       ) : (
         <>

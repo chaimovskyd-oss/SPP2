@@ -18,6 +18,7 @@ interface CollageRightPanelProps {
   /** Kept optional for old CollageScreen compatibility, but layouts are no longer shown here. */
   suggestions?: ScoredLayoutSuggestion[];
   onSelectLayout?: (family: CollageLayoutFamily) => void;
+  onReplaceImage?: () => void;
 }
 
 type EmptyTab = "layout" | "style" | "canvas";
@@ -65,7 +66,7 @@ function shapeLabel(shape: CollageSlotShape): string {
   }
 }
 
-export function CollageRightPanel({ rule, selectedSlotId, selectedLayer }: CollageRightPanelProps): ReactElement {
+export function CollageRightPanel({ rule, selectedSlotId, selectedLayer, onReplaceImage }: CollageRightPanelProps): ReactElement {
   const document = useDocumentStore((s) => s.document);
   const applyDocumentChange = useDocumentStore((s) => s.applyDocumentChange);
   const updateAdjustments = useDocumentStore((s) => s.updateCollageImageAdjustments);
@@ -226,6 +227,11 @@ export function CollageRightPanel({ rule, selectedSlotId, selectedLayer }: Colla
         {imageTab === "adjust" && (
           <div className="panel-section">
             <div className="panel-title">עריכת תמונה בתא</div>
+            {onReplaceImage && (
+              <button type="button" className="btn btn-ghost btn-full" onClick={onReplaceImage}>
+                החלף תמונה בתא
+              </button>
+            )}
             <div className="panel-field">
               <label>מצב התאמה</label>
               <select value={assignment.fitMode} onChange={(e) => updateFitMode(e.target.value as FitMode)}>

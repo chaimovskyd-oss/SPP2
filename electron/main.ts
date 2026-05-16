@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, ipcMain, shell, dialog } from "electron";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -44,6 +44,81 @@ ipcMain.handle("spp:read-file-base64", async (_event, filePath: string): Promise
   const buf = fs.readFileSync(filePath);
   return buf.toString("base64");
 });
+
+ipcMain.handle("spp:save-pdf-dialog", async (_event, pdfBase64: string, suggestedName = "SPP2-PDF-Studio.pdf"): Promise<{ success: boolean; filePath?: string; error?: string }> => {
+  try {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    const result = await dialog.showSaveDialog(win, {
+      title: "שמירת PDF",
+      defaultPath: suggestedName,
+      filters: [{ name: "PDF", extensions: ["pdf"] }]
+    });
+
+    if (result.canceled || !result.filePath) {
+      return { success: false, error: "השמירה בוטלה" };
+    }
+
+    fs.writeFileSync(result.filePath, Buffer.from(pdfBase64, "base64"));
+    return { success: true, filePath: result.filePath };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+function getLibreOfficeCandidates(): string[] {
+  if (process.platform === "win32") {
+    return [
+      "C:\\Program Files\\LibreOffice\\program\\soffice.exe",
+      "C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe",
+      "soffice.exe"
+    ];
+  }
+  if (process.platform === "darwin") {
+    return ["/Applications/LibreOffice.app/Contents/MacOS/soffice", "soffice"];
+  }
+  return ["libreoffice", "soffice"];
+}
+
+function runLibreOfficeConversion(sofficePath: string, inputPath: string, outDir: string): Promise<{ success: boolean; stdout?: string; stderr?: string; error?: string; code?: number | null }> {
+  return new Promise((resolve) => {
+    const args = ["--headless", "--convert-to", "pdf", "--outdir", outDir, inputPath];
+    const proc = spawn(sofficePath, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout?.on("data", (chunk) => { stdout += chunk.toString(); });
+    proc.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
+    proc.on("close", (code) => resolve({ success: code === 0, stdout, stderr, code }));
+    proc.on("error", (err) => resolve({ success: false, error: err.message }));
+  });
+}
+
+ipcMain.handle("spp:convert-office-to-pdf", async (_event, inputPath: string): Promise<{ success: boolean; pdfBase64?: string; outputPath?: string; outputName?: string; error?: string }> => {
+  try {
+    if (!inputPath || !fs.existsSync(inputPath)) {
+      return { success: false, error: `Office file not found: ${inputPath || "missing"}` };
+    }
+
+    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "spp2-office-pdf-"));
+    const baseName = path.basename(inputPath, path.extname(inputPath));
+    const outputPath = path.join(outDir, `${baseName}.pdf`);
+
+    let lastError = "LibreOffice was not found or conversion failed.";
+    for (const candidate of getLibreOfficeCandidates()) {
+      if (path.isAbsolute(candidate) && !fs.existsSync(candidate)) continue;
+      const result = await runLibreOfficeConversion(candidate, inputPath, outDir);
+      if (result.success && fs.existsSync(outputPath)) {
+        const pdfBase64 = fs.readFileSync(outputPath).toString("base64");
+        return { success: true, pdfBase64, outputPath, outputName: `${baseName}.pdf` };
+      }
+      lastError = result.error || result.stderr || result.stdout || lastError;
+    }
+
+    return { success: false, error: lastError };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
 
 /**
  * Launch the Smart Image Editor (Python / PySide6) for a specific file.
@@ -196,6 +271,16 @@ ipcMain.handle("spp:open-folder", async (_event, folderPath: string): Promise<{ 
   try {
     await shell.openPath(folderPath);
     return {};
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+/** Open any file with its default OS application (used for multi-page PDF printing). */
+ipcMain.handle("spp:open-path", async (_event, filePath: string): Promise<{ error?: string }> => {
+  try {
+    const error = await shell.openPath(filePath);
+    return error ? { error } : {};
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

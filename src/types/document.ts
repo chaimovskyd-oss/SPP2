@@ -5,6 +5,7 @@ import type { GridImageAssignment, GridLayoutRule, GridTextOverlayRule } from ".
 import type { MaskImageAssignment, MaskLayoutRule, MaskPreset, MaskTextOverlayRule } from "./mask";
 import type { CollageRule } from "./collage";
 import type { PhotoPrintImageAssignment, PhotoPrintRule } from "./photoPrint";
+import type { ClassPhotoLayoutRule } from "./classPhoto";
 
 export interface Asset extends VersionedEntity {
   id: ID;
@@ -63,6 +64,7 @@ export interface Document extends VersionedEntity {
   collageRules: CollageRule[];
   photoPrintRules: PhotoPrintRule[];
   photoPrintImageAssignments: PhotoPrintImageAssignment[];
+  classPhotoRules: ClassPhotoLayoutRule[];
   viewport: ViewportState;
   metadata: Metadata;
 }

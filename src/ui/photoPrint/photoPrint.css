@@ -110,155 +110,74 @@
 }
 
 /* ─── PhotoPrint side panel ──────────────────────────── */
-.pp-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
+.pp-panel { display: flex; flex-direction: column; gap: 0; }
 .pp-panel-tabs {
   display: flex;
   border-bottom: 1px solid var(--border);
   margin-bottom: 8px;
 }
 .pp-panel-tab {
-  flex: 1;
-  padding: 8px 6px;
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  flex: 1; padding: 8px 6px;
+  background: none; border: none;
+  color: var(--text-secondary); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
   transition: var(--t);
   border-bottom: 2px solid transparent;
 }
 .pp-panel-tab:hover { color: var(--text-primary); }
-.pp-panel-tab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-}
+.pp-panel-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 .pp-panel-body { padding: 0 2px; }
 .pp-panel-section { display: flex; flex-direction: column; gap: 8px; }
 .pp-panel-label {
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 11px; font-weight: 600;
   color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  text-transform: uppercase; letter-spacing: 0.5px;
 }
-.pp-panel-info {
-  font-size: 13px;
-  color: var(--text-primary);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
+.pp-panel-info { font-size: 13px; color: var(--text-primary); display: flex; align-items: center; gap: 6px; }
 .pp-panel-badge {
-  font-size: 11px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 1px 6px;
-  color: var(--text-secondary);
+  font-size: 11px; background: var(--bg-elevated);
+  border: 1px solid var(--border); border-radius: 4px;
+  padding: 1px 6px; color: var(--text-secondary);
 }
 .pp-panel-divider { height: 1px; background: var(--border); margin: 2px 0; }
-.pp-panel-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+.pp-panel-row { display: flex; align-items: center; gap: 8px; }
 .pp-panel-check {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text-primary);
-  cursor: pointer;
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--text-primary); cursor: pointer;
 }
 .pp-panel-slider-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-secondary);
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text-secondary);
 }
-.pp-panel-slider-row input[type=range] {
-  flex: 1;
-  accent-color: var(--accent);
-}
-.pp-panel-val {
-  font-size: 12px;
-  color: var(--text-primary);
-  min-width: 44px;
-  text-align: right;
-}
-.pp-preset-grid-sm {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
+.pp-panel-slider-row input[type=range] { flex: 1; accent-color: var(--accent); }
+.pp-panel-val { font-size: 12px; color: var(--text-primary); min-width: 44px; text-align: right; }
+.pp-preset-grid-sm { display: flex; flex-wrap: wrap; gap: 4px; }
 .pp-preset-sm {
   padding: 3px 8px;
-  border: 1.5px solid var(--border);
-  border-radius: 5px;
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  font-size: 11px;
-  cursor: pointer;
-  transition: var(--t);
+  border: 1.5px solid var(--border); border-radius: 5px;
+  background: var(--bg-surface); color: var(--text-secondary);
+  font-size: 11px; cursor: pointer; transition: var(--t);
 }
 .pp-preset-sm:hover { border-color: var(--accent); color: var(--text-primary); }
-.pp-preset-sm.active {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
-  font-weight: 600;
-}
-.pp-split-row {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
+.pp-preset-sm.active { border-color: var(--accent); background: var(--accent); color: #fff; font-weight: 600; }
+.pp-split-row { display: flex; gap: 4px; flex-wrap: wrap; }
 .pp-split-count-btn {
   padding: 4px 8px;
-  border: 1.5px solid var(--border);
-  border-radius: 5px;
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: var(--t);
+  border: 1.5px solid var(--border); border-radius: 5px;
+  background: var(--bg-surface); color: var(--text-secondary);
+  font-size: 12px; font-weight: 600; cursor: pointer; transition: var(--t);
 }
 .pp-split-count-btn:hover { border-color: var(--accent); color: var(--text-primary); }
-.pp-split-count-btn.active {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
-}
-.pp-toggle-row {
-  display: flex;
-  gap: 4px;
-}
+.pp-split-count-btn.active { border-color: var(--accent); background: var(--accent); color: #fff; }
+.pp-toggle-row { display: flex; gap: 4px; }
 .pp-toggle-btn {
-  flex: 1;
-  padding: 5px 8px;
-  border: 1.5px solid var(--border);
-  border-radius: 5px;
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  font-size: 12px;
-  cursor: pointer;
-  transition: var(--t);
+  flex: 1; padding: 5px 8px;
+  border: 1.5px solid var(--border); border-radius: 5px;
+  background: var(--bg-surface); color: var(--text-secondary);
+  font-size: 12px; cursor: pointer; transition: var(--t);
 }
 .pp-toggle-btn:hover { border-color: var(--accent); color: var(--text-primary); }
-.pp-toggle-btn.active {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
-  font-weight: 600;
-}
+.pp-toggle-btn.active { border-color: var(--accent); background: var(--accent); color: #fff; font-weight: 600; }
 
 /* ─── Drop zone ──────────────────────────────────────── */
 .pp-drop-zone {

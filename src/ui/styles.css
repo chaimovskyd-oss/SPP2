@@ -1089,7 +1089,7 @@ textarea {
 .canvas-frame {
   position: relative;
   z-index: 1;
-  overflow: hidden;
+  overflow: visible;
   border-radius: 2px;
   box-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.5),
@@ -1150,6 +1150,28 @@ textarea {
   text-transform: uppercase;
   flex-shrink: 0;
   margin-inline-start: 8px;
+}
+
+.rs-replace-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-inline-start: auto;
+  padding: 3px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+.rs-replace-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .rs-body {
@@ -1663,10 +1685,37 @@ textarea {
   overflow: hidden;
 }
 
+.layer-thumb.image-wrap {
+  position: relative;
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 22px;
+  overflow: visible;
+}
+
 .layer-thumb.image {
   display: block;
   object-fit: cover;
   border: 1px solid var(--border-soft);
+}
+
+.fx-badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 7px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  pointer-events: none;
 }
 
 .layer-thumb.text {
@@ -1697,15 +1746,47 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  direction: ltr;
+  text-align: left;
+}
+
+.layer-eye-btn {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--text-tertiary);
+  opacity: 0;
+  transition: opacity var(--t), color var(--t), background var(--t);
+}
+
+.layer-row:hover .layer-eye-btn,
+.layer-row.active .layer-eye-btn {
+  opacity: 1;
+}
+
+.layer-eye-btn.hidden {
+  opacity: 1;
+  color: var(--text-tertiary);
+}
+
+.layer-eye-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--accent-hover);
+}
+
+.layer-row.hidden .layer-main {
+  opacity: 0.55;
 }
 
 .layer-actions {
   display: inline-flex;
-  min-width: auto;
+  flex: 0 0 auto;
   height: auto;
   background: transparent;
   gap: 2px;
-  margin-right: auto;
 }
 
 .layer-actions button {
@@ -2213,6 +2294,23 @@ textarea {
 .field-row .field {
   flex: 1;
   min-width: 0;
+}
+
+/* ── Emoji sidebar nav column overrides ─────────────────────────────────────── */
+
+.ls-nav--4col {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.ls-nav--5col {
+  grid-template-columns: repeat(5, 1fr);
+}
+
+/* ── Emoji ls-content: no padding, panel owns its own spacing ──────────────── */
+
+.ls-content--emoji {
+  padding: 0;
+  overflow: hidden;
 }
 
 .field-row .seg {
@@ -2729,6 +2827,76 @@ input[type="range"]::-webkit-slider-runnable-track {
   background: var(--accent, #7C6FE0);
   color: #fff;
   border-color: var(--accent, #7C6FE0);
+}
+
+/* ─── Image Edit Mode toolbar & floating bar ─────────────────────────────── */
+.context-toolbar.image-edit-mode {
+  background: linear-gradient(90deg, #1a1824 0%, #1d1a2e 100%);
+  border-bottom: 2px solid #7C6FE0;
+}
+.context-toolbar.image-edit-mode .context-toolbar-label {
+  color: #a09afc;
+  font-weight: 800;
+}
+
+.image-edit-floating-bar {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: rgba(22, 20, 30, 0.94);
+  border: 1px solid #3a3845;
+  border-radius: 10px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.45);
+  z-index: 300;
+  backdrop-filter: blur(8px);
+  color: var(--text, #e2dff0);
+  font-size: 12px;
+  direction: rtl;
+}
+.float-param {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.float-param input[type="range"] {
+  width: 90px;
+  accent-color: #7C6FE0;
+}
+.float-param span {
+  min-width: 28px;
+  text-align: center;
+  color: #a09aac;
+  font-size: 11px;
+}
+.float-param-group {
+  display: flex;
+  gap: 4px;
+}
+.float-toggle {
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid #3a3845;
+  background: transparent;
+  color: var(--text, #e2dff0);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.float-toggle.on,
+.float-toggle:hover {
+  background: #7C6FE0;
+  color: #fff;
+  border-color: #7C6FE0;
+}
+.eraser-preview-canvas {
+  pointer-events: none;
+  border-radius: 4px;
 }
 
 /* ─── Studio tab bar (ImageStudio tabs) ─────────────────────────────────── */

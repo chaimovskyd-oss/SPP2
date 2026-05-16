@@ -1,5 +1,9 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { Layer, Line, Rect, Stage, Transformer } from "react-konva";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Transformer } from "react-konva";
+import { calculateRotateHandlePosition, nodeAABBInCanvasUnits, type RotateHandlePosition } from "./rotateHandleUtils";
+import { useKonvaImage } from "./useKonvaImage";
+import { createMaskAsset, resolveCanvasAssetPath } from "@/core/assets/assetManager";
+import { runMagicWand } from "@/core/imageEdit/magicWandWorker";
 import type Konva from "konva";
 import { beginPointer, createInputState, endPointer, movePointer } from "@/core/input/inputSystem";
 import { normalizeRect } from "@/core/bounds/bounds";
@@ -9,11 +13,18 @@ import { marqueeSelect } from "@/core/selection/selectionEngine";
 import { snapLayerBounds, snapLayerPosition, type SnapLine, type SnapLineKind, type SnapSourceRole } from "@/core/snap/snapEngine";
 import { measureTextLayerSize } from "@/core/text/measurement";
 import { useViewportStore } from "@/state/viewportStore";
+import { useImageEditStore } from "@/state/imageEditStore";
 import type { Asset, Page } from "@/types/document";
 import type { Rect as RectType } from "@/types/primitives";
-import type { TextLayer, VisualLayer } from "@/types/layers";
+import type { ImageLayer, TextLayer, VisualLayer } from "@/types/layers";
 import { SCREEN_HELPER_NODE_NAME } from "./canvasNodeNames";
 import { KonvaLayerNode, type CanvasContextMenuTarget } from "./KonvaLayerNode";
+
+// Extra screen-pixel buffer around the Stage canvas so that Transformer anchors
+// and the selection border remain visible and interactive even when the selected
+// object extends beyond the canvas boundary.  Content is clipped to the canvas
+// area by a Konva Group clipFunc; only the Transformer sits outside that clip.
+const OVERFLOW_PAD = 200; // px
 
 // ─── Guide color palette ──────────────────────────────────────────────────────
 const GUIDE_COLORS: Partial<Record<SnapLineKind, string>> = {
@@ -40,6 +51,7 @@ interface CanvasStageProps {
   onEndTextEdit: () => void;
   onLayerContextMenu?: (target: CanvasContextMenuTarget) => void;
   stageRef: React.RefObject<Konva.Stage | null>;
+  onMaskPainted?: (layerId: string, maskDataUrl: string, width: number, height: number) => void;
 }
 
 export function CanvasStage({
@@ -55,14 +67,31 @@ export function CanvasStage({
   onBeginTextEdit,
   onEndTextEdit,
   onLayerContextMenu,
-  stageRef
+  stageRef,
+  onMaskPainted
 }: CanvasStageProps): React.ReactElement {
   const transformerRef = useRef<Konva.Transformer>(null);
   const marqueeStartRef = useRef<{ x: number; y: number } | null>(null);
   const panStartRef = useRef<{ x: number; y: number } | null>(null);
+  const rotatingRef = useRef<{
+    pivot: { x: number; y: number };
+    startAngle: number;
+    initialNodes: Array<{ node: Konva.Node; x: number; y: number; rotation: number }>;
+  } | null>(null);
+  const [rotateHandlePos, setRotateHandlePos] = useState<RotateHandlePosition | null>(null);
   const inputStateRef = useRef(createInputState("move"));
   const [marqueeRect, setMarqueeRect] = useState<RectType | null>(null);
   const [smartLines, setSmartLines] = useState<SnapLine[]>([]);
+
+  // ── Image edit mode state ────────────────────────────────────────────────────
+  const imageEditStore = useImageEditStore();
+  const { imageEditMode, editingLayerId: imageEditLayerId, activeTool: imageActiveTool } = imageEditStore;
+  const eraserCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const isPaintingRef = useRef(false);
+  const lastPaintPosRef = useRef<{ x: number; y: number } | null>(null);
+  const [selectionCanvas, setSelectionCanvas] = useState<HTMLCanvasElement | null>(null);
+  const [eraserCursorPos, setEraserCursorPos] = useState<{ x: number; y: number } | null>(null);
+  const rectStartRef = useRef<{ x: number; y: number } | null>(null);
 
   // Live snap state — updated via RAF during drag to avoid render thrashing
   const pendingLinesRef = useRef<SnapLine[]>([]);
@@ -81,6 +110,13 @@ export function CanvasStage({
   const scale = baseScale * viewport.zoom;
   const stageWidth = Math.round(page.width * scale);
   const stageHeight = Math.round(page.height * scale);
+  // Extended Stage dimensions: OVERFLOW_PAD extra pixels on every side so the
+  // Transformer can render its handles outside the canvas boundary.
+  const extStageWidth = stageWidth + 2 * OVERFLOW_PAD;
+  const extStageHeight = stageHeight + 2 * OVERFLOW_PAD;
+  // Shift all Konva content by this offset (canvas units) so that canvas (0,0)
+  // maps to Stage pixel (OVERFLOW_PAD, OVERFLOW_PAD), not (0,0).
+  const layerOffset = OVERFLOW_PAD / scale;
   const gridLines = useMemo(() => buildGridLines(page, viewport.showGrid), [page, viewport.showGrid]);
   const editingLayer = useMemo(
     () => page.layers.find((layer): layer is TextLayer => layer.type === "text" && layer.id === editingLayerId) ?? null,
@@ -91,6 +127,13 @@ export function CanvasStage({
     const transformer = transformerRef.current;
     const stage = stageRef.current;
     if (transformer === null || stage === null) {
+      return;
+    }
+    // Hide transformer completely while in image-edit mode (crop handles take over)
+    if (imageEditMode) {
+      transformer.nodes([]);
+      transformer.getLayer()?.batchDraw();
+      setRotateHandlePos(null);
       return;
     }
     const nonTransformableIds = new Set(
@@ -104,7 +147,12 @@ export function CanvasStage({
       .filter((node): node is Konva.Node => node !== undefined);
     transformer.nodes(nodes);
     transformer.getLayer()?.batchDraw();
-  }, [selectedLayerIds, layoutEditMode, stageRef, page.layers]);
+    if (nodes.length > 0) {
+      setRotateHandlePos(calculateRotateHandlePosition(transformer, page.height));
+    } else {
+      setRotateHandlePos(null);
+    }
+  }, [selectedLayerIds, layoutEditMode, imageEditMode, stageRef, page.layers, page.height]);
 
   function getPointerPosition(): { x: number; y: number } | null {
     const stage = stageRef.current;
@@ -112,9 +160,11 @@ export function CanvasStage({
     if (stage === undefined || stage === null || pointer === undefined || pointer === null) {
       return null;
     }
+    // Subtract OVERFLOW_PAD before dividing by scale: Stage pixel (OVERFLOW_PAD, OVERFLOW_PAD)
+    // corresponds to canvas content origin (0, 0).
     return {
-      x: pointer.x / scale,
-      y: pointer.y / scale
+      x: (pointer.x - OVERFLOW_PAD) / scale,
+      y: (pointer.y - OVERFLOW_PAD) / scale
     };
   }
 
@@ -147,6 +197,42 @@ export function CanvasStage({
     }
     pendingLinesRef.current = [];
     setSmartLines([]);
+  }
+
+  function updateHandlePosition(): void {
+    const transformer = transformerRef.current;
+    if (transformer === null || transformer.nodes().length === 0) {
+      setRotateHandlePos(null);
+      return;
+    }
+    setRotateHandlePos(calculateRotateHandlePosition(transformer, page.height));
+  }
+
+  function handleRotateHandleMouseDown(e: Konva.KonvaEventObject<MouseEvent>): void {
+    e.cancelBubble = true;
+    const transformer = transformerRef.current;
+    if (transformer === null) return;
+    const nodes = transformer.nodes();
+    if (nodes.length === 0) return;
+    const pos = getPointerPosition();
+    if (pos === null) return;
+
+    // Recompute pivot (AABB center) fresh so it reflects any recent resize/drag
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const node of nodes) {
+      const bb = nodeAABBInCanvasUnits(node, scale);
+      minX = Math.min(minX, bb.minX);
+      minY = Math.min(minY, bb.minY);
+      maxX = Math.max(maxX, bb.maxX);
+      maxY = Math.max(maxY, bb.maxY);
+    }
+    const pivot = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+
+    rotatingRef.current = {
+      pivot,
+      startAngle: Math.atan2(pos.y - pivot.y, pos.x - pivot.x),
+      initialNodes: nodes.map(node => ({ node, x: node.x(), y: node.y(), rotation: node.rotation() })),
+    };
   }
 
   // Called by Stage onDragMove — applies magnetic snap imperatively then updates guides
@@ -255,6 +341,177 @@ export function CanvasStage({
     onLayerChange(layer);
   }
 
+  // ── Eraser brush painting ────────────────────────────────────────────────────
+  function getEditingImageLayer(): ImageLayer | null {
+    if (imageEditLayerId === null) return null;
+    const l = page.layers.find((layer) => layer.id === imageEditLayerId);
+    return l?.type === "image" ? l : null;
+  }
+
+  function paintEraserStroke(
+    x: number, y: number,
+    prevX: number | null, prevY: number | null
+  ): void {
+    const layer = getEditingImageLayer();
+    if (layer === null) return;
+    const cnv = eraserCanvasRef.current;
+    if (cnv === null) return;
+    const ctx = cnv.getContext("2d");
+    if (ctx === null) return;
+    const { eraserSize, eraserFeather, eraserStrength, eraserMode } = imageEditStore;
+
+    // Local coords relative to layer origin
+    const lx = x - layer.x;
+    const ly = y - layer.y;
+    const plx = prevX !== null ? prevX - layer.x : lx;
+    const ply = prevY !== null ? prevY - layer.y : ly;
+
+    const r = eraserSize / 2;
+    const gradient = ctx.createRadialGradient(lx, ly, r * (1 - eraserFeather), lx, ly, r);
+    const alpha = eraserStrength;
+
+    if (eraserMode === "erase") {
+      ctx.globalCompositeOperation = "destination-out";
+      gradient.addColorStop(0, `rgba(0,0,0,${alpha})`);
+      gradient.addColorStop(1, "rgba(0,0,0,0)");
+    } else {
+      ctx.globalCompositeOperation = "destination-over";
+      gradient.addColorStop(0, `rgba(255,255,255,${alpha})`);
+      gradient.addColorStop(1, "rgba(255,255,255,0)");
+    }
+
+    ctx.beginPath();
+    if (prevX !== null && prevY !== null) {
+      const steps = Math.ceil(Math.hypot(lx - plx, ly - ply) / (r * 0.3));
+      for (let i = 0; i <= steps; i++) {
+        const t = steps === 0 ? 0 : i / steps;
+        const cx = plx + (lx - plx) * t;
+        const cy = ply + (ly - ply) * t;
+        const g2 = ctx.createRadialGradient(cx, cy, r * (1 - eraserFeather), cx, cy, r);
+        if (eraserMode === "erase") {
+          g2.addColorStop(0, `rgba(0,0,0,${alpha})`);
+          g2.addColorStop(1, "rgba(0,0,0,0)");
+        } else {
+          g2.addColorStop(0, `rgba(255,255,255,${alpha})`);
+          g2.addColorStop(1, "rgba(255,255,255,0)");
+        }
+        ctx.globalCompositeOperation = eraserMode === "erase" ? "destination-out" : "destination-over";
+        ctx.fillStyle = g2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else {
+      ctx.fillStyle = gradient;
+      ctx.arc(lx, ly, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Force repaint
+  }
+
+  function commitEraserStroke(): void {
+    const layer = getEditingImageLayer();
+    const cnv = eraserCanvasRef.current;
+    if (layer === null || cnv === null || onMaskPainted === undefined) return;
+    const dataUrl = cnv.toDataURL("image/png");
+    onMaskPainted(layer.id, dataUrl, cnv.width, cnv.height);
+  }
+
+  // Initialize eraser canvas when entering eraser mode
+  useEffect(() => {
+    if (!imageEditMode || imageActiveTool !== "eraser") return;
+    const layer = getEditingImageLayer();
+    if (layer === null) return;
+
+    const cnv = window.document.createElement("canvas");
+    cnv.width = layer.width;
+    cnv.height = layer.height;
+    const ctx = cnv.getContext("2d");
+    if (ctx === null) return;
+
+    // Load existing mask into canvas if available
+    const maskAsset = layer.pixelMask !== undefined
+      ? assets.find((a) => a.id === layer.pixelMask!.assetId)
+      : undefined;
+
+    if (maskAsset?.previewPath !== undefined) {
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, layer.width, layer.height);
+        eraserCanvasRef.current = cnv;
+      };
+      img.src = maskAsset.previewPath;
+    } else {
+      ctx.fillStyle = "white";
+      ctx.fillRect(0, 0, layer.width, layer.height);
+      eraserCanvasRef.current = cnv;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageEditMode, imageActiveTool, imageEditLayerId]);
+
+  // ── Magic Wand click handler ─────────────────────────────────────────────────
+  const handleWandClick = useCallback((stageX: number, stageY: number) => {
+    const layer = getEditingImageLayer();
+    if (layer === null) return;
+
+    // Get the Konva node for this layer to extract pixel data
+    const stage = stageRef.current;
+    if (stage === null) return;
+
+    // Get the canvas data from the stage at the layer's bounding box
+    const lx = Math.round(layer.x * scale);
+    const ly = Math.round(layer.y * scale);
+    const lw = Math.round(layer.width * scale);
+    const lh = Math.round(layer.height * scale);
+
+    // Clamp to stage bounds
+    const sx = Math.max(0, lx);
+    const sy = Math.max(0, ly);
+    const sw = Math.min(lw, stageWidth - sx);
+    const sh = Math.min(lh, stageHeight - sy);
+    if (sw <= 0 || sh <= 0) return;
+
+    // Content starts at Stage pixel (OVERFLOW_PAD, OVERFLOW_PAD), so add the offset.
+    const stageCanvas = stage.toCanvas({ x: sx + OVERFLOW_PAD, y: sy + OVERFLOW_PAD, width: sw, height: sh });
+    const ctx = stageCanvas.getContext("2d");
+    if (ctx === null) return;
+    const imageData = ctx.getImageData(0, 0, sw, sh);
+
+    // Click coords relative to the cropped region
+    const clickX = stageX * scale - lx;
+    const clickY = stageY * scale - ly;
+
+    const { mask, width, height } = runMagicWand({
+      imageData,
+      clickX,
+      clickY,
+      tolerance: imageEditStore.wandTolerance,
+      contiguous: imageEditStore.wandContiguous
+    });
+
+    imageEditStore.setSelectionMask({ data: mask, width, height });
+
+    // Build a selection overlay canvas for rendering
+    const overlayCanvas = window.document.createElement("canvas");
+    overlayCanvas.width = width;
+    overlayCanvas.height = height;
+    const octx = overlayCanvas.getContext("2d");
+    if (octx !== null) {
+      const id = octx.createImageData(width, height);
+      for (let i = 0; i < mask.length; i++) {
+        if (mask[i] > 128) {
+          id.data[i * 4] = 80;
+          id.data[i * 4 + 1] = 130;
+          id.data[i * 4 + 2] = 220;
+          id.data[i * 4 + 3] = 100;
+        }
+      }
+      octx.putImageData(id, 0, 0);
+    }
+    setSelectionCanvas(overlayCanvas);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageEditLayerId, imageEditStore.wandTolerance, imageEditStore.wandContiguous, scale, stageWidth, stageHeight]);
+
   return (
     <div
       className="canvas-frame"
@@ -267,10 +524,15 @@ export function CanvasStage({
       }}
     >
       {viewport.showRulers ? <RulerOverlay page={page} scale={scale} /> : null}
+      {/* Wrapper: keeps canvas-frame sized at the true canvas dimensions while
+          the Stage canvas extends OVERFLOW_PAD px on every side so the
+          Transformer handles can render outside the canvas boundary. */}
+      <div style={{ position: 'relative', width: stageWidth, height: stageHeight }}>
+        <div style={{ position: 'absolute', left: -OVERFLOW_PAD, top: -OVERFLOW_PAD }}>
       <Stage
         ref={stageRef}
-        width={stageWidth}
-        height={stageHeight}
+        width={extStageWidth}
+        height={extStageHeight}
         scaleX={scale}
         scaleY={scale}
         onDragMove={handleStageDragMove}
@@ -280,6 +542,24 @@ export function CanvasStage({
             event.evt.preventDefault();
             panStartRef.current = { x: event.evt.clientX, y: event.evt.clientY };
             inputStateRef.current = beginPointer(inputStateRef.current, panStartRef.current, event.evt.button);
+            return;
+          }
+          // Eraser mode: start painting stroke
+          if (imageEditMode && imageActiveTool === "eraser") {
+            isPaintingRef.current = true;
+            const pointer = getPointerPosition();
+            if (pointer !== null) {
+              paintEraserStroke(pointer.x, pointer.y, null, null);
+              lastPaintPosRef.current = pointer;
+            }
+            return;
+          }
+          // Wand/rect-select: handled on mouse up
+          if (imageEditMode && imageActiveTool === "wand") return;
+          // Rect-select: start drag
+          if (imageEditMode && imageActiveTool === "rect-select") {
+            const pointer = getPointerPosition();
+            if (pointer !== null) rectStartRef.current = pointer;
             return;
           }
           if (event.target === event.target.getStage()) {
@@ -297,6 +577,33 @@ export function CanvasStage({
             panStartRef.current = { x: event.evt.clientX, y: event.evt.clientY };
             return;
           }
+          // Update eraser cursor position
+          if (imageEditMode && imageActiveTool === "eraser") {
+            const pointer = getPointerPosition();
+            if (pointer !== null) setEraserCursorPos(pointer);
+            if (isPaintingRef.current && pointer !== null) {
+              const prev = lastPaintPosRef.current;
+              paintEraserStroke(pointer.x, pointer.y, prev?.x ?? null, prev?.y ?? null);
+              lastPaintPosRef.current = pointer;
+            }
+            return;
+          }
+          // Rect-select: update preview
+          if (imageEditMode && imageActiveTool === "rect-select" && rectStartRef.current !== null) {
+            const pointer = getPointerPosition();
+            if (pointer !== null) {
+              const editLayer = getEditingImageLayer();
+              if (editLayer !== null) {
+                const lx = editLayer.x, ly = editLayer.y, lw = editLayer.width, lh = editLayer.height;
+                const rx = Math.max(lx, Math.min(rectStartRef.current.x, pointer.x));
+                const ry = Math.max(ly, Math.min(rectStartRef.current.y, pointer.y));
+                const rw = Math.min(lx + lw, Math.max(rectStartRef.current.x, pointer.x)) - rx;
+                const rh = Math.min(ly + lh, Math.max(rectStartRef.current.y, pointer.y)) - ry;
+                imageEditStore.setRectSelectPreview({ x: rx, y: ry, width: rw, height: rh });
+              }
+            }
+            return;
+          }
           const start = marqueeStartRef.current;
           const pointer = getPointerPosition();
           if (start !== null && pointer !== null) {
@@ -305,6 +612,63 @@ export function CanvasStage({
           }
         }}
         onMouseUp={() => {
+          // Eraser mode: commit stroke
+          if (imageEditMode && imageActiveTool === "eraser") {
+            if (isPaintingRef.current) {
+              isPaintingRef.current = false;
+              lastPaintPosRef.current = null;
+              commitEraserStroke();
+            }
+            return;
+          }
+          // Wand mode: run flood fill on click
+          if (imageEditMode && imageActiveTool === "wand") {
+            const pointer = getPointerPosition();
+            if (pointer !== null) {
+              void handleWandClick(pointer.x, pointer.y);
+            }
+            return;
+          }
+          // Rect-select: finalize selection
+          if (imageEditMode && imageActiveTool === "rect-select") {
+            const preview = imageEditStore.rectSelectPreview;
+            const editLayer = getEditingImageLayer();
+            if (preview !== null && editLayer !== null && preview.width > 2 && preview.height > 2) {
+              const lx = editLayer.x, ly = editLayer.y, lw = editLayer.width, lh = editLayer.height;
+              const w = lw, h = lh;
+              const mask = new Uint8Array(w * h);
+              // pixels inside the rect → selected
+              const rx0 = Math.round((preview.x - lx) / lw * w);
+              const ry0 = Math.round((preview.y - ly) / lh * h);
+              const rx1 = Math.round((preview.x + preview.width - lx) / lw * w);
+              const ry1 = Math.round((preview.y + preview.height - ly) / lh * h);
+              for (let py = 0; py < h; py++) {
+                for (let px = 0; px < w; px++) {
+                  if (px >= rx0 && px < rx1 && py >= ry0 && py < ry1) {
+                    mask[py * w + px] = 255;
+                  }
+                }
+              }
+              imageEditStore.setSelectionMask({ data: mask, width: w, height: h });
+              // Build overlay canvas
+              const overlayCanvas = window.document.createElement("canvas");
+              overlayCanvas.width = w; overlayCanvas.height = h;
+              const octx = overlayCanvas.getContext("2d");
+              if (octx !== null) {
+                const id = octx.createImageData(w, h);
+                for (let i = 0; i < mask.length; i++) {
+                  if (mask[i] > 0) {
+                    id.data[i * 4] = 80; id.data[i * 4 + 1] = 130; id.data[i * 4 + 2] = 220; id.data[i * 4 + 3] = 100;
+                  }
+                }
+                octx.putImageData(id, 0, 0);
+              }
+              setSelectionCanvas(overlayCanvas);
+            }
+            rectStartRef.current = null;
+            imageEditStore.setRectSelectPreview(null);
+            return;
+          }
           if (panStartRef.current !== null) {
             panStartRef.current = null;
             inputStateRef.current = endPointer(inputStateRef.current);
@@ -329,10 +693,22 @@ export function CanvasStage({
           }
         }}
       >
-        <Layer>
-          {page.background.type === "transparent" ? null : (
+        <Layer x={layerOffset} y={layerOffset}>
+          {/* All canvas content is clipped to the canvas boundary.
+              The Transformer lives outside this Group so its anchors render
+              and respond to events even when an object overflows the canvas. */}
+          <Group clipFunc={(ctx: any) => { ctx.rect(0, 0, page.width, page.height); }}>
+          {page.background.type !== "transparent" && page.background.type !== "asset" ? (
             <Rect x={0} y={0} width={page.width} height={page.height} fill={page.background.color ?? "#fbfafa"} listening={false} />
-          )}
+          ) : null}
+          {page.background.type === "asset" ? (
+            <BackgroundImageNode
+              assetId={page.background.assetId}
+              assets={assets}
+              width={page.width}
+              height={page.height}
+            />
+          ) : null}
           {gridLines.map((line) => (
             <Line
               key={line.key}
@@ -419,6 +795,7 @@ export function CanvasStage({
               listening={false}
             />
           ) : null}
+          </Group>
           {smartLines.map((line) => {
             const color = GUIDE_COLORS[line.kind] ?? "#F7C948";
             const sw = 1.5 / scale;
@@ -490,7 +867,159 @@ export function CanvasStage({
             onTransformEnd={clearGuides}
           />
         </Layer>
+        {/* ── Image edit overlay layer (crop handles, selection) ── */}
+        {imageEditMode && imageEditLayerId !== null && (() => {
+          const editLayer = page.layers.find((l) => l.id === imageEditLayerId);
+          if (editLayer === undefined || editLayer.type !== "image") return null;
+          const lx = editLayer.x;
+          const ly = editLayer.y;
+          const lw = editLayer.width;
+          const lh = editLayer.height;
+          const rot = editLayer.rotation ?? 0;
+          const crop = imageEditStore.cropPreview ?? editLayer.crop;
+          const cropX = crop.x * lw;
+          const cropY = crop.y * lh;
+          const cropW = crop.width * lw;
+          const cropH = crop.height * lh;
+          const hw = 8 / scale;
+          const handles = [
+            { id: "tl", cx: cropX,           cy: cropY,            dx: -1, dy: -1 },
+            { id: "tc", cx: cropX + cropW/2,  cy: cropY,            dx:  0, dy: -1 },
+            { id: "tr", cx: cropX + cropW,    cy: cropY,            dx:  1, dy: -1 },
+            { id: "ml", cx: cropX,            cy: cropY + cropH/2,  dx: -1, dy:  0 },
+            { id: "mr", cx: cropX + cropW,    cy: cropY + cropH/2,  dx:  1, dy:  0 },
+            { id: "bl", cx: cropX,            cy: cropY + cropH,    dx: -1, dy:  1 },
+            { id: "bc", cx: cropX + cropW/2,  cy: cropY + cropH,    dx:  0, dy:  1 },
+            { id: "br", cx: cropX + cropW,    cy: cropY + cropH,    dx:  1, dy:  1 },
+          ];
+          return (
+            <Layer x={layerOffset} y={layerOffset} listening={imageActiveTool === "crop"}>
+              <Group x={lx} y={ly} rotation={rot}>
+                {/* Dark overlay outside crop area */}
+                {imageActiveTool === "crop" && (
+                  <>
+                    <Rect x={0} y={0} width={lw} height={cropY} fill="rgba(0,0,0,0.45)" listening={false} />
+                    <Rect x={0} y={cropY + cropH} width={lw} height={lh - cropY - cropH} fill="rgba(0,0,0,0.45)" listening={false} />
+                    <Rect x={0} y={cropY} width={cropX} height={cropH} fill="rgba(0,0,0,0.45)" listening={false} />
+                    <Rect x={cropX + cropW} y={cropY} width={lw - cropX - cropW} height={cropH} fill="rgba(0,0,0,0.45)" listening={false} />
+                    {/* Crop border */}
+                    <Rect x={cropX} y={cropY} width={cropW} height={cropH} stroke="#fff" strokeWidth={1.5 / scale} fill="transparent" listening={false} />
+                    {/* Rule-of-thirds lines */}
+                    <Line points={[cropX + cropW/3, cropY, cropX + cropW/3, cropY + cropH]} stroke="rgba(255,255,255,0.35)" strokeWidth={0.8/scale} listening={false} />
+                    <Line points={[cropX + 2*cropW/3, cropY, cropX + 2*cropW/3, cropY + cropH]} stroke="rgba(255,255,255,0.35)" strokeWidth={0.8/scale} listening={false} />
+                    <Line points={[cropX, cropY + cropH/3, cropX + cropW, cropY + cropH/3]} stroke="rgba(255,255,255,0.35)" strokeWidth={0.8/scale} listening={false} />
+                    <Line points={[cropX, cropY + 2*cropH/3, cropX + cropW, cropY + 2*cropH/3]} stroke="rgba(255,255,255,0.35)" strokeWidth={0.8/scale} listening={false} />
+                    {/* Handles */}
+                    {handles.map((h) => (
+                      <Rect
+                        key={h.id}
+                        x={h.cx - hw / 2}
+                        y={h.cy - hw / 2}
+                        width={hw}
+                        height={hw}
+                        fill="#fff"
+                        stroke="#7C6FE0"
+                        strokeWidth={1 / scale}
+                        draggable
+                        onDragMove={(e) => {
+                          const nx = e.target.x() + hw / 2;
+                          const ny = e.target.y() + hw / 2;
+                          let newX = crop.x;
+                          let newY = crop.y;
+                          let newW = crop.width;
+                          let newH = crop.height;
+                          if (h.dx < 0) { newX = Math.min(nx / lw, crop.x + crop.width - 0.02); newW = crop.x + crop.width - newX; }
+                          if (h.dx > 0) { newW = Math.max(0.02, nx / lw - crop.x); }
+                          if (h.dy < 0) { newY = Math.min(ny / lh, crop.y + crop.height - 0.02); newH = crop.y + crop.height - newY; }
+                          if (h.dy > 0) { newH = Math.max(0.02, ny / lh - crop.y); }
+                          imageEditStore.setCropPreview({
+                            x: Math.max(0, Math.min(newX, 1 - newW)),
+                            y: Math.max(0, Math.min(newY, 1 - newH)),
+                            width: Math.min(newW, 1),
+                            height: Math.min(newH, 1)
+                          });
+                        }}
+                      />
+                    ))}
+                  </>
+                )}
+                {/* Selection overlay (wand / rect-select) */}
+                {(imageActiveTool === "wand" || imageActiveTool === "rect-select") && selectionCanvas !== null && (
+                  <KonvaImage
+                    x={0} y={0}
+                    width={lw}
+                    height={lh}
+                    image={selectionCanvas}
+                    listening={false}
+                  />
+                )}
+                {/* Rect-select drag preview */}
+                {imageActiveTool === "rect-select" && imageEditStore.rectSelectPreview !== null && (() => {
+                  const rp = imageEditStore.rectSelectPreview;
+                  return (
+                    <Rect
+                      x={rp.x - lx} y={rp.y - ly}
+                      width={rp.width} height={rp.height}
+                      fill="rgba(80,130,220,0.18)"
+                      stroke="#5082DC"
+                      strokeWidth={1.5 / scale}
+                      dash={[6 / scale, 4 / scale]}
+                      listening={false}
+                    />
+                  );
+                })()}
+              </Group>
+            </Layer>
+          );
+        })()}
       </Stage>
+        </div>
+      </div>
+      {/* Eraser brush cursor canvas overlay */}
+      {imageEditMode && imageActiveTool === "eraser" && imageEditLayerId !== null && (() => {
+        const editLayer = page.layers.find((l) => l.id === imageEditLayerId);
+        if (editLayer === undefined || editLayer.type !== "image") return null;
+        return (
+          <canvas
+            className="eraser-preview-canvas"
+            style={{
+              position: "absolute",
+              left: editLayer.x * scale,
+              top: editLayer.y * scale,
+              width: editLayer.width * scale,
+              height: editLayer.height * scale,
+              pointerEvents: "none",
+              opacity: 0.6,
+              mixBlendMode: "multiply"
+            }}
+            width={editLayer.width}
+            height={editLayer.height}
+          />
+        );
+      })()}
+      {/* Eraser brush cursor ring */}
+      {imageEditMode && imageActiveTool === "eraser" && eraserCursorPos !== null && (() => {
+        const r = imageEditStore.eraserSize / 2 * scale;
+        const cx = eraserCursorPos.x * scale;
+        const cy = eraserCursorPos.y * scale;
+        return (
+          <div
+            style={{
+              position: "absolute",
+              left: cx - r,
+              top: cy - r,
+              width: r * 2,
+              height: r * 2,
+              borderRadius: "50%",
+              border: "2px solid rgba(255,255,255,0.9)",
+              outline: "1px solid rgba(0,0,0,0.5)",
+              pointerEvents: "none",
+              boxSizing: "border-box",
+              zIndex: 400
+            }}
+          />
+        );
+      })()}
       {editingLayer !== null ? (
         <InlineTextEditor layer={editingLayer} scale={scale} onChange={handleLayerChange} onClose={onEndTextEdit} />
       ) : null}
@@ -672,5 +1201,34 @@ function RulerOverlay({ page, scale }: { page: Page; scale: number }): React.Rea
         ))}
       </div>
     </>
+  );
+}
+
+// ─── Background image node ────────────────────────────────────────────────────
+
+function BackgroundImageNode({
+  assetId,
+  assets,
+  width,
+  height
+}: {
+  assetId: string | undefined;
+  assets: Asset[];
+  width: number;
+  height: number;
+}): React.ReactElement | null {
+  const asset = assets.find((a) => a.id === assetId);
+  const imageSrc = resolveCanvasAssetPath(asset);
+  const image = useKonvaImage(imageSrc);
+  if (!image) return null;
+  return (
+    <KonvaImage
+      x={0}
+      y={0}
+      width={width}
+      height={height}
+      image={image}
+      listening={false}
+    />
   );
 }
