@@ -57,7 +57,12 @@ export function HomeScreen({ onOpenMode, onOpenProjectFile, onOpenSettings }: Ho
               <Clock size={14} />
               פרויקטים אחרונים
             </button>
-            <button className="nav-link" type="button">
+            <button
+              className="nav-link"
+              type="button"
+              onClick={onOpenSettings}
+              title="הגדרות (Ctrl+,)"
+            >
               <Settings size={14} />
               הגדרות
             </button>

@@ -5,6 +5,8 @@ import { useUtilitiesSettings } from "@/utilities/settingsStore";
 import type { ExternalAppKey } from "@/utilities/settingsStore";
 import { SettingsRow, SettingsSection, SettingsToggle } from "../components";
 
+const SOON = <span className="settings-coming-soon">בקרוב</span>;
+
 const PATH_LABELS: Record<ExternalAppKey, string> = {
   photoshopPath: "Photoshop",
   colorLabPath: "ColorLab",
@@ -53,10 +55,9 @@ export function FilesPanel(): ReactElement {
             value={files.autosaveEnabled}
             onChange={(v) => update({ autosaveEnabled: v })}
           />
-          {/* TODO: wire to AutosaveManager in EditorScreen */}
         </SettingsRow>
 
-        <SettingsRow label="שמור כל X דקות">
+        <SettingsRow label={<>שמור כל X דקות {SOON}</>} description="יחובר למנגנון השמירה האוטומטית.">
           <input
             type="number"
             className="settings-number-input"
@@ -65,10 +66,9 @@ export function FilesPanel(): ReactElement {
             disabled={!files.autosaveEnabled}
             onChange={(e) => update({ autosaveIntervalMinutes: parseInt(e.target.value) || 3 })}
           />
-          {/* TODO: wire to AutosaveManager.intervalMs */}
         </SettingsRow>
 
-        <SettingsRow label="שמור אחרי X פעולות">
+        <SettingsRow label={<>שמור אחרי X פעולות {SOON}</>} description="יחובר למנגנון השמירה האוטומטית.">
           <input
             type="number"
             className="settings-number-input"
@@ -77,16 +77,12 @@ export function FilesPanel(): ReactElement {
             disabled={!files.autosaveEnabled}
             onChange={(e) => update({ autosaveAfterActions: parseInt(e.target.value) || 20 })}
           />
-          {/* TODO: wire to AutosaveManager.actionThreshold */}
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title="גיבויים" description="שמירת גרסאות גיבוי אוטומטיות.">
+      <SettingsSection title="גיבויים">
         <SettingsRow label="שמור גרסאות גיבוי">
-          <SettingsToggle
-            value={files.keepBackupVersions}
-            onChange={(v) => update({ keepBackupVersions: v })}
-          />
+          <SettingsToggle value={files.keepBackupVersions} onChange={(v) => update({ keepBackupVersions: v })} />
         </SettingsRow>
 
         <SettingsRow label="מספר גרסאות לשמירה">
@@ -111,11 +107,8 @@ export function FilesPanel(): ReactElement {
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title="אחסון קבצים" description="הגדרות אחסון קישורים ותמונות.">
-        <SettingsRow
-          label="מצב אחסון פרויקט ברירת מחדל"
-          description="כיצד לשמור תמונות בפרויקטים חדשים."
-        >
+      <SettingsSection title="אחסון קבצים">
+        <SettingsRow label="מצב אחסון פרויקט ברירת מחדל" description="כיצד לשמור תמונות בפרויקטים חדשים.">
           <select
             className="settings-select"
             value={files.projectStorageMode}
@@ -127,36 +120,16 @@ export function FilesPanel(): ReactElement {
           </select>
         </SettingsRow>
 
-        <SettingsRow
-          label="אזהרה על תמונה מקושרת חסרה"
-          description="הצג אזהרה כאשר תמונה מקושרת לא נמצאת."
-        >
-          <SettingsToggle
-            value={files.warnMissingLinkedImage}
-            onChange={(v) => update({ warnMissingLinkedImage: v })}
-          />
+        <SettingsRow label="אזהרה על תמונה מקושרת חסרה">
+          <SettingsToggle value={files.warnMissingLinkedImage} onChange={(v) => update({ warnMissingLinkedImage: v })} />
         </SettingsRow>
 
-        <SettingsRow
-          label="שמור תמונת מיניאטורה עם הפרויקט"
-          description="יוצר תצוגה מקדימה קטנה לצד קובץ הפרויקט."
-        >
-          <SettingsToggle
-            value={files.saveProjectThumbnail}
-            onChange={(v) => update({ saveProjectThumbnail: v })}
-          />
+        <SettingsRow label="שמור תמונת מיניאטורה עם הפרויקט">
+          <SettingsToggle value={files.saveProjectThumbnail} onChange={(v) => update({ saveProjectThumbnail: v })} />
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title="מטמון (Cache)" description="ניהול קבצי מטמון ותמונות תצוגה מקדימה.">
-        <div className="settings-cache-stats">
-          <div className="settings-cache-stat">
-            <span className="settings-cache-stat-label">גודל מטמון</span>
-            <span className="settings-cache-stat-value">— MB</span>
-            {/* TODO: read actual cache size from IPC */}
-          </div>
-        </div>
-
+      <SettingsSection title={<>מטמון (Cache) {SOON}</>} description="ניהול קבצי מטמון. כלי המטמון יהיו זמינים בגרסה עתידית.">
         <SettingsRow label="נקה מטמון אוטומטית כל X ימים">
           <input
             type="number"
@@ -169,21 +142,13 @@ export function FilesPanel(): ReactElement {
 
         <div className="settings-row">
           <div className="settings-row-label">
-            <span className="settings-row-name">פעולות מטמון</span>
+            <span className="settings-row-name">פעולות מטמון <span className="settings-coming-soon">בקרוב</span></span>
           </div>
           <div className="settings-row-control" style={{ gap: 8 }}>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => { /* TODO: window.spp?.clearCache?.() */ }}
-            >
+            <button type="button" className="btn btn-ghost" disabled title="בקרוב">
               נקה מטמון
             </button>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => { /* TODO: window.spp?.openCacheFolder?.() */ }}
-            >
+            <button type="button" className="btn btn-ghost" disabled title="בקרוב">
               <FolderOpen size={13} />
               פתח תיקייה
             </button>
@@ -191,7 +156,7 @@ export function FilesPanel(): ReactElement {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="נתיבי תוכנות חיצוניות" description="נתיבי הפעלה לתוכנות חיצוניות ותיקיות עבודה.">
+      <SettingsSection title="נתיבי תוכנות חיצוניות" description="נתיבי הפעלה לתוכנות חיצוניות ותיקיות עבודה. שינויים חלים מיד.">
         {ALL_PATH_KEYS.map((key) => {
           const value = (files[key] as string) || "";
           const isFolder = PATH_IS_FOLDER[key];
@@ -201,7 +166,7 @@ export function FilesPanel(): ReactElement {
                 <span className="settings-row-name">{PATH_LABELS[key]}</span>
                 <div className="settings-row-desc">{isFolder ? "תיקייה" : "קובץ הרצה (.exe)"}</div>
               </div>
-              <div className="settings-row-control" style={{ gap: 6, flex: "0 0 auto" }}>
+              <div className="settings-row-control" style={{ gap: 6 }}>
                 <input
                   type="text"
                   className="settings-text-input"
@@ -211,12 +176,7 @@ export function FilesPanel(): ReactElement {
                   style={{ direction: "ltr", textAlign: "right", minWidth: 200 }}
                 />
                 {value && isFolder && (
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    title="פתח תיקייה"
-                    onClick={() => openFolder(value)}
-                  >
+                  <button type="button" className="icon-btn" title="פתח תיקייה" onClick={() => openFolder(value)}>
                     <ExternalLink size={13} />
                   </button>
                 )}

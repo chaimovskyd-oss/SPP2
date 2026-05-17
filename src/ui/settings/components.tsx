@@ -3,8 +3,8 @@ import type { ReactElement, ReactNode } from "react";
 // ─── Shared building blocks used by all settings panels ───────────────────────
 
 interface SettingsRowProps {
-  label: string;
-  description?: string;
+  label: ReactNode;
+  description?: ReactNode;
   note?: string;
   children: ReactNode;
 }
@@ -47,8 +47,8 @@ export function SettingsToggle({ value, onChange, disabled }: SettingsToggleProp
 }
 
 interface SettingsSectionProps {
-  title: string;
-  description?: string;
+  title: ReactNode;
+  description?: ReactNode;
   children: ReactNode;
   danger?: boolean;
   sub?: boolean;

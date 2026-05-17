@@ -105,6 +105,7 @@ import { importImageAsset, createMaskAsset } from "@/core/assets/assetManager";
 import { measureTextLayerSize } from "@/core/text/measurement";
 import { BUILTIN_TEXT_PRESETS } from "@/core/text/presets";
 import { useDocumentStore } from "@/state/documentStore";
+import { useMaskLibraryStore } from "@/state/maskLibraryStore";
 import { useSelectionStore } from "@/state/selectionStore";
 import { useImageEditStore } from "@/state/imageEditStore";
 import { ImageEditToolbar } from "./ImageEditToolbar";
@@ -135,7 +136,6 @@ import {
   exportStagePdf,
   exportStagePng,
   exportStagePrintImage,
-  buildMultiPagePdf,
   loadProject,
   savePortableProject,
   saveProject
@@ -146,7 +146,7 @@ import { CanvasErrorBoundary } from "./CanvasErrorBoundary";
 import { CollageGridOverlay } from "./CollageGridOverlay";
 import type { CanvasContextMenuTarget } from "./KonvaLayerNode";
 import { isImageEditorAvailable, openImageEditorForAsset } from "@/services/imageEditorService";
-import { isPrintPreviewAvailable, openPrintPreviewForRenderedPage } from "@/services/printPreviewService";
+import { isPrintPreviewAvailable, openPrintPreviewForRenderedPage, openPrintPreviewForPages } from "@/services/printPreviewService";
 import { PrintRangeDialog } from "@/ui/print/PrintRangeDialog";
 import type { PrintRangeMode } from "@/ui/print/printRangeUtils";
 import { getPagesForPrint } from "@/ui/print/printRangeUtils";
@@ -178,6 +178,7 @@ type ToolId = "move" | "text" | "image" | "layers";
 interface EditorScreenProps {
   onBackHome: () => void;
   onOpenClassPhotoWizard?: () => void;
+  onOpenSettings?: () => void;
 }
 
 async function runInitialSmartCrop(
@@ -199,7 +200,7 @@ async function runInitialSmartCrop(
   }
 }
 
-export function EditorScreen({ onBackHome, onOpenClassPhotoWizard }: EditorScreenProps): ReactElement {
+export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSettings }: EditorScreenProps): ReactElement {
   const stageRef = useRef<Konva.Stage | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const replaceImageInputRef = useRef<HTMLInputElement>(null);
@@ -1044,9 +1045,10 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard }: EditorScree
         setStatus("חלון הדפסה נפתח");
 
       } else {
-        // Multi-page → render all pages sequentially → PDF → open with OS viewer
+        // Multi-page → render all pages sequentially → Python print preview (multi-page mode)
         const originalPageId = currentPage.id;
         const renderedPages: PrintableStageImage[] = [];
+        const renderedPageNames: string[] = [];
 
         for (const idx of pageIndices) {
           const page = allPages[idx];
@@ -1054,6 +1056,8 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard }: EditorScree
           setActivePage(page.id);
           await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
           renderedPages.push(exportStagePrintImage(stage, page, "image/png"));
+          const name = typeof page.metadata["name"] === "string" ? page.metadata["name"] : `עמוד ${idx + 1}`;
+          renderedPageNames.push(name);
         }
 
         setActivePage(originalPageId);
@@ -1063,30 +1067,26 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard }: EditorScree
           return;
         }
 
-        const pdfBytes = await buildMultiPagePdf(renderedPages);
-
-        // Convert Uint8Array → base64 data URL in safe chunks
-        let binary = "";
-        const chunkSize = 8192;
-        for (let i = 0; i < pdfBytes.length; i += chunkSize) {
-          binary += String.fromCharCode(...pdfBytes.subarray(i, i + chunkSize));
-        }
-        const pdfDataUrl = `data:application/pdf;base64,${btoa(binary)}`;
-
-        const sppApi = (window as Window & { spp?: { writeTempImage?: (d: string, e: string) => Promise<string>; openPath?: (p: string) => Promise<{ error?: string }> } }).spp;
-        if (!sppApi?.writeTempImage || !sppApi?.openPath) {
-          setStatus("שגיאה: IPC לפתיחת PDF אינו זמין");
-          return;
-        }
-
-        const pdfPath = await sppApi.writeTempImage(pdfDataUrl, "pdf");
         setShowPrintDialog(false);
-        const openResult = await sppApi.openPath(pdfPath);
-        if (openResult?.error) {
-          setStatus(`שגיאה בפתיחת PDF: ${openResult.error}`);
+        const result = await openPrintPreviewForPages(renderedPages, currentDocument.name, renderedPageNames);
+
+        if (!result.success) {
+          // Fallback: open the first page image with the OS default app (Windows print tool)
+          setStatus(`שגיאה במודול ההדפסה — פותח בכלי Windows: ${result.error ?? ""}`);
+          const sppFallback = (window as unknown as { spp?: { openPath?: (p: string) => Promise<{ error?: string }> } }).spp;
+          if (sppFallback?.openPath) {
+            // open first temp image so user can print from OS viewer
+            const sppWrite = (window as unknown as { spp?: { writeTempImage?: (d: string, e: string) => Promise<string> } }).spp;
+            if (sppWrite?.writeTempImage) {
+              const p = renderedPages[0];
+              const fp = await sppWrite.writeTempImage(p.dataUrl, p.mimeType === "image/jpeg" ? "jpg" : "png");
+              await sppFallback.openPath(fp);
+            }
+          }
           return;
         }
-        setStatus(`נפתח PDF להדפסה — ${renderedPages.length} עמודים`);
+
+        setStatus(`נשלחו ${renderedPages.length} עמודים לתצוגת ההדפסה`);
       }
     } catch (err) {
       setStatus(`שגיאה בהדפסה: ${err instanceof Error ? err.message : "לא ידוע"}`);
@@ -1357,6 +1357,53 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard }: EditorScree
     setStatus("Selected text applied to all masks");
   }
 
+  async function handleChangeMaskPreset(rule: MaskLayoutRule, entry: import("@/state/maskLibraryStore").MaskLibraryEntry): Promise<void> {
+    const now = new Date().toISOString();
+    const newPresetId = crypto.randomUUID();
+    let importedAsset: import("@/types/document").Asset | undefined;
+
+    if (entry.fileDataUrl) {
+      try {
+        const blob = await (await fetch(entry.fileDataUrl)).blob();
+        const file = new File([blob], `${entry.name}.${entry.type}`, {
+          type: entry.type === "svg" ? "image/svg+xml" : "image/png"
+        });
+        const { asset } = await importImageAsset(file, currentDocument.assets, { createPreview: false });
+        importedAsset = asset;
+      } catch {
+        // continue without asset
+      }
+    }
+
+    applyDocumentChange("ChangeMaskPresetCommand", (doc) => {
+      const docWithAsset = importedAsset !== undefined && !doc.assets.some((a) => a.id === importedAsset!.id)
+        ? { ...doc, assets: [...doc.assets, importedAsset!] }
+        : doc;
+      const newPreset: import("@/types/mask").MaskPreset = {
+        version: 1,
+        id: newPresetId,
+        name: entry.name,
+        type: entry.type === "svg" ? "svg" : entry.thresholdEnabled ? "pngThreshold" : "png",
+        assetId: importedAsset?.id,
+        thumbnailAssetId: undefined,
+        thresholdSettings: entry.thresholdEnabled
+          ? { version: 1, enabled: true, color: entry.thresholdColor, tolerance: entry.thresholdTolerance, feather: entry.thresholdFeather }
+          : undefined,
+        defaultSize: { width: entry.defaultWidth, height: entry.defaultHeight },
+        keepProportionsDefault: true,
+        createdAt: now,
+        updatedAt: now,
+        metadata: { libraryEntryId: entry.id }
+      };
+      return regenerateMaskLayout(
+        { ...docWithAsset, maskPresets: [...docWithAsset.maskPresets, newPreset] },
+        rule.id,
+        { maskShape: "custom", maskPresetId: newPresetId }
+      );
+    }, currentPage.id);
+    setStatus("מסיכה הוחלפה");
+  }
+
   function handleDeleteMaskImage(rule: MaskLayoutRule): void {
     if (selectedLayer?.type !== "frame") return;
     const frame = selectedLayer.metadata["maskFrame"];
@@ -1479,6 +1526,15 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard }: EditorScree
         </div>
 
         <div className="topbar-side topbar-actions">
+          <button
+            type="button"
+            className="icon-btn"
+            title="הגדרות (Ctrl+,)"
+            onClick={onOpenSettings}
+          >
+            <Settings size={15} />
+          </button>
+          <span className="topbar-divider" />
           <UtilitiesMenu
             customerName={currentDocument.metadata.customerName as string | undefined}
             customerPhone={(currentDocument.metadata.customerPhone ?? currentDocument.metadata.phoneNumber) as string | undefined}
@@ -1945,6 +2001,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard }: EditorScree
                 onDeleteSelectedImage={() => handleDeleteMaskImage(activeMaskRule)}
                 onRegenerate={handleRegenerateMask}
                 onResetCrops={() => handleResetMaskCrops(activeMaskRule)}
+                onChangePreset={(entry) => void handleChangeMaskPreset(activeMaskRule, entry)}
               />
             </div>
           ) : null}
@@ -3862,6 +3919,20 @@ function GridModePanel({
   );
 }
 
+function MaskShapeIcon({ shape, size = 28 }: { shape: string; size?: number }): ReactElement {
+  const s = size;
+  if (shape === "circle") {
+    return <svg width={s} height={s} viewBox="0 0 40 40" style={{ fill: "var(--accent)", opacity: 0.8 }}><circle cx="20" cy="20" r="18" /></svg>;
+  }
+  if (shape === "heart") {
+    return <svg width={s} height={s} viewBox="0 0 40 40" style={{ fill: "var(--accent)", opacity: 0.8 }}><path d="M20 34 C20 34 4 24 4 14 C4 9 8 6 12 6 C15 6 18 8 20 11 C22 8 25 6 28 6 C32 6 36 9 36 14 C36 24 20 34 20 34Z" /></svg>;
+  }
+  if (shape === "star") {
+    return <svg width={s} height={s} viewBox="0 0 40 40" style={{ fill: "var(--accent)", opacity: 0.8 }}><polygon points="20,3 25,15 38,15 28,24 32,36 20,28 8,36 12,24 2,15 15,15" /></svg>;
+  }
+  return <svg width={s} height={s} viewBox="0 0 40 40" style={{ fill: "var(--accent)", opacity: 0.8 }}><rect x="4" y="4" width="32" height="32" rx="8" ry="8" /></svg>;
+}
+
 function MaskModePanel({
   assignmentCount,
   rule,
@@ -3872,7 +3943,8 @@ function MaskModePanel({
   onApplySelectedText,
   onDeleteSelectedImage,
   onRegenerate,
-  onResetCrops
+  onResetCrops,
+  onChangePreset
 }: {
   assignmentCount: number;
   rule: MaskLayoutRule;
@@ -3884,13 +3956,23 @@ function MaskModePanel({
   onDeleteSelectedImage: () => void;
   onRegenerate: (rule: MaskLayoutRule, patch: Partial<MaskLayoutRule>) => void;
   onResetCrops: () => void;
+  onChangePreset: (entry: import("@/state/maskLibraryStore").MaskLibraryEntry) => void;
 }): ReactElement {
   const [maskWidth, setMaskWidth] = useState(rule.maskWidth);
   const [maskHeight, setMaskHeight] = useState(rule.maskHeight);
   const [spacingX, setSpacingX] = useState(rule.spacingX);
   const [spacingY, setSpacingY] = useState(rule.spacingY);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const libraryEntries = useMaskLibraryStore((s) => s.entries);
   const selectedIsMaskFrame = selectedLayer?.type === "frame" && selectedLayer.metadata["maskFrame"] !== undefined;
   const selectedIsText = selectedLayer?.type === "text";
+
+  const BUILT_IN: { shape: string; label: string }[] = [
+    { shape: "circle", label: "עיגול" },
+    { shape: "heart", label: "לב" },
+    { shape: "roundedRect", label: "מלבן" },
+    { shape: "star", label: "כוכב" }
+  ];
 
   useEffect(() => {
     setMaskWidth(rule.maskWidth);
@@ -3909,33 +3991,92 @@ function MaskModePanel({
     if (rule.keepProportions) setMaskWidth(value);
   }
 
+  function selectBuiltIn(shape: string): void {
+    onRegenerate(rule, { maskShape: shape as import("@/types/mask").MaskShape });
+    setPickerOpen(false);
+  }
+
   return (
     <section className="panel-card grid-mode-panel">
-      <div className="panel-section-title">Mask Mode</div>
+      <div className="panel-section-title">מצב מסיכה</div>
       <div className="metrics-grid">
         <span className="metric">
-          <span>Shape</span>
-          <strong>{rule.maskShape}</strong>
+          <span>צורה</span>
+          <strong>{rule.maskShape === "custom" ? "מותאם" : rule.maskShape}</strong>
         </span>
-        <Metric label="Images" value={assignmentCount} />
-        <Metric label="Pages" value={rule.pageIds.length} />
+        <Metric label="תמונות" value={assignmentCount} />
+        <Metric label="דפים" value={rule.pageIds.length} />
       </div>
-      {selectedIsMaskFrame ? <p className="panel-note">This mask is layout-managed. Move, crop, rotate, and scale the image inside it.</p> : null}
+
+      {/* Preset picker */}
+      <div style={{ position: "relative" }}>
+        <button
+          className="btn btn-ghost wide"
+          onClick={() => setPickerOpen((v) => !v)}
+          type="button"
+        >
+          <Layers size={13} />
+          שנה מסיכה
+          <ChevronDown size={11} style={{ marginRight: "auto" }} />
+        </button>
+
+        {pickerOpen && (
+          <div className="mask-picker-dropdown">
+            {/* Built-in shapes */}
+            {BUILT_IN.map(({ shape, label }) => (
+              <button
+                key={shape}
+                className={`mask-picker-item ${rule.maskShape === shape ? "selected" : ""}`}
+                onClick={() => selectBuiltIn(shape)}
+                type="button"
+              >
+                <div className="mask-picker-thumb-shape">
+                  <MaskShapeIcon shape={shape} size={28} />
+                </div>
+                <span className="mask-picker-label">{label}</span>
+              </button>
+            ))}
+            {/* Library entries */}
+            {libraryEntries.map((entry) => (
+              <button
+                key={entry.id}
+                className="mask-picker-item"
+                onClick={() => { onChangePreset(entry); setPickerOpen(false); }}
+                type="button"
+              >
+                <div className="mask-picker-thumb">
+                  {entry.thumbnailDataUrl
+                    ? <img src={entry.thumbnailDataUrl} alt={entry.name} />
+                    : <div style={{ width: 44, height: 44 }} />}
+                </div>
+                <span className="mask-picker-label">{entry.name}</span>
+              </button>
+            ))}
+            {libraryEntries.length === 0 && (
+              <span style={{ fontSize: 11, color: "var(--text-muted)", padding: "6px", gridColumn: "1/-1" }}>
+                אין מסיכות בספרייה
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {selectedIsMaskFrame ? <p className="panel-note">מסיכה זו מנוהלת אוטומטית. ניתן לחתוך, לסובב ולשנות גודל התמונה בפנים.</p> : null}
       <button className="btn btn-accent wide" onClick={onAddImages} type="button">
         <ImagePlus size={14} />
-        Add images
+        הוסף תמונות
       </button>
       <div className="field-grid">
-        <NumberField label="Mask W" min={24} max={2000} value={Math.round(maskWidth)} onChange={updateWidth} />
-        <NumberField label="Mask H" min={24} max={2000} value={Math.round(maskHeight)} onChange={updateHeight} />
-        <NumberField label="Spacing X" min={0} max={400} value={Math.round(spacingX)} onChange={setSpacingX} />
-        <NumberField label="Spacing Y" min={0} max={400} value={Math.round(spacingY)} onChange={setSpacingY} />
+        <NumberField label="רוחב" min={24} max={2000} value={Math.round(maskWidth)} onChange={updateWidth} />
+        <NumberField label="גובה" min={24} max={2000} value={Math.round(maskHeight)} onChange={updateHeight} />
+        <NumberField label="רווח X" min={0} max={400} value={Math.round(spacingX)} onChange={setSpacingX} />
+        <NumberField label="רווח Y" min={0} max={400} value={Math.round(spacingY)} onChange={setSpacingY} />
       </div>
       <button className="mini-action success" onClick={() => onRegenerate(rule, { maskWidth, maskHeight, spacingX, spacingY })} type="button">
-        Rebuild masks
+        בנה מחדש
       </button>
       <div className="field">
-        <span className="field-label">Image fit</span>
+        <span className="field-label">התאמת תמונה</span>
         <div className="seg">
           {(["fit", "fill", "smartCrop", "stretch"] as const).map((mode) => (
             <button className={rule.fitMode === mode ? "on" : ""} key={mode} onClick={() => onApplyFit(rule, mode)} type="button">
@@ -3945,14 +4086,14 @@ function MaskModePanel({
         </div>
       </div>
       <div className="button-row">
-        <button className="mini-action" onClick={onResetCrops} type="button">Reset crops</button>
-        <button className="mini-action" onClick={onAddFilenameText} type="button">Filename text</button>
+        <button className="mini-action" onClick={onResetCrops} type="button">איפוס חיתוכים</button>
+        <button className="mini-action" onClick={onAddFilenameText} type="button">טקסט משמות קבצים</button>
       </div>
       <button className="mini-action success" disabled={!selectedIsText} onClick={onApplySelectedText} type="button">
-        Apply selected text to all
+        החל טקסט נבחר על כל המסיכות
       </button>
       <button className="mini-action danger" disabled={!selectedIsMaskFrame} onClick={onDeleteSelectedImage} type="button">
-        Delete image and compact
+        מחק תמונה ומלא מהסוף
       </button>
     </section>
   );

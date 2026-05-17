@@ -2,6 +2,8 @@ import type { ReactElement } from "react";
 import { useAppSettings } from "@/settings";
 import { SettingsRow, SettingsSection, SettingsToggle } from "../components";
 
+const SOON = <span className="settings-coming-soon">בקרוב</span>;
+
 export function PerformancePanel(): ReactElement {
   const perf = useAppSettings((s) => s.settings.performance);
   const update = useAppSettings((s) => s.updatePerformance);
@@ -9,7 +11,7 @@ export function PerformancePanel(): ReactElement {
   return (
     <div>
       <SettingsSection title="איכות תצוגה" description="איכות תצוגה מקדימה בזמן עריכה.">
-        <SettingsRow label="איכות תצוגה מקדימה">
+        <SettingsRow label={<>איכות תצוגה מקדימה {SOON}</>} description="יחובר למנוע הרינדור בגרסה עתידית.">
           <select
             className="settings-select"
             value={perf.previewQuality}
@@ -19,10 +21,9 @@ export function PerformancePanel(): ReactElement {
             <option value="medium">בינונית</option>
             <option value="high">גבוהה — מדויק יותר</option>
           </select>
-          {/* TODO: wire to image preview rendering */}
         </SettingsRow>
 
-        <SettingsRow label="איכות ייצוא סופי">
+        <SettingsRow label={<>איכות ייצוא סופי {SOON}</>} description="יחובר לצינור הייצוא בגרסה עתידית.">
           <select
             className="settings-select"
             value={perf.renderQuality}
@@ -32,71 +33,58 @@ export function PerformancePanel(): ReactElement {
             <option value="high">גבוה</option>
             <option value="print">הדפסה (300 DPI)</option>
           </select>
-          {/* TODO: wire to export pipeline */}
         </SettingsRow>
 
         <SettingsRow
-          label="הפחת איכות בזמן גרירה"
-          description="הצג רזולוציה נמוכה בזמן גרירה, ואיכות מלאה לאחר שחרור."
+          label={<>הפחת איכות בזמן גרירה {SOON}</>}
+          description="תצוגה ברזולוציה נמוכה בגרירה, ואיכות מלאה לאחר שחרור."
         >
-          <SettingsToggle
-            value={perf.lowResWhileDragging}
-            onChange={(v) => update({ lowResWhileDragging: v })}
-          />
-          {/* TODO: wire to Konva drag events */}
+          <SettingsToggle value={perf.lowResWhileDragging} onChange={(v) => update({ lowResWhileDragging: v })} disabled />
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title="זיכרון ועיבוד" description="הגבלת שימוש בזיכרון ובמעבד.">
+      <SettingsSection title="זיכרון ועיבוד">
         <SettingsRow
-          label="הפעלת האצת GPU"
-          description="מומלץ למחשבים עם כרטיס מסך ייעודי. ייתכן שיידרש הפעלה מחדש."
+          label={<>הפעלת האצת GPU {SOON}</>}
+          description="מומלץ למחשבים עם כרטיס מסך ייעודי."
         >
-          <SettingsToggle
-            value={perf.enableGpuAcceleration}
-            onChange={(v) => update({ enableGpuAcceleration: v })}
-          />
-          {/* TODO: wire to Electron GPU settings / Konva pixelRatio */}
+          <SettingsToggle value={perf.enableGpuAcceleration} onChange={(v) => update({ enableGpuAcceleration: v })} disabled />
         </SettingsRow>
 
         <SettingsRow
-          label="גודל תמונת תצוגה מקסימלי (px)"
-          description="מגביל גודל תמונות טעונות לתצוגה מקדימה."
+          label={<>גודל תמונת תצוגה מקסימלי (px) {SOON}</>}
+          description="מגביל גודל תמונות לתצוגה מקדימה."
         >
           <select
             className="settings-select"
             value={perf.maxPreviewSizePx}
             onChange={(e) => update({ maxPreviewSizePx: parseInt(e.target.value) })}
+            disabled
           >
             <option value={1024}>1024px</option>
             <option value={2048}>2048px</option>
             <option value={4096}>4096px</option>
             <option value={8192}>ללא הגבלה</option>
           </select>
-          {/* TODO: wire to assetManager preview generation */}
         </SettingsRow>
 
         <SettingsRow
-          label="מגבלת היסטוריית ביטול"
-          description="כמות הפעולות הניתנות לביטול."
-          note="(TODO: חיבור למנוע)"
+          label={<>מגבלת היסטוריית ביטול {SOON}</>}
+          description="כמות הפעולות הניתנות לביטול. יחובר למנוע ההיסטוריה."
         >
           <select
             className="settings-select"
             value={perf.undoHistoryLimit}
             onChange={(e) => update({ undoHistoryLimit: parseInt(e.target.value) })}
+            disabled
           >
             <option value={50}>50 פעולות</option>
             <option value={100}>100 פעולות</option>
             <option value={200}>200 פעולות</option>
           </select>
-          {/* TODO: wire to documentStore history limit */}
         </SettingsRow>
 
-        <SettingsRow
-          label="אזהרה בפתיחת קבצים גדולים (MB)"
-          description="הצג אזהרה לפני טעינת קובץ גדול."
-        >
+        <SettingsRow label="אזהרה בפתיחת קבצים גדולים (MB)" description="הצג אזהרה לפני טעינת קובץ גדול.">
           <input
             type="number"
             className="settings-number-input"
@@ -107,16 +95,12 @@ export function PerformancePanel(): ReactElement {
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title="מצב ביצועים" description="הגדרות למחשבים חלשים יותר.">
+      <SettingsSection title="מצב ביצועים">
         <SettingsRow
-          label="מצב ביצועים"
+          label={<>מצב ביצועים {SOON}</>}
           description="מפחית אפקטים ואנימציות לשיפור ביצועים."
         >
-          <SettingsToggle
-            value={perf.performanceMode}
-            onChange={(v) => update({ performanceMode: v })}
-          />
-          {/* TODO: wire to global performance CSS class / Konva settings */}
+          <SettingsToggle value={perf.performanceMode} onChange={(v) => update({ performanceMode: v })} disabled />
         </SettingsRow>
       </SettingsSection>
     </div>

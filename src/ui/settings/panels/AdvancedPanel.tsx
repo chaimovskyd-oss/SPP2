@@ -3,6 +3,8 @@ import { FolderOpen, FileDown, FileUp, RefreshCw, AlertTriangle } from "lucide-r
 import { useAppSettings } from "@/settings";
 import { SettingsRow, SettingsSection, SettingsToggle } from "../components";
 
+const SOON = <span className="settings-coming-soon">בקרוב</span>;
+
 export function AdvancedPanel(): ReactElement {
   const advanced = useAppSettings((s) => s.settings.advanced);
   const updateAdvanced = useAppSettings((s) => s.updateAdvanced);
@@ -30,8 +32,7 @@ export function AdvancedPanel(): ReactElement {
       if (!file) return;
       const reader = new FileReader();
       reader.onload = () => {
-        const json = reader.result as string;
-        const result = importSettings(json);
+        const result = importSettings(reader.result as string);
         if (result.success) {
           window.alert("הגדרות יובאו בהצלחה!");
         } else {
@@ -79,17 +80,13 @@ export function AdvancedPanel(): ReactElement {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="תיקיות ולוגים" description="גישה לקבצי מערכת ולוגים.">
+      <SettingsSection title={<>תיקיות ולוגים {SOON}</>} description="גישה לקבצי מערכת ולוגים. יהיה זמין בגרסה עתידית.">
         <div className="settings-row">
           <div className="settings-row-label">
             <span className="settings-row-name">פתח תיקיית לוגים</span>
           </div>
           <div className="settings-row-control">
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => { /* TODO: window.spp?.openLogsFolder?.() */ }}
-            >
+            <button type="button" className="btn btn-ghost" disabled title="בקרוב">
               <FolderOpen size={13} />
               פתח
             </button>
@@ -101,11 +98,7 @@ export function AdvancedPanel(): ReactElement {
             <span className="settings-row-name">פתח קובץ הגדרות</span>
           </div>
           <div className="settings-row-control">
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => { /* TODO: window.spp?.openSettingsFile?.() */ }}
-            >
+            <button type="button" className="btn btn-ghost" disabled title="בקרוב">
               <FolderOpen size={13} />
               פתח
             </button>
@@ -115,32 +108,21 @@ export function AdvancedPanel(): ReactElement {
 
       <SettingsSection title="אבחון ופיתוח">
         <SettingsRow label="מצב Debug" description="הצג לוגים מורחבים ואפשרויות פיתוח.">
-          <SettingsToggle
-            value={advanced.debugMode}
-            onChange={(v) => updateAdvanced({ debugMode: v })}
-          />
+          <SettingsToggle value={advanced.debugMode} onChange={(v) => updateAdvanced({ debugMode: v })} />
         </SettingsRow>
 
-        <SettingsRow label="אפשר אבחונים" description="שלח נתוני שגיאות אנונימיים לשיפור האפליקציה.">
-          <SettingsToggle
-            value={advanced.enableDiagnostics}
-            onChange={(v) => updateAdvanced({ enableDiagnostics: v })}
-          />
+        <SettingsRow label={<>אפשר אבחונים {SOON}</>} description="שלח נתוני שגיאות אנונימיים.">
+          <SettingsToggle value={advanced.enableDiagnostics} onChange={(v) => updateAdvanced({ enableDiagnostics: v })} disabled />
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title="תיקון ושיחזור" description="כלי תחזוקה.">
+      <SettingsSection title={<>תיקון ושיחזור {SOON}</>} description="כלי תחזוקה — יהיו זמינים בגרסה עתידית.">
         <div className="settings-row">
           <div className="settings-row-label">
             <span className="settings-row-name">בנה מחדש תמונות תצוגה מקדימה</span>
-            <div className="settings-row-desc">בנה מחדש את כל תמונות המיניאטורה.</div>
           </div>
           <div className="settings-row-control">
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => { /* TODO: trigger thumbnail rebuild */ }}
-            >
+            <button type="button" className="btn btn-ghost" disabled title="בקרוב">
               <RefreshCw size={13} />
               בנה מחדש
             </button>

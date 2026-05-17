@@ -527,7 +527,7 @@ export function CanvasStage({
       {/* Wrapper: keeps canvas-frame sized at the true canvas dimensions while
           the Stage canvas extends OVERFLOW_PAD px on every side so the
           Transformer handles can render outside the canvas boundary. */}
-      <div style={{ position: 'relative', width: stageWidth, height: stageHeight }}>
+      <div style={{ width: stageWidth, height: stageHeight }}>
         <div style={{ position: 'absolute', left: -OVERFLOW_PAD, top: -OVERFLOW_PAD }}>
       <Stage
         ref={stageRef}

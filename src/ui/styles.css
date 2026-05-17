@@ -2603,7 +2603,7 @@ input[type="range"]::-webkit-slider-runnable-track {
 
 .canvas-ruler {
   position: absolute;
-  z-index: 7;
+  z-index: 20;
   pointer-events: none;
   color: var(--text-tertiary);
   font-size: 9px;
@@ -4388,5 +4388,357 @@ input[type="range"]::-webkit-slider-runnable-track {
   font-size: 13px;
   color: var(--text-primary);
   font-weight: 600;
+}
+
+/* ═══════════════════════════════════════════════════════
+   MASK LIBRARY PANEL
+   ═══════════════════════════════════════════════════════ */
+
+.mask-library-panel {
+  width: 520px;
+  max-width: 96vw;
+}
+
+.mask-lib-empty {
+  text-align: center;
+  padding: 24px 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.mask-lib-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.mask-lib-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  transition: border-color var(--t);
+}
+
+.mask-lib-card:hover { border-color: var(--accent); }
+
+.mask-lib-thumb {
+  width: 72px;
+  height: 72px;
+  background: repeating-conic-gradient(#aaa 0% 25%, #ddd 0% 50%) 0 0 / 12px 12px;
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mask-lib-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.mask-lib-thumb-placeholder {
+  width: 100%;
+  height: 100%;
+  background: var(--bg-surface);
+}
+
+.mask-lib-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: center;
+  word-break: break-word;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.mask-lib-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.mask-lib-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.mask-lib-form {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mask-lib-form-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.mask-lib-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mask-lib-size-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.mask-lib-size-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  flex: 1;
+}
+
+.mask-lib-size-x {
+  padding-bottom: 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.mask-lib-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mask-lib-preview-thumb {
+  width: 56px;
+  height: 56px;
+  background: repeating-conic-gradient(#aaa 0% 25%, #ddd 0% 50%) 0 0 / 10px 10px;
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.mask-lib-preview-thumb img { width: 100%; height: 100%; object-fit: contain; }
+
+.mask-lib-preview-spinner {
+  width: 20px; height: 20px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.mask-lib-file-info {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.mask-lib-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.mask-lib-threshold {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.mask-lib-threshold-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.mask-lib-threshold-row span { min-width: 110px; }
+
+.mask-lib-threshold-row input[type=range] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.mask-lib-form-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+/* ── Mask Wizard ── */
+.mask-wizard-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+
+.mask-wizard {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px;
+  width: min(90vw, 640px);
+  max-height: 90vh;
+  overflow-y: auto;
+  position: relative;
+}
+
+.mask-wizard-close {
+  position: absolute; top: 16px; right: 16px;
+  background: none; border: none; color: var(--text-secondary); cursor: pointer;
+}
+
+.mask-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px;
+}
+
+.mask-preset-card {
+  background: var(--bg-surface);
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 6px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: border-color var(--t), background var(--t);
+}
+
+.mask-preset-card:hover { border-color: var(--accent); }
+.mask-preset-card.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
+.mask-preset-thumb {
+  width: 64px;
+  height: 64px;
+  background: repeating-conic-gradient(#aaa 0% 25%, #ddd 0% 50%) 0 0 / 10px 10px;
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mask-preset-thumb img { width: 100%; height: 100%; object-fit: contain; }
+
+.mask-preset-shape-icon {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mask-preset-shape-icon svg {
+  fill: var(--accent);
+  opacity: 0.75;
+}
+
+.mask-preset-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: center;
+}
+
+.mask-preset-badge {
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ── Canvas preset mini-picker in MaskModePanel ── */
+.mask-picker-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  z-index: 200;
+  max-height: 240px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.mask-picker-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  background: var(--bg-surface);
+  transition: border-color var(--t);
+}
+
+.mask-picker-item:hover { border-color: var(--accent); }
+.mask-picker-item.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
+.mask-picker-thumb {
+  width: 44px;
+  height: 44px;
+  background: repeating-conic-gradient(#aaa 0% 25%, #ddd 0% 50%) 0 0 / 8px 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mask-picker-thumb img { width: 100%; height: 100%; object-fit: contain; }
+
+.mask-picker-thumb-shape {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mask-picker-thumb-shape svg { fill: var(--accent); opacity: 0.7; }
+
+.mask-picker-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 

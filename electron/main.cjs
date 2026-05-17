@@ -219,6 +219,34 @@ ipcMain.handle("spp:apply-image-params", async (_event, inputPath, outputPath, p
 
 // ─── Print Preview IPC ───────────────────────────────────────────────────────
 
+function spawnPrintPreview(args, engineDir) {
+  return new Promise((resolve) => {
+    try {
+      const proc = spawn(getPythonCommand(), args, {
+        cwd: engineDir,
+        detached: true,
+        stdio: ["ignore", "ignore", "pipe"],
+        env: {
+          ...process.env,
+          PYTHONPATH: [engineDir, process.env.PYTHONPATH || ""].filter(Boolean).join(path.delimiter)
+        }
+      });
+      let stderr = "";
+      proc.stderr?.on("data", (chunk) => {
+        stderr += chunk.toString();
+        console.warn("[print-preview]", chunk.toString().trim());
+      });
+      proc.on("spawn", () => { proc.unref(); resolve({ success: true }); });
+      proc.on("error", (err) => resolve({ success: false, error: err.message }));
+      proc.on("close", (code) => {
+        if (code !== 0 && stderr) console.warn(`[print-preview] exited with code ${code}: ${stderr}`);
+      });
+    } catch (err) {
+      resolve({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+}
+
 ipcMain.handle("spp:open-print-preview", async (_event, payload) => {
   const engineDir = getPrintPreviewEngineDir();
   const scriptPath = path.join(engineDir, "launch_spp2_print_preview.py");
@@ -227,6 +255,37 @@ ipcMain.handle("spp:open-print-preview", async (_event, payload) => {
     return { success: false, error: `Print Preview launcher not found: ${scriptPath}` };
   }
 
+  // ── Multi-page mode ─────────────────────────────────────────────────────────
+  if (payload?.pages && payload.pages.length > 0) {
+    for (const page of payload.pages) {
+      if (!page.filePath || !fs.existsSync(page.filePath)) {
+        return { success: false, error: `Page image not found: ${page.filePath ?? "missing"}` };
+      }
+    }
+
+    const manifest = {
+      document_name: payload.documentName ?? "SPP2 Document",
+      pages: payload.pages.map((p, i) => ({
+        image_path: p.filePath,
+        page_name: p.pageName ?? `עמוד ${i + 1}`,
+        width_mm: p.widthMm,
+        height_mm: p.heightMm,
+        dpi: p.dpi,
+        orientation: p.orientation ?? "auto"
+      }))
+    };
+
+    const manifestPath = path.join(os.tmpdir(), `spp2_print_manifest_${Date.now()}.json`);
+    try {
+      fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf-8");
+    } catch (err) {
+      return { success: false, error: `Failed to write print manifest: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
+    return spawnPrintPreview([scriptPath, "--manifest", manifestPath], engineDir);
+  }
+
+  // ── Single-page mode (original) ─────────────────────────────────────────────
   if (!payload?.filePath || !fs.existsSync(payload.filePath)) {
     return { success: false, error: `Rendered print file not found: ${payload?.filePath ?? "missing"}` };
   }
@@ -245,35 +304,7 @@ ipcMain.handle("spp:open-print-preview", async (_event, payload) => {
     "--orientation", payload.orientation ?? ((payload.widthPx ?? 0) >= (payload.heightPx ?? 0) ? "landscape" : "portrait")
   ];
 
-  return new Promise((resolve) => {
-    try {
-      const proc = spawn(getPythonCommand(), args, {
-        cwd: engineDir,
-        detached: true,
-        stdio: ["ignore", "ignore", "pipe"],
-        env: {
-          ...process.env,
-          PYTHONPATH: [engineDir, process.env.PYTHONPATH || ""].filter(Boolean).join(path.delimiter)
-        }
-      });
-
-      let stderr = "";
-      proc.stderr?.on("data", (chunk) => {
-        stderr += chunk.toString();
-        console.warn("[print-preview]", chunk.toString().trim());
-      });
-      proc.on("spawn", () => {
-        proc.unref();
-        resolve({ success: true });
-      });
-      proc.on("error", (err) => resolve({ success: false, error: err.message }));
-      proc.on("close", (code) => {
-        if (code !== 0 && stderr) console.warn(`[print-preview] exited with code ${code}: ${stderr}`);
-      });
-    } catch (err) {
-      resolve({ success: false, error: err instanceof Error ? err.message : String(err) });
-    }
-  });
+  return spawnPrintPreview(args, engineDir);
 });
 
 // ─── External Apps & Utilities IPC ────────────────────────────────────────────

@@ -40,3 +40,50 @@ class SPP2RenderedImageAdapter(RenderAdapter):
 
     def get_design_page_size_mm(self, page: Any):
         return self.width_mm, self.height_mm
+
+
+class SPP2MultiPageAdapter(RenderAdapter):
+    """Multi-page RenderAdapter for SPP2.
+
+    Each page in the print job corresponds to a separate pre-rendered image file.
+    Page objects passed to the controller carry a ``_spp2_page_index`` attribute
+    that maps them back to the correct image in this adapter.
+    """
+
+    def __init__(self, pages_data: list[dict]):
+        """
+        Args:
+            pages_data: list of dicts, one per page, each with keys:
+                - image_path (str | Path): path to the rendered PNG/JPEG
+                - width_mm  (float): physical page width in mm
+                - height_mm (float): physical page height in mm
+                - dpi       (int):   output DPI
+        """
+        self._pages = pages_data
+        self._cache: dict[int, Image.Image] = {}
+
+    def _load(self, index: int) -> Image.Image:
+        if index not in self._cache:
+            data = self._pages[index]
+            img = Image.open(data["image_path"])
+            self._cache[index] = (
+                img.convert("RGBA") if img.mode in ("RGBA", "LA", "P") else img.convert("RGB")
+            )
+        return self._cache[index]
+
+    def _page_index(self, page: Any) -> int:
+        return int(getattr(page, "_spp2_page_index", 0))
+
+    def render_preview_page(self, page: Any, scale: float, settings=None):
+        return self._load(self._page_index(page)).copy()
+
+    def render_export_page(self, page: Any, dpi: int, scale: float = 1.0, settings=None):
+        idx = self._page_index(page)
+        image = self._load(idx).copy()
+        out_dpi = int(dpi or self._pages[idx].get("dpi", 300))
+        image.info["dpi"] = (out_dpi, out_dpi)
+        return image
+
+    def get_design_page_size_mm(self, page: Any):
+        data = self._pages[self._page_index(page)]
+        return float(data["width_mm"]), float(data["height_mm"])

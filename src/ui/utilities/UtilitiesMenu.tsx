@@ -1,6 +1,7 @@
 import {
   ChevronDown,
   ExternalLink,
+  Layers,
   Link2,
   MessageSquare,
   QrCode,
@@ -17,11 +18,12 @@ import {
 } from "react";
 import { CustomerActionsPanel } from "./CustomerActionsPanel";
 import { ExternalAppsSettings } from "./ExternalAppsSettings";
+import { MaskLibraryPanel } from "./MaskLibraryPanel";
 import { QRGeneratorPanel } from "./QRGeneratorPanel";
 import { QuickLinksPanel } from "./QuickLinksPanel";
 import { QuickSearchPanel } from "./QuickSearchPanel";
 
-type UtilPanel = "qr" | "links" | "search" | "customer" | "settings" | null;
+type UtilPanel = "qr" | "links" | "search" | "customer" | "settings" | "masks" | null;
 
 interface UtilitiesMenuProps {
   customerName?: string;
@@ -90,6 +92,12 @@ export function UtilitiesMenu({
           sub: customerName ?? "WhatsApp & Email"
         }]
       : []),
+    {
+      id: "masks" as UtilPanel,
+      icon: Layers,
+      label: "ספריית מסיכות",
+      sub: "SVG & PNG עיצובים"
+    },
     {
       id: "settings" as UtilPanel,
       icon: Settings2,
@@ -177,6 +185,11 @@ export function UtilitiesMenu({
             projectName={projectName}
             onClose={closePanel}
           />
+        </FloatingOverlay>
+      )}
+      {activePanel === "masks" && (
+        <FloatingOverlay onClose={closePanel}>
+          <MaskLibraryPanel onClose={closePanel} />
         </FloatingOverlay>
       )}
       {activePanel === "settings" && (

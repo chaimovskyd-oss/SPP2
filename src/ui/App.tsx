@@ -17,6 +17,7 @@ import type { CollageWizardResult } from "./collage/CollageSetupWizard";
 import type { PhotoPrintWizardResult } from "@/types/photoPrint";
 import type { ClassPhotoWizardResult } from "@/types/classPhoto";
 import type { ClassPhotoWizardInitialState } from "./classPhoto/ClassPhotoSetupWizard";
+import { MaskSetupWizard, type MaskWizardResult } from "./mask/MaskSetupWizard";
 import { useDocumentStore } from "@/state/documentStore";
 import { useSelectionStore } from "@/state/selectionStore";
 import { useViewportStore } from "@/state/viewportStore";
@@ -44,7 +45,7 @@ const PdfStudioScreen = lazy(() =>
 );
 
 export function App(): ReactElement {
-  const [screen, setScreen] = useState<"home" | "setup" | "editor" | "collage-wizard" | "photo-print-wizard" | "pdf-studio" | "class-photo-wizard">("home");
+  const [screen, setScreen] = useState<"home" | "setup" | "editor" | "collage-wizard" | "photo-print-wizard" | "pdf-studio" | "class-photo-wizard" | "mask-wizard">("home");
   const [classPhotoWizardInitialState, setClassPhotoWizardInitialState] = useState<ClassPhotoWizardInitialState | undefined>(undefined);
   const [pendingMode, setPendingMode] = useState<ModeType>("free");
   const [recoveryRecord, setRecoveryRecord] = useState<AutosaveRecord | null>(() => {
@@ -86,6 +87,8 @@ export function App(): ReactElement {
       setScreen("photo-print-wizard");
     } else if (mode === "pdf_tools") {
       setScreen("pdf-studio");
+    } else if (mode === "mask") {
+      setScreen("mask-wizard");
     } else {
       setScreen("setup");
     }
@@ -404,6 +407,87 @@ export function App(): ReactElement {
     setScreen("editor");
   }
 
+  async function handleMaskWizardComplete(result: MaskWizardResult): Promise<void> {
+    const { name, setup, builtInShape, libraryEntry, maskWidth, maskHeight, spacingX, spacingY } = result;
+
+    let maskShape: import("@/types/mask").MaskShape = builtInShape ?? "circle";
+    let extraPreset: import("@/types/mask").MaskPreset | undefined;
+
+    if (libraryEntry !== undefined) {
+      maskShape = "custom";
+      const now = new Date().toISOString();
+      extraPreset = {
+        version: 1,
+        id: crypto.randomUUID(),
+        name: libraryEntry.name,
+        type: libraryEntry.type === "svg" ? "svg" : libraryEntry.thresholdEnabled ? "pngThreshold" : "png",
+        assetId: undefined,
+        thumbnailAssetId: undefined,
+        thresholdSettings: libraryEntry.thresholdEnabled
+          ? {
+              version: 1,
+              enabled: true,
+              color: libraryEntry.thresholdColor,
+              tolerance: libraryEntry.thresholdTolerance,
+              feather: libraryEntry.thresholdFeather
+            }
+          : undefined,
+        defaultSize: { width: libraryEntry.defaultWidth, height: libraryEntry.defaultHeight },
+        keepProportionsDefault: true,
+        createdAt: now,
+        updatedAt: now,
+        metadata: { libraryEntryId: libraryEntry.id }
+      };
+    }
+
+    const nextDocument = createMaskModeDocument(
+      name,
+      setup,
+      {
+        maskShape,
+        maskWidth,
+        maskHeight,
+        keepProportions: true,
+        margins: { top: 20, right: 20, bottom: 20, left: 20 },
+        spacingX,
+        spacingY
+      },
+      { projectType: "Mask" }
+    );
+
+    if (extraPreset !== undefined) {
+      nextDocument.maskPresets = [...nextDocument.maskPresets, extraPreset];
+      nextDocument.maskRules = nextDocument.maskRules.map((r) => ({
+        ...r,
+        maskPresetId: extraPreset!.id
+      }));
+    }
+
+    if (libraryEntry !== undefined && libraryEntry.fileDataUrl) {
+      try {
+        const blob = await (await fetch(libraryEntry.fileDataUrl)).blob();
+        const file = new File([blob], `${libraryEntry.name}.${libraryEntry.type}`, {
+          type: libraryEntry.type === "svg" ? "image/svg+xml" : "image/png"
+        });
+        const { asset } = await importImageAsset(file, nextDocument.assets, { createPreview: false });
+        nextDocument.assets = [...nextDocument.assets, asset];
+        if (extraPreset !== undefined) {
+          nextDocument.maskPresets = nextDocument.maskPresets.map((p) =>
+            p.id === extraPreset!.id ? { ...p, assetId: asset.id } : p
+          );
+        }
+      } catch {
+        // Asset import failed — mask will render without custom shape
+      }
+    }
+
+    const envelope = beginProject(createProjectEnvelope({ document: nextDocument, linkedGroups: [], batchJobs: [] }));
+    setDocument(withProjectMetadata(envelope.document, envelope.metadata));
+    resetViewport();
+    clearSelection();
+    setScreen("editor");
+  }
+
   function createDocument(setup: PageSetup, options?: { grid?: Partial<GridCreateOptions>; mask?: Partial<MaskCreateOptions> }, customerInfo?: ProjectCustomerInfo): void {
     const name = pendingMode === "free" ? "פרויקט חופשי חדש" : `פרויקט ${pendingMode}`;
     const projectMetadata = {
@@ -487,6 +571,15 @@ export function App(): ReactElement {
     }
   }
 
+  if (screen === "mask-wizard") {
+    return (
+      <MaskSetupWizard
+        onComplete={(result) => void handleMaskWizardComplete(result)}
+        onCancel={() => setScreen("home")}
+      />
+    );
+  }
+
   if (screen === "collage-wizard") {
     return (
       <CollageSetupWizard
@@ -544,6 +637,7 @@ export function App(): ReactElement {
         <Suspense fallback={<main className="loading-screen">טוען את סביבת העריכה...</main>}>
           <EditorScreen
             onBackHome={backHome}
+            onOpenSettings={() => setSettingsOpen(true)}
             onOpenClassPhotoWizard={() => {
               setClassPhotoWizardInitialState(buildClassPhotoWizardStateFromDocument());
               setScreen("class-photo-wizard");

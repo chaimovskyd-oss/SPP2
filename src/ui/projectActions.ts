@@ -369,6 +369,13 @@ function renderPrintableStage(stage: Konva.Stage, mimeType: "image/png" | "image
     scaleX: stage.scaleX(),
     scaleY: stage.scaleY()
   };
+  // Save and reset every Layer's x/y offset.  The display Stage shifts all
+  // Layers by OVERFLOW_PAD/scale so Transformer handles render outside the
+  // canvas boundary; during export we need content to start at (0,0).
+  const layers = stage.getLayers();
+  const layerOffsets = layers.map((l) => ({ layer: l, x: l.x(), y: l.y() }));
+  layers.forEach((l) => { l.x(0); l.y(0); });
+
   helperNodes.forEach((node) => node.visible(false));
   stage.width(page.width);
   stage.height(page.height);
@@ -384,15 +391,28 @@ function renderPrintableStage(stage: Konva.Stage, mimeType: "image/png" | "image
     stage.width(original.width);
     stage.height(original.height);
     stage.scale({ x: original.scaleX, y: original.scaleY });
+    layerOffsets.forEach(({ layer, x, y }) => { layer.x(x); layer.y(y); });
     visibility.forEach(({ node, visible }) => node.visible(visible));
     stage.batchDraw();
   }
 }
 
 export function exportStagePreviewPng(stage: Konva.Stage, documentName: string): void {
+  // Crop to the canvas content area, skipping the OVERFLOW_PAD buffer that
+  // the display Stage adds on every side for Transformer handle overflow.
+  const layers = stage.getLayers();
+  const firstLayer = layers[0];
+  const offsetX = firstLayer !== undefined ? firstLayer.x() * stage.scaleX() : 0;
+  const offsetY = firstLayer !== undefined ? firstLayer.y() * stage.scaleY() : 0;
+  const canvasW = stage.width() - 2 * offsetX;
+  const canvasH = stage.height() - 2 * offsetY;
   const dataUrl = stage.toDataURL({
     mimeType: "image/png",
-    pixelRatio: 2
+    pixelRatio: 2,
+    x: offsetX,
+    y: offsetY,
+    width: Math.max(1, canvasW),
+    height: Math.max(1, canvasH)
   });
   downloadDataUrl(`${safeFilename(documentName)}.preview.png`, dataUrl);
 }
@@ -404,6 +424,10 @@ export function captureProjectThumbnail(stage: Konva.Stage, page: Page): string 
     scaleX: stage.scaleX(),
     scaleY: stage.scaleY()
   };
+  const layers = stage.getLayers();
+  const layerOffsets = layers.map((l) => ({ layer: l, x: l.x(), y: l.y() }));
+  layers.forEach((l) => { l.x(0); l.y(0); });
+
   const maxSide = 320;
   const ratio = Math.min(maxSide / page.width, maxSide / page.height, 1);
   stage.width(page.width);
@@ -419,6 +443,7 @@ export function captureProjectThumbnail(stage: Konva.Stage, page: Page): string 
     stage.width(original.width);
     stage.height(original.height);
     stage.scale({ x: original.scaleX, y: original.scaleY });
+    layerOffsets.forEach(({ layer, x, y }) => { layer.x(x); layer.y(y); });
     stage.batchDraw();
   }
 }

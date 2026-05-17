@@ -2,59 +2,49 @@ import { useEffect, type ReactElement } from "react";
 import { useAppSettings } from "@/settings";
 import { ColorPicker, SettingsRow, SettingsSection } from "../components";
 
+const SOON = <span className="settings-coming-soon">בקרוב</span>;
+
 export function AppearancePanel(): ReactElement {
   const appearance = useAppSettings((s) => s.settings.appearance);
   const update = useAppSettings((s) => s.updateAppearance);
 
-  // Apply appearance colors live as CSS custom properties
+  // Apply canvas background live — the only color currently wired to the real canvas
   useEffect(() => {
-    const root = document.documentElement;
-    root.style.setProperty("--app-guide-color", appearance.guideColor);
-    root.style.setProperty("--app-grid-color", appearance.gridColor);
-    root.style.setProperty("--app-safe-area-color", appearance.safeAreaColor);
-    root.style.setProperty("--app-bleed-color", appearance.bleedColor);
-    root.style.setProperty("--app-selection-color", appearance.selectionColor);
-    root.style.setProperty("--bg-canvas", appearance.canvasBackgroundColor);
-  }, [appearance]);
+    document.documentElement.style.setProperty("--bg-canvas", appearance.canvasBackgroundColor);
+  }, [appearance.canvasBackgroundColor]);
 
   return (
     <div>
       <SettingsSection title="ערכת נושא" description="מראה כללי של ממשק המשתמש.">
-        <SettingsRow
-          label="ערכת נושא"
-          description="צבעי הממשק."
-        >
+        <SettingsRow label="ערכת נושא">
           <select
             className="settings-select"
             value={appearance.theme}
             onChange={(e) => update({ theme: e.target.value as "dark" | "light" | "system" })}
           >
             <option value="dark">כהה (Dark)</option>
-            <option value="light" disabled title="בקרוב">
-              בהיר (Light) — בקרוב
-            </option>
-            <option value="system" disabled title="בקרוב">
-              לפי מערכת — בקרוב
-            </option>
+            <option value="light" disabled>בהיר (Light) — בקרוב</option>
+            <option value="system" disabled>לפי מערכת — בקרוב</option>
           </select>
         </SettingsRow>
 
-        <SettingsRow label="צפיפות ממשק" description="גודל וריווח אלמנטי ממשק.">
+        <SettingsRow
+          label={<>צפיפות ממשק {SOON}</>}
+          description="גודל וריווח אלמנטי ממשק."
+        >
           <select
             className="settings-select"
             value={appearance.uiDensity}
             onChange={(e) => update({ uiDensity: e.target.value as "comfortable" | "compact" })}
+            disabled
           >
             <option value="comfortable">נוח (Comfortable)</option>
-            <option value="compact">
-              קומפקטי (Compact)
-            </option>
+            <option value="compact">קומפקטי (Compact)</option>
           </select>
-          {/* TODO: wire uiDensity to CSS body class */}
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title="צבעי קנבס" description="צבעי הרקע והאלמנטים הוויזואליים של אזור העריכה. שינויים מיידיים.">
+      <SettingsSection title="צבעי קנבס" description="רקע אזור העריכה — שינוי מיידי.">
         <SettingsRow label="רקע קנבס" description="צבע הרקע של אזור הציור.">
           <ColorPicker
             value={appearance.canvasBackgroundColor}
@@ -63,45 +53,43 @@ export function AppearancePanel(): ReactElement {
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title="צבעי עזרים" description="צבע קווי עזר, גריד ואזורים מיוחדים.">
-        <SettingsRow label="צבע קווי עזר (Guides)">
+      <SettingsSection
+        title={<>צבעי עזרים {SOON}</>}
+        description="צבעי קווי עזר, גריד ואזורים. יחוברו לקנבס בגרסה עתידית."
+      >
+        <SettingsRow label={<>צבע קווי עזר (Guides) {SOON}</>}>
           <ColorPicker
             value={appearance.guideColor}
             onChange={(v) => update({ guideColor: v })}
           />
-          {/* TODO: connect to canvas guide rendering */}
         </SettingsRow>
 
-        <SettingsRow label="צבע גריד">
+        <SettingsRow label={<>צבע גריד {SOON}</>}>
           <ColorPicker
             value={appearance.gridColor}
             onChange={(v) => update({ gridColor: v })}
           />
-          {/* TODO: connect to canvas grid rendering */}
         </SettingsRow>
 
-        <SettingsRow label="צבע אזור בטוח (Safe Area)">
+        <SettingsRow label={<>צבע אזור בטוח (Safe Area) {SOON}</>}>
           <ColorPicker
             value={appearance.safeAreaColor}
             onChange={(v) => update({ safeAreaColor: v })}
           />
-          {/* TODO: connect to safe area overlay */}
         </SettingsRow>
 
-        <SettingsRow label="צבע כיווץ (Bleed)">
+        <SettingsRow label={<>צבע כיווץ (Bleed) {SOON}</>}>
           <ColorPicker
             value={appearance.bleedColor}
             onChange={(v) => update({ bleedColor: v })}
           />
-          {/* TODO: connect to bleed overlay */}
         </SettingsRow>
 
-        <SettingsRow label="צבע סימון בחירה">
+        <SettingsRow label={<>צבע סימון בחירה {SOON}</>}>
           <ColorPicker
             value={appearance.selectionColor}
             onChange={(v) => update({ selectionColor: v })}
           />
-          {/* TODO: connect to selection transformer */}
         </SettingsRow>
       </SettingsSection>
     </div>

@@ -3,6 +3,7 @@ import { useAppSettings } from "@/settings";
 import { SettingsRow, SettingsSection, SettingsToggle } from "../components";
 
 const NOTE = "(חל על פרויקטים חדשים)";
+const SOON = <span className="settings-coming-soon">בקרוב</span>;
 
 export function WorkspacePanel(): ReactElement {
   const ws = useAppSettings((s) => s.settings.workspace);
@@ -113,7 +114,7 @@ export function WorkspacePanel(): ReactElement {
       </SettingsSection>
 
       <SettingsSection title="תמונות ואובייקטים" description="התנהגות ברירת מחדל של תמונות ואלמנטים.">
-        <SettingsRow label="רווח ברירת מחדל בין אובייקטים (מ״מ)">
+        <SettingsRow label={<>רווח ברירת מחדל בין אובייקטים (מ״מ) {SOON}</>}>
           <input
             type="number"
             className="settings-number-input"
@@ -149,7 +150,7 @@ export function WorkspacePanel(): ReactElement {
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title="ברירות מחדל — מצב חופשי (Free Mode)" sub>
+      <SettingsSection title={<>ברירות מחדל — מצב חופשי (Free Mode) {SOON}</>} sub description="יחולו על פרויקטים חדשים.">
         <SettingsRow label="הצמדה מופעלת">
           <SettingsToggle
             value={ws.freeModeDefaults.snappingEnabled}
@@ -164,7 +165,7 @@ export function WorkspacePanel(): ReactElement {
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title="ברירות מחדל — מצב גריד (Grid Mode)" sub>
+      <SettingsSection title={<>ברירות מחדל — מצב גריד (Grid Mode) {SOON}</>} sub description="יחולו על פרויקטים חדשים.">
         <SettingsRow label="רווח ברירת מחדל (מ״מ)">
           <input
             type="number"
@@ -197,7 +198,7 @@ export function WorkspacePanel(): ReactElement {
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title="ברירות מחדל — מצב גודל (Size Mode)" sub>
+      <SettingsSection title={<>ברירות מחדל — מצב גודל (Size Mode) {SOON}</>} sub description="יחולו על פרויקטים חדשים.">
         <SettingsRow label="מרווח ברירת מחדל (מ״מ)">
           <input
             type="number"
@@ -221,7 +222,7 @@ export function WorkspacePanel(): ReactElement {
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title="ברירות מחדל — מצב מסכה (Mask Mode)" sub>
+      <SettingsSection title={<>ברירות מחדל — מצב מסכה (Mask Mode) {SOON}</>} sub description="יחולו על פרויקטים חדשים.">
         <SettingsRow label="מצב התאמת תמונה למסכה">
           <select
             className="settings-select"
