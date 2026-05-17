@@ -1,8 +1,8 @@
 /**
  * Right-panel section shown in EditorScreen when a product is active.
- * Allows viewing + editing product definition fields and toggling guide visibility.
- * All edits are applied via patchActiveProduct (in-memory) and persisted only
- * when the user clicks "Save to Library".
+ * - Shows product info, guide toggles, production instructions
+ * - Orientation flip: swaps canvas width/height and re-creates the page
+ * - Save to Library: persists changes back to Python product JSON
  */
 
 import {
@@ -13,11 +13,18 @@ import {
   Eye,
   EyeOff,
   Info,
+  Monitor,
+  RotateCcw,
+  RotateCw,
   Save,
-  RotateCw
+  Smartphone
 } from "lucide-react";
 import { useState, type ReactElement } from "react";
+import { applyOrientationToProduct, createDocumentFromProduct } from "@/core/product/productDocument";
+import { createProjectEnvelope, withProjectMetadata } from "@/core";
 import { useProductStore } from "@/state/productStore";
+import { useDocumentStore } from "@/state/documentStore";
+import { useProjectLifecycleStore } from "@/state/projectLifecycleStore";
 import { saveProductDefinition } from "@/services/python_bridge/productBridge";
 import type { ProductGuideVisibility } from "@/types/product";
 
@@ -25,7 +32,12 @@ export function ProductDefinitionPanel(): ReactElement | null {
   const activeProduct = useProductStore((s) => s.activeProduct);
   const isDirty = useProductStore((s) => s.isDirty);
   const patchActiveProduct = useProductStore((s) => s.patchActiveProduct);
+  const setActiveProduct = useProductStore((s) => s.setActiveProduct);
   const markProductClean = useProductStore((s) => s.markProductClean);
+
+  const setDocument = useDocumentStore((s) => s.setDocument);
+  const currentDoc = useDocumentStore((s) => s.document);
+  const beginProject = useProjectLifecycleStore((s) => s.beginProject);
 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -33,23 +45,52 @@ export function ProductDefinitionPanel(): ReactElement | null {
 
   if (!activeProduct) return null;
 
-  const ctx = activeProduct.metadata;
-  const guideVisibility = (
-    (activeProduct as unknown as { _guideVisibility?: ProductGuideVisibility })
-      ._guideVisibility ?? {
-      bleed: true,
-      safeArea: true,
-      maskOverlay: true,
-      nonPrintableArea: true,
-      printZones: true
-    }
-  );
+  // ── Derived values ──────────────────────────────────────────────────────────
 
-  function toggleGuide(key: keyof ProductGuideVisibility): void {
-    // Guide visibility is stored in page.metadata.productContext — for simplicity
-    // we expose it via product store patch on a synthetic field.
-    // The ProductGuidesOverlay reads it from page.metadata.productContext directly.
-    // This panel is informational; the full guide toggle wiring is in Step 10.
+  const trimW = activeProduct.canvasSize.width;
+  const trimH = activeProduct.canvasSize.height;
+  const isPortrait = trimH >= trimW;
+  const trimWCm = (trimW / 10).toFixed(1);
+  const trimHCm = (trimH / 10).toFixed(1);
+  const bleedMm = activeProduct.bleed
+    ? ((activeProduct.bleed.top + activeProduct.bleed.right + activeProduct.bleed.bottom + activeProduct.bleed.left) / 4).toFixed(1)
+    : "2.0";
+
+  const guideVisibility: ProductGuideVisibility = {
+    bleed: true,
+    safeArea: true,
+    maskOverlay: true,
+    nonPrintableArea: true,
+    printZones: true
+  };
+
+  // ── Handlers ────────────────────────────────────────────────────────────────
+
+  function handleFlipOrientation(): void {
+    if (!activeProduct) return;
+    const targetOrientation = isPortrait ? "landscape" : "portrait";
+    const flipped = applyOrientationToProduct(activeProduct, targetOrientation);
+    // Update store (so the panel reflects the new size immediately)
+    setActiveProduct(flipped);
+    // Re-create the document with flipped dimensions, preserving doc-level data
+    const newDoc = createDocumentFromProduct(flipped);
+    if (currentDoc) {
+      setDocument({
+        ...newDoc,
+        id: currentDoc.id,
+        name: currentDoc.name,
+        createdAt: currentDoc.createdAt,
+        assets: currentDoc.assets
+      });
+    } else {
+      const envelope = beginProject(createProjectEnvelope({ document: newDoc, linkedGroups: [], batchJobs: [] }));
+      setDocument(withProjectMetadata(envelope.document, envelope.metadata));
+    }
+  }
+
+  function toggleGuide(_key: keyof ProductGuideVisibility): void {
+    // Full guide-toggle wiring: updates page.metadata.productContext
+    // (to be wired in a future iteration)
   }
 
   async function handleSave(): Promise<void> {
@@ -66,65 +107,75 @@ export function ProductDefinitionPanel(): ReactElement | null {
     }
   }
 
-  const trimW = (activeProduct.canvasSize.width / 10).toFixed(1);
-  const trimH = (activeProduct.canvasSize.height / 10).toFixed(1);
-  const bleedMm = activeProduct.bleed
-    ? ((activeProduct.bleed.top + activeProduct.bleed.right + activeProduct.bleed.bottom + activeProduct.bleed.left) / 4).toFixed(1)
-    : "2.0";
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <div className="product-def-panel">
-      {/* ── Header ── */}
+      {/* Header */}
       <div className="product-def-header">
         <Boxes size={14} />
         <span>{activeProduct.name}</span>
         {isDirty && <span className="product-def-dirty" title="שינויים לא נשמרו">●</span>}
       </div>
 
-      {/* ── Basic info ── */}
+      {/* ── Basic info + orientation ── */}
       <div className="product-def-section">
         <div className="product-def-row">
           <label>קטגוריה</label>
           <span>{activeProduct.category || "—"}</span>
         </div>
-        <div className="product-def-row">
-          <label>גודל (ס&quot;מ)</label>
-          <span>{trimW} × {trimH}</span>
+
+        {/* Orientation row with flip button */}
+        <div className="product-def-row product-def-orientation-row">
+          <label>אוריינטציה</label>
+          <div className="product-def-orientation-ctrl">
+            <span className="product-def-orientation-label">
+              {isPortrait ? (
+                <><Smartphone size={11} /> {trimWCm} × {trimHCm} ס&quot;מ</>
+              ) : (
+                <><Monitor size={11} /> {trimWCm} × {trimHCm} ס&quot;מ</>
+              )}
+            </span>
+            <button
+              className="icon-btn product-def-flip-btn"
+              onClick={handleFlipOrientation}
+              title={`הפוך ל${isPortrait ? "שוכב" : "עומד"}`}
+              type="button"
+            >
+              <RotateCcw size={13} />
+            </button>
+          </div>
         </div>
+
         <div className="product-def-row">
-          <label>Bleed (מ&quot;מ)</label>
+          <label>Bleed</label>
           <span>{bleedMm} מ&quot;מ</span>
         </div>
+
         {activeProduct.productionType && (
           <div className="product-def-row">
-            <label>סוג ייצור</label>
+            <label>ייצור</label>
             <span className="product-def-badge">{activeProduct.productionType}</span>
           </div>
         )}
         {activeProduct.recommendedDPI && (
           <div className="product-def-row">
-            <label>DPI מומלץ</label>
+            <label>DPI</label>
             <span>{activeProduct.recommendedDPI}</span>
-          </div>
-        )}
-        {(activeProduct.tags ?? []).length > 0 && (
-          <div className="product-def-row">
-            <label>תגיות</label>
-            <span>{(activeProduct.tags ?? []).join(", ")}</span>
           </div>
         )}
       </div>
 
-      {/* ── Guide visibility toggles ── */}
+      {/* ── Guide visibility ── */}
       <div className="product-def-section">
         <div className="product-def-section-title">מדריכים</div>
         {(
           [
-            { key: "bleed" as const, label: "Bleed" },
-            { key: "safeArea" as const, label: "Safe Area" },
-            { key: "printZones" as const, label: "אזורי הדפסה" },
-            { key: "maskOverlay" as const, label: "גבול מסיכה" },
-            { key: "nonPrintableArea" as const, label: "אפלת חוץ" }
+            { key: "bleed" as const,            label: "Bleed" },
+            { key: "safeArea" as const,          label: "Safe Area" },
+            { key: "printZones" as const,        label: "אזורי הדפסה" },
+            { key: "maskOverlay" as const,       label: "גבול מסיכה" },
+            { key: "nonPrintableArea" as const,  label: "אפלת חוץ" }
           ] as const
         ).map(({ key, label }) => (
           <div className="product-def-guide-row" key={key}>
@@ -141,7 +192,7 @@ export function ProductDefinitionPanel(): ReactElement | null {
         ))}
       </div>
 
-      {/* ── Production instructions (collapsible) ── */}
+      {/* ── Production instructions ── */}
       {activeProduct.instructions && (
         <div className="product-def-section">
           <button
@@ -191,7 +242,7 @@ export function ProductDefinitionPanel(): ReactElement | null {
         </div>
       )}
 
-      {/* ── Print zones list ── */}
+      {/* ── Print zones ── */}
       {(activeProduct.printZones ?? []).length > 0 && (
         <div className="product-def-section">
           <div className="product-def-section-title">אזורי הדפסה</div>

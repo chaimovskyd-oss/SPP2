@@ -20,6 +20,12 @@ import json
 import os
 import sys
 
+# Ensure UTF-8 stdout so Hebrew characters survive the Node.js IPC round-trip on Windows.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
 from product_library import pl_storage  # run via: python -m product_library.product_handler
 
 

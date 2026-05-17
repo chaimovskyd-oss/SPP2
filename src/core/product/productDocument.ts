@@ -39,6 +39,31 @@ function offsetRectByBleed(rect: Rect, bleed: Margins): Rect {
   };
 }
 
+/**
+ * Return a copy of the product with canvasSize (and safeArea) swapped to match
+ * the requested orientation.  No-op if the product is already in that orientation.
+ */
+export function applyOrientationToProduct(
+  product: ProductDefinition,
+  orientation: "portrait" | "landscape"
+): ProductDefinition {
+  const { width, height } = product.canvasSize;
+  const isPortrait = height >= width;
+  const wantPortrait = orientation === "portrait";
+  if (isPortrait === wantPortrait) return product;
+  // Flip width ↔ height. SafeArea x/y stay the same; w/h swap (symmetric margins).
+  return {
+    ...product,
+    canvasSize: { width: height, height: width },
+    safeArea: {
+      x: product.safeArea.x,
+      y: product.safeArea.y,
+      width: product.safeArea.height,
+      height: product.safeArea.width
+    }
+  };
+}
+
 export function createDocumentFromProduct(
   product: ProductDefinition,
   now = new Date().toISOString()

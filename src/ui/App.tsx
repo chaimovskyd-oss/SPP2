@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useState, type ReactElement } from "react";
 import { cleanupRecovery, createGridModeDocument, createMaskModeDocument, createPhotoPrintModeDocument, createProjectEnvelope, discardRecoveryRecord, getLatestRecoveryRecord, restoreRecoveryRecord, withProjectMetadata, type AutosaveRecord } from "@/core";
 import { createPage } from "@/core/document/factory";
-import { createDocumentFromProduct } from "@/core/product/productDocument";
+import { applyOrientationToProduct, createDocumentFromProduct } from "@/core/product/productDocument";
 import { useProductStore } from "@/state/productStore";
 import { ProductLibraryScreen } from "./productLibrary/ProductLibraryScreen";
 import type { ProductDefinition } from "@/types/product";
@@ -65,6 +65,8 @@ export function App(): ReactElement {
   const setProductCollageContext = useProductStore((state) => state.setCollageContext);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Orientation picker: set when product has orientation="any" and user must choose
+  const [orientationPicking, setOrientationPicking] = useState<ProductDefinition | null>(null);
   const [isCreatingPhotoPrint, setIsCreatingPhotoPrint] = useState(false);
   const [creatingProgress, setCreatingProgress] = useState("");
   const canShowEditor = useMemo(() => screen === "editor" && document !== null, [document, screen]);
@@ -102,7 +104,7 @@ export function App(): ReactElement {
     }
   }
 
-  function handleOpenProductStandard(product: ProductDefinition): void {
+  function openProductStandard(product: ProductDefinition): void {
     const doc = createDocumentFromProduct(product);
     setActiveProduct(product);
     setProductCollageContext(null);
@@ -111,6 +113,24 @@ export function App(): ReactElement {
     resetViewport();
     clearSelection();
     setScreen("editor");
+  }
+
+  function handleOpenProductStandard(product: ProductDefinition): void {
+    const orientation = String(product.metadata.orientation ?? "any");
+    if (orientation === "portrait") {
+      openProductStandard(applyOrientationToProduct(product, "portrait"));
+    } else if (orientation === "landscape") {
+      openProductStandard(applyOrientationToProduct(product, "landscape"));
+    } else {
+      // "any" or unspecified → let user choose
+      setOrientationPicking(product);
+    }
+  }
+
+  function handleOrientationPicked(orientation: "portrait" | "landscape"): void {
+    if (!orientationPicking) return;
+    setOrientationPicking(null);
+    openProductStandard(applyOrientationToProduct(orientationPicking, orientation));
   }
 
   function handleOpenProductCollage(product: ProductDefinition): void {
@@ -734,6 +754,60 @@ export function App(): ReactElement {
       )}
 
       <SettingsWindow open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+
+      {/* ── Orientation picker — shown when product orientation is "any" ── */}
+      {orientationPicking && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 9999,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            background: "rgba(0,0,0,0.55)"
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setOrientationPicking(null); }}
+        >
+          <div style={{
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--border)",
+            borderRadius: 12,
+            padding: "28px 32px",
+            maxWidth: 360,
+            width: "90%",
+            textAlign: "center",
+            boxShadow: "0 24px 64px -12px rgba(0,0,0,0.6)"
+          }}>
+            <div style={{ fontSize: 22, marginBottom: 6 }}>⬛</div>
+            <h3 style={{ margin: "0 0 6px", fontSize: 16, color: "var(--text-primary)" }}>
+              {orientationPicking.name}
+            </h3>
+            <p style={{ margin: "0 0 22px", fontSize: 13, color: "var(--text-secondary)" }}>
+              {(orientationPicking.canvasSize.width / 10).toFixed(1)} ×{" "}
+              {(orientationPicking.canvasSize.height / 10).toFixed(1)} ס&quot;מ — בחר אוריינטציה
+            </p>
+            <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+              <button
+                className="btn btn-ghost"
+                onClick={() => handleOrientationPicked("portrait")}
+                style={{ flexDirection: "column", gap: 6, height: "auto", padding: "12px 20px" }}
+                type="button"
+              >
+                <span style={{ fontSize: 22 }}>▭</span>
+                <span>עומד</span>
+                <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>Portrait</span>
+              </button>
+              <button
+                className="btn btn-ghost"
+                onClick={() => handleOrientationPicked("landscape")}
+                style={{ flexDirection: "column", gap: 6, height: "auto", padding: "12px 20px" }}
+                type="button"
+              >
+                <span style={{ fontSize: 22 }}>▬</span>
+                <span>שוכב</span>
+                <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>Landscape</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

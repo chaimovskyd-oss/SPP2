@@ -35,7 +35,9 @@ body {
   background: var(--bg-base);
   color: var(--text-primary);
   direction: rtl;
-  font-family: "DM Sans", "Helvetica Neue", Arial, sans-serif;
+  /* DM Sans (Latin) → Heebo (Hebrew, already loaded from Google Fonts) →
+     Segoe UI (Windows system, full Hebrew) → Arial → system fallback */
+  font-family: "DM Sans", "Heebo", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   font-size: 13px;
   line-height: 1.45;
   overflow: hidden;
@@ -4854,4 +4856,197 @@ input[type="range"]::-webkit-slider-runnable-track {
   white-space: nowrap;
   max-width: 100%;
 }
+
+/* ════════════════════════════════════════════════════════════
+   Product Definition Panel (right sidebar, product mode)
+   ════════════════════════════════════════════════════════════ */
+
+.product-def-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  font-size: 12.5px;
+}
+
+.product-def-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.product-def-dirty {
+  color: var(--warning);
+  font-size: 10px;
+  margin-right: auto;
+}
+
+.product-def-section {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.product-def-section-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+
+.product-def-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 22px;
+}
+
+.product-def-row label {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.product-def-row span {
+  font-size: 12px;
+  color: var(--text-primary);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.product-def-row.product-def-info {
+  color: var(--warning);
+  gap: 5px;
+  font-size: 11px;
+}
+
+/* Orientation row */
+.product-def-orientation-row {
+  align-items: center;
+}
+
+.product-def-orientation-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.product-def-orientation-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--text-primary);
+}
+
+.product-def-flip-btn {
+  color: var(--accent);
+  background: var(--accent-glow);
+  border-radius: var(--radius-input);
+}
+
+.product-def-flip-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.product-def-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10.5px;
+  font-weight: 700;
+  background: var(--accent-glow);
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.product-def-guide-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.product-def-guide-row span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.product-def-collapsible {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 2px 0;
+  width: 100%;
+}
+
+.product-def-collapsible:hover { color: var(--text-primary); }
+
+.product-def-instructions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0 2px;
+}
+
+.product-def-notes {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  background: var(--bg-base);
+  border-radius: 4px;
+  padding: 6px 8px;
+  line-height: 1.5;
+  margin-top: 4px;
+}
+
+.product-def-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 2px 0;
+}
+
+.product-def-zone-name { color: var(--text-primary); }
+.product-def-zone-side { color: var(--text-tertiary); font-size: 11px; }
+
+.product-def-footer {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.product-def-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--danger);
+}
+
+/* spin animation for save button */
+.spin { animation: spin-anim 0.8s linear infinite; }
+@keyframes spin-anim { to { transform: rotate(360deg); } }
 

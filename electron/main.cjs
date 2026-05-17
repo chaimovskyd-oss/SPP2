@@ -444,6 +444,10 @@ function runProductPython(args) {
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
+        // Force UTF-8 stdout so Hebrew characters survive the IPC round-trip.
+        PYTHONIOENCODING: "utf-8",
+        PYTHONUTF8: "1",
+        PYTHONLEGACYWINDOWSSTDIO: "0",
         PYTHONPATH: [appRoot, process.env.PYTHONPATH || ""].filter(Boolean).join(path.delimiter)
       }
     });
