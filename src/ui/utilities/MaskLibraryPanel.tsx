@@ -1,6 +1,35 @@
 import { Lock, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent, type ReactElement } from "react";
+import { pxToUnit, unitToPx } from "@/core/units/conversion";
 import { generateMaskThumbnail, useMaskLibraryStore, type MaskLibraryEntry } from "@/state/maskLibraryStore";
+import type { Unit } from "@/types/primitives";
+
+// Masks are defined at 300 DPI for default size purposes
+const LIBRARY_DPI = 300;
+
+const UNIT_LABELS: Record<Unit, string> = { cm: "ס\"מ", mm: "מ\"מ", inch: "אינץ'", px: "px" };
+
+function unitStep(u: Unit): number {
+  if (u === "cm") return 0.01;
+  if (u === "mm") return 0.1;
+  if (u === "inch") return 0.001;
+  return 1;
+}
+
+function unitDecimals(u: Unit): number {
+  if (u === "px") return 0;
+  if (u === "mm") return 1;
+  return 2;
+}
+
+function roundUnit(v: number, u: Unit): number {
+  const d = unitDecimals(u);
+  return Math.round(v * 10 ** d) / 10 ** d;
+}
+
+function pxToDisplay(px: number, u: Unit): number {
+  return roundUnit(pxToUnit(px, u, LIBRARY_DPI), u);
+}
 
 interface MaskLibraryPanelProps {
   onClose: () => void;
@@ -12,10 +41,12 @@ interface FormState {
   name: string;
   fileDataUrl: string;
   fileType: "svg" | "png";
-  naturalWidth: number;
-  naturalHeight: number;
-  defaultWidth: number;
-  defaultHeight: number;
+  naturalWidthPx: number;
+  naturalHeightPx: number;
+  // stored in px, displayed in sizeUnit
+  defaultWidthPx: number;
+  defaultHeightPx: number;
+  sizeUnit: Unit;
   thresholdEnabled: boolean;
   thresholdColor: "white" | "black";
   thresholdTolerance: number;
@@ -27,10 +58,11 @@ const EMPTY_FORM: FormState = {
   name: "",
   fileDataUrl: "",
   fileType: "png",
-  naturalWidth: 200,
-  naturalHeight: 200,
-  defaultWidth: 200,
-  defaultHeight: 200,
+  naturalWidthPx: 0,
+  naturalHeightPx: 0,
+  defaultWidthPx: Math.round(unitToPx(5, "cm", LIBRARY_DPI)),   // 5 cm default
+  defaultHeightPx: Math.round(unitToPx(5, "cm", LIBRARY_DPI)),
+  sizeUnit: "cm",
   thresholdEnabled: false,
   thresholdColor: "white",
   thresholdTolerance: 30,
@@ -50,7 +82,10 @@ export function MaskLibraryPanel({ onClose }: MaskLibraryPanelProps): ReactEleme
   const [previewLoading, setPreviewLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const aspectRatio = form.naturalHeight > 0 ? form.naturalWidth / form.naturalHeight : 1;
+  // Display values derived from px storage
+  const displayWidth = pxToDisplay(form.defaultWidthPx, form.sizeUnit);
+  const displayHeight = pxToDisplay(form.defaultHeightPx, form.sizeUnit);
+  const aspectRatio = form.naturalHeightPx > 0 ? form.naturalWidthPx / form.naturalHeightPx : 1;
 
   // Regenerate preview when threshold params change
   useEffect(() => {
@@ -78,17 +113,17 @@ export function MaskLibraryPanel({ onClose }: MaskLibraryPanelProps): ReactEleme
       const dataUrl = reader.result as string;
       const img = new window.Image();
       img.onload = () => {
-        const w = img.naturalWidth || 200;
-        const h = img.naturalHeight || 200;
+        const wPx = img.naturalWidth || Math.round(unitToPx(5, "cm", LIBRARY_DPI));
+        const hPx = img.naturalHeight || Math.round(unitToPx(5, "cm", LIBRARY_DPI));
         setForm((f) => ({
           ...f,
           name: f.name || file.name.replace(/\.[^.]+$/, ""),
           fileDataUrl: dataUrl,
           fileType: isSvg ? "svg" : "png",
-          naturalWidth: w,
-          naturalHeight: h,
-          defaultWidth: w,
-          defaultHeight: h,
+          naturalWidthPx: wPx,
+          naturalHeightPx: hPx,
+          defaultWidthPx: wPx,
+          defaultHeightPx: hPx,
           preview: isSvg ? dataUrl : f.preview
         }));
       };
@@ -98,40 +133,35 @@ export function MaskLibraryPanel({ onClose }: MaskLibraryPanelProps): ReactEleme
     e.target.value = "";
   }
 
-  function patchWidth(value: number): void {
-    const ratio = form.naturalHeight > 0 ? form.naturalWidth / form.naturalHeight : 1;
-    setForm((f) => ({ ...f, defaultWidth: value, defaultHeight: Math.round(value / ratio) }));
+  function changeUnit(newUnit: Unit): void {
+    setForm((f) => ({ ...f, sizeUnit: newUnit }));
+  }
+
+  function patchDisplayWidth(displayVal: number): void {
+    const wPx = Math.round(unitToPx(displayVal, form.sizeUnit, LIBRARY_DPI));
+    const hPx = aspectRatio > 0 ? Math.round(wPx / aspectRatio) : wPx;
+    setForm((f) => ({ ...f, defaultWidthPx: wPx, defaultHeightPx: hPx }));
   }
 
   function handleSave(): void {
     if (!form.fileDataUrl || !form.name.trim()) return;
     const thumbnail = form.preview || form.fileDataUrl;
+    const entry = {
+      name: form.name.trim(),
+      type: form.fileType,
+      fileDataUrl: form.fileDataUrl,
+      thumbnailDataUrl: thumbnail,
+      defaultWidth: form.defaultWidthPx,
+      defaultHeight: form.defaultHeightPx,
+      thresholdEnabled: form.thresholdEnabled,
+      thresholdColor: form.thresholdColor,
+      thresholdTolerance: form.thresholdTolerance,
+      thresholdFeather: form.thresholdFeather
+    };
     if (formMode === "add") {
-      addEntry({
-        name: form.name.trim(),
-        type: form.fileType,
-        fileDataUrl: form.fileDataUrl,
-        thumbnailDataUrl: thumbnail,
-        defaultWidth: form.defaultWidth,
-        defaultHeight: form.defaultHeight,
-        thresholdEnabled: form.thresholdEnabled,
-        thresholdColor: form.thresholdColor,
-        thresholdTolerance: form.thresholdTolerance,
-        thresholdFeather: form.thresholdFeather
-      });
+      addEntry(entry);
     } else if (formMode === "edit" && editingId !== null) {
-      updateEntry(editingId, {
-        name: form.name.trim(),
-        type: form.fileType,
-        fileDataUrl: form.fileDataUrl,
-        thumbnailDataUrl: thumbnail,
-        defaultWidth: form.defaultWidth,
-        defaultHeight: form.defaultHeight,
-        thresholdEnabled: form.thresholdEnabled,
-        thresholdColor: form.thresholdColor,
-        thresholdTolerance: form.thresholdTolerance,
-        thresholdFeather: form.thresholdFeather
-      });
+      updateEntry(editingId, entry);
     }
     setFormMode("closed");
     setEditingId(null);
@@ -145,10 +175,11 @@ export function MaskLibraryPanel({ onClose }: MaskLibraryPanelProps): ReactEleme
       name: entry.name,
       fileDataUrl: entry.fileDataUrl ?? "",
       fileType: (entry.type === "svg" ? "svg" : "png") as "svg" | "png",
-      naturalWidth: entry.defaultWidth,
-      naturalHeight: entry.defaultHeight,
-      defaultWidth: entry.defaultWidth,
-      defaultHeight: entry.defaultHeight,
+      naturalWidthPx: entry.defaultWidth,
+      naturalHeightPx: entry.defaultHeight,
+      defaultWidthPx: entry.defaultWidth,
+      defaultHeightPx: entry.defaultHeight,
+      sizeUnit: "cm",
       thresholdEnabled: entry.thresholdEnabled,
       thresholdColor: entry.thresholdColor,
       thresholdTolerance: entry.thresholdTolerance,
@@ -190,7 +221,9 @@ export function MaskLibraryPanel({ onClose }: MaskLibraryPanelProps): ReactEleme
                   )}
                 </div>
                 <div className="mask-lib-name">{entry.name}</div>
-                <div className="mask-lib-meta">{entry.defaultWidth}×{entry.defaultHeight}px</div>
+                <div className="mask-lib-meta">
+                  {pxToDisplay(entry.defaultWidth, "cm")} × {pxToDisplay(entry.defaultHeight, "cm")} ס"מ
+                </div>
                 <div className="mask-lib-actions">
                   <button className="icon-btn" title="עריכה" onClick={() => handleEdit(entry)} type="button">
                     <Pencil size={12} />
@@ -239,7 +272,9 @@ export function MaskLibraryPanel({ onClose }: MaskLibraryPanelProps): ReactEleme
                       <img src={form.preview || form.fileDataUrl} alt="preview" />
                     )}
                   </div>
-                  <span className="mask-lib-file-info">{form.fileType.toUpperCase()} • {form.naturalWidth}×{form.naturalHeight}</span>
+                  <span className="mask-lib-file-info">
+                    {form.fileType.toUpperCase()} • {form.naturalWidthPx}×{form.naturalHeightPx} px
+                  </span>
                 </div>
               )}
             </div>
@@ -256,10 +291,27 @@ export function MaskLibraryPanel({ onClose }: MaskLibraryPanelProps): ReactEleme
               />
             </div>
 
+            {/* Unit selector */}
+            <div className="mask-lib-field">
+              <span className="util-field-label">יחידות מידה</span>
+              <div className="seg">
+                {(["cm", "mm", "inch", "px"] as Unit[]).map((u) => (
+                  <button
+                    key={u}
+                    className={form.sizeUnit === u ? "on" : ""}
+                    onClick={() => changeUnit(u)}
+                    type="button"
+                  >
+                    {UNIT_LABELS[u]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Default size */}
             <div className="mask-lib-field">
               <span className="util-field-label">
-                גודל ברירת מחדל (px)
+                גודל ברירת מחדל ({UNIT_LABELS[form.sizeUnit]})
                 <Lock size={10} style={{ opacity: 0.5 }} />
                 <span style={{ fontSize: 10, opacity: 0.5 }}>פרופורציונלי</span>
               </span>
@@ -269,10 +321,10 @@ export function MaskLibraryPanel({ onClose }: MaskLibraryPanelProps): ReactEleme
                   <input
                     className="util-input"
                     type="number"
-                    min={10}
-                    max={3000}
-                    value={form.defaultWidth}
-                    onChange={(e) => patchWidth(Math.max(10, Number(e.target.value)))}
+                    min={unitStep(form.sizeUnit)}
+                    step={unitStep(form.sizeUnit)}
+                    value={displayWidth}
+                    onChange={(e) => patchDisplayWidth(Number(e.target.value))}
                   />
                 </label>
                 <span className="mask-lib-size-x">×</span>
@@ -281,16 +333,15 @@ export function MaskLibraryPanel({ onClose }: MaskLibraryPanelProps): ReactEleme
                   <input
                     className="util-input"
                     type="number"
-                    min={10}
-                    max={3000}
-                    value={form.defaultHeight}
+                    value={displayHeight}
                     readOnly
                     style={{ opacity: 0.6 }}
                   />
                 </label>
               </div>
               <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
-                יחס: {aspectRatio.toFixed(2)}:1
+                יחס: {aspectRatio > 0 ? aspectRatio.toFixed(2) : "1.00"}:1
+                {" · "}≈ {form.defaultWidthPx} × {form.defaultHeightPx} px
               </span>
             </div>
 

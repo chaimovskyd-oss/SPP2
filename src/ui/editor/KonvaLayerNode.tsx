@@ -608,17 +608,25 @@ function ImageNode({
     : undefined;
   const maskImage = useKonvaImage(maskAsset !== undefined ? resolveCanvasAssetPath(maskAsset) : undefined);
 
+  // Load library mask (from Shape picker → imageShape === "mask_lib")
+  const libMaskDataUrl = (layer.metadata["imageShape"] as string | undefined) === "mask_lib"
+    ? (layer.metadata["imageMaskDataUrl"] as string | undefined)
+    : undefined;
+  const libMaskImage = useKonvaImage(libMaskDataUrl);
+
   // Cache the masked group whenever image/mask changes so destination-in compositing works correctly
   useEffect(() => {
     const grp = maskedGroupRef.current;
     if (grp === null) return;
-    if (image !== null && maskImage !== null && layer.pixelMask !== undefined) {
+    const hasPixelMask = image !== null && maskImage !== null && layer.pixelMask !== undefined;
+    const hasLibMask = image !== null && libMaskImage !== null && libMaskDataUrl !== undefined;
+    if (hasPixelMask || hasLibMask) {
       grp.cache();
     } else {
       grp.clearCache();
     }
     grp.getLayer()?.batchDraw();
-  }, [image, maskImage, layer.pixelMask, layer.width, layer.height]);
+  }, [image, maskImage, libMaskImage, libMaskDataUrl, layer.pixelMask, layer.width, layer.height]);
 
   const fx = useMemo(
     () => resolveFrameEffects(layer.visualEffects),
@@ -723,7 +731,8 @@ function ImageNode({
   const flipH = (layer.metadata["flipH"] as boolean | undefined) ?? false;
   const flipV = (layer.metadata["flipV"] as boolean | undefined) ?? false;
 
-  const hasClip = imageShape !== "rect" || cornerRadius > 0;
+  const isLibMask = imageShape === "mask_lib";
+  const hasClip = !isLibMask && (imageShape !== "rect" || cornerRadius > 0);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const imageClipFunc = hasClip ? (ctx: any): void => {
@@ -763,6 +772,8 @@ function ImageNode({
   } : {};
 
   const hasMask = layer.pixelMask !== undefined && maskImage !== null;
+  const hasLibMask = isLibMask && libMaskImage !== null;
+  const activeCompositeMask = hasMask ? maskImage : hasLibMask ? libMaskImage : null;
 
   const konvaImageNode = (
     <KonvaImage
@@ -792,8 +803,8 @@ function ImageNode({
     <Group {...groupCommon} {...shadowProps}>
       {/* Inner group clips to shape/corner-radius */}
       <Group clipFunc={imageClipFunc}>
-        {hasMask ? (
-          // Wrap image + mask in a cached Group so destination-in is isolated
+        {activeCompositeMask !== null ? (
+          // Wrap image + mask in a cached Group so destination-in compositing is isolated
           <Group ref={maskedGroupRef}>
             {konvaImageNode}
             <KonvaImage
@@ -801,7 +812,7 @@ function ImageNode({
               y={0}
               width={layer.width}
               height={layer.height}
-              image={maskImage ?? undefined}
+              image={activeCompositeMask}
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               globalCompositeOperation={"destination-in" as any}
               listening={false}

@@ -1,10 +1,14 @@
-import { AlertTriangle, ArrowLeft, Clock, FileUp, ImageIcon, Search, Settings } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Clock, FileUp, ImageIcon, Layers, Link2, QrCode, Search, Settings } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type ReactElement } from "react";
 import { getProjectIndexEntries, type ProjectIndexEntry } from "@/core";
 import type { ModeType } from "@/types/template";
 import { homeModes } from "../data";
 import { ExternalAppsHub } from "./ExternalAppsHub";
 import { ExternalAppsSettings } from "../utilities/ExternalAppsSettings";
+import { MaskLibraryPanel } from "../utilities/MaskLibraryPanel";
+import { QRGeneratorPanel } from "../utilities/QRGeneratorPanel";
+import { QuickLinksPanel } from "../utilities/QuickLinksPanel";
+import { QuickSearchPanel } from "../utilities/QuickSearchPanel";
 
 interface HomeScreenProps {
   onOpenMode: (mode: ModeType) => void;
@@ -17,6 +21,7 @@ export function HomeScreen({ onOpenMode, onOpenProjectFile, onOpenSettings }: Ho
   const [projects, setProjects] = useState<ProjectIndexEntry[]>(() => getProjectIndexEntries());
   const [query, setQuery] = useState("");
   const [showExtSettings, setShowExtSettings] = useState(false);
+  const [utilPanel, setUtilPanel] = useState<"masks" | "qr" | "links" | "search" | null>(null);
 
   useEffect(() => {
     function refreshProjects(): void {
@@ -117,6 +122,32 @@ export function HomeScreen({ onOpenMode, onOpenProjectFile, onOpenSettings }: Ho
           })}
         </section>
 
+        {/* ── Utilities quick access ── */}
+        <section className="util-hub-section" aria-label="כלי עזר">
+          <div className="ext-hub-header">
+            <h2>כלי עזר</h2>
+          </div>
+          <div className="util-hub-grid">
+            {([
+              { id: "masks" as const, icon: Layers, label: "ספריית מסיכות", sub: "SVG & PNG" },
+              { id: "qr" as const, icon: QrCode, label: "קודים ו-QR", sub: "יצירת QR Code" },
+              { id: "links" as const, icon: Link2, label: "קישורים מהירים", sub: "Freepik, ChatGPT..." },
+              { id: "search" as const, icon: Search, label: "חיפוש מהיר", sub: "Google Images..." }
+            ]).map(({ id, icon: Icon, label, sub }) => (
+              <button
+                key={id}
+                className="util-hub-card"
+                onClick={() => setUtilPanel(id)}
+                type="button"
+              >
+                <span className="util-hub-card-icon"><Icon size={18} /></span>
+                <span className="util-hub-card-label">{label}</span>
+                <span className="util-hub-card-sub">{sub}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+
         <ExternalAppsHub onOpenSettings={onOpenSettings ?? (() => setShowExtSettings(true))} />
 
         <section className="section-title">
@@ -158,6 +189,26 @@ export function HomeScreen({ onOpenMode, onOpenProjectFile, onOpenSettings }: Ho
       {showExtSettings && (
         <div className="util-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowExtSettings(false); }}>
           <ExternalAppsSettings onClose={() => setShowExtSettings(false)} />
+        </div>
+      )}
+      {utilPanel === "masks" && (
+        <div className="util-overlay" onClick={(e) => { if (e.target === e.currentTarget) setUtilPanel(null); }}>
+          <MaskLibraryPanel onClose={() => setUtilPanel(null)} />
+        </div>
+      )}
+      {utilPanel === "qr" && (
+        <div className="util-overlay" onClick={(e) => { if (e.target === e.currentTarget) setUtilPanel(null); }}>
+          <QRGeneratorPanel onInsertToCanvas={() => setUtilPanel(null)} onClose={() => setUtilPanel(null)} />
+        </div>
+      )}
+      {utilPanel === "links" && (
+        <div className="util-overlay" onClick={(e) => { if (e.target === e.currentTarget) setUtilPanel(null); }}>
+          <QuickLinksPanel onClose={() => setUtilPanel(null)} />
+        </div>
+      )}
+      {utilPanel === "search" && (
+        <div className="util-overlay" onClick={(e) => { if (e.target === e.currentTarget) setUtilPanel(null); }}>
+          <QuickSearchPanel onClose={() => setUtilPanel(null)} />
         </div>
       )}
     </main>

@@ -105,7 +105,7 @@ import { importImageAsset, createMaskAsset } from "@/core/assets/assetManager";
 import { measureTextLayerSize } from "@/core/text/measurement";
 import { BUILTIN_TEXT_PRESETS } from "@/core/text/presets";
 import { useDocumentStore } from "@/state/documentStore";
-import { useMaskLibraryStore } from "@/state/maskLibraryStore";
+import { generateMaskThumbnail, useMaskLibraryStore } from "@/state/maskLibraryStore";
 import { useSelectionStore } from "@/state/selectionStore";
 import { useImageEditStore } from "@/state/imageEditStore";
 import { ImageEditToolbar } from "./ImageEditToolbar";
@@ -2752,21 +2752,23 @@ function ImageContextToolbar({
       {/* Shape (only for free ImageLayer) */}
       {!isFrame && (
         <ToolbarMenu label="Shape" title="צורת תמונה">
-          <div className="context-menu-actions shape-picker">
-            {(["rect", "rounded", "circle", "ellipse"] as const).map((s) => (
-              <button
-                className={`context-menu-button${imageShape === s ? " on" : ""}`}
-                key={s}
-                type="button"
-                onClick={() => patchMeta({ imageShape: s })}
-              >
-                {s === "rect" && <><Square size={13} /> מרובע</>}
-                {s === "rounded" && <><SquareRoundCorner size={13} /> עגול</>}
-                {s === "circle" && <><Circle size={13} /> עיגול</>}
-                {s === "ellipse" && <><Circle size={13} /> אליפסה</>}
-              </button>
-            ))}
-          </div>
+          <ShapePickerContent
+            imageShape={imageShape}
+            imageMaskLibId={(layer.metadata["imageMaskLibId"] as string | undefined) ?? null}
+            onBasicShape={(s) => patchMeta({ imageShape: s, imageMaskDataUrl: null, imageMaskLibId: null })}
+            onLibraryMask={async (entry) => {
+              const processed = await generateMaskThumbnail(
+                entry.fileDataUrl ?? "",
+                entry.type as "svg" | "png",
+                entry.thresholdEnabled,
+                entry.thresholdColor,
+                entry.thresholdTolerance,
+                entry.thresholdFeather,
+                1024
+              );
+              patchMeta({ imageShape: "mask_lib", imageMaskDataUrl: processed, imageMaskLibId: entry.id });
+            }}
+          />
         </ToolbarMenu>
       )}
 
@@ -2850,6 +2852,83 @@ function ToolbarButton({ active = false, danger = false, icon: Icon, label, onCl
 
 function ToolbarMenu({ children, label, title }: { children: ReactNode; label: string; title: string }): ReactElement {
   return <details className="context-menu"><summary title={title}>{label}</summary><div className="context-popover">{children}</div></details>;
+}
+
+function ShapePickerContent({
+  imageShape,
+  imageMaskLibId,
+  onBasicShape,
+  onLibraryMask
+}: {
+  imageShape: string;
+  imageMaskLibId: string | null;
+  onBasicShape: (shape: "rect" | "rounded" | "circle" | "ellipse") => void;
+  onLibraryMask: (entry: import("@/state/maskLibraryStore").MaskLibraryEntry) => Promise<void>;
+}): ReactElement {
+  const libraryEntries = useMaskLibraryStore((s) => s.entries);
+  const [applying, setApplying] = useState<string | null>(null);
+
+  async function handleLibraryMask(entry: import("@/state/maskLibraryStore").MaskLibraryEntry): Promise<void> {
+    setApplying(entry.id);
+    try {
+      await onLibraryMask(entry);
+    } finally {
+      setApplying(null);
+    }
+  }
+
+  return (
+    <>
+      <div className="context-menu-actions shape-picker">
+        {(["rect", "rounded", "circle", "ellipse"] as const).map((s) => (
+          <button
+            className={`context-menu-button${imageShape === s ? " on" : ""}`}
+            key={s}
+            type="button"
+            onClick={() => onBasicShape(s)}
+          >
+            {s === "rect" && <><Square size={13} /> מרובע</>}
+            {s === "rounded" && <><SquareRoundCorner size={13} /> עגול</>}
+            {s === "circle" && <><Circle size={13} /> עיגול</>}
+            {s === "ellipse" && <><Circle size={13} /> אליפסה</>}
+          </button>
+        ))}
+      </div>
+
+      {libraryEntries.length > 0 && (
+        <>
+          <div className="context-menu-section-label">ספריית מסיכות</div>
+          <div className="shape-lib-grid">
+            {libraryEntries.map((entry) => {
+              const isActive = imageShape === "mask_lib" && imageMaskLibId === entry.id;
+              const isLoading = applying === entry.id;
+              return (
+                <button
+                  key={entry.id}
+                  className={`shape-lib-item${isActive ? " on" : ""}`}
+                  title={entry.name}
+                  type="button"
+                  disabled={isLoading}
+                  onClick={() => void handleLibraryMask(entry)}
+                >
+                  <div className="shape-lib-thumb">
+                    {isLoading ? (
+                      <div className="shape-lib-spinner" />
+                    ) : entry.thumbnailDataUrl ? (
+                      <img src={entry.thumbnailDataUrl} alt={entry.name} />
+                    ) : (
+                      <div style={{ width: "100%", height: "100%", background: "var(--bg-surface)" }} />
+                    )}
+                  </div>
+                  <span className="shape-lib-name">{entry.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </>
+  );
 }
 
 function CompactRange({ label, min, max, step = 1, value, onChange }: { label: string; min: number; max: number; step?: number; value: number; onChange: (value: number) => void; }): ReactElement {

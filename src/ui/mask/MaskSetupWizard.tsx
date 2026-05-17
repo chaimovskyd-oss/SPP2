@@ -1,7 +1,7 @@
-import { ArrowLeft, ArrowRight, Check, Circle, Heart, Star, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, X } from "lucide-react";
 import { useState, type ReactElement } from "react";
 import { PAGE_PRESETS, pageSetupFromPreset } from "@/core/pageSetup/presets";
-import { unitToPx } from "@/core/units/conversion";
+import { pxToUnit, unitToPx } from "@/core/units/conversion";
 import { useMaskLibraryStore, type MaskLibraryEntry } from "@/state/maskLibraryStore";
 import type { MaskShape } from "@/types/mask";
 import type { PageSetup, Unit } from "@/types/primitives";
@@ -35,11 +35,39 @@ const MASK_PRESETS = [
   ...PAGE_PRESETS.filter((p) => p.category === "photo" || (p.category === "paper" && ["a4", "a3", "a5"].includes(p.id)))
 ];
 
+const UNIT_LABELS: Record<Unit, string> = { cm: "ס\"מ", mm: "מ\"מ", inch: "אינץ'", px: "px" };
+
+function unitStep(unit: Unit): number {
+  if (unit === "cm") return 0.1;
+  if (unit === "mm") return 1;
+  if (unit === "inch") return 0.05;
+  return 1;
+}
+
+function unitMin(unit: Unit): number {
+  if (unit === "cm") return 0.5;
+  if (unit === "mm") return 5;
+  if (unit === "inch") return 0.2;
+  return 10;
+}
+
+function unitMax(unit: Unit): number {
+  if (unit === "cm") return 50;
+  if (unit === "mm") return 500;
+  if (unit === "inch") return 20;
+  return 5000;
+}
+
+function round(value: number, unit: Unit): number {
+  if (unit === "px") return Math.round(value);
+  return Math.round(value * 100) / 100;
+}
+
 function marginsFromValue(v: number) {
   return { top: v, right: v, bottom: v, left: v };
 }
 
-function ShapeIcon({ shape, size = 40 }: { shape: MaskShape; size?: number }): ReactElement {
+export function ShapeIcon({ shape, size = 40 }: { shape: MaskShape; size?: number }): ReactElement {
   const s = size;
   if (shape === "circle") {
     return (
@@ -83,12 +111,15 @@ export function MaskSetupWizard({ onComplete, onCancel }: MaskSetupWizardProps):
   const [projectName, setProjectName] = useState("פרויקט מסיכה חדש");
   const [presetId, setPresetId] = useState("a4");
   const [orientation, setOrientation] = useState<"portrait" | "landscape">("portrait");
-  const [maskWidth, setMaskWidth] = useState(0);
-  const [maskHeight, setMaskHeight] = useState(0);
-  const [spacingX, setSpacingX] = useState(16);
-  const [spacingY, setSpacingY] = useState(16);
+
+  // Size in the current unit (default cm)
+  const [maskUnit, setMaskUnit] = useState<Unit>("cm");
+  const [maskWidth, setMaskWidth] = useState(5);   // 5 cm default
+  const [maskHeight, setMaskHeight] = useState(5); // 5 cm default
+  const [spacingW, setSpacingW] = useState(0.5);   // 0.5 cm default
 
   const selectedLibrary = libraryEntries.find((e) => e.id === selectedLibraryId) ?? null;
+  const selectedPreset = MASK_PRESETS.find((p) => p.id === presetId) ?? MASK_PRESETS[0];
 
   function selectBuiltIn(shape: MaskShape): void {
     setSelectedBuiltIn(shape);
@@ -100,23 +131,41 @@ export function MaskSetupWizard({ onComplete, onCancel }: MaskSetupWizardProps):
     setSelectedBuiltIn(null);
   }
 
+  function changeUnit(newUnit: Unit): void {
+    const dpi = selectedPreset.dpi;
+    // Convert current values (in maskUnit) to px, then to newUnit
+    const wPx = unitToPx(maskWidth, maskUnit, dpi);
+    const hPx = unitToPx(maskHeight, maskUnit, dpi);
+    const sPx = unitToPx(spacingW, maskUnit, dpi);
+    setMaskWidth(round(pxToUnit(wPx, newUnit, dpi), newUnit));
+    setMaskHeight(round(pxToUnit(hPx, newUnit, dpi), newUnit));
+    setSpacingW(round(pxToUnit(sPx, newUnit, dpi), newUnit));
+    setMaskUnit(newUnit);
+  }
+
   function goToStep2(): void {
-    // Pre-fill mask size from library entry or defaults
     if (selectedLibrary !== null) {
-      setMaskWidth(selectedLibrary.defaultWidth);
-      setMaskHeight(selectedLibrary.defaultHeight);
-    } else {
-      setMaskWidth(200);
-      setMaskHeight(200);
+      const dpi = selectedPreset.dpi;
+      const wPx = selectedLibrary.defaultWidth;
+      const hPx = selectedLibrary.defaultHeight;
+      setMaskWidth(round(pxToUnit(wPx, maskUnit, dpi), maskUnit));
+      setMaskHeight(round(pxToUnit(hPx, maskUnit, dpi), maskUnit));
     }
     setStep(2);
   }
 
+  function patchWidth(value: number): void {
+    const ratio = maskHeight > 0 && maskWidth > 0 ? maskWidth / maskHeight : 1;
+    setMaskWidth(value);
+    setMaskHeight(round(value / ratio, maskUnit));
+  }
+
   function handleComplete(): void {
-    const preset = MASK_PRESETS.find((p) => p.id === presetId) ?? MASK_PRESETS[0];
+    const preset = selectedPreset;
+    const dpi = preset.dpi;
     const setup = pageSetupFromPreset(preset, orientation);
-    const bleedPx = unitToPx(preset.bleed ?? 0, preset.units, preset.dpi);
-    const marginsPx = unitToPx(preset.margins ?? 0, preset.units, preset.dpi);
+    const bleedPx = unitToPx(preset.bleed ?? 0, preset.units, dpi);
+    const marginsPx = unitToPx(preset.margins ?? 0, preset.units, dpi);
 
     const finalSetup: PageSetup = {
       ...setup,
@@ -125,19 +174,26 @@ export function MaskSetupWizard({ onComplete, onCancel }: MaskSetupWizardProps):
       safeArea: marginsFromValue(marginsPx)
     };
 
+    const maskWidthPx = unitToPx(maskWidth, maskUnit, dpi);
+    const maskHeightPx = unitToPx(maskHeight, maskUnit, dpi);
+    const spacingPx = unitToPx(spacingW, maskUnit, dpi);
+
     onComplete({
       name: projectName.trim() || "פרויקט מסיכה",
       setup: finalSetup,
       builtInShape: selectedBuiltIn ?? undefined,
       libraryEntry: selectedLibrary ?? undefined,
-      maskWidth: Math.max(10, maskWidth),
-      maskHeight: Math.max(10, maskHeight),
-      spacingX,
-      spacingY
+      maskWidth: Math.max(10, Math.round(maskWidthPx)),
+      maskHeight: Math.max(10, Math.round(maskHeightPx)),
+      spacingX: Math.max(0, Math.round(spacingPx)),
+      spacingY: Math.max(0, Math.round(spacingPx))
     });
   }
 
   const hasSelection = selectedBuiltIn !== null || selectedLibraryId !== null;
+  const inputStep = unitStep(maskUnit);
+  const minVal = unitMin(maskUnit);
+  const maxVal = unitMax(maskUnit);
 
   return (
     <div className="mask-wizard-overlay">
@@ -283,64 +339,78 @@ export function MaskSetupWizard({ onComplete, onCancel }: MaskSetupWizardProps):
               </div>
             </div>
 
+            {/* Unit selector */}
+            <div className="wizard-field">
+              <label>יחידות מידה</label>
+              <div className="seg">
+                {(["cm", "mm", "inch", "px"] as Unit[]).map((u) => (
+                  <button
+                    key={u}
+                    className={maskUnit === u ? "on" : ""}
+                    onClick={() => changeUnit(u)}
+                    type="button"
+                  >
+                    {UNIT_LABELS[u]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Mask size */}
             <div className="wizard-field">
-              <label>גודל מסיכה (px) — פרופורציונלי</label>
+              <label>
+                גודל מסיכה ({UNIT_LABELS[maskUnit]}) — פרופורציונלי
+              </label>
               <div className="wizard-row">
+                <span style={{ fontSize: 12, color: "var(--text-muted)", minWidth: 36 }}>רוחב</span>
                 <input
                   className="util-input compact"
                   type="number"
-                  min={10}
-                  max={2000}
+                  min={minVal}
+                  max={maxVal}
+                  step={inputStep}
                   value={maskWidth}
-                  onChange={(e) => {
-                    const w = Number(e.target.value);
-                    const ratio = maskHeight > 0 && maskWidth > 0 ? maskWidth / maskHeight : 1;
-                    setMaskWidth(w);
-                    setMaskHeight(Math.round(w / ratio));
-                  }}
-                  placeholder="רוחב"
+                  onChange={(e) => patchWidth(Number(e.target.value))}
                 />
-                <span>×</span>
+                <span style={{ color: "var(--text-muted)" }}>×</span>
                 <input
                   className="util-input compact"
                   type="number"
-                  min={10}
-                  max={2000}
                   value={maskHeight}
                   readOnly
                   style={{ opacity: 0.6 }}
-                  placeholder="גובה"
                 />
+                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{UNIT_LABELS[maskUnit]}</span>
               </div>
+              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                ≈ {Math.round(unitToPx(maskWidth, maskUnit, selectedPreset.dpi))} × {Math.round(unitToPx(maskHeight, maskUnit, selectedPreset.dpi))} px
+              </span>
             </div>
 
             {/* Spacing */}
             <div className="wizard-field">
-              <label>רווח בין מסיכות (px)</label>
+              <label>רווח בין מסיכות ({UNIT_LABELS[maskUnit]})</label>
               <div className="wizard-row">
-                <span style={{ fontSize: 12, color: "var(--text-muted)", minWidth: 28 }}>X:</span>
                 <input
                   type="range"
                   min={0}
-                  max={200}
-                  value={spacingX}
-                  onChange={(e) => setSpacingX(Number(e.target.value))}
+                  max={maskUnit === "cm" ? 5 : maskUnit === "mm" ? 50 : maskUnit === "inch" ? 2 : 200}
+                  step={inputStep}
+                  value={spacingW}
+                  onChange={(e) => setSpacingW(Number(e.target.value))}
                   style={{ flex: 1, accentColor: "var(--accent)" }}
                 />
-                <span style={{ fontSize: 12, minWidth: 28 }}>{spacingX}</span>
-              </div>
-              <div className="wizard-row">
-                <span style={{ fontSize: 12, color: "var(--text-muted)", minWidth: 28 }}>Y:</span>
                 <input
-                  type="range"
+                  className="util-input compact"
+                  type="number"
                   min={0}
-                  max={200}
-                  value={spacingY}
-                  onChange={(e) => setSpacingY(Number(e.target.value))}
-                  style={{ flex: 1, accentColor: "var(--accent)" }}
+                  max={maskUnit === "cm" ? 5 : maskUnit === "mm" ? 50 : maskUnit === "inch" ? 2 : 200}
+                  step={inputStep}
+                  value={spacingW}
+                  onChange={(e) => setSpacingW(Number(e.target.value))}
+                  style={{ width: 64 }}
                 />
-                <span style={{ fontSize: 12, minWidth: 28 }}>{spacingY}</span>
+                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{UNIT_LABELS[maskUnit]}</span>
               </div>
             </div>
 
