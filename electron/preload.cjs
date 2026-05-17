@@ -49,5 +49,43 @@ contextBridge.exposeInMainWorld("spp", {
     const handler = (_event, watchId, filePath) => callback(watchId, filePath);
     ipcRenderer.on("spp:file-changed", handler);
     return () => ipcRenderer.removeListener("spp:file-changed", handler);
-  }
+  },
+
+  /** Product Library — persistent read/write via Python backend. */
+  productLibrary: {
+    /** Load all products from the library JSON. Returns PythonProduct[]. */
+    loadAll: async () => {
+      const res = await ipcRenderer.invoke("spp:product-library:get-all");
+      if (!res.success) throw new Error(res.error || "Failed to load products");
+      return res.products;
+    },
+
+    /** Upsert a product into the library JSON. */
+    saveOne: async (product) => {
+      const res = await ipcRenderer.invoke("spp:product-library:save-one", product);
+      if (!res.success) throw new Error(res.error || "Failed to save product");
+    },
+
+    /**
+     * Upload a mask (base64-encoded) to the product library.
+     * Returns the relative path of the saved mask file.
+     */
+    uploadMask: async (productId, maskDataBase64, fileName) => {
+      const res = await ipcRenderer.invoke(
+        "spp:product-library:upload-mask",
+        productId,
+        maskDataBase64,
+        fileName
+      );
+      if (!res.success) throw new Error(res.error || "Failed to upload mask");
+      return res.maskPath;
+    },
+
+    /** Reload a single product by ID. Returns PythonProduct or null. */
+    reloadOne: async (productId) => {
+      const res = await ipcRenderer.invoke("spp:product-library:reload-one", productId);
+      if (!res.success) throw new Error(res.error || "Failed to reload product");
+      return res.product; // null when not found
+    },
+  },
 });

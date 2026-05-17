@@ -401,6 +401,84 @@ ipcMain.handle("spp:unwatch-file", (_event, watchId: string): void => {
   fileWatchers.delete(watchId);
 });
 
+// ─── Product Library IPC ─────────────────────────────────────────────────────
+
+function getProductLibraryDir(): string {
+  return path.join(getAppRoot(), "product_library");
+}
+
+function runProductPython(args: string[]): Promise<{ success: boolean; stdout: string; stderr: string; error?: string }> {
+  const appRoot = getAppRoot();
+  const handlerModule = "product_library.product_handler";
+  const handlerFile = path.join(appRoot, "product_library", "product_handler.py");
+
+  if (!fs.existsSync(handlerFile)) {
+    return Promise.resolve({ success: false, stdout: "", stderr: "", error: `Product handler not found: ${handlerFile}` });
+  }
+
+  return new Promise((resolve) => {
+    const proc = spawn(getPythonCommand(), ["-m", handlerModule, ...args], {
+      cwd: appRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        PYTHONPATH: [appRoot, process.env.PYTHONPATH || ""].filter(Boolean).join(path.delimiter)
+      }
+    });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+    proc.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); console.warn("[product-lib]", chunk.toString().trim()); });
+    proc.on("close", (code) => {
+      resolve({ success: code === 0, stdout: stdout.trim(), stderr: stderr.trim(), error: code === 0 ? undefined : (stderr.trim() || `Python exited with code ${code}`) });
+    });
+    proc.on("error", (err: Error) => resolve({ success: false, stdout: "", stderr: "", error: err.message }));
+  });
+}
+
+ipcMain.handle("spp:product-library:get-all", async () => {
+  const result = await runProductPython(["--action", "get-all"]);
+  if (!result.success) return { success: false, error: result.error };
+  try { return { success: true, products: JSON.parse(result.stdout) }; }
+  catch (err) { return { success: false, error: `Invalid JSON: ${(err as Error).message}` }; }
+});
+
+ipcMain.handle("spp:product-library:save-one", async (_event, product: unknown) => {
+  const tmpPath = path.join(os.tmpdir(), `spp2_product_save_${Date.now()}.json`);
+  try {
+    fs.writeFileSync(tmpPath, JSON.stringify(product), "utf-8");
+    const result = await runProductPython(["--action", "save-one", "--input", tmpPath]);
+    return result.success ? { success: true } : { success: false, error: result.error };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+  }
+});
+
+ipcMain.handle("spp:product-library:upload-mask", async (_event, productId: string, maskDataBase64: string, fileName: string) => {
+  const safeExt = (path.extname(String(fileName || ".png")).toLowerCase() || ".png").replace(/[^.a-z0-9]/g, "").slice(0, 5) || ".png";
+  const tmpPath = path.join(os.tmpdir(), `spp2_mask_${Date.now()}${safeExt}`);
+  try {
+    fs.writeFileSync(tmpPath, Buffer.from(String(maskDataBase64), "base64"));
+    const result = await runProductPython(["--action", "upload-mask", "--product-id", String(productId), "--mask-file", tmpPath, "--file-name", String(fileName || "mask.png")]);
+    if (!result.success) return { success: false, error: result.error };
+    try { const output = JSON.parse(result.stdout); return { success: true, maskPath: String(output.path || "") }; }
+    catch { return { success: false, error: "Invalid response from mask handler" }; }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+  }
+});
+
+ipcMain.handle("spp:product-library:reload-one", async (_event, productId: string) => {
+  const result = await runProductPython(["--action", "reload-one", "--product-id", String(productId)]);
+  if (!result.success) return { success: false, error: result.error };
+  try { return { success: true, product: JSON.parse(result.stdout) }; }
+  catch (err) { return { success: false, error: `Invalid JSON: ${(err as Error).message}` }; }
+});
+
 // ─── Main window ──────────────────────────────────────────────────────────────
 
 async function createWindow(): Promise<void> {

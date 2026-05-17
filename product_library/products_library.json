@@ -22,7 +22,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/8b081b433_166882.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "698367c5eec16f1c3ae7bd08",
@@ -47,7 +54,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/74c7c1038_166876.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "6983671a3e71e24409d84e91",
@@ -70,7 +84,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/81f0cc9e8_166873.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "698365dda2b99d8f36de1fe9",
@@ -93,7 +114,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/c2d2bbc24_166868.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "6977d12b64950204b5546793",
@@ -117,7 +145,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/6d9df073a_164983.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "6977d0656b6d7ed6ec08ced6",
@@ -141,7 +176,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/c28330245_164979.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "6977cffe695bd8efe68e98be",
@@ -165,7 +207,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/d0cde2835_164974.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "6977cf1905f0379a9c53b3cb",
@@ -190,7 +239,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/dc58e3b93_164973.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "695ce3a1b59297ae2a5db54d",
@@ -215,7 +271,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/891572856_SKM_C30826010610510212.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "693c6154909ae207636f0fe6",
@@ -244,7 +307,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/7fe290afc_158235.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "6920e3e47e0b189c535206a6",
@@ -269,7 +339,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/4d20a2a7d_155355.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "691b835a8a03c16d772c33bd",
@@ -294,7 +371,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/ebb58fb13_154994.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "691466d48a435a5ed51b40ff",
@@ -319,7 +403,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/7061298af_bf36cf42-7bb9-4c78-a69f-447f72ca01f112W.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "69133fc7abf1fffdd76b192d",
@@ -336,7 +427,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/ff47b6d4f_.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "691324df074c7ae897cbb966",
@@ -353,7 +451,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/81eb9ebf3_1.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "691324ac2b5280b08bcb1780",
@@ -370,7 +475,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/eefcd2bfd_1.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "69124ed97cf00a50ab1e0ebb",
@@ -387,7 +499,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/3da79d54c_12.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "6911b1a00d9abf71a9b8f8b3",
@@ -404,7 +523,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/de16acf0e_15-15.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "6911ad0d30b3b3a987f40903",
@@ -421,7 +547,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/340b86ea9_.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "6911991a26fe0b4855dbea78",
@@ -438,7 +571,14 @@
     "image_url": "",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "6910d0745c95a540c9cdf42a",
@@ -463,7 +603,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/0f25b1347_153524.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "6910c88e92ce24cb4056e222",
@@ -485,7 +632,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/122ac3284_.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "6910c734e05fe47c756dccb7",
@@ -507,7 +661,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/1fd364412_97.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "6910c69b7d07747326f3cdfa",
@@ -529,7 +690,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/4807fce26_18.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "6910c19b00ccf0debc85e4bc",
@@ -552,7 +720,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/16f94c9fa_sinar3.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "6910b4b42d44470a1ef253d2",
@@ -576,7 +751,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/bbd482edf_153503.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "690ce4479b378896a86dd49f",
@@ -602,7 +784,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/c14e7cb8e_152374.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "690a5b45554b5c97145070b9",
@@ -626,7 +815,14 @@
     "image_url": "https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/68d6c74511c551c2152b265d/627fe692b_1625282.jpg",
     "mockup_image_url": "https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/68d6c74511c551c2152b265d/627fe692b_1625282.jpg",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "690a2e7b598ed9547fa9637e",
@@ -649,7 +845,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/1b62f2fd8_152367.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "690738b24cf0ed42686cd1a8",
@@ -678,7 +881,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/fd98af6a1_152370.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "69036c9ec9fc00762da607f0",
@@ -697,7 +907,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/cc467593b_15-10.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68ff9b7f2ba4d97162b0ac74",
@@ -726,7 +943,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/0308e28cf_148677.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68fe0d870fc0830549f54b2e",
@@ -752,7 +976,14 @@
     "image_url": "",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68fdfb91b5008f20ab6323ee",
@@ -776,7 +1007,14 @@
     "image_url": "",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f94f6e7bfe58d66e529251",
@@ -804,7 +1042,14 @@
     "image_url": "",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f94f2c40283c66132dc571",
@@ -832,7 +1077,14 @@
     "image_url": "",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f89c0e5fd121ad9370fc7a",
@@ -856,7 +1108,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/c83fc2e08_WhatsAppImage2025-10-22at111705.jpeg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f89b78a6954dba5c49bd6d",
@@ -879,7 +1138,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/5920a9d20_WhatsAppImage2025-10-22at1117092.jpeg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f89b3c923b45bc218ed307",
@@ -908,7 +1174,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/f48084689_WhatsAppImage2025-10-22at1117093.jpeg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f89ad261b563ee2c4cdbb0",
@@ -933,7 +1206,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/1c73cdab1_WhatsAppImage2025-10-22at1117082.jpeg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f89a94aff064463f4b0f70",
@@ -956,7 +1236,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/b897190cb_WhatsAppImage2025-10-22at1117091.jpeg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f88618228234feb864e75d",
@@ -979,7 +1266,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/6a0b75cbe_WhatsAppImage2025-10-22at1117101.jpeg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f8739c3b7e4a521c0ab0b4",
@@ -1006,7 +1300,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/1ae0b6f78_147215.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f87331b89f989497d27802",
@@ -1028,7 +1329,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/fcb070e6b_147214.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f872ce49224d42a83080dc",
@@ -1052,7 +1360,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/65f6e7b74_147213.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f4eda3001f32018cd329d2",
@@ -1078,7 +1393,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/013411d35_148062.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f4cf850e3d3a9398bc2629",
@@ -1103,7 +1425,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/ba3276165_148063.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f4cf4b237cf9c48cce1b6b",
@@ -1124,7 +1453,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/64045724c_147285.jpg",
     "mockup_image_url": "",
     "mask_path": "masks\\68f4cf4b237cf9c48cce1b6b.svg",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f4ce6d5a46c628379bfa9d",
@@ -1149,7 +1485,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/0de728376_.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f4a3a3100bc521e7e81108",
@@ -1174,7 +1517,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/68f849978_146895.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f3f2959f28ffc168aa9a4d",
@@ -1201,7 +1551,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/f883531be_146849.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f3df5963c6f1e415143cb2",
@@ -1225,7 +1582,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/c22c1bfde_146838.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f3de9c78d62dbb81b9dd8c",
@@ -1254,7 +1618,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/ee8c52d6e_146833.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f3de70747474a925fb674a",
@@ -1283,7 +1654,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/a4f09f8c8_146834.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f3de3537a7b8050db87cdc",
@@ -1311,7 +1689,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/e4dcf97f9_146835.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f3ddfd24d434da187c410d",
@@ -1333,7 +1718,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/bab27c543_146837.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f3dbcebfb4bb86626fffb5",
@@ -1359,7 +1751,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/b11b05b20_146824.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68f0993464cbac4acb686c56",
@@ -1381,7 +1780,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/b11e2b4e4_146820.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68ebc2934070fb8b351669a5",
@@ -1407,7 +1813,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/318e30db1_146830.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68e77db85cd3cf40b0c1f52c",
@@ -1432,7 +1845,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/f4f4a5475_146841.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68e777f2f8141941b32cfec9",
@@ -1457,7 +1877,14 @@
     "image_url": "",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68e767374a8205cf86b43882",
@@ -1481,7 +1908,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/38f395ee9_146829.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d81b28b97b4efa56639af9",
@@ -1500,7 +1934,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/ba701c714_143123.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc5c",
@@ -1527,7 +1968,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/4585adec1_IMG_20241105_151000.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc34",
@@ -1553,7 +2001,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/c663722e2_146831.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc37",
@@ -1579,7 +2034,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/970ba8edf_13179.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc4f",
@@ -1600,7 +2062,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/911f95a74_142964.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc40",
@@ -1627,7 +2096,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/15f85dced_146843.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc35",
@@ -1649,7 +2125,14 @@
     "image_url": "",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc36",
@@ -1675,7 +2158,14 @@
     "image_url": "",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc31",
@@ -1701,7 +2191,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/876385945_WhatsAppImage2025-10-22at1117081.jpeg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc50",
@@ -1720,7 +2217,14 @@
     "image_url": "",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc49",
@@ -1742,7 +2246,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/598643f33_146836.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc62",
@@ -1769,7 +2280,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/2fe068cb9_143119.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc4e",
@@ -1793,7 +2311,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/feddbb9dd_146832.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc46",
@@ -1819,7 +2344,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/4383dcc51_WhatsAppImage2025-10-22at111710.jpeg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc3a",
@@ -1844,7 +2376,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/1eba52f71_148061.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc41",
@@ -1869,7 +2408,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/70ee6748d_146839.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc54",
@@ -1896,7 +2442,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/8c9c4ee42_143118.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc5f",
@@ -1920,7 +2473,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/c6939666a_143017.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc3c",
@@ -1946,7 +2506,14 @@
     "image_url": "",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc59",
@@ -1971,7 +2538,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/58bb71ce4_143017.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc3e",
@@ -1998,7 +2572,14 @@
     "image_url": "",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": false
+    "active": false,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc32",
@@ -2024,7 +2605,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/76fa1e349_WhatsAppImage2025-10-22at111707.jpeg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc45",
@@ -2052,7 +2640,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/c3a3de734_WhatsAppImage2025-10-22at1117102.jpeg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc61",
@@ -2073,7 +2668,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/8a53b431b_146826.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc4c",
@@ -2095,7 +2697,14 @@
     "image_url": "",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc48",
@@ -2117,7 +2726,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/1dd8fade1_146803.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc52",
@@ -2142,7 +2758,14 @@
     "image_url": "",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc51",
@@ -2167,7 +2790,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/7152bc443_143117.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc5a",
@@ -2189,7 +2819,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/506196886_143033.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc3f",
@@ -2214,7 +2851,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/583b1c7d7_146823.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc5e",
@@ -2235,7 +2879,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/7bf63b10f_146828.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc4d",
@@ -2259,7 +2910,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/45185a4bb_147287.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc56",
@@ -2284,7 +2942,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/48b93c236_143033.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc4b",
@@ -2308,7 +2973,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/62950094a_147286.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc57",
@@ -2333,7 +3005,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/511ccd6a6_143033.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc58",
@@ -2358,7 +3037,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/4c4380d9a_143017.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc39",
@@ -2377,7 +3063,14 @@
     "image_url": "",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc42",
@@ -2403,7 +3096,14 @@
     "image_url": "",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc38",
@@ -2429,7 +3129,14 @@
     "image_url": "",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc30",
@@ -2453,7 +3160,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/2b0308743_.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc55",
@@ -2478,7 +3192,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/2263f136a_143033.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d79f35d4496d149539cc60",
@@ -2501,7 +3222,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/d5e0d77dc_146825.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d6ee4c67abe31bf2cdca16",
@@ -2528,7 +3256,14 @@
     "image_url": "",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d6ee4c3544a4439f0bbd21",
@@ -2555,7 +3290,14 @@
     "image_url": "",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d6ee4b1748b225e6edc8c1",
@@ -2582,7 +3324,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/8fdbac60a_15-20.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d6ee4b3cee746183fa79f7",
@@ -2609,7 +3358,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/eb09f15bf_146828.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d6ed2542ad9d6fd29fa1ba",
@@ -2636,7 +3392,14 @@
     "image_url": "",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d6eb2784a884a53fe28e22",
@@ -2659,7 +3422,14 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/32fafd968_146821.jpg",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   },
   {
     "id": "68d6d981bb0dbbfdfc5abdd4",
@@ -2684,6 +3454,13 @@
     "image_url": "https://base44.app/api/apps/68d6c74511c551c2152b265d/files/public/68d6c74511c551c2152b265d/f09da08cb_143115.png",
     "mockup_image_url": "",
     "mask_path": "",
-    "active": true
+    "active": true,
+    "bleed_mm": 2.0,
+    "safe_area": null,
+    "print_zones": [],
+    "production_type": null,
+    "instructions": null,
+    "recommended_dpi": null,
+    "tags": []
   }
 ]

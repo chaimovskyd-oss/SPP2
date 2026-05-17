@@ -1,7 +1,7 @@
 """Product data model for SPP Product Library integration."""
 
 from dataclasses import dataclass, asdict, field
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 
 @dataclass
@@ -21,15 +21,25 @@ class Product:
     mockup_image_url: str = ""
     mask_path: str = ""
     active: bool = True
+    # Phase 7 — product canvas & print metadata
+    bleed_mm: float = 2.0
+    safe_area: Optional[Dict[str, Any]] = None        # {top, right, bottom, left} in mm
+    print_zones: List[Dict[str, Any]] = field(default_factory=list)
+    production_type: Optional[str] = None             # 'photo'|'sublimation'|'laser'|…
+    instructions: Optional[Dict[str, Any]] = None     # heat-press settings, notes, …
+    recommended_dpi: Optional[int] = None
+    tags: List[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Product":
         allowed = {f for f in cls.__dataclass_fields__}
         clean = {k: v for k, v in data.items() if k in allowed}
-        for list_field in ("audience", "mounting_options"):
+        for list_field in ("audience", "mounting_options", "tags"):
             val = clean.get(list_field)
             if val is not None and not isinstance(val, list):
                 clean[list_field] = [str(val)] if val else []
+        if "print_zones" in clean and not isinstance(clean.get("print_zones"), list):
+            clean["print_zones"] = []
         return cls(**clean)
 
     def to_dict(self) -> Dict[str, Any]:

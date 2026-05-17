@@ -1,9 +1,10 @@
-import { useRef, useState, type ChangeEvent, type DragEvent, type ReactElement } from "react";
-import { ArrowLeft, ArrowRight, Check, UploadCloud, X } from "lucide-react";
+import { useEffect, useRef, useState, type ChangeEvent, type DragEvent, type ReactElement } from "react";
+import { ArrowLeft, ArrowRight, Boxes, Check, UploadCloud, X } from "lucide-react";
 import { PAGE_PRESETS, pageSetupFromPreset } from "@/core/pageSetup/presets";
 import { unitToPx } from "@/core/units/conversion";
 import { generateCollageSuggestions } from "@/core/collage/collageModeEngine";
 import { CollageMiniPreview } from "./CollageMiniPreview";
+import { useProductStore } from "@/state/productStore";
 import type { CollageComplexityMode, CollageLayoutFamily, CollageSlot, ScoredLayoutSuggestion } from "@/types/collage";
 import type { PageSetup, Unit } from "@/types/primitives";
 import type { ProjectCustomerInfo } from "@/types/project";
@@ -39,6 +40,11 @@ const COLLAGE_PRESETS = [
 ];
 
 export function CollageSetupWizard({ onComplete, onCancel }: CollageSetupWizardProps): ReactElement {
+  // Product collage context — if set, we skip the page-size step
+  const productCollageContext = useProductStore((s) => s.collageContext);
+  const clearProductCollageContext = useProductStore((s) => s.setCollageContext);
+  const isProductCollage = productCollageContext !== null;
+
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
 
   // Step 1 — images
@@ -51,17 +57,38 @@ export function CollageSetupWizard({ onComplete, onCancel }: CollageSetupWizardP
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
 
-  // Step 2 — page size
-  const [presetId, setPresetId] = useState("a4");
+  // Step 2 — page size (skipped in product collage mode)
+  const [presetId, setPresetId] = useState("custom");
   const [orientation, setOrientation] = useState<"portrait" | "landscape">("portrait");
   const [customW, setCustomW] = useState("20");
   const [customH, setCustomH] = useState("20");
-  const [customUnit, setCustomUnit] = useState<Unit>("cm");
+  const [customUnit, setCustomUnit] = useState<Unit>("mm");
   const [customDpi, setCustomDpi] = useState(300);
 
   // Step 3 — settings
   const [spacingMm, setSpacingMm] = useState(3);
   const [marginMm, setMarginMm] = useState(4);
+
+  // Pre-fill canvas size from product when in product collage mode
+  useEffect(() => {
+    if (!productCollageContext) return;
+    const p = productCollageContext.product;
+    const bleed = p.bleed ?? { top: 2, right: 2, bottom: 2, left: 2 };
+    // Canvas = trim + bleed (same logic as createDocumentFromProduct)
+    const canvasWMm = p.canvasSize.width + bleed.left + bleed.right;
+    const canvasHMm = p.canvasSize.height + bleed.top + bleed.bottom;
+    setPresetId("custom");
+    setCustomUnit("mm");
+    setCustomW(canvasWMm.toFixed(2));
+    setCustomH(canvasHMm.toFixed(2));
+    setCustomDpi(p.recommendedDPI ?? p.printSpec.dpi ?? 300);
+    // Masked products default to zero spacing/margin
+    if ((p.productMasks ?? []).length > 0) {
+      setSpacingMm(0);
+      setMarginMm(0);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [complexityMode, setComplexityMode] = useState<CollageComplexityMode>("simple");
 
   // Step 4 — layout pick
@@ -152,6 +179,7 @@ export function CollageSetupWizard({ onComplete, onCancel }: CollageSetupWizardP
       phoneNumber: customerPhone || "",
       customerEmail: customerEmail || undefined
     };
+    clearProductCollageContext(null);
     onComplete({
       images,
       pageSetup: currentPageSetup(),
@@ -173,10 +201,22 @@ export function CollageSetupWizard({ onComplete, onCancel }: CollageSetupWizardP
       <div className="collage-wizard">
         <button type="button" className="collage-wizard-close" onClick={onCancel}><X size={20} /></button>
 
+        {/* Product collage context banner */}
+        {isProductCollage && productCollageContext && (
+          <div className="wizard-product-banner">
+            <Boxes size={13} />
+            <span>קולאז&apos; מוצר: <strong>{productCollageContext.product.name}</strong></span>
+            <span className="wizard-product-size">
+              {(productCollageContext.product.canvasSize.width / 10).toFixed(1)} ×{" "}
+              {(productCollageContext.product.canvasSize.height / 10).toFixed(1)} ס&quot;מ
+            </span>
+          </div>
+        )}
+
         {/* Progress dots */}
         <div className="wizard-steps">
           {[1, 2, 3, 4].map((s) => (
-            <div key={s} className={`wizard-step-dot${step >= s ? " active" : ""}${step > s ? " done" : ""}`}>
+            <div key={s} className={`wizard-step-dot${step >= s ? " active" : ""}${step > s ? " done" : ""}${isProductCollage && s === 2 ? " skipped" : ""}`}>
               {step > s ? <Check size={10} /> : s}
             </div>
           ))}
@@ -234,7 +274,12 @@ export function CollageSetupWizard({ onComplete, onCancel }: CollageSetupWizardP
 
             <div className="wizard-footer">
               <button type="button" className="btn btn-ghost" onClick={onCancel}>ביטול</button>
-              <button type="button" className="btn btn-primary" disabled={images.length === 0} onClick={() => setStep(2)}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={images.length === 0}
+                onClick={() => setStep(isProductCollage ? 3 : 2)}
+              >
                 המשך <ArrowRight size={16} />
               </button>
             </div>

@@ -21,6 +21,13 @@ interface SppElectronAPI {
   openCacheFolder?: () => Promise<void>;
   clearCache?: () => Promise<{ freed: number }>;
   pickFolder?: () => Promise<{ path?: string }>;
+  // Product library IPC — implemented alongside Python product handlers
+  productLibrary?: {
+    loadAll(): Promise<import("./services/python_bridge/productBridge").PythonProduct[]>;
+    saveOne(product: import("./services/python_bridge/productBridge").PythonProduct): Promise<void>;
+    uploadMask(productId: string, maskDataBase64: string, fileName: string): Promise<string>;
+    reloadOne(productId: string): Promise<import("./services/python_bridge/productBridge").PythonProduct | null>;
+  };
 }
 
 declare global {

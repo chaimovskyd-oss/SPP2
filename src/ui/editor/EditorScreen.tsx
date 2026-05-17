@@ -4,6 +4,7 @@ import {
   AlignLeft,
   AlignRight,
   Bold,
+  Boxes,
   ChevronDown,
   Circle,
   Clipboard,
@@ -108,6 +109,7 @@ import { useDocumentStore } from "@/state/documentStore";
 import { generateMaskThumbnail, useMaskLibraryStore } from "@/state/maskLibraryStore";
 import { useSelectionStore } from "@/state/selectionStore";
 import { useImageEditStore } from "@/state/imageEditStore";
+import { useMaskContentEditStore } from "@/state/maskContentEditStore";
 import { ImageEditToolbar } from "./ImageEditToolbar";
 import { ImageEditFloatingBar } from "./ImageEditFloatingBar";
 import { CropUI } from "./CropUI";
@@ -155,6 +157,8 @@ import { useProjectLifecycleStore } from "@/state/projectLifecycleStore";
 import { CollageModePanel } from "@/ui/collage/CollageModePanel";
 import { PhotoPrintModePanel } from "@/ui/photoPrint/PhotoPrintModePanel";
 import { ClassPhotoModePanel } from "@/ui/classPhoto/ClassPhotoModePanel";
+import { ProductDefinitionPanel } from "./panels/ProductDefinitionPanel";
+import { useProductStore } from "@/state/productStore";
 import { regeneratePhotoPrint } from "@/core/photoPrint/photoPrintModeEngine";
 import type { PhotoPrintRule } from "@/types/photoPrint";
 import { CollageLayoutsPanel } from "@/ui/collage/CollageLayoutsPanel";
@@ -267,6 +271,10 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const cropPreview = useImageEditStore((s) => s.cropPreview);
   const enterImageEditMode = useImageEditStore((s) => s.enterImageEditMode);
   const exitImageEditMode = useImageEditStore((s) => s.exitImageEditMode);
+  const maskContentEditActive = useMaskContentEditStore((s) => s.active);
+  const maskContentEditLayerId = useMaskContentEditStore((s) => s.editingLayerId);
+  const enterMaskContentEdit = useMaskContentEditStore((s) => s.enter);
+  const exitMaskContentEdit = useMaskContentEditStore((s) => s.exit);
   const viewport = useViewportStore();
   const lifecycle = useProjectLifecycleStore();
 
@@ -299,7 +307,12 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   );
   const isGridMode = document?.metadata["mode"] === "grid";
   const isMaskMode = document?.metadata["mode"] === "mask";
-  const isCollageMode = document?.metadata["mode"] === "collage";
+  const activeProductInStore = useProductStore((s) => s.activeProduct);
+  const isProductMode = document?.metadata["mode"] === "product" || activeProductInStore !== null;
+  const isCollageMode =
+    document?.metadata["mode"] === "collage" ||
+    // product+collage hybrid: product mode with collage rules present
+    (isProductMode && (document?.collageRules.length ?? 0) > 0);
   const isPhotoPrintMode = document?.metadata["mode"] === "photo_print";
   const isClassPhotoMode = document?.metadata["mode"] === "class_photo";
   const activeClassPhotoRule = useMemo(() => {
@@ -417,6 +430,60 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     return () => window.removeEventListener("keydown", onImageEditKey);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageEditMode, imageEditLayerId]);
+
+  // Exit mask content edit mode when selection changes away from the editing layer
+  useEffect(() => {
+    if (maskContentEditActive && maskContentEditLayerId !== selectedLayerId) {
+      exitMaskContentEdit();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLayerId, maskContentEditActive, maskContentEditLayerId]);
+
+  // Keyboard handling for mask content edit mode
+  useEffect(() => {
+    function onMaskContentKey(event: KeyboardEvent): void {
+      // Escape or Enter exits mask content edit mode
+      if (maskContentEditActive && (event.key === "Escape" || event.key === "Enter")) {
+        exitMaskContentEdit();
+        event.preventDefault();
+        return;
+      }
+
+      // Shift + Arrow: nudge image content inside mask
+      if (!event.shiftKey) return;
+      const key = event.key;
+      if (key !== "ArrowLeft" && key !== "ArrowRight" && key !== "ArrowUp" && key !== "ArrowDown") return;
+      if (selectedLayer?.type !== "image") return;
+
+      const imageShape = (selectedLayer.metadata["imageShape"] as string | undefined) ?? "rect";
+      const hasAnyMask = selectedLayer.pixelMask !== undefined || imageShape !== "rect";
+      if (!hasAnyMask) return;
+
+      // Target input elements should not trigger this
+      const target = event.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+
+      event.preventDefault();
+      const step = (event.ctrlKey || event.metaKey) ? 10 : event.altKey ? 0.25 : 1;
+      let dx = 0;
+      let dy = 0;
+      if (key === "ArrowLeft") dx = -step;
+      if (key === "ArrowRight") dx = step;
+      if (key === "ArrowUp") dy = -step;
+      if (key === "ArrowDown") dy = step;
+
+      if (document !== null && activePage !== null) {
+        updateLayer(activePage.id, {
+          ...selectedLayer,
+          imageOffsetX: (selectedLayer.imageOffsetX ?? 0) + dx,
+          imageOffsetY: (selectedLayer.imageOffsetY ?? 0) + dy
+        });
+      }
+    }
+    window.addEventListener("keydown", onMaskContentKey);
+    return () => window.removeEventListener("keydown", onMaskContentKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [maskContentEditActive, selectedLayer, document, activePage, updateLayer, exitMaskContentEdit]);
 
   useEffect(() => {
     if (document === null) {
@@ -1693,6 +1760,12 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
             enterImageEditMode(selectedLayer.id, selectedLayer.crop ?? undefined);
           }
         }}
+        onEnterMaskContentEditMode={() => {
+          if (selectedLayer?.type === "image") {
+            enterMaskContentEdit(selectedLayer.id);
+          }
+        }}
+        onExitMaskContentEditMode={exitMaskContentEdit}
         onImageEditApply={handleImageEditApply}
         onImageEditCancel={handleImageEditCancel}
         onImageEditDeleteSelection={handleDeleteSelection}
@@ -1897,6 +1970,12 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
           </CanvasErrorBoundary>
           {/* Image Edit floating params bar */}
           {imageEditMode && <ImageEditFloatingBar />}
+          {/* Mask content edit mode banner */}
+          {maskContentEditActive && (
+            <div className="collage-swap-banner">
+              עריכת תמונה בתוך מסיכה — גרור להזזת התמונה פנימה | Shift+גרירה גם עובד | Esc לסיום
+            </div>
+          )}
           {/* Collage swap mode banner */}
           {isCollageMode && collageSwapSourceSlotId !== null && (
             <div className="collage-swap-banner">
@@ -1964,6 +2043,12 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
 
         <aside className="right-sidebar">
           {/* Mode-specific panel at top */}
+          {isProductMode ? (
+            <div className="rs-mode-section">
+              <div className="rs-mode-label"><Boxes size={11} />מצב מוצר</div>
+              <ProductDefinitionPanel />
+            </div>
+          ) : null}
           {isCollageMode && activeCollageRule !== null ? (
             <div className="rs-mode-section">
               <div className="rs-mode-label"><SlidersHorizontal size={11} />מצב קולאז׳</div>
@@ -2206,6 +2291,8 @@ function ContextToolbar({
   onDelete,
   onDuplicate,
   onEnterImageEditMode,
+  onEnterMaskContentEditMode,
+  onExitMaskContentEditMode,
   onImageEditApply,
   onImageEditCancel,
   onImageEditDeleteSelection,
@@ -2234,6 +2321,8 @@ function ContextToolbar({
   onDelete: () => void;
   onDuplicate: () => void;
   onEnterImageEditMode: () => void;
+  onEnterMaskContentEditMode: () => void;
+  onExitMaskContentEditMode: () => void;
   onImageEditApply: () => void;
   onImageEditCancel: () => void;
   onImageEditDeleteSelection: () => void;
@@ -2285,6 +2374,8 @@ function ContextToolbar({
         onDelete={onDelete}
         onDuplicate={onDuplicate}
         onEnterImageEditMode={onEnterImageEditMode}
+        onEnterMaskContentEditMode={onEnterMaskContentEditMode}
+        onExitMaskContentEditMode={onExitMaskContentEditMode}
         onMoveLayer={onMoveLayer}
         onPatch={onPatch}
       />
@@ -2593,6 +2684,8 @@ function ImageContextToolbar({
   onDelete,
   onDuplicate,
   onEnterImageEditMode,
+  onEnterMaskContentEditMode,
+  onExitMaskContentEditMode,
   onMoveLayer,
   onPatch,
 }: {
@@ -2603,6 +2696,8 @@ function ImageContextToolbar({
   onDelete: () => void;
   onDuplicate: () => void;
   onEnterImageEditMode: () => void;
+  onEnterMaskContentEditMode: () => void;
+  onExitMaskContentEditMode: () => void;
   onMoveLayer: (direction: "forward" | "backward" | "front" | "back") => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
 }): ReactElement {
@@ -2676,6 +2771,13 @@ function ImageContextToolbar({
   const flipH = (layer.metadata["flipH"] as boolean | undefined) ?? false;
   const flipV = (layer.metadata["flipV"] as boolean | undefined) ?? false;
 
+  // Mask content edit mode — only relevant for free ImageLayer with a mask/clip
+  const hasAnyMask = !isFrame && (
+    (layer as Extract<VisualLayer, { type: "image" }>).pixelMask !== undefined ||
+    imageShape !== "rect"
+  );
+  const isMaskContentEditMode = useMaskContentEditStore((s) => s.active && s.editingLayerId === layer.id);
+
   function patchMeta(patch: Record<string, string | number | boolean | null>): void {
     onPatch({ metadata: { ...layer.metadata, ...patch } as Record<string, import("@/types/primitives").JsonValue> });
   }
@@ -2734,6 +2836,22 @@ function ImageContextToolbar({
 
       {/* Resize */}
       <ImageResizeControl dpi={dpi} layer={layer} onPatch={onPatch} />
+
+      {/* Mask content repositioning — only for images with a mask/clip shape */}
+      {hasAnyMask && (
+        <div className="context-group">
+          <button
+            className={`context-toggle${isMaskContentEditMode ? " on" : ""}`}
+            type="button"
+            title={isMaskContentEditMode
+              ? "סיים כוונון תמונה במסיכה (Esc)"
+              : "כוונון תמונה בתוך המסיכה — גרירה מזיזה רק את התמונה פנימה"}
+            onClick={isMaskContentEditMode ? onExitMaskContentEditMode : onEnterMaskContentEditMode}
+          >
+            {isMaskContentEditMode ? "סיום כוונון" : "כוונון בתוך מסיכה"}
+          </button>
+        </div>
+      )}
 
       {/* Fit Mode */}
       <div className="context-group">

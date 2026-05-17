@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useImageEditStore } from "@/state/imageEditStore";
+import { useMaskContentEditStore } from "@/state/maskContentEditStore";
 import { Circle, Group, Image as KonvaImage, Line, Rect, Text } from "react-konva";
 import { drawPuzzlePath } from "@/core/collage/collagePuzzle";
 import { generateTornEdgePoints } from "@/core/collage/collageTornPaper";
@@ -597,6 +598,19 @@ function ImageNode({
     s.imageEditMode && s.editingLayerId === layer.id ? s.cropPreview : null
   );
 
+  // Mask content edit mode (internal image repositioning)
+  const isMaskContentEditMode = useMaskContentEditStore((s) => s.active && s.editingLayerId === layer.id);
+  const enterMaskContentEdit = useMaskContentEditStore((s) => s.enter);
+
+  // Refs for Shift+drag internal offset tracking
+  const dragStartShift = useRef(false);
+  const dragStartLayerX = useRef(0);
+  const dragStartLayerY = useRef(0);
+  const dragStartImgOffsetX = useRef(0);
+  const dragStartImgOffsetY = useRef(0);
+  const dragAccumX = useRef(0);
+  const dragAccumY = useRef(0);
+
   const asset = assets.find((item) => item.id === layer.assetId);
   const image = useKonvaImage(resolveCanvasAssetPath(asset));
   const imageRef = useRef<Konva.Image | null>(null);
@@ -614,7 +628,7 @@ function ImageNode({
     : undefined;
   const libMaskImage = useKonvaImage(libMaskDataUrl);
 
-  // Cache the masked group whenever image/mask changes so destination-in compositing works correctly
+  // Cache the masked group whenever image/mask or internal offset changes so destination-in compositing works correctly
   useEffect(() => {
     const grp = maskedGroupRef.current;
     if (grp === null) return;
@@ -626,7 +640,8 @@ function ImageNode({
       grp.clearCache();
     }
     grp.getLayer()?.batchDraw();
-  }, [image, maskImage, libMaskImage, libMaskDataUrl, layer.pixelMask, layer.width, layer.height]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [image, maskImage, libMaskImage, libMaskDataUrl, layer.pixelMask, layer.width, layer.height, layer.imageOffsetX ?? 0, layer.imageOffsetY ?? 0]);
 
   const fx = useMemo(
     () => resolveFrameEffects(layer.visualEffects),
@@ -682,6 +697,16 @@ function ImageNode({
           }
         : {};
 
+  // ─── Shape clip + flip from metadata ──────────────────────────────────────
+  // (Moved before groupCommon so hasAnyMask/flipH/flipV are available in drag handlers)
+  const imageShape = (layer.metadata["imageShape"] as string | undefined) ?? "rect";
+  const cornerRadius = (layer.metadata["imageCornerRadius"] as number | undefined) ?? 0;
+  const flipH = (layer.metadata["flipH"] as boolean | undefined) ?? false;
+  const flipV = (layer.metadata["flipV"] as boolean | undefined) ?? false;
+
+  const isLibMask = imageShape === "mask_lib";
+  const hasClip = !isLibMask && (imageShape !== "rect" || cornerRadius > 0);
+
   const groupCommon = {
     id: layer.id,
     name: selected ? "selected-layer" : undefined,
@@ -692,9 +717,15 @@ function ImageNode({
     rotation: layer.rotation,
     opacity: layer.opacity,
     visible: layer.visible,
-    draggable: !layer.locked && !isBeingEdited,
-    onClick: () => { if (!isBeingEdited) onSelect(layer.id); },
-    onTap: () => { if (!isBeingEdited) onSelect(layer.id); },
+    draggable: !layer.locked && !isBeingEdited && !isMaskContentEditMode,
+    onClick: () => { if (!isBeingEdited && !isMaskContentEditMode) onSelect(layer.id); },
+    onTap: () => { if (!isBeingEdited && !isMaskContentEditMode) onSelect(layer.id); },
+    onDblClick: () => {
+      if (!isBeingEdited && hasAnyMask) {
+        enterMaskContentEdit(layer.id);
+        onSelect(layer.id);
+      }
+    },
     onContextMenu: (event: Konva.KonvaEventObject<PointerEvent>) => {
       event.evt.preventDefault();
       onContextMenu?.({
@@ -705,8 +736,57 @@ function ImageNode({
         screenY: event.evt.clientY
       });
     },
+    onDragStart: (event: Konva.KonvaEventObject<DragEvent>) => {
+      if (hasAnyMask && event.evt.shiftKey) {
+        dragStartShift.current = true;
+        dragStartLayerX.current = layer.x;
+        dragStartLayerY.current = layer.y;
+        dragStartImgOffsetX.current = layer.imageOffsetX ?? 0;
+        dragStartImgOffsetY.current = layer.imageOffsetY ?? 0;
+        dragAccumX.current = 0;
+        dragAccumY.current = 0;
+      } else {
+        dragStartShift.current = false;
+      }
+    },
+    onDragMove: (event: Konva.KonvaEventObject<DragEvent>) => {
+      if (!dragStartShift.current) return;
+      const node = event.target;
+      const dx = node.x() - dragStartLayerX.current;
+      const dy = node.y() - dragStartLayerY.current;
+      dragAccumX.current = dx;
+      dragAccumY.current = dy;
+      // Keep the outer group fixed; update inner image directly on the Konva node
+      node.x(dragStartLayerX.current);
+      node.y(dragStartLayerY.current);
+      const imgNode = imageRef.current;
+      if (imgNode !== null) {
+        imgNode.x((flipH ? layer.width : 0) + dragStartImgOffsetX.current + dx);
+        imgNode.y((flipV ? layer.height : 0) + dragStartImgOffsetY.current + dy);
+        if (maskedGroupRef.current !== null) {
+          maskedGroupRef.current.cache();
+        }
+        imgNode.getLayer()?.batchDraw();
+      }
+      event.cancelBubble = true;
+    },
     onDragEnd: (event: Konva.KonvaEventObject<DragEvent>) => {
-      onChange({ ...layer, x: event.target.x(), y: event.target.y() });
+      if (dragStartShift.current) {
+        const dx = dragAccumX.current;
+        const dy = dragAccumY.current;
+        dragStartShift.current = false;
+        event.target.x(dragStartLayerX.current);
+        event.target.y(dragStartLayerY.current);
+        onChange({
+          ...layer,
+          x: dragStartLayerX.current,
+          y: dragStartLayerY.current,
+          imageOffsetX: dragStartImgOffsetX.current + dx,
+          imageOffsetY: dragStartImgOffsetY.current + dy
+        });
+      } else {
+        onChange({ ...layer, x: event.target.x(), y: event.target.y() });
+      }
     },
     onTransformEnd: (event: Konva.KonvaEventObject<Event>) => {
       const node = event.target;
@@ -724,15 +804,6 @@ function ImageNode({
       });
     }
   };
-
-  // ─── Shape clip + flip from metadata ──────────────────────────────────────
-  const imageShape = (layer.metadata["imageShape"] as string | undefined) ?? "rect";
-  const cornerRadius = (layer.metadata["imageCornerRadius"] as number | undefined) ?? 0;
-  const flipH = (layer.metadata["flipH"] as boolean | undefined) ?? false;
-  const flipV = (layer.metadata["flipV"] as boolean | undefined) ?? false;
-
-  const isLibMask = imageShape === "mask_lib";
-  const hasClip = !isLibMask && (imageShape !== "rect" || cornerRadius > 0);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const imageClipFunc = hasClip ? (ctx: any): void => {
@@ -752,9 +823,16 @@ function ImageNode({
     }
   } : undefined;
 
-  // Flip via negative scale + offset compensation on the KonvaImage
-  const imgX = flipH ? layer.width : 0;
-  const imgY = flipV ? layer.height : 0;
+  // Whether this layer has any masking/clipping that supports internal image repositioning
+  const hasAnyMask = layer.pixelMask !== undefined || imageShape !== "rect";
+
+  // Internal image offset (for repositioning image inside mask without moving the mask)
+  const imageOffsetX = layer.imageOffsetX ?? 0;
+  const imageOffsetY = layer.imageOffsetY ?? 0;
+
+  // Flip via negative scale + offset compensation on the KonvaImage, plus internal image offset
+  const imgX = (flipH ? layer.width : 0) + imageOffsetX;
+  const imgY = (flipV ? layer.height : 0) + imageOffsetY;
   const imgScaleX = flipH ? -1 : 1;
   const imgScaleY = flipV ? -1 : 1;
 
@@ -801,6 +879,10 @@ function ImageNode({
 
   return (
     <Group {...groupCommon} {...shadowProps}>
+      {/* Visual indicator when in mask content edit mode */}
+      {isMaskContentEditMode && (
+        <Rect x={0} y={0} width={layer.width} height={layer.height} fill="transparent" stroke="#7C6FE0" strokeWidth={2.5} dash={[6, 3]} listening={false} />
+      )}
       {/* Inner group clips to shape/corner-radius */}
       <Group clipFunc={imageClipFunc}>
         {activeCompositeMask !== null ? (
@@ -819,6 +901,43 @@ function ImageNode({
             />
           </Group>
         ) : konvaImageNode}
+        {/* Draggable overlay for mask content edit mode — lets user reposition image inside mask */}
+        {isMaskContentEditMode && hasAnyMask && (
+          <Rect
+            x={0}
+            y={0}
+            width={layer.width}
+            height={layer.height}
+            fill="rgba(0,0,0,0.001)"
+            draggable
+            onDragMove={(event) => {
+              event.cancelBubble = true;
+              const dx = event.target.x();
+              const dy = event.target.y();
+              const imgNode = imageRef.current;
+              if (imgNode !== null) {
+                imgNode.x((flipH ? layer.width : 0) + imageOffsetX + dx);
+                imgNode.y((flipV ? layer.height : 0) + imageOffsetY + dy);
+                if (maskedGroupRef.current !== null) {
+                  maskedGroupRef.current.cache();
+                }
+                imgNode.getLayer()?.batchDraw();
+              }
+            }}
+            onDragEnd={(event) => {
+              event.cancelBubble = true;
+              const dx = event.target.x();
+              const dy = event.target.y();
+              event.target.x(0);
+              event.target.y(0);
+              onChange({
+                ...layer,
+                imageOffsetX: imageOffsetX + dx,
+                imageOffsetY: imageOffsetY + dy
+              });
+            }}
+          />
+        )}
         {/* Color overlay */}
         {fx.colorOverlay !== undefined && (
           <Rect x={0} y={0} width={layer.width} height={layer.height} fill={fx.colorOverlay.color} opacity={fx.colorOverlay.opacity} globalCompositeOperation={mapBlendMode(fx.colorOverlay.blendMode) as "source-over"} listening={false} />

@@ -1,5 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Transformer } from "react-konva";
+import { useProductStore } from "@/state/productStore";
+import { ProductGuidesOverlay } from "./ProductGuidesOverlay";
+import type { ProductPageContext } from "@/types/product";
 import { calculateRotateHandlePosition, nodeAABBInCanvasUnits, type RotateHandlePosition } from "./rotateHandleUtils";
 import { useKonvaImage } from "./useKonvaImage";
 import { createMaskAsset, resolveCanvasAssetPath } from "@/core/assets/assetManager";
@@ -98,6 +101,14 @@ export function CanvasStage({
   const rafRef = useRef<number | null>(null);
 
   const viewport = useViewportStore();
+  const activeProduct = useProductStore((s) => s.activeProduct);
+  const productContext = useMemo<ProductPageContext | null>(() => {
+    if (!activeProduct) return null;
+    const ctx = page.metadata.productContext;
+    if (!ctx || typeof ctx !== "object" || Array.isArray(ctx)) return null;
+    return ctx as unknown as ProductPageContext;
+  }, [activeProduct, page.metadata]);
+
   const baseScale = useMemo(() => {
     if (viewport.fitMode === "actualSize") {
       return 96 / page.setup.dpi;
@@ -796,6 +807,17 @@ export function CanvasStage({
             />
           ) : null}
           </Group>
+
+          {/* ── Product Mode guides overlay (above content, below selection UI) ── */}
+          {productContext && (
+            <ProductGuidesOverlay
+              context={productContext}
+              pageWidth={page.width}
+              pageHeight={page.height}
+              scale={scale}
+            />
+          )}
+
           {smartLines.map((line) => {
             const color = GUIDE_COLORS[line.kind] ?? "#F7C948";
             const sw = 1.5 / scale;

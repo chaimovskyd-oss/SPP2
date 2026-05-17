@@ -24,6 +24,7 @@
       "electron/**/*",
       "image.editor.engine/**/*",
       "print.preview.engine/**/*",
+      "product_library/**/*",
       "package.json"
     ],
     "directories": {

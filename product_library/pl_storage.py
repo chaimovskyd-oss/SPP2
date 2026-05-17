@@ -183,6 +183,41 @@ def download_and_cache_thumbnail(url: str, size=(96, 96)):
         return None
 
 
+# ── Phase 7 CRUD helpers (used by Electron IPC handlers) ──────────────────────
+
+def get_all_products() -> list:
+    """Return all products as dicts — bridge entry point for loadAll IPC."""
+    return [p.to_dict() for p in load_products()]
+
+
+def save_product(product_dict: dict) -> None:
+    """Upsert a single product by id and persist to JSON."""
+    products = load_products()
+    by_id = {p.id: p for p in products}
+    updated = Product.from_dict(product_dict)
+    by_id[updated.id] = updated
+    save_products(list(by_id.values()))
+
+
+def upload_mask_base64(product_id: str, mask_data_b64: str, file_name: str) -> str:
+    """Decode a base64 mask payload, save it to masks/, return relative path."""
+    import base64
+    _ensure_dirs()
+    ext = Path(file_name).suffix.lower() or ".png"
+    dst = MASKS_DIR / f"{slugify(product_id)}{ext}"
+    dst.write_bytes(base64.b64decode(mask_data_b64))
+    return str(dst.relative_to(_ROOT))
+
+
+def reload_product(product_id: str) -> dict | None:
+    """Return a single product dict by id, or None if not found."""
+    products = load_products()
+    for p in products:
+        if p.id == product_id:
+            return p.to_dict()
+    return None
+
+
 # ── CSV import ────────────────────────────────────────────────────────────────
 
 def _normalize_csv_row(row: dict):

@@ -1,5 +1,7 @@
 import type { Asset, Document, Page } from "@/types/document";
 import type { ContentTransform, FrameLayer, VisualLayer } from "@/types/layers";
+import type { Margins, Rect } from "@/types/primitives";
+import type { ProductGuideVisibility, ProductInstructionSet, ProductPageContext, ProductPrintZone } from "@/types/product";
 
 export interface DocumentAction {
   id: string;
@@ -221,4 +223,68 @@ function updatePageById(document: Document, pageId: string, updater: (page: Page
 
 function compressStack(actions: DocumentAction[], limit: number): DocumentAction[] {
   return actions.slice(-limit);
+}
+
+// ── Product Mode history actions ──────────────────────────────────────────────
+
+function patchProductContext(page: Page, patch: Partial<ProductPageContext>): Page {
+  const current = (page.metadata.productContext ?? {}) as unknown as ProductPageContext;
+  return {
+    ...page,
+    metadata: {
+      ...page.metadata,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      productContext: { ...current, ...patch } as any
+    }
+  };
+}
+
+export function updateProductBleedAction(page: Page, bleed: Margins): DocumentAction {
+  const before = page;
+  const after = patchProductContext(page, { bleed });
+  return changePageAction(before, after, "UpdateProductBleedAction");
+}
+
+export function updateProductSafeAreaAction(page: Page, safeArea: Rect): DocumentAction {
+  const before = page;
+  const after = patchProductContext(page, { safeArea });
+  return changePageAction(before, after, "UpdateProductSafeAreaAction");
+}
+
+export function updateProductInstructionsAction(page: Page, instructions: ProductInstructionSet): DocumentAction {
+  const ctx = (page.metadata.productContext ?? {}) as unknown as ProductPageContext;
+  const before = page;
+  const after = patchProductContext(page, { ...ctx, ...({ instructions } as unknown as Partial<ProductPageContext>) });
+  return changePageAction(before, after, "UpdateProductInstructionsAction");
+}
+
+export function toggleProductGuideVisibilityAction(
+  page: Page,
+  key: keyof ProductGuideVisibility,
+  value: boolean
+): DocumentAction {
+  const ctx = (page.metadata.productContext ?? {}) as unknown as ProductPageContext;
+  const newVisibility = { ...ctx.guideVisibility, [key]: value };
+  const before = page;
+  const after = patchProductContext(page, { guideVisibility: newVisibility });
+  return changePageAction(before, after, "ToggleProductGuideVisibilityAction");
+}
+
+export function addProductPrintZoneAction(page: Page, zone: ProductPrintZone): DocumentAction {
+  const ctx = (page.metadata.productContext ?? {}) as unknown as ProductPageContext;
+  const before = page;
+  const after = patchProductContext(page, { printZones: [...(ctx.printZones ?? []), zone] });
+  return changePageAction(before, after, "AddProductPrintZoneAction");
+}
+
+export function updateProductPrintZoneAction(
+  page: Page,
+  zoneId: string,
+  patch: Partial<ProductPrintZone>
+): DocumentAction {
+  const ctx = (page.metadata.productContext ?? {}) as unknown as ProductPageContext;
+  const updatedZones = (ctx.printZones ?? []).map((z) => (z.id === zoneId ? { ...z, ...patch } : z));
+  const before = page;
+  const after = patchProductContext(page, { printZones: updatedZones });
+  return changePageAction(before, after, "UpdateProductPrintZoneAction");
 }

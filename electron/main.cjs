@@ -414,6 +414,152 @@ ipcMain.handle("spp:unwatch-file", (_event, watchId) => {
   fileWatchers.delete(watchId);
 });
 
+// ─── Product Library IPC ─────────────────────────────────────────────────────
+
+function getProductLibraryDir() {
+  return path.join(getAppRoot(), "product_library");
+}
+
+/**
+ * Run product_library.product_handler as a Python module with the given CLI arguments.
+ * Uses `python -m product_library.product_handler` so that relative imports in
+ * pl_storage.py (from .pl_models import Product) resolve correctly.
+ * cwd and PYTHONPATH are set to the app root.
+ */
+function runProductPython(args) {
+  const appRoot = getAppRoot();
+  const handlerModule = "product_library.product_handler";
+  const handlerFile = path.join(appRoot, "product_library", "product_handler.py");
+
+  if (!fs.existsSync(handlerFile)) {
+    return Promise.resolve({
+      success: false,
+      error: `Product handler not found: ${handlerFile}`
+    });
+  }
+
+  return new Promise((resolve) => {
+    const proc = spawn(getPythonCommand(), ["-m", handlerModule, ...args], {
+      cwd: appRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        PYTHONPATH: [appRoot, process.env.PYTHONPATH || ""].filter(Boolean).join(path.delimiter)
+      }
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    proc.stdout?.on("data", (chunk) => { stdout += chunk.toString(); });
+    proc.stderr?.on("data", (chunk) => {
+      stderr += chunk.toString();
+      console.warn("[product-lib]", chunk.toString().trim());
+    });
+
+    proc.on("close", (code) => {
+      resolve({
+        success: code === 0,
+        stdout: stdout.trim(),
+        stderr: stderr.trim(),
+        error: code === 0 ? undefined : (stderr.trim() || `Python exited with code ${code}`)
+      });
+    });
+
+    proc.on("error", (err) => {
+      resolve({ success: false, error: err.message });
+    });
+  });
+}
+
+/** Load all products from the library JSON and return them as an array. */
+ipcMain.handle("spp:product-library:get-all", async () => {
+  const result = await runProductPython(["--action", "get-all"]);
+  if (!result.success) {
+    return { success: false, error: result.error || "Failed to load products" };
+  }
+  try {
+    const products = JSON.parse(result.stdout);
+    return { success: true, products };
+  } catch (err) {
+    return { success: false, error: `Invalid JSON from product handler: ${err.message}` };
+  }
+});
+
+/** Upsert a product into the library JSON. */
+ipcMain.handle("spp:product-library:save-one", async (_event, product) => {
+  const tmpPath = path.join(os.tmpdir(), `spp2_product_save_${Date.now()}.json`);
+  try {
+    if (!product || typeof product !== "object") {
+      return { success: false, error: "Invalid product object" };
+    }
+    fs.writeFileSync(tmpPath, JSON.stringify(product), "utf-8");
+    const result = await runProductPython(["--action", "save-one", "--input", tmpPath]);
+    return result.success
+      ? { success: true }
+      : { success: false, error: result.error || "Save failed" };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+  }
+});
+
+/**
+ * Upload a mask file to the product library.
+ * Electron decodes base64 → temp file; Python copies it to masks/ and returns the relative path.
+ */
+ipcMain.handle("spp:product-library:upload-mask", async (_event, productId, maskDataBase64, fileName) => {
+  const safeExt = (path.extname(String(fileName || ".png")).toLowerCase() || ".png")
+    .replace(/[^.a-z0-9]/g, "").slice(0, 5) || ".png";
+  const tmpPath = path.join(os.tmpdir(), `spp2_mask_${Date.now()}${safeExt}`);
+  try {
+    if (!productId || !maskDataBase64) {
+      return { success: false, error: "productId and maskDataBase64 are required" };
+    }
+    fs.writeFileSync(tmpPath, Buffer.from(String(maskDataBase64), "base64"));
+    const result = await runProductPython([
+      "--action",     "upload-mask",
+      "--product-id", String(productId),
+      "--mask-file",  tmpPath,
+      "--file-name",  String(fileName || "mask.png")
+    ]);
+    if (!result.success) {
+      return { success: false, error: result.error || "Mask upload failed" };
+    }
+    try {
+      const output = JSON.parse(result.stdout);
+      return { success: true, maskPath: String(output.path || "") };
+    } catch {
+      return { success: false, error: "Invalid response from mask upload handler" };
+    }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+  }
+});
+
+/** Reload a single product by ID from the library JSON. */
+ipcMain.handle("spp:product-library:reload-one", async (_event, productId) => {
+  if (!productId) {
+    return { success: false, error: "productId is required" };
+  }
+  const result = await runProductPython([
+    "--action",     "reload-one",
+    "--product-id", String(productId)
+  ]);
+  if (!result.success) {
+    return { success: false, error: result.error || "Reload failed" };
+  }
+  try {
+    const product = JSON.parse(result.stdout); // null when not found, object otherwise
+    return { success: true, product };
+  } catch (err) {
+    return { success: false, error: `Invalid JSON from reload handler: ${err.message}` };
+  }
+});
+
 // ─── Main Window ──────────────────────────────────────────────────────────────
 
 function createWindow() {

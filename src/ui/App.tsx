@@ -1,6 +1,10 @@
 import { Suspense, lazy, useEffect, useMemo, useState, type ReactElement } from "react";
 import { cleanupRecovery, createGridModeDocument, createMaskModeDocument, createPhotoPrintModeDocument, createProjectEnvelope, discardRecoveryRecord, getLatestRecoveryRecord, restoreRecoveryRecord, withProjectMetadata, type AutosaveRecord } from "@/core";
 import { createPage } from "@/core/document/factory";
+import { createDocumentFromProduct } from "@/core/product/productDocument";
+import { useProductStore } from "@/state/productStore";
+import { ProductLibraryScreen } from "./productLibrary/ProductLibraryScreen";
+import type { ProductDefinition } from "@/types/product";
 import { createCollageModeDocument } from "@/core/collage/collageFactory";
 import { syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import { importImageAsset } from "@/core/assets/assetManager";
@@ -45,7 +49,7 @@ const PdfStudioScreen = lazy(() =>
 );
 
 export function App(): ReactElement {
-  const [screen, setScreen] = useState<"home" | "setup" | "editor" | "collage-wizard" | "photo-print-wizard" | "pdf-studio" | "class-photo-wizard" | "mask-wizard">("home");
+  const [screen, setScreen] = useState<"home" | "setup" | "editor" | "collage-wizard" | "photo-print-wizard" | "pdf-studio" | "class-photo-wizard" | "mask-wizard" | "product-library">("home");
   const [classPhotoWizardInitialState, setClassPhotoWizardInitialState] = useState<ClassPhotoWizardInitialState | undefined>(undefined);
   const [pendingMode, setPendingMode] = useState<ModeType>("free");
   const [recoveryRecord, setRecoveryRecord] = useState<AutosaveRecord | null>(() => {
@@ -57,6 +61,8 @@ export function App(): ReactElement {
   const beginProject = useProjectLifecycleStore((state) => state.beginProject);
   const clearSelection = useSelectionStore((state) => state.clearSelection);
   const resetViewport = useViewportStore((state) => state.resetViewport);
+  const setActiveProduct = useProductStore((state) => state.setActiveProduct);
+  const setProductCollageContext = useProductStore((state) => state.setCollageContext);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [isCreatingPhotoPrint, setIsCreatingPhotoPrint] = useState(false);
@@ -89,9 +95,29 @@ export function App(): ReactElement {
       setScreen("pdf-studio");
     } else if (mode === "mask") {
       setScreen("mask-wizard");
+    } else if (mode === "product") {
+      setScreen("product-library");
     } else {
       setScreen("setup");
     }
+  }
+
+  function handleOpenProductStandard(product: ProductDefinition): void {
+    const doc = createDocumentFromProduct(product);
+    setActiveProduct(product);
+    setProductCollageContext(null);
+    const envelope = beginProject(createProjectEnvelope({ document: doc, linkedGroups: [], batchJobs: [] }));
+    setDocument(withProjectMetadata(envelope.document, envelope.metadata));
+    resetViewport();
+    clearSelection();
+    setScreen("editor");
+  }
+
+  function handleOpenProductCollage(product: ProductDefinition): void {
+    // Only set context — the collage wizard creates the document
+    setActiveProduct(product);
+    setProductCollageContext({ product });
+    setScreen("collage-wizard");
   }
 
   async function handleCollageWizardComplete(result: CollageWizardResult): Promise<void> {
@@ -124,7 +150,21 @@ export function App(): ReactElement {
     }
 
     const assetIds = importedAssets.map((a) => a.id);
-    const collagePage = createPage({ setup: pageSetup });
+
+    // If opening from product library, inject product context into page metadata
+    const productCtx = useProductStore.getState().collageContext;
+    const pageExtraMetadata: import("@/types/primitives").Metadata = productCtx
+      ? {
+          productId: productCtx.product.id,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          productContext: productCtx.product as any
+        }
+      : {};
+
+    const collagePage = createPage({
+      setup: pageSetup,
+      metadata: pageExtraMetadata
+    });
 
     // Create document with new architecture: activeFamily + spacingMM + marginMM + cachedSlots
     let doc = createCollageModeDocument(
@@ -154,6 +194,14 @@ export function App(): ReactElement {
           pages: doc.pages.map((p) => p.id === rule.pageId ? updatedPage : p)
         };
       }
+    }
+
+    // If product context was active, stamp product mode on the document
+    if (productCtx) {
+      doc = {
+        ...doc,
+        metadata: { ...doc.metadata, mode: "product", productId: productCtx.product.id, source: "product" }
+      };
     }
 
     const envelope = beginProject(createProjectEnvelope({ document: doc, linkedGroups: [], batchJobs: [] }));
@@ -562,9 +610,23 @@ export function App(): ReactElement {
     try {
       const envelope = await loadProject(file);
       const opened = beginProject(envelope, file.name);
-      setDocument(withProjectMetadata(opened.document, opened.metadata));
+      const doc = withProjectMetadata(opened.document, opened.metadata);
+      setDocument(doc);
       resetViewport();
       clearSelection();
+      // Restore product store from saved document context
+      if (doc.metadata["mode"] === "product") {
+        const pageCtx = doc.pages[0]?.metadata.productContext as unknown as import("@/types/product").ProductPageContext | undefined;
+        if (pageCtx?.productId) {
+          try {
+            const { reloadProductDefinition } = await import("@/services/python_bridge/productBridge");
+            const reloaded = await reloadProductDefinition(String(pageCtx.productId));
+            if (reloaded) setActiveProduct(reloaded);
+          } catch {
+            // Bridge unavailable — product panel won't show, but document still opens
+          }
+        }
+      }
       setScreen("editor");
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "לא ניתן לפתוח את הפרויקט");
@@ -608,6 +670,16 @@ export function App(): ReactElement {
     );
   }
 
+
+  if (screen === "product-library") {
+    return (
+      <ProductLibraryScreen
+        onOpenStandard={handleOpenProductStandard}
+        onOpenCollage={handleOpenProductCollage}
+        onCancel={() => setScreen("home")}
+      />
+    );
+  }
 
   if (screen === "pdf-studio") {
     return (

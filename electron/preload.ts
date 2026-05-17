@@ -81,5 +81,28 @@ contextBridge.exposeInMainWorld("spp", {
     const handler = (_event: Electron.IpcRendererEvent, watchId: string, filePath: string) => callback(watchId, filePath);
     ipcRenderer.on("spp:file-changed", handler);
     return () => ipcRenderer.removeListener("spp:file-changed", handler);
-  }
+  },
+
+  /** Product Library — persistent read/write via Python backend. */
+  productLibrary: {
+    loadAll: async (): Promise<unknown[]> => {
+      const res = await ipcRenderer.invoke("spp:product-library:get-all") as { success: boolean; products?: unknown[]; error?: string };
+      if (!res.success) throw new Error(res.error || "Failed to load products");
+      return res.products!;
+    },
+    saveOne: async (product: unknown): Promise<void> => {
+      const res = await ipcRenderer.invoke("spp:product-library:save-one", product) as { success: boolean; error?: string };
+      if (!res.success) throw new Error(res.error || "Failed to save product");
+    },
+    uploadMask: async (productId: string, maskDataBase64: string, fileName: string): Promise<string> => {
+      const res = await ipcRenderer.invoke("spp:product-library:upload-mask", productId, maskDataBase64, fileName) as { success: boolean; maskPath?: string; error?: string };
+      if (!res.success) throw new Error(res.error || "Failed to upload mask");
+      return res.maskPath!;
+    },
+    reloadOne: async (productId: string): Promise<unknown | null> => {
+      const res = await ipcRenderer.invoke("spp:product-library:reload-one", productId) as { success: boolean; product?: unknown | null; error?: string };
+      if (!res.success) throw new Error(res.error || "Failed to reload product");
+      return res.product ?? null;
+    },
+  },
 });

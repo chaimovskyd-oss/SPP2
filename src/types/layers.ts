@@ -226,6 +226,8 @@ export interface ImageLayer extends BaseLayer {
   mask?: ID;
   pixelMask?: PixelMask;
   visualEffects?: VisualEffectStack;
+  imageOffsetX?: number;
+  imageOffsetY?: number;
 }
 
 export interface ShapeLayer extends BaseLayer {
