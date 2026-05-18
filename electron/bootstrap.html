@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <title>SPP2 — הכנת סביבה</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #17161c;
+      --bg-elev: #211f29;
+      --fg: #ece9f4;
+      --muted: #9590a8;
+      --accent: #6b8afd;
+      --accent-2: #a98bff;
+      --danger: #ff7676;
+      --border: #2c2937;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      width: 100vw; height: 100vh;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: "Segoe UI", "Heebo", "Arial Hebrew", sans-serif;
+      font-size: 14px;
+      overflow: hidden;
+      user-select: none;
+    }
+    .shell {
+      height: 100%;
+      display: flex; flex-direction: column;
+      padding: 20px 22px 16px;
+    }
+    h1 {
+      margin: 0 0 4px;
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+    }
+    .subtitle {
+      color: var(--muted);
+      font-size: 12.5px;
+      margin-bottom: 18px;
+    }
+    .status {
+      font-size: 14px;
+      min-height: 21px;
+      margin-bottom: 10px;
+    }
+    .progress-track {
+      position: relative;
+      height: 8px;
+      background: var(--bg-elev);
+      border-radius: 6px;
+      overflow: hidden;
+      margin-bottom: 14px;
+      border: 1px solid var(--border);
+    }
+    .progress-fill {
+      position: absolute; top: 0; right: 0; bottom: 0;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      transition: width 0.4s ease;
+    }
+    details {
+      flex: 1; min-height: 0;
+      display: flex; flex-direction: column;
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      overflow: hidden;
+    }
+    details summary {
+      cursor: pointer;
+      list-style: none;
+      color: var(--muted);
+      font-size: 12px;
+      padding: 2px 0;
+    }
+    details[open] summary {
+      margin-bottom: 6px;
+      color: var(--fg);
+    }
+    summary::-webkit-details-marker { display: none; }
+    .log {
+      flex: 1;
+      overflow-y: auto;
+      direction: ltr;
+      text-align: left;
+      font-family: "Consolas", "Cascadia Mono", monospace;
+      font-size: 11.5px;
+      line-height: 1.45;
+      color: var(--muted);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .hint { color: var(--muted); font-size: 11.5px; }
+    button {
+      background: var(--bg-elev);
+      color: var(--fg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 14px;
+      font: inherit;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    button:hover { border-color: var(--accent); }
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #0d0e1a;
+      font-weight: 600;
+    }
+    button.danger { color: var(--danger); }
+    .error-banner {
+      display: none;
+      background: rgba(255,118,118,0.08);
+      border: 1px solid rgba(255,118,118,0.35);
+      color: var(--danger);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 12.5px;
+      margin-bottom: 10px;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <h1>מכין את SPP2 לראשונה</h1>
+    <div class="subtitle">ההכנה רצה פעם אחת בלבד. בפעמים הבאות האפליקציה תיפתח מיד.</div>
+
+    <div class="error-banner" id="error"></div>
+    <div class="status" id="status">מתחיל…</div>
+    <div class="progress-track"><div class="progress-fill" id="bar"></div></div>
+
+    <details>
+      <summary>הצג פרטים טכניים</summary>
+      <div class="log" id="log"></div>
+    </details>
+
+    <div class="footer">
+      <span class="hint" id="hint">ניתן לבטל ולסגור את האפליקציה.</span>
+      <div>
+        <button id="continueBtn" class="primary" style="display:none">המשך עם הסביבה הקיימת</button>
+        <button id="cancelBtn" class="danger">ביטול</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const $status = document.getElementById("status");
+    const $bar = document.getElementById("bar");
+    const $log = document.getElementById("log");
+    const $err = document.getElementById("error");
+    const $cancel = document.getElementById("cancelBtn");
+    const $continue = document.getElementById("continueBtn");
+
+    const MAX_LOG_LINES = 600;
+    let logLines = [];
+
+    function pushLog(line) {
+      logLines.push(line);
+      if (logLines.length > MAX_LOG_LINES) logLines = logLines.slice(-MAX_LOG_LINES);
+      $log.textContent = logLines.join("\n");
+      $log.scrollTop = $log.scrollHeight;
+    }
+
+    window.sppBootstrap.onEvent((evt) => {
+      if (evt.type === "stage") {
+        $status.textContent = evt.message || "";
+        if (typeof evt.progress === "number") {
+          $bar.style.width = Math.max(0, Math.min(1, evt.progress)) * 100 + "%";
+        }
+      } else if (evt.type === "log") {
+        pushLog(evt.line);
+      } else if (evt.type === "error") {
+        $err.textContent = "אירעה שגיאה: " + evt.message;
+        $err.style.display = "block";
+        $cancel.textContent = "סגור";
+        if (evt.canContinue) {
+          $continue.style.display = "inline-block";
+        }
+      }
+    });
+
+    $cancel.addEventListener("click", async () => {
+      $cancel.disabled = true;
+      $status.textContent = "מבטל…";
+      try { await window.sppBootstrap.resolve("abort"); } catch {}
+      try { await window.sppBootstrap.cancel(); } catch {}
+    });
+
+    $continue.addEventListener("click", async () => {
+      $continue.disabled = true;
+      $cancel.disabled = true;
+      try { await window.sppBootstrap.resolve("continue"); } catch {}
+    });
+  </script>
+</body>
+</html>

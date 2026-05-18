@@ -192,6 +192,18 @@ export interface ImageLayerEffects extends VersionedEntity {
   blur: number;
   shadow: ImageLayerShadow | null;
   outline: ImageLayerOutline | null;
+  // Quick effects (optional — undefined = off). UI keys in EditorScreen.tsx.
+  luminance?: number;          // -25..25
+  sepia?: boolean;
+  invert?: boolean;
+  threshold?: number;          // 0..100, 0 = off
+  posterize?: number;          // 0..6, 0 = off
+  remove_white?: boolean;
+  remove_white_tolerance?: number;     // 5..55
+  color_pop?: boolean;
+  color_pop_color?: string;            // hex
+  color_pop_tolerance?: number;        // 5..85
+  color_pop_background?: number;       // 50..100
 }
 
 export const DEFAULT_IMAGE_LAYER_EFFECTS: ImageLayerEffects = {
@@ -204,7 +216,18 @@ export const DEFAULT_IMAGE_LAYER_EFFECTS: ImageLayerEffects = {
   grayscale: false,
   blur: 0,
   shadow: null,
-  outline: null
+  outline: null,
+  luminance: 0,
+  sepia: false,
+  invert: false,
+  threshold: 0,
+  posterize: 0,
+  remove_white: false,
+  remove_white_tolerance: 22,
+  color_pop: false,
+  color_pop_color: "#ff0000",
+  color_pop_tolerance: 28,
+  color_pop_background: 100
 };
 
 export interface PixelMask extends VersionedEntity {
@@ -228,6 +251,7 @@ export interface ImageLayer extends BaseLayer {
   visualEffects?: VisualEffectStack;
   imageOffsetX?: number;
   imageOffsetY?: number;
+  imageScale?: number;
 }
 
 export interface ShapeLayer extends BaseLayer {

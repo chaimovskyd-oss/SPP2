@@ -1,139 +1,127 @@
-import { PDFDocument, degrees } from "pdf-lib";
+import { PDFDocument } from "pdf-lib";
 import {
   ArrowRight,
+  CheckCircle2,
   Copy,
   FileDown,
-  FileImage,
   FilePlus2,
   FileText,
   ImagePlus,
   Loader2,
   Maximize2,
+  Minus,
+  Plus,
+  Printer,
   RotateCw,
   Save,
+  Settings,
   Trash2,
   Upload,
   X
 } from "lucide-react";
-import { useMemo, useRef, useState, type ChangeEvent, type ReactElement } from "react";
+import { useMemo, useRef, useState, type ChangeEvent, type DragEvent, type MouseEvent, type ReactElement } from "react";
+import { buildPdfStudioPdf } from "./pdfStudioExportService";
+import { PdfOverlayEditor } from "./PdfOverlayEditor";
+import { PdfPagePreview } from "./PdfPagePreview";
+import { PdfThumbnail } from "./PdfThumbnail";
+import { openPdfStudioPrintPreview } from "./pdfStudioToPrintPreviewAdapter";
+import {
+  DEFAULT_ADJUSTMENTS,
+  DEFAULT_RESIZE_BEHAVIOR,
+  MM_TO_PT,
+  PT_TO_MM,
+  type PdfApplyScope,
+  type PdfOrientationMode,
+  type PdfPageAdjustments,
+  type PdfResizeBehavior,
+  type PdfStudioDocument,
+  type PdfStudioPage,
+  type PdfStudioSourceFile,
+  type PdfUnit
+} from "./pdfStudioTypes";
 import "./pdfStudio.css";
 
-type PdfPageKind = "pdf" | "image" | "blank";
-type ResizeBehavior = "fit" | "fill" | "stretch" | "center";
-type ApplyScope = "current" | "selected" | "all";
+type PagePresetId = "a4" | "a5" | "a3" | "10x15" | "13x18" | "15x20" | "20x30" | "custom";
 
-type PdfSource = {
-  id: string;
-  name: string;
-  bytes: Uint8Array;
-};
-
-type PdfStudioPage = {
-  id: string;
-  kind: PdfPageKind;
-  title: string;
-  sourceId?: string;
-  sourcePageIndex?: number;
-  imageBytes?: Uint8Array;
-  imageMime?: string;
-  imageUrl?: string;
-  widthPt: number;
-  heightPt: number;
-  originalWidthPt: number;
-  originalHeightPt: number;
-  rotation: 0 | 90 | 180 | 270;
-};
-
-type PagePreset = {
-  id: string;
+interface PagePreset {
+  id: PagePresetId;
   label: string;
   widthMm: number;
   heightMm: number;
-};
+}
 
-const MM_TO_PT = 72 / 25.4;
-const PT_TO_MM = 25.4 / 72;
+interface PdfStudioScreenProps {
+  onBackHome: () => void;
+  initialDocument?: PdfStudioDocument;
+}
 
 const PAGE_PRESETS: PagePreset[] = [
   { id: "a4", label: "A4", widthMm: 210, heightMm: 297 },
   { id: "a5", label: "A5", widthMm: 148, heightMm: 210 },
   { id: "a3", label: "A3", widthMm: 297, heightMm: 420 },
-  { id: "10x15", label: "10×15", widthMm: 100, heightMm: 150 },
-  { id: "13x18", label: "13×18", widthMm: 130, heightMm: 180 },
+  { id: "10x15", label: "10x15", widthMm: 100, heightMm: 150 },
+  { id: "13x18", label: "13x18", widthMm: 130, heightMm: 180 },
+  { id: "15x20", label: "15x20", widthMm: 150, heightMm: 200 },
+  { id: "20x30", label: "20x30", widthMm: 200, heightMm: 300 },
   { id: "custom", label: "מותאם אישית", widthMm: 210, heightMm: 297 }
 ];
 
-interface PdfStudioScreenProps {
-  onBackHome: () => void;
-}
-
-export function PdfStudioScreen({ onBackHome }: PdfStudioScreenProps): ReactElement {
+export function PdfStudioScreen({ onBackHome, initialDocument }: PdfStudioScreenProps): ReactElement {
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const officeInputRef = useRef<HTMLInputElement>(null);
+  const lastSelectedIndexRef = useRef<number | null>(null);
+  const draggedPageIdsRef = useRef<string[]>([]);
 
-  const [sources, setSources] = useState<PdfSource[]>([]);
-  const [pages, setPages] = useState<PdfStudioPage[]>([]);
-  const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
-  const [activePageId, setActivePageId] = useState<string | null>(null);
+  const [documentModel, setDocumentModel] = useState<PdfStudioDocument>(initialDocument ?? {
+    id: crypto.randomUUID(),
+    title: "PDF Studio",
+    files: {},
+    pages: [],
+    selectedPageIds: []
+  });
   const [status, setStatus] = useState("מוכן");
-  const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isBusy, setIsBusy] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [overlayPage, setOverlayPage] = useState<PdfStudioPage | null>(null);
 
-  const [presetId, setPresetId] = useState("a4");
-  const [customWidthMm, setCustomWidthMm] = useState(210);
-  const [customHeightMm, setCustomHeightMm] = useState(297);
-  const [applyScope, setApplyScope] = useState<ApplyScope>("current");
-  const [resizeBehavior, setResizeBehavior] = useState<ResizeBehavior>("fit");
+  const [presetId, setPresetId] = useState<PagePresetId>("a4");
+  const [unit, setUnit] = useState<PdfUnit>("mm");
+  const [orientation, setOrientation] = useState<PdfOrientationMode>("source");
+  const [customWidth, setCustomWidth] = useState(210);
+  const [customHeight, setCustomHeight] = useState(297);
+  const [applyScope, setApplyScope] = useState<PdfApplyScope>("current");
+  const [resizeBehavior, setResizeBehavior] = useState<PdfResizeBehavior>("fit");
+  const [libreOfficeStatus, setLibreOfficeStatus] = useState("לא נבדק");
 
   const activePage = useMemo(
-    () => pages.find((page) => page.id === activePageId) ?? pages[0] ?? null,
-    [activePageId, pages]
+    () => documentModel.pages.find((page) => page.id === documentModel.activePageId) ?? documentModel.pages[0] ?? null,
+    [documentModel.activePageId, documentModel.pages]
   );
-
-  const selectedPagesCount = selectedPageIds.length;
+  const activeSource = activePage?.sourceFileId !== undefined ? documentModel.files[activePage.sourceFileId] : undefined;
   const selectedPreset = PAGE_PRESETS.find((preset) => preset.id === presetId) ?? PAGE_PRESETS[0];
-  const targetWidthMm = presetId === "custom" ? customWidthMm : selectedPreset.widthMm;
-  const targetHeightMm = presetId === "custom" ? customHeightMm : selectedPreset.heightMm;
+  const targetSizeMm = getTargetSizeMm(selectedPreset, presetId, unit, customWidth, customHeight, orientation);
+  const electronAvailable = typeof window.spp !== "undefined";
 
-  async function importPdfFiles(files: FileList | File[]): Promise<void> {
+  async function importPdfFiles(files: FileList | File[], sourceType: PdfStudioSourceFile["sourceType"] = "pdf"): Promise<void> {
     const fileArray = Array.from(files).filter((file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
     if (fileArray.length === 0) return;
 
     await runBusy(`מייבא ${fileArray.length} קובצי PDF...`, async () => {
-      const nextSources: PdfSource[] = [];
+      const nextFiles: Record<string, PdfStudioSourceFile> = {};
       const nextPages: PdfStudioPage[] = [];
-
       for (const file of fileArray) {
         const bytes = new Uint8Array(await file.arrayBuffer());
-        const source: PdfSource = { id: crypto.randomUUID(), name: file.name, bytes };
-        const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
-        const pdfPages = doc.getPages();
-        nextSources.push(source);
-
-        pdfPages.forEach((page, index) => {
+        const source: PdfStudioSourceFile = { id: crypto.randomUUID(), name: file.name, sourceType, bytes };
+        nextFiles[source.id] = source;
+        const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+        pdfDoc.getPages().forEach((page, index) => {
           const { width, height } = page.getSize();
-          nextPages.push({
-            id: crypto.randomUUID(),
-            kind: "pdf",
-            title: `${file.name} · עמוד ${index + 1}`,
-            sourceId: source.id,
-            sourcePageIndex: index,
-            widthPt: width,
-            heightPt: height,
-            originalWidthPt: width,
-            originalHeightPt: height,
-            rotation: 0
-          });
+          nextPages.push(createPdfPage(source, index, width, height));
         });
       }
-
-      setSources((current) => [...current, ...nextSources]);
-      setPages((current) => {
-        const merged = [...current, ...nextPages];
-        if (activePageId === null && merged[0] !== undefined) setActivePageId(merged[0].id);
-        return merged;
-      });
+      appendPages(nextPages, nextFiles);
       setStatus(`יובאו ${nextPages.length} עמודים`);
     });
   }
@@ -146,28 +134,29 @@ export function PdfStudioScreen({ onBackHome }: PdfStudioScreenProps): ReactElem
       const imagePages: PdfStudioPage[] = [];
       for (const file of fileArray) {
         const bytes = new Uint8Array(await file.arrayBuffer());
-        const size = await readImageSize(file);
+        const dataUrl = await readFileAsDataUrl(file);
+        const size = await readImageSize(dataUrl);
         const widthPt = Math.max(1, size.widthPx * 72 / 300);
         const heightPt = Math.max(1, size.heightPx * 72 / 300);
         imagePages.push({
           id: crypto.randomUUID(),
-          kind: "image",
+          sourceType: "image",
           title: file.name,
           imageBytes: bytes,
           imageMime: file.type || guessImageMime(file.name),
-          imageUrl: URL.createObjectURL(file),
+          imageDataUrl: dataUrl,
           widthPt,
           heightPt,
           originalWidthPt: widthPt,
           originalHeightPt: heightPt,
-          rotation: 0
+          rotation: 0,
+          resizeBehavior: DEFAULT_RESIZE_BEHAVIOR,
+          overlayObjects: [],
+          adjustments: { ...DEFAULT_ADJUSTMENTS },
+          flattened: false
         });
       }
-      setPages((current) => {
-        const merged = [...current, ...imagePages];
-        if (activePageId === null && merged[0] !== undefined) setActivePageId(merged[0].id);
-        return merged;
-      });
+      appendPages(imagePages, {});
       setStatus(`נוספו ${imagePages.length} עמודי תמונה`);
     });
   }
@@ -175,215 +164,286 @@ export function PdfStudioScreen({ onBackHome }: PdfStudioScreenProps): ReactElem
   async function importOfficeFiles(files: FileList | File[]): Promise<void> {
     const fileArray = Array.from(files);
     if (fileArray.length === 0) return;
-    if (window.spp?.convertOfficeToPdf === undefined) {
-      setError("חיבור Electron להמרת Office עדיין לא זמין. ודא שהקבצים electron/main.cjs ו-preload.cjs עודכנו.");
+    if (!electronAvailable || window.spp.convertOfficeToPdf === undefined) {
+      setError("המרת Office זמינה רק בהרצת Electron מלאה.");
       return;
     }
 
-    await runBusy("ממיר קבצי Office ל-PDF דרך LibreOffice...", async () => {
+    await runBusy("ממיר קובצי Office ל-PDF דרך LibreOffice...", async () => {
       for (const file of fileArray) {
-        const filePath = getElectronFilePath(file);
-        if (filePath === undefined) {
-          throw new Error(`לא ניתן לקבל נתיב מקומי עבור ${file.name}. במצב Electron מלא זה אמור להיות זמין.`);
-        }
+        const filePath = await getElectronFilePath(file);
+        if (filePath === undefined) throw new Error(`לא ניתן לקבל נתיב מקומי עבור ${file.name}.`);
         const result = await window.spp.convertOfficeToPdf!(filePath);
-        if (!result.success || result.pdfBase64 === undefined) {
-          throw new Error(result.error ?? `המרת ${file.name} נכשלה`);
-        }
+        if (!result.success || result.pdfBase64 === undefined) throw new Error(result.error ?? `המרת ${file.name} נכשלה`);
         const bytes = base64ToUint8Array(result.pdfBase64);
-        await appendPdfBytes(bytes, result.outputName ?? `${file.name}.pdf`);
+        await appendPdfBytes(bytes, result.outputName ?? `${file.name}.pdf`, "office-converted");
       }
-      setStatus("קבצי Office הומרו ונוספו למסמך");
+      setStatus("קובצי Office הומרו ונוספו למסמך");
     });
   }
 
-  async function appendPdfBytes(bytes: Uint8Array, name: string): Promise<void> {
-    const source: PdfSource = { id: crypto.randomUUID(), name, bytes };
-    const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
-    const importedPages = doc.getPages().map((page, index): PdfStudioPage => {
+  async function importDroppedFiles(files: File[]): Promise<void> {
+    const pdfFiles = files.filter(isPdfFile);
+    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+    const officeFiles = files.filter(isOfficeFile);
+    const supportedCount = pdfFiles.length + imageFiles.length + officeFiles.length;
+    if (supportedCount === 0) {
+      setError("לא נמצאו קבצים נתמכים. אפשר לגרור PDF, תמונות או קובצי Office.");
+      return;
+    }
+    if (pdfFiles.length > 0) await importPdfFiles(pdfFiles);
+    if (imageFiles.length > 0) await importImageFiles(imageFiles);
+    if (officeFiles.length > 0) await importOfficeFiles(officeFiles);
+  }
+
+  function handleStudioDragOver(event: DragEvent<HTMLElement>): void {
+    if (event.dataTransfer.types.includes("Files")) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+    }
+  }
+
+  function handleStudioDrop(event: DragEvent<HTMLElement>): void {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest(".pdf-page-card") !== null) return;
+    event.preventDefault();
+    const files = Array.from(event.dataTransfer.files);
+    void importDroppedFiles(files);
+  }
+
+  async function appendPdfBytes(bytes: Uint8Array, name: string, sourceType: PdfStudioSourceFile["sourceType"]): Promise<void> {
+    const source: PdfStudioSourceFile = { id: crypto.randomUUID(), name, sourceType, bytes };
+    const pdfDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    const pages = pdfDoc.getPages().map((page, index) => {
       const { width, height } = page.getSize();
+      return createPdfPage(source, index, width, height);
+    });
+    appendPages(pages, { [source.id]: source });
+  }
+
+  function appendPages(pages: PdfStudioPage[], files: Record<string, PdfStudioSourceFile>): void {
+    setDocumentModel((current) => {
+      const mergedPages = [...current.pages, ...pages];
       return {
-        id: crypto.randomUUID(),
-        kind: "pdf",
-        title: `${name} · עמוד ${index + 1}`,
-        sourceId: source.id,
-        sourcePageIndex: index,
-        widthPt: width,
-        heightPt: height,
-        originalWidthPt: width,
-        originalHeightPt: height,
-        rotation: 0
+        ...current,
+        files: { ...current.files, ...files },
+        pages: mergedPages,
+        activePageId: current.activePageId ?? mergedPages[0]?.id,
+        selectedPageIds: current.selectedPageIds.length > 0 ? current.selectedPageIds : mergedPages[0] !== undefined ? [mergedPages[0].id] : []
       };
     });
-    setSources((current) => [...current, source]);
-    setPages((current) => {
-      const merged = [...current, ...importedPages];
-      if (activePageId === null && merged[0] !== undefined) setActivePageId(merged[0].id);
-      return merged;
+  }
+
+  function handleSelectPage(pageId: string, index: number, event: MouseEvent<HTMLElement>): void {
+    setDocumentModel((current) => {
+      let selectedPageIds: string[];
+      if (event.shiftKey && lastSelectedIndexRef.current !== null) {
+        const start = Math.min(lastSelectedIndexRef.current, index);
+        const end = Math.max(lastSelectedIndexRef.current, index);
+        selectedPageIds = current.pages.slice(start, end + 1).map((page) => page.id);
+      } else if (event.ctrlKey || event.metaKey) {
+        selectedPageIds = current.selectedPageIds.includes(pageId)
+          ? current.selectedPageIds.filter((id) => id !== pageId)
+          : [...current.selectedPageIds, pageId];
+      } else {
+        selectedPageIds = [pageId];
+      }
+      lastSelectedIndexRef.current = index;
+      return { ...current, activePageId: pageId, selectedPageIds };
     });
   }
 
-  function toggleSelectPage(pageId: string, additive: boolean): void {
-    setActivePageId(pageId);
-    setSelectedPageIds((current) => {
-      if (!additive) return [pageId];
-      return current.includes(pageId) ? current.filter((id) => id !== pageId) : [...current, pageId];
-    });
+  function getActionIds(current: PdfStudioDocument = documentModel): string[] {
+    if (current.selectedPageIds.length > 0) return current.selectedPageIds;
+    return current.activePageId !== undefined ? [current.activePageId] : [];
   }
 
-  function movePage(pageId: string, direction: -1 | 1): void {
-    setPages((current) => {
-      const index = current.findIndex((page) => page.id === pageId);
-      const nextIndex = index + direction;
-      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) return current;
-      const copy = [...current];
-      const [item] = copy.splice(index, 1);
-      if (item === undefined) return current;
-      copy.splice(nextIndex, 0, item);
-      return copy;
-    });
-  }
-
-  function deleteSelectedPages(): void {
-    const ids = selectedPageIds.length > 0 ? selectedPageIds : activePageId !== null ? [activePageId] : [];
+  function deletePages(ids = getActionIds()): void {
     if (ids.length === 0) return;
-    setPages((current) => {
-      const next = current.filter((page) => !ids.includes(page.id));
-      setActivePageId(next[0]?.id ?? null);
-      return next;
+    setDocumentModel((current) => {
+      const nextPages = current.pages.filter((page) => !ids.includes(page.id));
+      return {
+        ...current,
+        pages: nextPages,
+        selectedPageIds: [],
+        activePageId: nextPages[0]?.id
+      };
     });
-    setSelectedPageIds([]);
     setStatus(`נמחקו ${ids.length} עמודים`);
   }
 
-  function duplicateSelectedPages(): void {
-    const ids = selectedPageIds.length > 0 ? selectedPageIds : activePageId !== null ? [activePageId] : [];
+  function duplicatePages(ids = getActionIds()): void {
     if (ids.length === 0) return;
-    setPages((current) => {
-      const clones: PdfStudioPage[] = [];
-      const next: PdfStudioPage[] = [];
-      current.forEach((page) => {
-        next.push(page);
+    setDocumentModel((current) => {
+      const nextPages: PdfStudioPage[] = [];
+      current.pages.forEach((page) => {
+        nextPages.push(page);
         if (ids.includes(page.id)) {
-          const clone = { ...page, id: crypto.randomUUID(), title: `${page.title} · עותק` };
-          clones.push(clone);
-          next.push(clone);
+          nextPages.push({ ...page, id: crypto.randomUUID(), title: `${page.title} · עותק`, overlayObjects: page.overlayObjects.map((object) => ({ ...object, id: crypto.randomUUID() })) });
         }
       });
-      return next;
+      return { ...current, pages: nextPages };
     });
     setStatus(`שוכפלו ${ids.length} עמודים`);
   }
 
-  function rotateSelectedPages(): void {
-    const ids = selectedPageIds.length > 0 ? selectedPageIds : activePageId !== null ? [activePageId] : [];
+  function rotatePages(ids = getActionIds()): void {
     if (ids.length === 0) return;
-    setPages((current) => current.map((page) => ids.includes(page.id) ? { ...page, rotation: ((page.rotation + 90) % 360) as PdfStudioPage["rotation"] } : page));
+    setDocumentModel((current) => ({
+      ...current,
+      pages: current.pages.map((page) => ids.includes(page.id) ? { ...page, rotation: ((page.rotation + 90) % 360) as PdfStudioPage["rotation"] } : page)
+    }));
+  }
+
+  function moveSelectedToPrompt(ids = getActionIds()): void {
+    if (ids.length === 0) return;
+    const raw = window.prompt("לאיזה מספר עמוד להעביר?", "1");
+    if (raw === null) return;
+    const target = Number(raw);
+    if (!Number.isFinite(target)) {
+      setError("מספר יעד לא תקין.");
+      return;
+    }
+    movePagesToIndex(ids, Math.max(0, Math.min(documentModel.pages.length - ids.length, target - 1)));
+  }
+
+  function movePagesToIndex(ids: string[], targetIndex: number): void {
+    setDocumentModel((current) => {
+      const moving = current.pages.filter((page) => ids.includes(page.id));
+      const rest = current.pages.filter((page) => !ids.includes(page.id));
+      const safeIndex = Math.max(0, Math.min(rest.length, targetIndex));
+      return {
+        ...current,
+        pages: [...rest.slice(0, safeIndex), ...moving, ...rest.slice(safeIndex)],
+        activePageId: moving[0]?.id ?? current.activePageId,
+        selectedPageIds: moving.map((page) => page.id)
+      };
+    });
   }
 
   function applyPageSize(): void {
-    const targetIds = getTargetPageIds();
-    if (targetIds.length === 0) return;
-    const widthPt = Math.max(1, targetWidthMm * MM_TO_PT);
-    const heightPt = Math.max(1, targetHeightMm * MM_TO_PT);
-    setPages((current) => current.map((page) => targetIds.includes(page.id) ? { ...page, widthPt, heightPt } : page));
-    setStatus(`גודל הדף עודכן ל-${formatMm(widthPt)} × ${formatMm(heightPt)} מ״מ`);
+    const ids = getTargetPageIds();
+    if (ids.length === 0) return;
+    const widthPt = Math.max(1, targetSizeMm.widthMm * MM_TO_PT);
+    const heightPt = Math.max(1, targetSizeMm.heightMm * MM_TO_PT);
+    setDocumentModel((current) => ({
+      ...current,
+      pages: current.pages.map((page) => ids.includes(page.id) ? { ...page, widthPt, heightPt, resizeBehavior } : page)
+    }));
+    setStatus(`גודל הדף עודכן ל-${targetSizeMm.widthMm.toFixed(1)} x ${targetSizeMm.heightMm.toFixed(1)} מ״מ`);
   }
 
   function getTargetPageIds(): string[] {
-    if (applyScope === "all") return pages.map((page) => page.id);
-    if (applyScope === "selected") return selectedPageIds;
-    return activePageId !== null ? [activePageId] : [];
+    if (applyScope === "all") return documentModel.pages.map((page) => page.id);
+    if (applyScope === "selected") return documentModel.selectedPageIds;
+    if (applyScope === "from-current") {
+      const activeIndex = documentModel.pages.findIndex((page) => page.id === activePage?.id);
+      return activeIndex >= 0 ? documentModel.pages.slice(activeIndex).map((page) => page.id) : [];
+    }
+    return activePage !== null ? [activePage.id] : [];
   }
 
   function addBlankPage(): void {
-    const widthPt = Math.max(1, targetWidthMm * MM_TO_PT);
-    const heightPt = Math.max(1, targetHeightMm * MM_TO_PT);
+    const widthPt = targetSizeMm.widthMm * MM_TO_PT;
+    const heightPt = targetSizeMm.heightMm * MM_TO_PT;
     const blank: PdfStudioPage = {
       id: crypto.randomUUID(),
-      kind: "blank",
+      sourceType: "blank",
       title: "עמוד ריק",
       widthPt,
       heightPt,
       originalWidthPt: widthPt,
       originalHeightPt: heightPt,
-      rotation: 0
+      rotation: 0,
+      resizeBehavior,
+      overlayObjects: [],
+      adjustments: { ...DEFAULT_ADJUSTMENTS },
+      flattened: false
     };
-    setPages((current) => [...current, blank]);
-    setActivePageId(blank.id);
-    setSelectedPageIds([blank.id]);
+    appendPages([blank], {});
+  }
+
+  function updateActiveAdjustments(next: PdfPageAdjustments): void {
+    if (activePage === null) return;
+    if ((activePage.sourceType === "pdf" || activePage.sourceType === "office-converted") && !activePage.flattened) {
+      const approved = window.confirm("עריכת בהירות/קונטרסט לעמוד PDF תשטח את העמוד לתמונה באותו עמוד. להמשיך?");
+      if (!approved) return;
+    }
+    setDocumentModel((current) => ({
+      ...current,
+      pages: current.pages.map((page) => page.id === activePage.id ? { ...page, adjustments: next, flattened: page.sourceType !== "image" } : page)
+    }));
   }
 
   async function exportPdf(saveToDisk: boolean): Promise<void> {
-    if (pages.length === 0) {
-      setError("אין עמודים לייצוא");
+    if (documentModel.pages.length === 0) {
+      setError("אין עמודים לייצוא.");
       return;
     }
-
     await runBusy("בונה PDF חדש...", async () => {
-      const pdfDoc = await PDFDocument.create();
-      const loadedSources = new Map<string, PDFDocument>();
-
-      for (const pageEntry of pages) {
-        if (pageEntry.kind === "pdf") {
-          const source = sources.find((item) => item.id === pageEntry.sourceId);
-          if (source === undefined || pageEntry.sourcePageIndex === undefined) continue;
-          let sourceDoc = loadedSources.get(source.id);
-          if (sourceDoc === undefined) {
-            sourceDoc = await PDFDocument.load(source.bytes, { ignoreEncryption: true });
-            loadedSources.set(source.id, sourceDoc);
-          }
-          const [copiedPage] = await pdfDoc.copyPages(sourceDoc, [pageEntry.sourcePageIndex]);
-          if (copiedPage !== undefined) {
-            applyPageTransform(copiedPage, pageEntry, resizeBehavior);
-            pdfDoc.addPage(copiedPage);
-          }
-        } else if (pageEntry.kind === "image" && pageEntry.imageBytes !== undefined) {
-          const page = pdfDoc.addPage([pageEntry.widthPt, pageEntry.heightPt]);
-          const image = pageEntry.imageMime?.includes("png")
-            ? await pdfDoc.embedPng(pageEntry.imageBytes)
-            : await pdfDoc.embedJpg(pageEntry.imageBytes);
-          const fit = image.scaleToFit(pageEntry.widthPt, pageEntry.heightPt);
-          page.drawImage(image, {
-            x: (pageEntry.widthPt - fit.width) / 2,
-            y: (pageEntry.heightPt - fit.height) / 2,
-            width: fit.width,
-            height: fit.height,
-            rotate: degrees(pageEntry.rotation)
-          });
-        } else {
-          pdfDoc.addPage([pageEntry.widthPt, pageEntry.heightPt]);
-        }
-      }
-
-      const bytes = await pdfDoc.save();
+      const bytes = await buildPdfStudioPdf(documentModel);
       const base64 = uint8ArrayToBase64(bytes);
-      if (saveToDisk) {
-        if (window.spp?.savePdfDialog === undefined) {
-          downloadInBrowser(bytes, "SPP2-PDF-Studio.pdf");
-          setStatus("ה-PDF הורד דרך הדפדפן כי שמירה דרך Electron לא זמינה");
-          return;
-        }
+      if (saveToDisk && window.spp?.savePdfDialog !== undefined) {
         const result = await window.spp.savePdfDialog(base64, "SPP2-PDF-Studio.pdf");
-        if (!result.success) throw new Error(result.error ?? "שמירת PDF נכשלה");
+        if (!result.success) throw new Error(result.error ?? "שמירת PDF נכשלה.");
         setStatus(`נשמר: ${result.filePath ?? "PDF"}`);
       } else {
         downloadInBrowser(bytes, "SPP2-PDF-Studio.pdf");
-        setStatus("ה-PDF יוצא בהצלחה");
+        setStatus(saveToDisk ? "שמירה דרך Electron לא זמינה, הקובץ הורד דרך הדפדפן." : "ה-PDF יוצא בהצלחה.");
       }
     });
   }
 
-  function clearAll(): void {
-    pages.forEach((page) => {
-      if (page.imageUrl !== undefined) URL.revokeObjectURL(page.imageUrl);
+  async function openPrintPreview(): Promise<void> {
+    if (!electronAvailable) {
+      setError("תצוגת הדפסה זמינה רק בהרצת Electron.");
+      return;
+    }
+    await runBusy("מכין תצוגת הדפסה...", async () => {
+      const result = await openPdfStudioPrintPreview(documentModel);
+      if (!result.success) throw new Error(result.error ?? "פתיחת Print Preview נכשלה.");
+      setStatus("תצוגת ההדפסה נפתחה");
     });
-    setPages([]);
-    setSources([]);
-    setSelectedPageIds([]);
-    setActivePageId(null);
-    setStatus("נוקה");
+  }
+
+  async function openSeparatePdfStudioWindow(): Promise<void> {
+    if (window.spp?.openModeWindow === undefined && window.spp?.openPdfStudioWindow === undefined) {
+      setError("פתיחת PDF Studio בחלון נפרד זמינה רק בהרצת Electron.");
+      return;
+    }
+    const result = window.spp.openModeWindow !== undefined
+      ? await window.spp.openModeWindow({
+          mode: "pdf-studio",
+          title: "SPP2-PDF EDITOR",
+          snapshot: { pdfStudioDocument: documentModel }
+        })
+      : await window.spp.openPdfStudioWindow!();
+    if (!result.success) setError(result.error ?? "פתיחת חלון PDF Studio נכשלה.");
+  }
+
+  async function checkLibreOffice(): Promise<void> {
+    if (window.spp?.checkLibreOffice === undefined) {
+      setLibreOfficeStatus("זמין רק ב-Electron");
+      return;
+    }
+    const result = await window.spp.checkLibreOffice();
+    setLibreOfficeStatus(result.found ? `נמצא: ${result.path}` : `לא נמצא: ${result.error ?? ""}`);
+  }
+
+  async function chooseLibreOffice(): Promise<void> {
+    if (window.spp?.chooseLibreOfficePath === undefined) {
+      setError("בחירת LibreOffice זמינה רק בהרצת Electron.");
+      return;
+    }
+    const result = await window.spp.chooseLibreOfficePath();
+    if (result.success) setLibreOfficeStatus(`נבחר: ${result.path}`);
+    else if (result.error !== undefined) setError(result.error);
+  }
+
+  function clearAll(): void {
+    setDocumentModel({ id: crypto.randomUUID(), title: "PDF Studio", files: {}, pages: [], selectedPageIds: [] });
     setError(null);
+    setStatus("נוקה");
   }
 
   async function runBusy(message: string, job: () => Promise<void>): Promise<void> {
@@ -399,217 +459,188 @@ export function PdfStudioScreen({ onBackHome }: PdfStudioScreenProps): ReactElem
     }
   }
 
-  function handlePdfInput(event: ChangeEvent<HTMLInputElement>): void {
-    if (event.target.files !== null) void importPdfFiles(event.target.files);
-    event.target.value = "";
-  }
-
-  function handleImageInput(event: ChangeEvent<HTMLInputElement>): void {
-    if (event.target.files !== null) void importImageFiles(event.target.files);
-    event.target.value = "";
-  }
-
-  function handleOfficeInput(event: ChangeEvent<HTMLInputElement>): void {
-    if (event.target.files !== null) void importOfficeFiles(event.target.files);
-    event.target.value = "";
-  }
-
   return (
-    <main className="pdf-studio-shell" dir="rtl">
+    <main className="pdf-studio-shell" dir="rtl" onDragOver={handleStudioDragOver} onDrop={handleStudioDrop}>
       <header className="pdf-studio-topbar">
-        <button className="pdf-icon-btn" type="button" onClick={onBackHome} title="חזרה למסך הבית">
-          <ArrowRight size={18} />
-        </button>
+        <button className="pdf-icon-btn" type="button" onClick={onBackHome} title="חזרה למסך הבית"><ArrowRight size={18} /></button>
         <div className="pdf-studio-title">
           <strong>PDF Studio</strong>
-          <span>סידור, מיזוג, שינוי גודל והמרת קבצים ל-PDF</span>
+          <span>ארגון, הכנה להדפסה, המרת Office ועריכת שכבות מעל PDF</span>
         </div>
-        <div className="pdf-studio-status">
-          {isBusy ? <Loader2 className="pdf-spin" size={15} /> : null}
-          {status}
-        </div>
+        <div className="pdf-studio-status">{isBusy ? <Loader2 className="pdf-spin" size={15} /> : <CheckCircle2 size={15} />}{status}</div>
       </header>
 
       <section className="pdf-studio-toolbar" aria-label="פעולות PDF">
-        <button className="pdf-action primary" onClick={() => pdfInputRef.current?.click()} type="button"><Upload size={16} /> ייבוא PDF</button>
-        <button className="pdf-action" onClick={() => imageInputRef.current?.click()} type="button"><ImagePlus size={16} /> תמונות כעמודים</button>
-        <button className="pdf-action" onClick={() => officeInputRef.current?.click()} type="button"><FilePlus2 size={16} /> Office ל-PDF</button>
+        <button className="pdf-action primary" onClick={() => pdfInputRef.current?.click()} type="button"><Upload size={16} /> פתח PDF</button>
+        <button className="pdf-action" onClick={() => imageInputRef.current?.click()} type="button"><ImagePlus size={16} /> הוסף תמונות</button>
+        <button className="pdf-action" onClick={() => officeInputRef.current?.click()} type="button"><FilePlus2 size={16} /> הוסף Office</button>
         <button className="pdf-action" onClick={addBlankPage} type="button"><FileText size={16} /> עמוד ריק</button>
         <span className="pdf-toolbar-divider" />
-        <button className="pdf-action" disabled={activePage === null} onClick={rotateSelectedPages} type="button"><RotateCw size={16} /> סובב</button>
-        <button className="pdf-action" disabled={activePage === null} onClick={duplicateSelectedPages} type="button"><Copy size={16} /> שכפל</button>
-        <button className="pdf-action danger" disabled={activePage === null} onClick={deleteSelectedPages} type="button"><Trash2 size={16} /> מחק</button>
+        <button className="pdf-action" disabled={activePage === null} onClick={() => rotatePages()} type="button"><RotateCw size={16} /> סובב</button>
+        <button className="pdf-action" disabled={activePage === null} onClick={() => duplicatePages()} type="button"><Copy size={16} /> שכפל</button>
+        <button className="pdf-action" disabled={activePage === null} onClick={() => moveSelectedToPrompt()} type="button"><FileText size={16} /> העבר אל...</button>
+        <button className="pdf-action danger" disabled={activePage === null} onClick={() => deletePages()} type="button"><Trash2 size={16} /> מחק</button>
+        <button className="pdf-action" disabled={documentModel.pages.length === 0} onClick={() => setDocumentModel((current) => ({ ...current, selectedPageIds: current.pages.map((page) => page.id) }))} type="button">בחר הכל</button>
         <span className="pdf-toolbar-spacer" />
-        <button className="pdf-action" disabled={pages.length === 0 || isBusy} onClick={() => void exportPdf(false)} type="button"><FileDown size={16} /> הורד</button>
-        <button className="pdf-action primary" disabled={pages.length === 0 || isBusy} onClick={() => void exportPdf(true)} type="button"><Save size={16} /> שמור PDF</button>
-        <button className="pdf-action ghost" disabled={pages.length === 0} onClick={clearAll} type="button"><X size={16} /> נקה</button>
+        <button className="pdf-action" disabled={documentModel.pages.length === 0 || isBusy} onClick={() => void exportPdf(false)} type="button"><FileDown size={16} /> ייצוא PDF</button>
+        <button className="pdf-action primary" disabled={documentModel.pages.length === 0 || isBusy} onClick={() => void exportPdf(true)} type="button"><Save size={16} /> שמור PDF</button>
+        <button className="pdf-action primary" disabled={documentModel.pages.length === 0 || isBusy} onClick={() => void openPrintPreview()} type="button"><Printer size={16} /> הדפס / תצוגת הדפסה</button>
+        <button className="pdf-action" onClick={() => void openSeparatePdfStudioWindow()} type="button">פתח בחלון נפרד</button>
+        <button className="pdf-action ghost" disabled={documentModel.pages.length === 0} onClick={clearAll} type="button"><X size={16} /> נקה</button>
       </section>
 
-      <input ref={pdfInputRef} accept="application/pdf,.pdf" hidden multiple onChange={handlePdfInput} type="file" />
-      <input ref={imageInputRef} accept="image/png,image/jpeg,image/jpg,image/webp" hidden multiple onChange={handleImageInput} type="file" />
-      <input ref={officeInputRef} accept=".doc,.docx,.ppt,.pptx,.xls,.xlsx,.odt,.ods,.odp" hidden multiple onChange={handleOfficeInput} type="file" />
+      <input ref={pdfInputRef} accept="application/pdf,.pdf" hidden multiple onChange={(event) => { if (event.target.files !== null) void importPdfFiles(event.target.files); event.target.value = ""; }} type="file" />
+      <input ref={imageInputRef} accept="image/png,image/jpeg,image/jpg,image/webp" hidden multiple onChange={(event) => { if (event.target.files !== null) void importImageFiles(event.target.files); event.target.value = ""; }} type="file" />
+      <input ref={officeInputRef} accept=".doc,.docx,.ppt,.pptx,.xls,.xlsx,.odt,.ods,.odp" hidden multiple onChange={(event) => { if (event.target.files !== null) void importOfficeFiles(event.target.files); event.target.value = ""; }} type="file" />
 
+      {!electronAvailable ? <div className="pdf-warning">חלק מפעולות הקבצים זמינות רק בהרצת Electron מלאה. התצוגה והייצוא בדפדפן עדיין יעבדו.</div> : null}
       {error !== null ? <div className="pdf-error">{error}</div> : null}
 
       <div className="pdf-studio-layout">
         <aside className="pdf-pages-panel">
           <div className="pdf-panel-heading">
             <strong>עמודים</strong>
-            <span>{pages.length} עמודים · {selectedPagesCount} נבחרו</span>
+            <span>{documentModel.pages.length} עמודים · {documentModel.selectedPageIds.length} נבחרו</span>
           </div>
           <div className="pdf-page-list">
-            {pages.length === 0 ? (
-              <div className="pdf-empty-state">
-                <FileImage size={34} />
-                <strong>אין עדיין עמודים</strong>
-                <span>ייבא PDF, תמונות או קובצי Office כדי להתחיל.</span>
-              </div>
-            ) : pages.map((page, index) => (
-              <article
-                className={`pdf-page-card ${page.id === activePage?.id ? "active" : ""} ${selectedPageIds.includes(page.id) ? "selected" : ""}`}
+            {documentModel.pages.length === 0 ? (
+              <div className="pdf-empty-state"><FileText size={34} /><strong>אין עדיין עמודים</strong><span>ייבא קובץ כדי להתחיל.</span></div>
+            ) : documentModel.pages.map((page, index) => (
+              <PdfThumbnail
                 key={page.id}
-                onClick={(event) => toggleSelectPage(page.id, event.ctrlKey || event.metaKey)}
-              >
-                <div className="pdf-page-thumb">
-                  {page.kind === "image" && page.imageUrl !== undefined ? <img alt="" src={page.imageUrl} /> : <span>{index + 1}</span>}
-                </div>
-                <div className="pdf-page-meta">
-                  <strong>עמוד {index + 1}</strong>
-                  <span>{page.title}</span>
-                  <small>{formatMm(page.widthPt)} × {formatMm(page.heightPt)} מ״מ · {page.rotation}°</small>
-                </div>
-                <div className="pdf-page-move">
-                  <button disabled={index === 0} onClick={(event) => { event.stopPropagation(); movePage(page.id, -1); }} type="button">↑</button>
-                  <button disabled={index === pages.length - 1} onClick={(event) => { event.stopPropagation(); movePage(page.id, 1); }} type="button">↓</button>
-                </div>
-              </article>
+                page={page}
+                source={page.sourceFileId !== undefined ? documentModel.files[page.sourceFileId] : undefined}
+                index={index}
+                active={page.id === activePage?.id}
+                selected={documentModel.selectedPageIds.includes(page.id)}
+                draggable
+                onSelect={(event) => handleSelectPage(page.id, index, event)}
+                onDelete={() => deletePages([page.id])}
+                onDuplicate={() => duplicatePages([page.id])}
+                onRotate={() => rotatePages([page.id])}
+                onMoveRequest={() => moveSelectedToPrompt([page.id])}
+                onDragStart={() => { draggedPageIdsRef.current = documentModel.selectedPageIds.includes(page.id) ? documentModel.selectedPageIds : [page.id]; }}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={() => movePagesToIndex(draggedPageIdsRef.current, index)}
+              />
             ))}
           </div>
         </aside>
 
         <section className="pdf-preview-panel">
-          {activePage === null ? (
-            <div className="pdf-preview-empty">
-              <Maximize2 size={44} />
-              <h2>PDF Studio מוכן</h2>
-              <p>הכלי מחובר כמסך עצמאי בתוך SPP2. גרור/ייבא קבצים והתחל לסדר עמודים.</p>
-            </div>
-          ) : (
-            <div className="pdf-preview-page-wrap">
-              <div
-                className="pdf-preview-page"
-                style={{ aspectRatio: `${activePage.widthPt} / ${activePage.heightPt}` }}
-              >
-                {activePage.kind === "image" && activePage.imageUrl !== undefined ? (
-                  <img alt="" src={activePage.imageUrl} style={{ transform: `rotate(${activePage.rotation}deg)` }} />
-                ) : (
-                  <div className="pdf-preview-placeholder">
-                    <FileText size={52} />
-                    <strong>{activePage.title}</strong>
-                    <span>{formatMm(activePage.widthPt)} × {formatMm(activePage.heightPt)} מ״מ</span>
-                    <small>תצוגת תוכן PDF ויזואלית מלאה תתחבר בשלב PDF.js; הייצוא משתמש בעמודי המקור.</small>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+          <div className="pdf-preview-controls">
+            <button type="button" onClick={() => setZoom((current) => Math.max(0.35, current - 0.15))}><Minus size={15} /></button>
+            <span>{Math.round(zoom * 100)}%</span>
+            <button type="button" onClick={() => setZoom((current) => Math.min(2.5, current + 0.15))}><Plus size={15} /></button>
+            <button type="button" onClick={() => setZoom(1)}><Maximize2 size={15} /> התאמה</button>
+          </div>
+          <PdfPagePreview page={activePage} source={activeSource} zoom={zoom} />
         </section>
 
         <aside className="pdf-settings-panel">
-          <div className="pdf-panel-heading">
-            <strong>גודל דף</strong>
-            <span>לדף נוכחי / נבחרים / הכל</span>
-          </div>
+          <div className="pdf-panel-heading"><strong>פעולות עמוד</strong><span>{activePage !== null ? formatPageSize(activePage) : "אין עמוד פעיל"}</span></div>
+          <button className="pdf-action primary full" disabled={activePage === null} type="button" onClick={() => activePage !== null && setOverlayPage(activePage)}><Settings size={16} /> עריכה על העמוד</button>
 
-          <label className="pdf-field">
-            <span>גודל</span>
-            <select value={presetId} onChange={(event) => setPresetId(event.target.value)}>
-              {PAGE_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
-            </select>
-          </label>
-
+          <div className="pdf-panel-heading compact"><strong>גודל דף</strong><span>Custom פותח רוחב/גובה</span></div>
+          <label className="pdf-field"><span>גודל</span><select value={presetId} onChange={(event) => setPresetId(event.target.value as PagePresetId)}>{PAGE_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}</select></label>
+          <label className="pdf-field"><span>יחידות</span><select value={unit} onChange={(event) => setUnit(event.target.value as PdfUnit)}><option value="mm">מ״מ</option><option value="cm">ס״מ</option><option value="in">אינץ׳</option></select></label>
+          <label className="pdf-field"><span>כיוון</span><select value={orientation} onChange={(event) => setOrientation(event.target.value as PdfOrientationMode)}><option value="source">שמור לפי המקור</option><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></label>
           <div className="pdf-field-grid">
-            <label className="pdf-field">
-              <span>רוחב מ״מ</span>
-              <input disabled={presetId !== "custom"} min={1} onChange={(event) => setCustomWidthMm(Number(event.target.value))} type="number" value={targetWidthMm} />
-            </label>
-            <label className="pdf-field">
-              <span>גובה מ״מ</span>
-              <input disabled={presetId !== "custom"} min={1} onChange={(event) => setCustomHeightMm(Number(event.target.value))} type="number" value={targetHeightMm} />
-            </label>
+            <label className="pdf-field"><span>רוחב</span><input disabled={presetId !== "custom"} min={1} type="number" value={customWidth} onChange={(event) => setCustomWidth(Number(event.target.value))} /></label>
+            <label className="pdf-field"><span>גובה</span><input disabled={presetId !== "custom"} min={1} type="number" value={customHeight} onChange={(event) => setCustomHeight(Number(event.target.value))} /></label>
           </div>
-
-          <label className="pdf-field">
-            <span>החל על</span>
-            <select value={applyScope} onChange={(event) => setApplyScope(event.target.value as ApplyScope)}>
-              <option value="current">עמוד נוכחי</option>
-              <option value="selected">עמודים נבחרים</option>
-              <option value="all">כל העמודים</option>
-            </select>
-          </label>
-
-          <label className="pdf-field">
-            <span>התנהגות תוכן בייצוא</span>
-            <select value={resizeBehavior} onChange={(event) => setResizeBehavior(event.target.value as ResizeBehavior)}>
-              <option value="fit">התאם פנימה ושמור יחס</option>
-              <option value="fill">מלא דף ושמור יחס</option>
-              <option value="stretch">מתח לגודל החדש</option>
-              <option value="center">מרכז ללא שינוי גודל</option>
-            </select>
-          </label>
-
+          <label className="pdf-field"><span>החל על</span><select value={applyScope} onChange={(event) => setApplyScope(event.target.value as PdfApplyScope)}><option value="current">עמוד נוכחי</option><option value="selected">עמודים נבחרים</option><option value="all">כל העמודים</option><option value="from-current">מהעמוד הנוכחי והלאה</option></select></label>
+          <label className="pdf-field"><span>התנהגות תוכן</span><select value={resizeBehavior} onChange={(event) => setResizeBehavior(event.target.value as PdfResizeBehavior)}><option value="fit">Fit proportionally</option><option value="fill">Fill / Crop</option><option value="stretch">Stretch</option><option value="center">Center no scale</option><option value="fit-width">Fit width</option><option value="fit-height">Fit height</option></select></label>
           <button className="pdf-action primary full" disabled={activePage === null} onClick={applyPageSize} type="button">החל גודל דף</button>
 
-          <div className="pdf-info-box">
-            <strong>הערה חשובה</strong>
-            <span>בגרסה הזו פעולות PDF נשמרות כ-PDF חדש. דפי PDF מקוריים נשארים וקטוריים ככל האפשר; תמונות מוטמעות כעמודים חדשים.</span>
+          <div className="pdf-panel-heading compact"><strong>Adjust</strong><span>לעמוד הפעיל</span></div>
+          <AdjustmentControls page={activePage} onChange={updateActiveAdjustments} />
+
+          <div className="pdf-panel-heading compact"><strong>LibreOffice</strong><span>{libreOfficeStatus}</span></div>
+          <div className="pdf-button-row">
+            <button className="pdf-action" type="button" onClick={() => void checkLibreOffice()}>בדוק LibreOffice</button>
+            <button className="pdf-action" type="button" onClick={() => void chooseLibreOffice()}>בחר נתיב</button>
           </div>
+
+          <div className="pdf-info-box"><strong>OCR</strong><span>זיהוי טקסט יתווסף בהמשך. כרגע המיקוד הוא Organizer/Print Prep יציב.</span></div>
         </aside>
       </div>
+
+      {overlayPage !== null ? (
+        <PdfOverlayEditor
+          page={overlayPage}
+          source={overlayPage.sourceFileId !== undefined ? documentModel.files[overlayPage.sourceFileId] : undefined}
+          onCancel={() => setOverlayPage(null)}
+          onDone={(objects) => {
+            setDocumentModel((current) => ({ ...current, pages: current.pages.map((page) => page.id === overlayPage.id ? { ...page, overlayObjects: objects } : page) }));
+            setOverlayPage(null);
+          }}
+        />
+      ) : null}
     </main>
   );
 }
 
-function applyPageTransform(page: import("pdf-lib").PDFPage, entry: PdfStudioPage, behavior: ResizeBehavior): void {
-  const originalWidth = page.getWidth();
-  const originalHeight = page.getHeight();
-  const targetWidth = entry.widthPt;
-  const targetHeight = entry.heightPt;
-  const changed = Math.abs(originalWidth - targetWidth) > 0.01 || Math.abs(originalHeight - targetHeight) > 0.01;
-
-  if (changed) {
-    page.setSize(targetWidth, targetHeight);
-    const scaleX = targetWidth / originalWidth;
-    const scaleY = targetHeight / originalHeight;
-    if (behavior === "stretch") {
-      page.scaleContent(scaleX, scaleY);
-    } else if (behavior === "center") {
-      page.translateContent((targetWidth - originalWidth) / 2, (targetHeight - originalHeight) / 2);
-    } else {
-      const scale = behavior === "fill" ? Math.max(scaleX, scaleY) : Math.min(scaleX, scaleY);
-      page.scaleContent(scale, scale);
-      page.translateContent((targetWidth - originalWidth * scale) / 2, (targetHeight - originalHeight * scale) / 2);
-    }
-  }
-
-  if (entry.rotation !== 0) {
-    page.setRotation(degrees(entry.rotation));
-  }
+function AdjustmentControls({ page, onChange }: { page: PdfStudioPage | null; onChange: (adjustments: PdfPageAdjustments) => void }): ReactElement {
+  const adjustments = page?.adjustments ?? DEFAULT_ADJUSTMENTS;
+  return (
+    <div className="pdf-adjustments">
+      <label><span>בהירות</span><input disabled={page === null} min={-50} max={50} type="range" value={adjustments.brightness} onChange={(event) => onChange({ ...adjustments, brightness: Number(event.target.value) })} /></label>
+      <label><span>קונטרסט</span><input disabled={page === null} min={-40} max={60} type="range" value={adjustments.contrast} onChange={(event) => onChange({ ...adjustments, contrast: Number(event.target.value) })} /></label>
+      <label><span>רוויה</span><input disabled={page === null} min={-60} max={60} type="range" value={adjustments.saturation} onChange={(event) => onChange({ ...adjustments, saturation: Number(event.target.value) })} /></label>
+      <label className="pdf-checkbox"><input disabled={page === null} checked={adjustments.grayscale} type="checkbox" onChange={(event) => onChange({ ...adjustments, grayscale: event.target.checked })} /> שחור־לבן</label>
+      <button className="pdf-action full" disabled={page === null} type="button" onClick={() => onChange({ ...DEFAULT_ADJUSTMENTS })}>Reset</button>
+    </div>
+  );
 }
 
-function readImageSize(file: File): Promise<{ widthPx: number; heightPx: number }> {
+function createPdfPage(source: PdfStudioSourceFile, index: number, width: number, height: number): PdfStudioPage {
+  return {
+    id: crypto.randomUUID(),
+    sourceType: source.sourceType,
+    title: `${source.name} · עמוד ${index + 1}`,
+    sourceFileId: source.id,
+    sourcePageIndex: index,
+    widthPt: width,
+    heightPt: height,
+    originalWidthPt: width,
+    originalHeightPt: height,
+    rotation: 0,
+    resizeBehavior: DEFAULT_RESIZE_BEHAVIOR,
+    overlayObjects: [],
+    adjustments: { ...DEFAULT_ADJUSTMENTS },
+    flattened: false
+  };
+}
+
+function getTargetSizeMm(preset: PagePreset, presetId: PagePresetId, unit: PdfUnit, customWidth: number, customHeight: number, orientation: PdfOrientationMode): { widthMm: number; heightMm: number } {
+  const factor = unit === "cm" ? 10 : unit === "in" ? 25.4 : 1;
+  let widthMm = presetId === "custom" ? customWidth * factor : preset.widthMm;
+  let heightMm = presetId === "custom" ? customHeight * factor : preset.heightMm;
+  if (orientation === "portrait" && widthMm > heightMm) [widthMm, heightMm] = [heightMm, widthMm];
+  if (orientation === "landscape" && heightMm > widthMm) [widthMm, heightMm] = [heightMm, widthMm];
+  return { widthMm, heightMm };
+}
+
+function formatPageSize(page: PdfStudioPage): string {
+  return `${(page.widthPt * PT_TO_MM).toFixed(1)} x ${(page.heightPt * PT_TO_MM).toFixed(1)} מ״מ`;
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve({ widthPx: img.naturalWidth || 1000, heightPx: img.naturalHeight || 1000 });
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error(`לא ניתן לקרוא את ממדי התמונה: ${file.name}`));
-    };
-    img.src = url;
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("קריאת הקובץ נכשלה."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function readImageSize(dataUrl: string): Promise<{ widthPx: number; heightPx: number }> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve({ widthPx: image.naturalWidth || 1000, heightPx: image.naturalHeight || 1000 });
+    image.onerror = () => reject(new Error("לא ניתן לקרוא את ממדי התמונה."));
+    image.src = dataUrl;
   });
 }
 
@@ -617,7 +648,16 @@ function guessImageMime(name: string): string {
   return name.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
 }
 
-function getElectronFilePath(file: File): string | undefined {
+function isPdfFile(file: File): boolean {
+  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+}
+
+function isOfficeFile(file: File): boolean {
+  return /\.(doc|docx|ppt|pptx|xls|xlsx|odt|odp|ods)$/i.test(file.name);
+}
+
+async function getElectronFilePath(file: File): Promise<string | undefined> {
+  if (window.spp?.getFilePath !== undefined) return window.spp.getFilePath(file);
   return (file as File & { path?: string }).path;
 }
 
@@ -645,8 +685,4 @@ function downloadInBrowser(bytes: Uint8Array, filename: string): void {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
-}
-
-function formatMm(pt: number): string {
-  return (pt * PT_TO_MM).toFixed(1);
 }

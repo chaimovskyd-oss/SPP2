@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("spp", {
   platform: process.platform,
@@ -15,11 +15,29 @@ contextBridge.exposeInMainWorld("spp", {
   convertOfficeToPdf: (inputPath) =>
     ipcRenderer.invoke("spp:convert-office-to-pdf", inputPath),
 
+  getFilePath: (file) =>
+    webUtils.getPathForFile(file),
+
+  checkLibreOffice: () =>
+    ipcRenderer.invoke("spp:check-libreoffice"),
+
+  chooseLibreOfficePath: () =>
+    ipcRenderer.invoke("spp:choose-libreoffice-path"),
+
   openImageEditor: (inputPath, outputPath) =>
     ipcRenderer.invoke("spp:open-image-editor", inputPath, outputPath),
 
   openPrintPreview: (payload) =>
     ipcRenderer.invoke("spp:open-print-preview", payload),
+
+  openModeWindow: (payload) =>
+    ipcRenderer.invoke("spp:open-mode-window", payload),
+
+  getModeWindowSnapshot: (snapshotId) =>
+    ipcRenderer.invoke("spp:get-mode-window-snapshot", snapshotId),
+
+  openPdfStudioWindow: () =>
+    ipcRenderer.invoke("spp:open-mode-window", { mode: "pdf-studio", title: "SPP2-PDF EDITOR" }),
 
   applyImageParams: (inputPath, outputPath, paramsJson) =>
     ipcRenderer.invoke("spp:apply-image-params", inputPath, outputPath, paramsJson),

@@ -1,6 +1,7 @@
 import { createDocument, createPage } from "../document/factory";
 import { createFrameLayer, createShapeLayer } from "../layers/factory";
 import { createId } from "../ids";
+import { mmToPx } from "../units/conversion";
 import type { Document } from "@/types/document";
 import type {
   ProductDefinition,
@@ -18,30 +19,31 @@ function resolveBleed(bleed: Margins | undefined): Margins {
   return bleed;
 }
 
-/** Actual page/canvas size = product trim size + bleed on all sides. */
-function canvasSizeWithBleed(trimSize: Size, bleed: Margins): Size {
+/** Canvas size (px) = trim size + bleed on all sides, converted from mm at the given DPI. */
+function canvasSizePxWithBleed(trimSizeMm: Size, bleed: Margins, dpi: number): Size {
   return {
-    width: trimSize.width + bleed.left + bleed.right,
-    height: trimSize.height + bleed.top + bleed.bottom
+    width: mmToPx(trimSizeMm.width + bleed.left + bleed.right, dpi),
+    height: mmToPx(trimSizeMm.height + bleed.top + bleed.bottom, dpi)
   };
 }
 
 /**
  * Offset a rect defined relative to the trim area so it sits correctly on the
- * larger canvas that includes the bleed zone at its edges.
+ * larger canvas that includes the bleed zone at its edges — returned in px.
  */
-function offsetRectByBleed(rect: Rect, bleed: Margins): Rect {
+function safeAreaToPx(safeArea: Rect, bleed: Margins, dpi: number): Rect {
   return {
-    x: rect.x + bleed.left,
-    y: rect.y + bleed.top,
-    width: rect.width,
-    height: rect.height
+    x: mmToPx(safeArea.x + bleed.left, dpi),
+    y: mmToPx(safeArea.y + bleed.top, dpi),
+    width: mmToPx(safeArea.width, dpi),
+    height: mmToPx(safeArea.height, dpi)
   };
 }
 
 /**
  * Return a copy of the product with canvasSize (and safeArea) swapped to match
  * the requested orientation.  No-op if the product is already in that orientation.
+ * canvasSize and safeArea are kept in mm (ProductDefinition convention).
  */
 export function applyOrientationToProduct(
   product: ProductDefinition,
@@ -51,7 +53,6 @@ export function applyOrientationToProduct(
   const isPortrait = height >= width;
   const wantPortrait = orientation === "portrait";
   if (isPortrait === wantPortrait) return product;
-  // Flip width ↔ height. SafeArea x/y stay the same; w/h swap (symmetric margins).
   return {
     ...product,
     canvasSize: { width: height, height: width },
@@ -69,17 +70,18 @@ export function createDocumentFromProduct(
   now = new Date().toISOString()
 ): Document {
   const bleed = resolveBleed(product.bleed);
-  const trimSize = product.canvasSize;
-  const actualCanvasSize = canvasSizeWithBleed(trimSize, bleed);
+  const trimSizeMm = product.canvasSize; // stored in mm
+  const dpi = product.recommendedDPI ?? product.printSpec.dpi;
 
-  // safeArea from product is measured from the trim edge — offset onto the full canvas.
-  const safeAreaOnCanvas = offsetRectByBleed(product.safeArea, bleed);
+  // All pixel values derived from mm here — this is the single conversion point.
+  const canvasSizePx = canvasSizePxWithBleed(trimSizeMm, bleed, dpi);
+  const safeAreaPx = safeAreaToPx(product.safeArea, bleed, dpi);
 
   const safeAreaGuide = createShapeLayer({
     name: "Safe area",
     shape: "rect",
     locked: true,
-    rect: safeAreaOnCanvas,
+    rect: safeAreaPx,
     metadata: {
       role: "safeAreaGuide",
       productId: product.id
@@ -88,7 +90,7 @@ export function createDocumentFromProduct(
 
   const editableFrame = createFrameLayer({
     name: "Editable product zone",
-    rect: safeAreaOnCanvas,
+    rect: safeAreaPx,
     contentType: "empty",
     fitMode: "fill",
     lockedFrame: false,
@@ -98,19 +100,19 @@ export function createDocumentFromProduct(
     }
   });
 
-  // Default single print zone covering the trim area (inset from canvas origin by bleed).
+  // Default single print zone (px) covering the trim area inset from canvas origin by bleed.
   const defaultZone: ProductPrintZone = {
     id: createId("zone"),
     name: "Print Area",
     side: "front",
     bounds: {
-      x: bleed.left,
-      y: bleed.top,
-      width: trimSize.width,
-      height: trimSize.height
+      x: mmToPx(bleed.left, dpi),
+      y: mmToPx(bleed.top, dpi),
+      width: mmToPx(trimSizeMm.width, dpi),
+      height: mmToPx(trimSizeMm.height, dpi)
     },
-    safeArea: safeAreaOnCanvas,
-    bleed,
+    safeArea: safeAreaPx,
+    bleed, // kept in mm — used by print/export metadata, not canvas layout
     editable: true
   };
 
@@ -119,11 +121,24 @@ export function createDocumentFromProduct(
       ? product.printZones
       : [defaultZone];
 
+  // ProductPageContext is consumed by ProductGuidesOverlay which uses these values
+  // directly as Konva pixel coordinates — convert to px here.
+  const bleedPx: Margins = {
+    top: mmToPx(bleed.top, dpi),
+    right: mmToPx(bleed.right, dpi),
+    bottom: mmToPx(bleed.bottom, dpi),
+    left: mmToPx(bleed.left, dpi)
+  };
+  const trimSizePx: Size = {
+    width: mmToPx(trimSizeMm.width, dpi),
+    height: mmToPx(trimSizeMm.height, dpi)
+  };
+
   const productContext: ProductPageContext = {
     productId: product.id,
-    bleed,
-    trimSize,
-    safeArea: safeAreaOnCanvas,
+    bleed: bleedPx,         // px — used as Konva offsets in ProductGuidesOverlay
+    trimSize: trimSizePx,   // px — used as Konva dimensions in ProductGuidesOverlay
+    safeArea: safeAreaPx,   // px — overlay/guide rendering
     printZones,
     masks: product.productMasks,
     guideVisibility: {
@@ -138,13 +153,13 @@ export function createDocumentFromProduct(
   const page = createPage({
     name: product.name,
     setup: {
-      size: actualCanvasSize,
-      bleed,
+      size: canvasSizePx, // px — page.width / page.height will be in pixels
+      bleed,              // mm — PageSetup.bleed convention matches other modes
       margins: {
-        top: safeAreaOnCanvas.y,
-        right: actualCanvasSize.width - safeAreaOnCanvas.x - safeAreaOnCanvas.width,
-        bottom: actualCanvasSize.height - safeAreaOnCanvas.y - safeAreaOnCanvas.height,
-        left: safeAreaOnCanvas.x
+        top: safeAreaPx.y,
+        right: canvasSizePx.width - safeAreaPx.x - safeAreaPx.width,
+        bottom: canvasSizePx.height - safeAreaPx.y - safeAreaPx.height,
+        left: safeAreaPx.x
       }
     },
     layers: [safeAreaGuide, editableFrame],
@@ -160,7 +175,7 @@ export function createDocumentFromProduct(
     ...createDocument({
       name: product.name,
       now,
-      dpi: product.recommendedDPI ?? product.printSpec.dpi,
+      dpi,
       colorProfile: product.printSpec.colorProfile,
       metadata: {
         source: "product",

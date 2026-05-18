@@ -38,8 +38,12 @@ export interface ProductInstructionSet {
   heatPressTemperature?: number;
   heatPressTimeSeconds?: number;
   heatPressPressure?: "light" | "medium" | "heavy";
-  /** Informational only — never auto-applied by SPP. */
   requiresMirrorPrint?: boolean;
+  // Textile / washing instructions
+  washTemperatureCelsius?: number;
+  doNotTumbleDry?: boolean;
+  ironingAllowed?: boolean;
+  dryCleanOnly?: boolean;
   notes?: string;
 }
 

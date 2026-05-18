@@ -4,6 +4,9 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
+const { ensurePythonEnv, getVenvPythonExe } = require("./pythonBootstrap.cjs");
+const { registerHealthCheckIpc } = require("./healthCheck.cjs");
+
 // ─── Paths ────────────────────────────────────────────────────────────────────
 
 function getAppRoot() {
@@ -15,16 +18,70 @@ function getAppRoot() {
   return path.join(__dirname, "..");
 }
 
+/**
+ * Root containing the bundled Python engines.
+ * Packaged: process.resourcesPath  (engines live in resources/<engine>/ via extraResources)
+ * Dev:      project root            (engines live alongside the source)
+ */
+function getEngineRoot(engine) {
+  const base = app.isPackaged ? process.resourcesPath : path.join(__dirname, "..");
+  return engine ? path.join(base, engine) : base;
+}
+
 function getEngineDir() {
-  return path.join(getAppRoot(), "image.editor.engine");
+  return getEngineRoot("image.editor.engine");
 }
 
 function getPrintPreviewEngineDir() {
-  return path.join(getAppRoot(), "print.preview.engine");
+  return getEngineRoot("print.preview.engine");
 }
 
+/**
+ * Path to the Python interpreter SPP2 should spawn.
+ * - Packaged: the venv created by pythonBootstrap (%APPDATA%/SPP2/python-env).
+ *   Falls back to the embedded interpreter if the venv isn't ready yet (very
+ *   early calls during bootstrap recovery).
+ * - Dev: system `python` (Windows) / `python3` (else) — same behavior as before.
+ */
 function getPythonCommand() {
+  if (app.isPackaged) {
+    const venvPython = getVenvPythonExe();
+    if (fs.existsSync(venvPython)) return venvPython;
+    // Fallback: embedded python (won't have engine deps, but allows minimal commands).
+    const embedded = path.join(process.resourcesPath, "python-embed", process.platform === "win32" ? "python.exe" : "bin/python3");
+    if (fs.existsSync(embedded)) return embedded;
+  }
   return process.platform === "win32" ? "python" : "python3";
+}
+
+/**
+ * Writable user-data directory for the product library.
+ * Seeded once from the bundled template (see seedProductLibraryIfNeeded).
+ * Python's product_handler reads/writes this location via cwd + PYTHONPATH.
+ */
+function getProductLibraryUserDir() {
+  return path.join(app.getPath("userData"), "product_library");
+}
+
+function getModelsCacheDir() {
+  return path.join(app.getPath("userData"), "models");
+}
+
+function getPythonEnvBase() {
+  // Common env vars added to every Python spawn so model caches and config
+  // land in writable user data, not in Program Files.
+  const modelsDir = getModelsCacheDir();
+  fs.mkdirSync(modelsDir, { recursive: true });
+  return {
+    PYTHONIOENCODING: "utf-8",
+    PYTHONUTF8: "1",
+    PYTHONLEGACYWINDOWSSTDIO: "0",
+    TORCH_HOME: modelsDir,
+    HF_HOME: modelsDir,
+    XDG_CACHE_HOME: modelsDir,
+    SPP2_MODELS_DIR: modelsDir,
+    SPP2_USER_DATA_DIR: app.getPath("userData")
+  };
 }
 
 function runPython(scriptPath, args, options = {}) {
@@ -44,6 +101,7 @@ function runPython(scriptPath, args, options = {}) {
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
+        ...getPythonEnvBase(),
         PYTHONPATH: [
           engineDir,
           process.env.PYTHONPATH || ""
@@ -121,6 +179,8 @@ ipcMain.handle("spp:save-pdf-dialog", async (_event, pdfBase64, suggestedName = 
 
 function getLibreOfficeCandidates() {
   const candidates = [];
+  const configured = getConfiguredLibreOfficePath();
+  if (configured) candidates.push(configured);
   if (process.platform === "win32") {
     candidates.push("C:\\Program Files\\LibreOffice\\program\\soffice.exe");
     candidates.push("C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe");
@@ -135,18 +195,105 @@ function getLibreOfficeCandidates() {
   return candidates;
 }
 
+function getPdfStudioSettingsPath() {
+  return path.join(app.getPath("userData"), "pdf-studio-settings.json");
+}
+
+function getConfiguredLibreOfficePath() {
+  try {
+    const settingsPath = getPdfStudioSettingsPath();
+    if (!fs.existsSync(settingsPath)) return undefined;
+    const parsed = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+    return typeof parsed.libreOfficePath === "string" && parsed.libreOfficePath.length > 0
+      ? parsed.libreOfficePath
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function setConfiguredLibreOfficePath(sofficePath) {
+  const settingsPath = getPdfStudioSettingsPath();
+  fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+  fs.writeFileSync(settingsPath, JSON.stringify({ libreOfficePath: sofficePath }, null, 2), "utf-8");
+}
+
+async function findLibreOffice() {
+  let lastError = "LibreOffice לא נמצא.";
+  for (const candidate of getLibreOfficeCandidates()) {
+    if (path.isAbsolute(candidate) && !fs.existsSync(candidate)) continue;
+    const result = await runLibreOfficeProbe(candidate);
+    if (result.success) return { found: true, path: candidate };
+    lastError = result.error || lastError;
+  }
+  return { found: false, error: lastError };
+}
+
+function runLibreOfficeProbe(sofficePath) {
+  return new Promise((resolve) => {
+    const proc = spawn(sofficePath, ["--version"], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    let stderr = "";
+    const timer = setTimeout(() => {
+      proc.kill();
+      resolve({ success: false, error: "בדיקת LibreOffice עברה את מגבלת הזמן." });
+    }, 8000);
+    proc.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
+    proc.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ success: code === 0, error: stderr || `LibreOffice exited with code ${code}` });
+    });
+    proc.on("error", (err) => {
+      clearTimeout(timer);
+      resolve({ success: false, error: err.message });
+    });
+  });
+}
+
 function runLibreOfficeConversion(sofficePath, inputPath, outDir) {
   return new Promise((resolve) => {
     const args = ["--headless", "--convert-to", "pdf", "--outdir", outDir, inputPath];
     const proc = spawn(sofficePath, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     let stdout = "";
     let stderr = "";
+    const timer = setTimeout(() => {
+      proc.kill();
+      resolve({ success: false, error: "המרת LibreOffice עברה את מגבלת הזמן." });
+    }, 90000);
     proc.stdout?.on("data", (chunk) => { stdout += chunk.toString(); });
     proc.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
-    proc.on("close", (code) => resolve({ success: code === 0, stdout, stderr, code }));
-    proc.on("error", (err) => resolve({ success: false, error: err.message }));
+    proc.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ success: code === 0, stdout, stderr, code });
+    });
+    proc.on("error", (err) => {
+      clearTimeout(timer);
+      resolve({ success: false, error: err.message });
+    });
   });
 }
+
+ipcMain.handle("spp:check-libreoffice", async () => findLibreOffice());
+
+ipcMain.handle("spp:choose-libreoffice-path", async () => {
+  const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+  const result = await dialog.showOpenDialog(win, {
+    title: "בחר soffice.exe של LibreOffice",
+    properties: ["openFile"],
+    filters: process.platform === "win32"
+      ? [{ name: "LibreOffice", extensions: ["exe"] }]
+      : [{ name: "LibreOffice", extensions: ["*"] }]
+  });
+  if (result.canceled || !result.filePaths[0]) {
+    return { success: false, error: "בחירת LibreOffice בוטלה." };
+  }
+  const selected = result.filePaths[0];
+  const probe = await runLibreOfficeProbe(selected);
+  if (!probe.success) {
+    return { success: false, error: probe.error || "הנתיב שנבחר אינו LibreOffice תקין." };
+  }
+  setConfiguredLibreOfficePath(selected);
+  return { success: true, path: selected };
+});
 
 ipcMain.handle("spp:convert-office-to-pdf", async (_event, inputPath) => {
   try {
@@ -228,6 +375,7 @@ function spawnPrintPreview(args, engineDir) {
         stdio: ["ignore", "ignore", "pipe"],
         env: {
           ...process.env,
+          ...getPythonEnvBase(),
           PYTHONPATH: [engineDir, process.env.PYTHONPATH || ""].filter(Boolean).join(path.delimiter)
         }
       });
@@ -416,21 +564,78 @@ ipcMain.handle("spp:unwatch-file", (_event, watchId) => {
 
 // ─── Product Library IPC ─────────────────────────────────────────────────────
 
+/**
+ * Bundled (read-only in packaged builds) location of the product library template.
+ */
+function getProductLibraryTemplateDir() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, "product_library")
+    : path.join(__dirname, "..", "product_library");
+}
+
+/**
+ * One-time copy of the bundled product_library into a writable user-data dir
+ * so the Python handler can read & write products_library.json, masks/,
+ * thumbnails/ without admin rights. Idempotent: never overwrites user data.
+ */
+function seedProductLibraryIfNeeded() {
+  const target = getProductLibraryUserDir();
+  fs.mkdirSync(target, { recursive: true });
+
+  const source = getProductLibraryTemplateDir();
+  if (!fs.existsSync(source)) return;
+
+  // Copy module code + JSON template, but never overwrite an existing
+  // products_library.json (that's the user's data).
+  const skipOverwrite = new Set(["products_library.json"]);
+  const skipDirs = new Set(["__pycache__", "exports", "thumbnails"]);
+
+  function copyTree(src, dst) {
+    const entries = fs.readdirSync(src, { withFileTypes: true });
+    for (const entry of entries) {
+      if (skipDirs.has(entry.name)) continue;
+      const s = path.join(src, entry.name);
+      const d = path.join(dst, entry.name);
+      if (entry.isDirectory()) {
+        fs.mkdirSync(d, { recursive: true });
+        copyTree(s, d);
+      } else if (entry.isFile()) {
+        if (skipOverwrite.has(entry.name) && fs.existsSync(d)) continue;
+        // Refresh code files every launch (templates may change between versions);
+        // user-data files (products_library.json) are protected above.
+        fs.copyFileSync(s, d);
+      }
+    }
+  }
+
+  try {
+    copyTree(source, target);
+  } catch (err) {
+    console.warn("[product-lib] seed failed:", err.message);
+  }
+}
+
 function getProductLibraryDir() {
-  return path.join(getAppRoot(), "product_library");
+  // Always return the writable user-data location — Python reads/writes here.
+  return getProductLibraryUserDir();
 }
 
 /**
  * Run product_library.product_handler as a Python module with the given CLI arguments.
  * Uses `python -m product_library.product_handler` so that relative imports in
  * pl_storage.py (from .pl_models import Product) resolve correctly.
- * cwd and PYTHONPATH are set to the app root.
+ * cwd and PYTHONPATH are set so the user-data copy of the package is importable.
  */
 function runProductPython(args) {
-  const appRoot = getAppRoot();
+  const userBase = app.getPath("userData");
+  const productDir = getProductLibraryUserDir();
+  const handlerFile = path.join(productDir, "product_handler.py");
   const handlerModule = "product_library.product_handler";
-  const handlerFile = path.join(appRoot, "product_library", "product_handler.py");
 
+  if (!fs.existsSync(handlerFile)) {
+    // Defensive — seedProductLibraryIfNeeded should have been called at startup.
+    seedProductLibraryIfNeeded();
+  }
   if (!fs.existsSync(handlerFile)) {
     return Promise.resolve({
       success: false,
@@ -440,15 +645,12 @@ function runProductPython(args) {
 
   return new Promise((resolve) => {
     const proc = spawn(getPythonCommand(), ["-m", handlerModule, ...args], {
-      cwd: appRoot,
+      cwd: userBase,
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
-        // Force UTF-8 stdout so Hebrew characters survive the IPC round-trip.
-        PYTHONIOENCODING: "utf-8",
-        PYTHONUTF8: "1",
-        PYTHONLEGACYWINDOWSSTDIO: "0",
-        PYTHONPATH: [appRoot, process.env.PYTHONPATH || ""].filter(Boolean).join(path.delimiter)
+        ...getPythonEnvBase(),
+        PYTHONPATH: [userBase, process.env.PYTHONPATH || ""].filter(Boolean).join(path.delimiter)
       }
     });
 
@@ -566,6 +768,35 @@ ipcMain.handle("spp:product-library:reload-one", async (_event, productId) => {
 
 // ─── Main Window ──────────────────────────────────────────────────────────────
 
+const modeWindowSnapshots = new Map();
+const MODE_WINDOW_TITLES = {
+  "pdf-studio": "SPP2-PDF EDITOR",
+  editor: "SPP2-EDITOR",
+  "product-library": "SPP2-PRODUCT LIBRARY",
+  settings: "SPP2-SETTINGS",
+  setup: "SPP2-SETUP",
+  "collage-wizard": "SPP2-COLLAGE",
+  "photo-print-wizard": "SPP2-PHOTO PRINT",
+  "class-photo-wizard": "SPP2-CLASS PHOTO",
+  "mask-wizard": "SPP2-MASK"
+};
+
+function sanitizeModeWindowMode(mode) {
+  const value = String(mode || "").trim().toLowerCase();
+  return /^[a-z0-9_-]+$/.test(value) ? value : "";
+}
+
+function getModeWindowTitle(mode, requestedTitle) {
+  if (typeof requestedTitle === "string" && requestedTitle.trim().length > 0) {
+    return requestedTitle.trim();
+  }
+  return MODE_WINDOW_TITLES[mode] || `SPP2-${mode.replace(/-/g, " ").toUpperCase()}`;
+}
+
+function createSnapshotId() {
+  return `snapshot-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1360,
@@ -586,7 +817,90 @@ function createWindow() {
   // win.webContents.openDevTools();
 }
 
-app.whenReady().then(createWindow);
+function createModeWindow(payload = {}) {
+  const mode = sanitizeModeWindowMode(payload.mode);
+  if (!mode) {
+    throw new Error("mode is required");
+  }
+  const title = getModeWindowTitle(mode, payload.title);
+  const snapshotId = payload.snapshot !== undefined ? createSnapshotId() : undefined;
+  if (snapshotId !== undefined) {
+    modeWindowSnapshots.set(snapshotId, payload.snapshot);
+  }
+
+  const win = new BrowserWindow({
+    width: 1280,
+    height: 860,
+    minWidth: 980,
+    minHeight: 680,
+    title,
+    backgroundColor: "#17161C",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+
+  win.on("closed", () => {
+    if (snapshotId !== undefined) modeWindowSnapshots.delete(snapshotId);
+  });
+
+  const hash = snapshotId !== undefined ? `/window/${mode}/${snapshotId}` : `/window/${mode}`;
+  win.loadFile(path.join(getAppRoot(), "dist", "index.html"), { hash });
+  win.webContents.on("did-finish-load", () => {
+    win.setTitle(title);
+  });
+}
+
+ipcMain.handle("spp:open-mode-window", async (_event, payload) => {
+  try {
+    createModeWindow(payload);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle("spp:get-mode-window-snapshot", async (_event, snapshotId) => {
+  if (typeof snapshotId !== "string" || !modeWindowSnapshots.has(snapshotId)) {
+    return { success: false, error: "Snapshot not found" };
+  }
+  return { success: true, snapshot: modeWindowSnapshots.get(snapshotId) };
+});
+
+ipcMain.handle("spp:open-pdf-studio-window", async () => {
+  try {
+    createModeWindow({ mode: "pdf-studio", title: MODE_WINDOW_TITLES["pdf-studio"] });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+app.whenReady().then(async () => {
+  try {
+    seedProductLibraryIfNeeded();
+  } catch (err) {
+    console.warn("[startup] product library seed failed:", err);
+  }
+  try {
+    registerHealthCheckIpc();
+  } catch (err) {
+    console.warn("[startup] health check registration failed:", err);
+  }
+  try {
+    await ensurePythonEnv();
+  } catch (err) {
+    console.error("[startup] python bootstrap failed:", err);
+    // ensurePythonEnv handles user-facing recovery; if we get here something
+    // unexpected happened — surface a dialog rather than launching headless.
+    dialog.showErrorBox("SPP2", `הכנת הסביבה נכשלה:\n${err instanceof Error ? err.message : String(err)}`);
+    app.exit(1);
+    return;
+  }
+  createWindow();
+});
 
 app.on("window-all-closed", () => {
   for (const watcher of fileWatchers.values()) {

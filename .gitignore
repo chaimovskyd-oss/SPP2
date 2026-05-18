@@ -11,6 +11,14 @@ build/
 out/
 release/
 
+# keep installer resources under build/ tracked, only ignore the heavy embedded runtime
+!build/icon.ico
+!build/icon.png
+!build/icon.icns
+!build/installerSidebar.bmp
+!build/installerHeader.bmp
+!build/README.md
+
 # env
 .env
 .env.local

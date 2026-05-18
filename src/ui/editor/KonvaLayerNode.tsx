@@ -21,7 +21,7 @@ import type {
   VisualEffectStack
 } from "@/types/visualEffects";
 import { useKonvaImage } from "./useKonvaImage";
-import { collageAdjToKonva, imageEffectsToKonva, imageLayerAdjToKonva, type CollageColorAdj } from "@/core/rendering/colorAdjustUtils";
+import { collageAdjToKonva, EMPTY_EXTRA_QUICK_EFFECTS, extractExtraQuickEffects, imageEffectsToKonva, imageLayerAdjToKonva, type CollageColorAdj, type ExtraQuickEffects } from "@/core/rendering/colorAdjustUtils";
 import { renderTextToCanvas } from "./warpText";
 
 export interface CanvasContextMenuTarget {
@@ -341,6 +341,7 @@ function TextNode({
         rotation={layer.rotation}
         opacity={layer.opacity}
         visible={layer.visible}
+        globalCompositeOperation={mapBlendMode(layer.blendMode) as "source-over"}
         {...commonDrag}
         onClick={() => onSelect(layer.id)}
         onDblClick={() => onBeginTextEdit(layer.id)}
@@ -416,6 +417,7 @@ function TextNode({
       rotation={layer.rotation}
       opacity={layer.opacity}
       visible={layer.visible}
+      globalCompositeOperation={mapBlendMode(layer.blendMode) as "source-over"}
       onClick={() => onSelect(layer.id)}
       onDblClick={() => onBeginTextEdit(layer.id)}
       onTap={() => onSelect(layer.id)}
@@ -507,7 +509,48 @@ type KonvaQuickAdjustment = {
   grayscale: boolean;
   blurRadius: number;
   hasAny: boolean;
+  extras: ExtraQuickEffects;
 };
+
+// ─── Custom Konva filters for quick effects ─────────────────────────────────
+// Konva calls filter functions with `this` bound to the Konva.Node and the
+// ImageData of the cached node. Parameters are read via node.getAttr("…").
+// We export them so they can be referenced by name in the activeFilters list.
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function RemoveWhiteFilter(this: any, imageData: ImageData): void {
+  const tol = (this.getAttr?.("removeWhiteTolerance") as number | undefined) ?? 50;
+  const cutoff = 255 - tol;
+  const d = imageData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i] >= cutoff && d[i + 1] >= cutoff && d[i + 2] >= cutoff) {
+      d[i + 3] = 0;
+    }
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ColorPopFilter(this: any, imageData: ImageData): void {
+  const target = (this.getAttr?.("colorPopColor") as [number, number, number] | undefined) ?? [255, 0, 0];
+  const tol = (this.getAttr?.("colorPopTolerance") as number | undefined) ?? 70;
+  const bg = (this.getAttr?.("colorPopBackground") as number | undefined) ?? 1;
+  const d = imageData.data;
+  const tr = target[0];
+  const tg = target[1];
+  const tb = target[2];
+  const tolSq = tol * tol;
+  for (let i = 0; i < d.length; i += 4) {
+    const dr = d[i] - tr;
+    const dg = d[i + 1] - tg;
+    const db = d[i + 2] - tb;
+    if (dr * dr + dg * dg + db * db > tolSq) {
+      const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      d[i] = d[i] * (1 - bg) + gray * bg;
+      d[i + 1] = d[i + 1] * (1 - bg) + gray * bg;
+      d[i + 2] = d[i + 2] * (1 - bg) + gray * bg;
+    }
+  }
+}
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -528,6 +571,8 @@ function quickEditParamsToKonva(params: Record<string, unknown> | null | undefin
   const mappedHue = clampNumber(hue, -45, 45);
   const mappedBlur = clampNumber(blur, 0, 8);
 
+  const extras = extractExtraQuickEffects(params ?? null);
+
   return {
     brightness: mappedBrightness,
     contrast: mappedContrast,
@@ -535,13 +580,15 @@ function quickEditParamsToKonva(params: Record<string, unknown> | null | undefin
     hue: mappedHue,
     grayscale,
     blurRadius: mappedBlur,
+    extras,
     hasAny:
       Math.abs(mappedBrightness) > 0.001 ||
       Math.abs(mappedContrast) > 0.001 ||
       Math.abs(mappedSaturation - 1) > 0.001 ||
       Math.abs(mappedHue) > 0.001 ||
       grayscale ||
-      mappedBlur > 0
+      mappedBlur > 0 ||
+      extras.hasAny
   };
 }
 
@@ -562,6 +609,7 @@ function mergeKonvaAdjustments(
     hue,
     grayscale,
     blurRadius: quick.blurRadius,
+    extras: quick.extras,
     hasAny:
       Boolean(base?.hasAny) ||
       quick.hasAny ||
@@ -611,6 +659,13 @@ function ImageNode({
   const dragAccumX = useRef(0);
   const dragAccumY = useRef(0);
 
+  // Refs for Shift+transform / internal-edit-mode transform (imageScale)
+  const transformStartInternal = useRef(false);
+  const transformStartImageScale = useRef(1);
+  const transformStartGroupX = useRef(0);
+  const transformStartGroupY = useRef(0);
+  const [shiftTransforming, setShiftTransforming] = useState(false);
+
   const asset = assets.find((item) => item.id === layer.assetId);
   const image = useKonvaImage(resolveCanvasAssetPath(asset));
   const imageRef = useRef<Konva.Image | null>(null);
@@ -641,7 +696,7 @@ function ImageNode({
     }
     grp.getLayer()?.batchDraw();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [image, maskImage, libMaskImage, libMaskDataUrl, layer.pixelMask, layer.width, layer.height, layer.imageOffsetX ?? 0, layer.imageOffsetY ?? 0]);
+  }, [image, maskImage, libMaskImage, libMaskDataUrl, layer.pixelMask, layer.width, layer.height, layer.imageOffsetX ?? 0, layer.imageOffsetY ?? 0, layer.imageScale ?? 1.0]);
 
   const fx = useMemo(
     () => resolveFrameEffects(layer.visualEffects),
@@ -652,6 +707,8 @@ function ImageNode({
   const colorAdj = imageEffectsToKonva(layer.effects);
   const blurRadius = Math.max(softEdgeBlurRadius, colorAdj.blurRadius);
 
+  const extras = colorAdj.extras;
+
   // Build the active filter list for this node.
   const activeFilters = useMemo(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -660,16 +717,25 @@ function ImageNode({
     if (Math.abs(colorAdj.brightness) > 0.001) list.push(Konva.Filters.Brighten);
     if (Math.abs(colorAdj.contrast) > 0.001) list.push(Konva.Filters.Contrast);
     if (colorAdj.grayscale) list.push(Konva.Filters.Grayscale);
-    if (!colorAdj.grayscale && (Math.abs(colorAdj.saturation - 1) > 0.001 || Math.abs(colorAdj.hue) > 0.001)) list.push(Konva.Filters.HSL);
+    if (!colorAdj.grayscale && (Math.abs(colorAdj.saturation - 1) > 0.001 || Math.abs(colorAdj.hue) > 0.001 || Math.abs(extras.luminance) > 0.001)) list.push(Konva.Filters.HSL);
+    if (extras.sepia) list.push(Konva.Filters.Sepia);
+    if (extras.invert) list.push(Konva.Filters.Invert);
+    if (extras.threshold > 0) list.push(Konva.Filters.Threshold);
+    if (extras.posterize > 0) list.push(Konva.Filters.Posterize);
+    if (extras.removeWhite !== null) list.push(RemoveWhiteFilter);
+    if (extras.colorPop !== null) list.push(ColorPopFilter);
     return list;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blurRadius, colorAdj.brightness, colorAdj.contrast, colorAdj.saturation, colorAdj.hue, colorAdj.grayscale]);
+  }, [blurRadius, colorAdj.brightness, colorAdj.contrast, colorAdj.saturation, colorAdj.hue, colorAdj.grayscale, extras.luminance, extras.sepia, extras.invert, extras.threshold, extras.posterize, extras.removeWhite !== null, extras.colorPop !== null]);
 
   const needsCache = activeFilters.length > 0;
+  const filterCount = activeFilters.length;
 
   // Cache the node whenever filters are active, image changes, or dimensions change.
   // Dimensions must be in deps because Konva's cached bitmap is frozen at cache() time —
   // after a resize the cache would show the old size until re-cached.
+  // filterCount must be in deps so that stacking a new filter (e.g. Sepia) on a node
+  // that was already cached with another filter (e.g. Brighten) re-caches and shows the new filter.
   useEffect(() => {
     const node = imageRef.current;
     if (node === null || image === null) return;
@@ -680,7 +746,7 @@ function ImageNode({
     }
     node.getLayer()?.batchDraw();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [needsCache, image, layer.width, layer.height]);
+  }, [needsCache, filterCount, image, layer.width, layer.height]);
 
   // Shadow on the outer Group — effects.shadow takes precedence over visualEffects dropShadow
   const shadowProps =
@@ -717,6 +783,7 @@ function ImageNode({
     rotation: layer.rotation,
     opacity: layer.opacity,
     visible: layer.visible,
+    globalCompositeOperation: mapBlendMode(layer.blendMode) as "source-over",
     draggable: !layer.locked && !isBeingEdited && !isMaskContentEditMode,
     onClick: () => { if (!isBeingEdited && !isMaskContentEditMode) onSelect(layer.id); },
     onTap: () => { if (!isBeingEdited && !isMaskContentEditMode) onSelect(layer.id); },
@@ -761,8 +828,9 @@ function ImageNode({
       node.y(dragStartLayerY.current);
       const imgNode = imageRef.current;
       if (imgNode !== null) {
-        imgNode.x((flipH ? layer.width : 0) + dragStartImgOffsetX.current + dx);
-        imgNode.y((flipV ? layer.height : 0) + dragStartImgOffsetY.current + dy);
+        const s = layer.imageScale ?? 1.0;
+        imgNode.x((flipH ? layer.width * (1 + s) / 2 : layer.width * (1 - s) / 2) + dragStartImgOffsetX.current + dx);
+        imgNode.y((flipV ? layer.height * (1 + s) / 2 : layer.height * (1 - s) / 2) + dragStartImgOffsetY.current + dy);
         if (maskedGroupRef.current !== null) {
           maskedGroupRef.current.cache();
         }
@@ -788,20 +856,79 @@ function ImageNode({
         onChange({ ...layer, x: event.target.x(), y: event.target.y() });
       }
     },
-    onTransformEnd: (event: Konva.KonvaEventObject<Event>) => {
+    onTransformStart: (event: Konva.KonvaEventObject<Event>) => {
+      // Use internal image scaling when: Shift is held on a masked layer, or already in mask content edit mode
+      const shiftHeld = (event.evt as MouseEvent).shiftKey === true;
+      const useInternal = hasAnyMask && (isMaskContentEditMode || shiftHeld);
+      if (useInternal) {
+        const node = event.target;
+        transformStartInternal.current = true;
+        transformStartImageScale.current = Math.max(0.05, Math.min(20, layer.imageScale ?? 1.0));
+        transformStartGroupX.current = node.x();
+        transformStartGroupY.current = node.y();
+        if (shiftHeld && !isMaskContentEditMode) setShiftTransforming(true);
+      } else {
+        transformStartInternal.current = false;
+      }
+    },
+    onTransform: (event: Konva.KonvaEventObject<Event>) => {
+      if (!transformStartInternal.current) return;
       const node = event.target;
-      const scaleX = node.scaleX();
-      const scaleY = node.scaleY();
+      // Geometric mean of scale factors gives uniform scaling intent
+      const scaleFactor = Math.sqrt(Math.abs(node.scaleX()) * Math.abs(node.scaleY()));
+      const newImageScale = Math.max(0.05, Math.min(20, transformStartImageScale.current * scaleFactor));
+
+      // Revert the outer group — the mask/layer must not move
+      node.x(transformStartGroupX.current);
+      node.y(transformStartGroupY.current);
       node.scaleX(1);
       node.scaleY(1);
-      onChange({
-        ...layer,
-        x: node.x(),
-        y: node.y(),
-        width: Math.max(8, node.width() * scaleX),
-        height: Math.max(8, node.height() * scaleY),
-        rotation: node.rotation()
-      });
+
+      // Imperatively update the image node to reflect newImageScale
+      const imgNode = imageRef.current;
+      if (imgNode !== null) {
+        const s = newImageScale;
+        imgNode.scaleX((flipH ? -1 : 1) * s);
+        imgNode.scaleY((flipV ? -1 : 1) * s);
+        imgNode.x((flipH ? layer.width * (1 + s) / 2 : layer.width * (1 - s) / 2) + imageOffsetX);
+        imgNode.y((flipV ? layer.height * (1 + s) / 2 : layer.height * (1 - s) / 2) + imageOffsetY);
+        if (maskedGroupRef.current !== null) maskedGroupRef.current.cache();
+        imgNode.getLayer()?.batchDraw();
+      }
+    },
+    onTransformEnd: (event: Konva.KonvaEventObject<Event>) => {
+      if (transformStartInternal.current) {
+        const node = event.target;
+        const scaleFactor = Math.sqrt(Math.abs(node.scaleX()) * Math.abs(node.scaleY()));
+        const newImageScale = Math.max(0.05, Math.min(20, transformStartImageScale.current * scaleFactor));
+        // Revert outer group
+        node.x(transformStartGroupX.current);
+        node.y(transformStartGroupY.current);
+        node.scaleX(1);
+        node.scaleY(1);
+        transformStartInternal.current = false;
+        setShiftTransforming(false);
+        onChange({
+          ...layer,
+          x: transformStartGroupX.current,
+          y: transformStartGroupY.current,
+          imageScale: newImageScale
+        });
+      } else {
+        const node = event.target;
+        const scaleX = node.scaleX();
+        const scaleY = node.scaleY();
+        node.scaleX(1);
+        node.scaleY(1);
+        onChange({
+          ...layer,
+          x: node.x(),
+          y: node.y(),
+          width: Math.max(8, node.width() * scaleX),
+          height: Math.max(8, node.height() * scaleY),
+          rotation: node.rotation()
+        });
+      }
     }
   };
 
@@ -826,15 +953,23 @@ function ImageNode({
   // Whether this layer has any masking/clipping that supports internal image repositioning
   const hasAnyMask = layer.pixelMask !== undefined || imageShape !== "rect";
 
-  // Internal image offset (for repositioning image inside mask without moving the mask)
+  // Internal image offset and scale (for repositioning/resizing image inside mask)
   const imageOffsetX = layer.imageOffsetX ?? 0;
   const imageOffsetY = layer.imageOffsetY ?? 0;
+  const effectiveImageScale = Math.max(0.05, Math.min(20, layer.imageScale ?? 1.0));
 
-  // Flip via negative scale + offset compensation on the KonvaImage, plus internal image offset
-  const imgX = (flipH ? layer.width : 0) + imageOffsetX;
-  const imgY = (flipV ? layer.height : 0) + imageOffsetY;
-  const imgScaleX = flipH ? -1 : 1;
-  const imgScaleY = flipV ? -1 : 1;
+  // Flip + imageScale: position and scale the KonvaImage within the mask bounds.
+  // Formula keeps the image centered when imageScale != 1 even with flip compensation.
+  const imgScaleX = (flipH ? -1 : 1) * effectiveImageScale;
+  const imgScaleY = (flipV ? -1 : 1) * effectiveImageScale;
+  const imgX = (flipH
+    ? layer.width * (1 + effectiveImageScale) / 2
+    : layer.width * (1 - effectiveImageScale) / 2
+  ) + imageOffsetX;
+  const imgY = (flipV
+    ? layer.height * (1 + effectiveImageScale) / 2
+    : layer.height * (1 - effectiveImageScale) / 2
+  ) + imageOffsetY;
 
   // Non-destructive crop: use live preview during edit mode, else stored crop
   const effectiveCrop = cropPreviewFromStore ?? layer.crop;
@@ -871,6 +1006,13 @@ function ImageNode({
       contrast={colorAdj.contrast}
       saturation={colorAdj.saturation}
       hue={colorAdj.hue}
+      luminance={extras.luminance}
+      threshold={extras.threshold}
+      levels={extras.posterize}
+      removeWhiteTolerance={extras.removeWhite?.tolerance}
+      colorPopColor={extras.colorPop?.color}
+      colorPopTolerance={extras.colorPop?.tolerance}
+      colorPopBackground={extras.colorPop?.background}
       stroke={colorAdj.outline !== null ? colorAdj.outline.stroke : (fx.stroke?.color)}
       strokeWidth={colorAdj.outline !== null ? colorAdj.outline.strokeWidth : (fx.stroke?.width ?? 0)}
       strokeEnabled={colorAdj.outline !== null ? colorAdj.outline.strokeEnabled : fx.stroke !== undefined}
@@ -882,6 +1024,13 @@ function ImageNode({
       {/* Visual indicator when in mask content edit mode */}
       {isMaskContentEditMode && (
         <Rect x={0} y={0} width={layer.width} height={layer.height} fill="transparent" stroke="#7C6FE0" strokeWidth={2.5} dash={[6, 3]} listening={false} />
+      )}
+      {/* Floating label during Shift+transform (internal image scale) */}
+      {shiftTransforming && (
+        <>
+          <Rect x={0} y={-30} width={layer.width} height={22} fill="rgba(124,111,224,0.88)" cornerRadius={4} listening={false} />
+          <Text x={0} y={-28} width={layer.width} text="שינוי גודל תמונה בתוך מסיכה" fontSize={12} fill="#fff" align="center" listening={false} />
+        </>
       )}
       {/* Inner group clips to shape/corner-radius */}
       <Group clipFunc={imageClipFunc}>
@@ -916,8 +1065,9 @@ function ImageNode({
               const dy = event.target.y();
               const imgNode = imageRef.current;
               if (imgNode !== null) {
-                imgNode.x((flipH ? layer.width : 0) + imageOffsetX + dx);
-                imgNode.y((flipV ? layer.height : 0) + imageOffsetY + dy);
+                const s = effectiveImageScale;
+                imgNode.x((flipH ? layer.width * (1 + s) / 2 : layer.width * (1 - s) / 2) + imageOffsetX + dx);
+                imgNode.y((flipV ? layer.height * (1 + s) / 2 : layer.height * (1 - s) / 2) + imageOffsetY + dy);
                 if (maskedGroupRef.current !== null) {
                   maskedGroupRef.current.cache();
                 }
@@ -1001,6 +1151,8 @@ function FrameNode({
 
   const frameNeedsCache = blurRadius > 0 || frameColorAdj.hasAny;
 
+  const frameExtras = frameColorAdj.extras ?? EMPTY_EXTRA_QUICK_EFFECTS;
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const frameFilters = useMemo((): any[] => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1009,10 +1161,18 @@ function FrameNode({
     if (Math.abs(frameColorAdj.brightness) > 0.001) list.push(Konva.Filters.Brighten);
     if (Math.abs(frameColorAdj.contrast) > 0.001) list.push(Konva.Filters.Contrast);
     if (frameColorAdj.grayscale) list.push(Konva.Filters.Grayscale);
-    if (!frameColorAdj.grayscale && (Math.abs(frameColorAdj.saturation - 1) > 0.001 || Math.abs(frameColorAdj.hue) > 0.001)) list.push(Konva.Filters.HSL);
+    if (!frameColorAdj.grayscale && (Math.abs(frameColorAdj.saturation - 1) > 0.001 || Math.abs(frameColorAdj.hue) > 0.001 || Math.abs(frameExtras.luminance) > 0.001)) list.push(Konva.Filters.HSL);
+    if (frameExtras.sepia) list.push(Konva.Filters.Sepia);
+    if (frameExtras.invert) list.push(Konva.Filters.Invert);
+    if (frameExtras.threshold > 0) list.push(Konva.Filters.Threshold);
+    if (frameExtras.posterize > 0) list.push(Konva.Filters.Posterize);
+    if (frameExtras.removeWhite !== null) list.push(RemoveWhiteFilter);
+    if (frameExtras.colorPop !== null) list.push(ColorPopFilter);
     return list;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blurRadius, frameColorAdj.brightness, frameColorAdj.contrast, frameColorAdj.saturation, frameColorAdj.hue, frameColorAdj.grayscale]);
+  }, [blurRadius, frameColorAdj.brightness, frameColorAdj.contrast, frameColorAdj.saturation, frameColorAdj.hue, frameColorAdj.grayscale, frameExtras.luminance, frameExtras.sepia, frameExtras.invert, frameExtras.threshold, frameExtras.posterize, frameExtras.removeWhite !== null, frameExtras.colorPop !== null]);
+
+  const frameFilterCount = frameFilters.length;
 
   useEffect(() => {
     const node = blurRef.current;
@@ -1020,7 +1180,7 @@ function FrameNode({
     if (frameNeedsCache) { node.cache(); } else { node.clearCache(); }
     node.getLayer()?.batchDraw();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [frameNeedsCache, image, layer.width, layer.height]);
+  }, [frameNeedsCache, frameFilterCount, image, layer.width, layer.height]);
 
   // האם הפריים עצמו ניתן לגרירה
   const frameIsDraggable =
@@ -1235,6 +1395,7 @@ function FrameNode({
       rotation={layer.rotation}
       opacity={layer.opacity}
       visible={layer.visible}
+      globalCompositeOperation={mapBlendMode(layer.blendMode) as "source-over"}
       draggable={frameIsDraggable}
       onClick={() => onSelect(layer.id)}
       onTap={() => onSelect(layer.id)}
@@ -1298,6 +1459,13 @@ function FrameNode({
             contrast={frameColorAdj.contrast}
             saturation={frameColorAdj.saturation}
             hue={frameColorAdj.hue}
+            luminance={frameExtras.luminance}
+            threshold={frameExtras.threshold}
+            levels={frameExtras.posterize}
+            removeWhiteTolerance={frameExtras.removeWhite?.tolerance}
+            colorPopColor={frameExtras.colorPop?.color}
+            colorPopTolerance={frameExtras.colorPop?.tolerance}
+            colorPopBackground={frameExtras.colorPop?.background}
             onDragMove={(event) => {
               event.cancelBubble = true;
               clampContentNodeToFrame(event.target, contentRect, layer);

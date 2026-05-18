@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import { X, RotateCcw } from "lucide-react";
 import { useAppSettings, DEFAULT_APP_SETTINGS } from "@/settings";
 import type { AppShortcut, ShortcutModifiers } from "@/settings";
+import { keyboardEventToShortcutKey } from "@/core/input/inputSystem";
 import { SettingsSection } from "../components";
 
 function formatShortcut(sc: Pick<AppShortcut, "currentKey" | "currentCtrl" | "currentMeta" | "currentShift" | "currentAlt">): string {
@@ -74,9 +75,10 @@ export function ShortcutsPanel(): ReactElement {
       }
 
       if (!capturingAction) return;
-      const conflict = findConflict(capturingAction, e.key, mods);
+      const shortcutKey = keyboardEventToShortcutKey(e);
+      const conflict = findConflict(capturingAction, shortcutKey, mods);
       setConflictAction(conflict);
-      updateShortcutKey(capturingAction, e.key, mods);
+      updateShortcutKey(capturingAction, shortcutKey, mods);
       setCapturingAction(null);
     }
 

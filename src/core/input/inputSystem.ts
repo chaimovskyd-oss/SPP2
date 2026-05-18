@@ -29,6 +29,15 @@ export interface Shortcut {
   action: string;
 }
 
+export interface UserShortcutBinding {
+  action: string;
+  currentKey?: string | null;
+  currentCtrl?: boolean;
+  currentMeta?: boolean;
+  currentShift?: boolean;
+  currentAlt?: boolean;
+}
+
 export function createInputState(activeTool: ToolId = "move"): InputState {
   return {
     activeTool,
@@ -83,16 +92,106 @@ export function endPointer(input: InputState): InputState {
   };
 }
 
+function normalizeShortcutKey(key: string): string {
+  return key.length === 1 ? key.toLowerCase() : key;
+}
+
+function keyboardEventMatchesKey(event: KeyboardEvent, shortcutKey: string): boolean {
+  const normalized = normalizeShortcutKey(shortcutKey);
+  if (normalizeShortcutKey(event.key) === normalized) {
+    return true;
+  }
+
+  if (normalized.length === 1 && normalized >= "a" && normalized <= "z") {
+    return event.code === `Key${normalized.toUpperCase()}`;
+  }
+
+  if (normalized.length === 1 && normalized >= "0" && normalized <= "9") {
+    return event.code === `Digit${normalized}`;
+  }
+
+  const codeByKey: Record<string, string[]> = {
+    ",": ["Comma"],
+    ".": ["Period"],
+    "/": ["Slash"],
+    "\\": ["Backslash"],
+    ";": ["Semicolon"],
+    "'": ["Quote"],
+    "[": ["BracketLeft"],
+    "]": ["BracketRight"],
+    "-": ["Minus", "NumpadSubtract"],
+    "=": ["Equal", "NumpadAdd"],
+    "+": ["Equal", "NumpadAdd"],
+    " ": ["Space"],
+    Space: ["Space"],
+    Delete: ["Delete"],
+    Backspace: ["Backspace"],
+    Escape: ["Escape"],
+    Enter: ["Enter"],
+    Tab: ["Tab"],
+    ArrowLeft: ["ArrowLeft"],
+    ArrowRight: ["ArrowRight"],
+    ArrowUp: ["ArrowUp"],
+    ArrowDown: ["ArrowDown"]
+  };
+  return codeByKey[shortcutKey]?.includes(event.code) ?? false;
+}
+
+export function isEditableShortcutTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  const element = target.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']");
+  return element !== null;
+}
+
+export function keyboardEventToShortcutKey(event: KeyboardEvent): string {
+  if (event.code.startsWith("Key") && event.code.length === 4) {
+    return event.code.slice(3).toLowerCase();
+  }
+  if (event.code.startsWith("Digit") && event.code.length === 6) {
+    return event.code.slice(5);
+  }
+  const keyByCode: Record<string, string> = {
+    Comma: ",",
+    Period: ".",
+    Slash: "/",
+    Backslash: "\\",
+    Semicolon: ";",
+    Quote: "'",
+    BracketLeft: "[",
+    BracketRight: "]",
+    Minus: "-",
+    Equal: "=",
+    NumpadAdd: "+",
+    NumpadSubtract: "-",
+    Space: " "
+  };
+  return keyByCode[event.code] ?? event.key;
+}
+
 export function matchShortcut(event: KeyboardEvent, shortcuts: Shortcut[]): string | null {
-  const key = event.key.toLowerCase();
   const match = shortcuts.find((shortcut) =>
-    shortcut.key.toLowerCase() === key &&
+    keyboardEventMatchesKey(event, shortcut.key) &&
     Boolean(shortcut.ctrl) === event.ctrlKey &&
     Boolean(shortcut.meta) === event.metaKey &&
     Boolean(shortcut.shift) === event.shiftKey &&
     Boolean(shortcut.alt) === event.altKey
   );
   return match?.action ?? null;
+}
+
+export function shortcutBindingsToShortcuts(bindings: UserShortcutBinding[]): Shortcut[] {
+  return bindings.flatMap((binding) =>
+    binding.currentKey
+      ? [{
+          action: binding.action,
+          key: binding.currentKey,
+          ctrl: binding.currentCtrl,
+          meta: binding.currentMeta,
+          shift: binding.currentShift,
+          alt: binding.currentAlt
+        }]
+      : []
+  );
 }
 
 export const DEFAULT_SHORTCUTS: Shortcut[] = [
@@ -126,8 +225,6 @@ export const DEFAULT_SHORTCUT_DEFINITIONS: AppShortcutDef[] = [
   { action: "duplicate",    label: "שכפל",              defaultKey: "d", ctrl: true },
   { action: "selectAll",    label: "בחר הכל",           defaultKey: "a", ctrl: true },
   { action: "deselect",     label: "בטל בחירה",         defaultKey: "Escape" },
-  { action: "group",        label: "קבץ",               defaultKey: "g", ctrl: true },
-  { action: "ungroup",      label: "בטל קיבוץ",         defaultKey: "g", ctrl: true, shift: true },
   { action: "copy",         label: "העתק",              defaultKey: "c", ctrl: true },
   { action: "paste",        label: "הדבק",              defaultKey: "v", ctrl: true },
   { action: "cut",          label: "גזור",              defaultKey: "x", ctrl: true },

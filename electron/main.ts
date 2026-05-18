@@ -66,17 +66,73 @@ ipcMain.handle("spp:save-pdf-dialog", async (_event, pdfBase64: string, suggeste
 });
 
 function getLibreOfficeCandidates(): string[] {
+  const configured = getConfiguredLibreOfficePath();
   if (process.platform === "win32") {
     return [
+      configured,
       "C:\\Program Files\\LibreOffice\\program\\soffice.exe",
       "C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe",
       "soffice.exe"
-    ];
+    ].filter(Boolean) as string[];
   }
   if (process.platform === "darwin") {
-    return ["/Applications/LibreOffice.app/Contents/MacOS/soffice", "soffice"];
+    return [configured, "/Applications/LibreOffice.app/Contents/MacOS/soffice", "soffice"].filter(Boolean) as string[];
   }
-  return ["libreoffice", "soffice"];
+  return [configured, "libreoffice", "soffice"].filter(Boolean) as string[];
+}
+
+function getPdfStudioSettingsPath(): string {
+  return path.join(app.getPath("userData"), "pdf-studio-settings.json");
+}
+
+function getConfiguredLibreOfficePath(): string | undefined {
+  try {
+    const settingsPath = getPdfStudioSettingsPath();
+    if (!fs.existsSync(settingsPath)) return undefined;
+    const parsed = JSON.parse(fs.readFileSync(settingsPath, "utf-8")) as { libreOfficePath?: unknown };
+    return typeof parsed.libreOfficePath === "string" && parsed.libreOfficePath.length > 0
+      ? parsed.libreOfficePath
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function setConfiguredLibreOfficePath(sofficePath: string): void {
+  const settingsPath = getPdfStudioSettingsPath();
+  fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+  fs.writeFileSync(settingsPath, JSON.stringify({ libreOfficePath: sofficePath }, null, 2), "utf-8");
+}
+
+function runLibreOfficeProbe(sofficePath: string): Promise<{ success: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    const proc = spawn(sofficePath, ["--version"], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    let stderr = "";
+    const timer = setTimeout(() => {
+      proc.kill();
+      resolve({ success: false, error: "בדיקת LibreOffice עברה את מגבלת הזמן." });
+    }, 8000);
+    proc.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
+    proc.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ success: code === 0, error: stderr || `LibreOffice exited with code ${code}` });
+    });
+    proc.on("error", (err) => {
+      clearTimeout(timer);
+      resolve({ success: false, error: err.message });
+    });
+  });
+}
+
+async function findLibreOffice(): Promise<{ found: boolean; path?: string; error?: string }> {
+  let lastError = "LibreOffice לא נמצא.";
+  for (const candidate of getLibreOfficeCandidates()) {
+    if (path.isAbsolute(candidate) && !fs.existsSync(candidate)) continue;
+    const result = await runLibreOfficeProbe(candidate);
+    if (result.success) return { found: true, path: candidate };
+    lastError = result.error || lastError;
+  }
+  return { found: false, error: lastError };
 }
 
 function runLibreOfficeConversion(sofficePath: string, inputPath: string, outDir: string): Promise<{ success: boolean; stdout?: string; stderr?: string; error?: string; code?: number | null }> {
@@ -85,12 +141,45 @@ function runLibreOfficeConversion(sofficePath: string, inputPath: string, outDir
     const proc = spawn(sofficePath, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     let stdout = "";
     let stderr = "";
+    const timer = setTimeout(() => {
+      proc.kill();
+      resolve({ success: false, error: "המרת LibreOffice עברה את מגבלת הזמן." });
+    }, 90000);
     proc.stdout?.on("data", (chunk) => { stdout += chunk.toString(); });
     proc.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
-    proc.on("close", (code) => resolve({ success: code === 0, stdout, stderr, code }));
-    proc.on("error", (err) => resolve({ success: false, error: err.message }));
+    proc.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ success: code === 0, stdout, stderr, code });
+    });
+    proc.on("error", (err) => {
+      clearTimeout(timer);
+      resolve({ success: false, error: err.message });
+    });
   });
 }
+
+ipcMain.handle("spp:check-libreoffice", async (): Promise<{ found: boolean; path?: string; error?: string }> => findLibreOffice());
+
+ipcMain.handle("spp:choose-libreoffice-path", async (): Promise<{ success: boolean; path?: string; error?: string }> => {
+  const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+  const result = await dialog.showOpenDialog(win, {
+    title: "בחר soffice.exe של LibreOffice",
+    properties: ["openFile"],
+    filters: process.platform === "win32"
+      ? [{ name: "LibreOffice", extensions: ["exe"] }]
+      : [{ name: "LibreOffice", extensions: ["*"] }]
+  });
+  if (result.canceled || !result.filePaths[0]) {
+    return { success: false, error: "בחירת LibreOffice בוטלה." };
+  }
+  const selected = result.filePaths[0];
+  const probe = await runLibreOfficeProbe(selected);
+  if (!probe.success) {
+    return { success: false, error: probe.error || "הנתיב שנבחר אינו LibreOffice תקין." };
+  }
+  setConfiguredLibreOfficePath(selected);
+  return { success: true, path: selected };
+});
 
 ipcMain.handle("spp:convert-office-to-pdf", async (_event, inputPath: string): Promise<{ success: boolean; pdfBase64?: string; outputPath?: string; outputName?: string; error?: string }> => {
   try {
@@ -481,6 +570,41 @@ ipcMain.handle("spp:product-library:reload-one", async (_event, productId: strin
 
 // ─── Main window ──────────────────────────────────────────────────────────────
 
+const modeWindowSnapshots = new Map<string, unknown>();
+const MODE_WINDOW_TITLES: Record<string, string> = {
+  "pdf-studio": "SPP2-PDF EDITOR",
+  editor: "SPP2-EDITOR",
+  "product-library": "SPP2-PRODUCT LIBRARY",
+  settings: "SPP2-SETTINGS",
+  setup: "SPP2-SETUP",
+  "collage-wizard": "SPP2-COLLAGE",
+  "photo-print-wizard": "SPP2-PHOTO PRINT",
+  "class-photo-wizard": "SPP2-CLASS PHOTO",
+  "mask-wizard": "SPP2-MASK"
+};
+
+function sanitizeModeWindowMode(mode: unknown): string {
+  const value = String(mode ?? "").trim().toLowerCase();
+  return /^[a-z0-9_-]+$/.test(value) ? value : "";
+}
+
+function getModeWindowTitle(mode: string, requestedTitle: unknown): string {
+  if (typeof requestedTitle === "string" && requestedTitle.trim().length > 0) {
+    return requestedTitle.trim();
+  }
+  return MODE_WINDOW_TITLES[mode] ?? `SPP2-${mode.replace(/-/g, " ").toUpperCase()}`;
+}
+
+function createSnapshotId(): string {
+  return `snapshot-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+interface ModeWindowPayload {
+  mode?: unknown;
+  title?: unknown;
+  snapshot?: unknown;
+}
+
 async function createWindow(): Promise<void> {
   const win = new BrowserWindow({
     width: 1360,
@@ -501,6 +625,71 @@ async function createWindow(): Promise<void> {
     await win.loadFile(path.join(__dirname, "../dist/index.html"));
   }
 }
+
+async function createModeWindow(payload: ModeWindowPayload = {}): Promise<void> {
+  const mode = sanitizeModeWindowMode(payload.mode);
+  if (!mode) {
+    throw new Error("mode is required");
+  }
+  const title = getModeWindowTitle(mode, payload.title);
+  const snapshotId = payload.snapshot !== undefined ? createSnapshotId() : undefined;
+  if (snapshotId !== undefined) {
+    modeWindowSnapshots.set(snapshotId, payload.snapshot);
+  }
+
+  const win = new BrowserWindow({
+    width: 1280,
+    height: 860,
+    minWidth: 980,
+    minHeight: 680,
+    title,
+    backgroundColor: "#17161C",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+
+  win.on("closed", () => {
+    if (snapshotId !== undefined) modeWindowSnapshots.delete(snapshotId);
+  });
+
+  const hash = snapshotId !== undefined ? `/window/${mode}/${snapshotId}` : `/window/${mode}`;
+  if (isDev) {
+    await win.loadURL(`${process.env.VITE_DEV_SERVER_URL as string}#${hash}`);
+  } else {
+    await win.loadFile(path.join(__dirname, "../dist/index.html"), { hash });
+  }
+  win.webContents.on("did-finish-load", () => {
+    win.setTitle(title);
+  });
+}
+
+ipcMain.handle("spp:open-mode-window", async (_event, payload: ModeWindowPayload): Promise<{ success: boolean; error?: string }> => {
+  try {
+    await createModeWindow(payload);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle("spp:get-mode-window-snapshot", async (_event, snapshotId: string): Promise<{ success: boolean; snapshot?: unknown; error?: string }> => {
+  if (!modeWindowSnapshots.has(snapshotId)) {
+    return { success: false, error: "Snapshot not found" };
+  }
+  return { success: true, snapshot: modeWindowSnapshots.get(snapshotId) };
+});
+
+ipcMain.handle("spp:open-pdf-studio-window", async (): Promise<{ success: boolean; error?: string }> => {
+  try {
+    await createModeWindow({ mode: "pdf-studio", title: MODE_WINDOW_TITLES["pdf-studio"] });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
 
 app.whenReady().then(createWindow);
 

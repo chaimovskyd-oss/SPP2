@@ -1,6 +1,6 @@
 {
   "name": "spp-v2",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "SPP v2 architecture proof for a modular print-design Electron app",
@@ -8,9 +8,11 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
-    "electron": "vite build && electron .",
-    "pack": "vite build && electron-builder --dir --win dir",
-    "dist": "vite build && electron-builder --win portable",
+    "electron": "node scripts/run-electron.cjs",
+    "fetch:python": "node scripts/fetch-python-embed.cjs",
+    "pack": "vite build && electron-builder --dir",
+    "dist": "vite build && electron-builder --win nsis",
+    "dist:mac": "vite build && electron-builder --mac dmg",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
@@ -22,19 +24,71 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "image.editor.engine/**/*",
-      "print.preview.engine/**/*",
-      "product_library/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "image.editor.engine",
+        "to": "image.editor.engine",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!models/**",
+          "!gfpgan/weights/**",
+          "!smart_image_editor/models/**"
+        ]
+      },
+      {
+        "from": "print.preview.engine",
+        "to": "print.preview.engine",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
+        ]
+      },
+      {
+        "from": "product_library",
+        "to": "product_library",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!exports/**",
+          "!thumbnails/**"
+        ]
+      },
+      {
+        "from": "build/python-embed",
+        "to": "python-embed"
+      }
+    ],
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "win": {
-      "target": [
-        "dir",
-        "portable"
-      ]
+      "target": ["nsis"],
+      "icon": "build/icon.ico",
+      "artifactName": "SPP2-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "SPP2",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "icon": "build/icon.icns",
+      "category": "public.app-category.graphics-design"
     }
   },
   "dependencies": {
@@ -43,6 +97,7 @@
     "konva": "^10.0.12",
     "lucide-react": "^0.555.0",
     "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^4.10.38",
     "qrcode": "^1.5.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

@@ -5,7 +5,13 @@ interface SppElectronAPI {
   readFileBase64: (filePath: string) => Promise<string>;
   savePdfDialog?: (pdfBase64: string, suggestedName?: string) => Promise<{ success: boolean; filePath?: string; error?: string }>;
   convertOfficeToPdf?: (inputPath: string) => Promise<{ success: boolean; pdfBase64?: string; outputPath?: string; outputName?: string; error?: string }>;
+  getFilePath?: (file: File) => string;
+  checkLibreOffice?: () => Promise<{ found: boolean; path?: string; error?: string }>;
+  chooseLibreOfficePath?: () => Promise<{ success: boolean; path?: string; error?: string }>;
   openImageEditor: (inputPath: string, outputPath: string) => Promise<{ success: boolean; error?: string }>;
+  openModeWindow?: (payload: { mode: string; title?: string; snapshot?: unknown }) => Promise<{ success: boolean; error?: string }>;
+  getModeWindowSnapshot?: (snapshotId: string) => Promise<{ success: boolean; snapshot?: unknown; error?: string }>;
+  openPdfStudioWindow?: () => Promise<{ success: boolean; error?: string }>;
   applyImageParams: (inputPath: string, outputPath: string, paramsJson: string) => Promise<{ success: boolean; error?: string }>;
   openUrl: (url: string) => Promise<void>;
   openFolder: (folderPath: string) => Promise<{ error?: string }>;

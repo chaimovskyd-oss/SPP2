@@ -11,7 +11,7 @@ import { importImageAsset } from "@/core/assets/assetManager";
 import { createClassPhotoModeDocument, defaultLayoutSettings } from "@/core/classPhoto/classPhotoFactory";
 import { syncClassPhotoToPage } from "@/core/classPhoto/classPhotoLayoutEngine";
 import { defaultGridSettings, defaultSnapSettings, mmToPx } from "@/core";
-import type { Asset } from "@/types/document";
+import type { Asset, Document as SppDocument } from "@/types/document";
 import type { PageSetup } from "@/types/primitives";
 import type { ProjectCustomerInfo } from "@/types/project";
 import type { GridCreateOptions } from "@/types/grid";
@@ -35,6 +35,7 @@ import { ClassPhotoSetupWizard } from "./classPhoto/ClassPhotoSetupWizard";
 import "./photoPrint/photoPrint.css";
 import "./classPhoto/classPhoto.css";
 import { SettingsWindow } from "./settings/SettingsWindow";
+import type { PdfStudioDocument } from "./pdf/pdfStudioTypes";
 
 const EditorScreen = lazy(() =>
   import("./editor/EditorScreen").then((module) => ({
@@ -48,8 +49,78 @@ const PdfStudioScreen = lazy(() =>
   }))
 );
 
+type AppScreen = "home" | "setup" | "editor" | "collage-wizard" | "photo-print-wizard" | "pdf-studio" | "class-photo-wizard" | "mask-wizard" | "product-library";
+
+interface ModeWindowInfo {
+  mode: string;
+  screen: AppScreen;
+  title: string;
+  snapshotId?: string;
+}
+
+interface ModeWindowSnapshot {
+  document?: SppDocument;
+  pdfStudioDocument?: PdfStudioDocument;
+}
+
+const MODE_WINDOW_TITLES: Record<string, string> = {
+  "pdf-studio": "SPP2-PDF EDITOR",
+  editor: "SPP2-EDITOR",
+  "product-library": "SPP2-PRODUCT LIBRARY",
+  settings: "SPP2-SETTINGS",
+  setup: "SPP2-SETUP",
+  "collage-wizard": "SPP2-COLLAGE",
+  "photo-print-wizard": "SPP2-PHOTO PRINT",
+  "class-photo-wizard": "SPP2-CLASS PHOTO",
+  "mask-wizard": "SPP2-MASK"
+};
+
+function parseModeWindowHash(hash: string): ModeWindowInfo | null {
+  const route = hash.replace(/^#\/?/, "");
+  if (route === "pdf-studio-window") {
+    return { mode: "pdf-studio", screen: "pdf-studio", title: MODE_WINDOW_TITLES["pdf-studio"] };
+  }
+  const [prefix, mode, snapshotId] = route.split("/");
+  if (prefix !== "window" || mode === undefined || mode.length === 0) return null;
+  const screen = mode === "settings" ? "home" : modeToScreen(mode);
+  if (screen === null) return null;
+  return {
+    mode,
+    screen,
+    title: MODE_WINDOW_TITLES[mode] ?? `SPP2-${mode.replace(/-/g, " ").toUpperCase()}`,
+    snapshotId
+  };
+}
+
+function modeToScreen(mode: string): AppScreen | null {
+  switch (mode) {
+    case "pdf-studio":
+    case "editor":
+    case "product-library":
+    case "setup":
+    case "collage-wizard":
+    case "photo-print-wizard":
+    case "class-photo-wizard":
+    case "mask-wizard":
+      return mode;
+    default:
+      return null;
+  }
+}
+
+function screenToMode(screen: AppScreen): string | null {
+  if (screen === "home") return null;
+  return screen;
+}
+
+function isModeWindowSnapshot(value: unknown): value is ModeWindowSnapshot {
+  return typeof value === "object" && value !== null;
+}
+
 export function App(): ReactElement {
-  const [screen, setScreen] = useState<"home" | "setup" | "editor" | "collage-wizard" | "photo-print-wizard" | "pdf-studio" | "class-photo-wizard" | "mask-wizard" | "product-library">("home");
+  const modeWindow = useMemo(() => parseModeWindowHash(window.location.hash), []);
+  const isModeWindow = modeWindow !== null;
+  const [screen, setScreen] = useState<AppScreen>(modeWindow?.screen ?? "home");
   const [classPhotoWizardInitialState, setClassPhotoWizardInitialState] = useState<ClassPhotoWizardInitialState | undefined>(undefined);
   const [pendingMode, setPendingMode] = useState<ModeType>("free");
   const [recoveryRecord, setRecoveryRecord] = useState<AutosaveRecord | null>(() => {
@@ -64,7 +135,9 @@ export function App(): ReactElement {
   const setActiveProduct = useProductStore((state) => state.setActiveProduct);
   const setProductCollageContext = useProductStore((state) => state.setCollageContext);
 
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(modeWindow?.mode === "settings");
+  const [modeWindowSnapshot, setModeWindowSnapshot] = useState<ModeWindowSnapshot | null>(null);
+  const [windowSnapshotLoading, setWindowSnapshotLoading] = useState(modeWindow?.snapshotId !== undefined);
   // Orientation picker: set when product has orientation="any" and user must choose
   const [orientationPicking, setOrientationPicking] = useState<ProductDefinition | null>(null);
   const [isCreatingPhotoPrint, setIsCreatingPhotoPrint] = useState(false);
@@ -74,7 +147,7 @@ export function App(): ReactElement {
   // Global Ctrl+, shortcut to open settings from anywhere in the app
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
-      if (e.ctrlKey && e.key === "," && !e.metaKey && !e.shiftKey && !e.altKey) {
+      if (e.ctrlKey && (e.key === "," || e.code === "Comma") && !e.metaKey && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         setSettingsOpen((v) => !v);
       }
@@ -83,6 +156,44 @@ export function App(): ReactElement {
     globalThis.document.addEventListener("keydown", onKeyDown);
     return () => globalThis.document.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  useEffect(() => {
+    if (modeWindow === null) {
+      globalThis.document.title = "SPP v2";
+      return;
+    }
+    globalThis.document.title = modeWindow.title;
+  }, [modeWindow]);
+
+  useEffect(() => {
+    const snapshotId = modeWindow?.snapshotId;
+    if (typeof snapshotId !== "string") return;
+    const requestedSnapshotId = snapshotId;
+
+    let alive = true;
+    async function loadSnapshot(): Promise<void> {
+      try {
+        const result = await window.spp?.getModeWindowSnapshot?.(requestedSnapshotId);
+        if (!alive) return;
+        if (result?.success && isModeWindowSnapshot(result.snapshot)) {
+          setModeWindowSnapshot(result.snapshot);
+          if (result.snapshot.document !== undefined) {
+            const envelope = beginProject(createProjectEnvelope({ document: result.snapshot.document, linkedGroups: [], batchJobs: [] }));
+            setDocument(withProjectMetadata(envelope.document, envelope.metadata));
+            resetViewport();
+            clearSelection();
+          }
+        }
+      } finally {
+        if (alive) setWindowSnapshotLoading(false);
+      }
+    }
+
+    void loadSnapshot();
+    return () => {
+      alive = false;
+    };
+  }, [beginProject, clearSelection, modeWindow, resetViewport, setDocument]);
 
   function openMode(mode: ModeType): void {
     setPendingMode(mode);
@@ -131,6 +242,62 @@ export function App(): ReactElement {
     if (!orientationPicking) return;
     setOrientationPicking(null);
     openProductStandard(applyOrientationToProduct(orientationPicking, orientation));
+  }
+
+  function renderOrientationPicker(): ReactElement | null {
+    if (!orientationPicking) return null;
+    return (
+      <div
+        style={{
+          position: "fixed", inset: 0, zIndex: 9999,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: "rgba(0,0,0,0.55)"
+        }}
+        onClick={(e) => { if (e.target === e.currentTarget) setOrientationPicking(null); }}
+      >
+        <div style={{
+          background: "var(--bg-elevated)",
+          border: "1px solid var(--border)",
+          borderRadius: 12,
+          padding: "28px 32px",
+          maxWidth: 360,
+          width: "90%",
+          textAlign: "center",
+          boxShadow: "0 24px 64px -12px rgba(0,0,0,0.6)"
+        }}>
+          <div style={{ fontSize: 22, marginBottom: 6 }}>⬛</div>
+          <h3 style={{ margin: "0 0 6px", fontSize: 16, color: "var(--text-primary)" }}>
+            {orientationPicking.name}
+          </h3>
+          <p style={{ margin: "0 0 22px", fontSize: 13, color: "var(--text-secondary)" }}>
+            {(orientationPicking.canvasSize.width / 10).toFixed(1)} ×{" "}
+            {(orientationPicking.canvasSize.height / 10).toFixed(1)} ס&quot;מ — בחר אוריינטציה
+          </p>
+          <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+            <button
+              className="btn btn-ghost"
+              onClick={() => handleOrientationPicked("portrait")}
+              style={{ flexDirection: "column", gap: 6, height: "auto", padding: "12px 20px" }}
+              type="button"
+            >
+              <span style={{ fontSize: 22 }}>▭</span>
+              <span>עומד</span>
+              <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>Portrait</span>
+            </button>
+            <button
+              className="btn btn-ghost"
+              onClick={() => handleOrientationPicked("landscape")}
+              style={{ flexDirection: "column", gap: 6, height: "auto", padding: "12px 20px" }}
+              type="button"
+            >
+              <span style={{ fontSize: 22 }}>▬</span>
+              <span>שוכב</span>
+              <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>Landscape</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   function handleOpenProductCollage(product: ProductDefinition): void {
@@ -577,7 +744,56 @@ export function App(): ReactElement {
 
   function backHome(): void {
     clearSelection();
+    if (isModeWindow) {
+      window.close();
+      return;
+    }
     setScreen("home");
+  }
+
+  async function openCurrentScreenInSeparateWindow(): Promise<void> {
+    const mode = screenToMode(screen);
+    if (mode === null || mode === "pdf-studio") return;
+    if (window.spp?.openModeWindow === undefined) {
+      window.alert("פתיחת חלון נפרד זמינה רק בהרצת Electron.");
+      return;
+    }
+    const snapshot = screen === "editor" && document !== null ? { document } : undefined;
+    const result = await window.spp.openModeWindow({
+      mode,
+      title: MODE_WINDOW_TITLES[mode],
+      snapshot
+    });
+    if (!result.success) {
+      window.alert(result.error ?? "פתיחת החלון נכשלה.");
+    }
+  }
+
+  function renderSeparateWindowButton(): ReactElement | null {
+    const mode = screenToMode(screen);
+    if (isModeWindow || mode === null || mode === "pdf-studio" || window.spp?.openModeWindow === undefined) return null;
+    return (
+      <button
+        aria-label="פתח בחלון נפרד"
+        onClick={() => void openCurrentScreenInSeparateWindow()}
+        style={{
+          position: "fixed",
+          top: 14,
+          left: 14,
+          zIndex: 3000,
+          border: "1px solid rgba(255,255,255,0.18)",
+          borderRadius: 8,
+          background: "rgba(20,22,34,0.9)",
+          color: "#ffffff",
+          padding: "8px 12px",
+          boxShadow: "0 8px 24px rgba(0,0,0,0.28)",
+          cursor: "pointer"
+        }}
+        type="button"
+      >
+        פתח בחלון נפרד
+      </button>
+    );
   }
 
   function buildClassPhotoWizardStateFromDocument(): ClassPhotoWizardInitialState | undefined {
@@ -653,58 +869,80 @@ export function App(): ReactElement {
     }
   }
 
+  if (windowSnapshotLoading) {
+    return <main className="loading-screen">טוען עותק עבודה לחלון נפרד...</main>;
+  }
+
+  const pdfStudioInitialDocument = modeWindowSnapshot?.pdfStudioDocument;
+
   if (screen === "mask-wizard") {
     return (
-      <MaskSetupWizard
-        onComplete={(result) => void handleMaskWizardComplete(result)}
-        onCancel={() => setScreen("home")}
-      />
+      <>
+        {renderSeparateWindowButton()}
+        <MaskSetupWizard
+          onComplete={(result) => void handleMaskWizardComplete(result)}
+          onCancel={backHome}
+        />
+      </>
     );
   }
 
   if (screen === "collage-wizard") {
     return (
-      <CollageSetupWizard
-        onComplete={(result) => void handleCollageWizardComplete(result)}
-        onCancel={() => setScreen("home")}
-      />
+      <>
+        {renderSeparateWindowButton()}
+        <CollageSetupWizard
+          onComplete={(result) => void handleCollageWizardComplete(result)}
+          onCancel={backHome}
+        />
+      </>
     );
   }
 
   if (screen === "photo-print-wizard") {
     return (
-      <PhotoPrintSetupWizard
-        onComplete={(result) => void handlePhotoPrintWizardComplete(result)}
-        onCancel={() => setScreen("home")}
-      />
+      <>
+        {renderSeparateWindowButton()}
+        <PhotoPrintSetupWizard
+          onComplete={(result) => void handlePhotoPrintWizardComplete(result)}
+          onCancel={backHome}
+        />
+      </>
     );
   }
 
   if (screen === "class-photo-wizard") {
     return (
-      <ClassPhotoSetupWizard
-        initialState={classPhotoWizardInitialState}
-        onComplete={(result) => void handleClassPhotoWizardComplete(result)}
-        onCancel={() => setScreen("home")}
-      />
+      <>
+        {renderSeparateWindowButton()}
+        <ClassPhotoSetupWizard
+          initialState={classPhotoWizardInitialState}
+          onComplete={(result) => void handleClassPhotoWizardComplete(result)}
+          onCancel={backHome}
+        />
+      </>
     );
   }
 
 
   if (screen === "product-library") {
     return (
-      <ProductLibraryScreen
-        onOpenStandard={handleOpenProductStandard}
-        onOpenCollage={handleOpenProductCollage}
-        onCancel={() => setScreen("home")}
-      />
+      <>
+        <ProductLibraryScreen
+          onOpenStandard={handleOpenProductStandard}
+          onOpenCollage={handleOpenProductCollage}
+          onCancel={backHome}
+        />
+        {renderSeparateWindowButton()}
+        {orientationPicking && renderOrientationPicker()}
+      </>
     );
   }
 
   if (screen === "pdf-studio") {
     return (
       <Suspense fallback={<main className="loading-screen">טוען את כלי ה-PDF...</main>}>
-        <PdfStudioScreen onBackHome={() => setScreen("home")} />
+        <PdfStudioScreen initialDocument={pdfStudioInitialDocument} onBackHome={backHome} />
       </Suspense>
     );
   }
@@ -720,11 +958,17 @@ export function App(): ReactElement {
   }
 
   if (screen === "setup") {
-    return <DocumentSetupScreen modeName={pendingMode} onBack={() => setScreen("home")} onCreate={createDocument} />;
+    return (
+      <>
+        {renderSeparateWindowButton()}
+        <DocumentSetupScreen modeName={pendingMode} onBack={backHome} onCreate={createDocument} />
+      </>
+    );
   }
 
   return (
     <>
+      {canShowEditor ? renderSeparateWindowButton() : null}
       {canShowEditor ? (
         <Suspense fallback={<main className="loading-screen">טוען את סביבת העריכה...</main>}>
           <EditorScreen
@@ -753,61 +997,10 @@ export function App(): ReactElement {
         </>
       )}
 
-      <SettingsWindow open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsWindow open={settingsOpen} onClose={() => (isModeWindow && modeWindow?.mode === "settings" ? window.close() : setSettingsOpen(false))} />
 
       {/* ── Orientation picker — shown when product orientation is "any" ── */}
-      {orientationPicking && (
-        <div
-          style={{
-            position: "fixed", inset: 0, zIndex: 9999,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            background: "rgba(0,0,0,0.55)"
-          }}
-          onClick={(e) => { if (e.target === e.currentTarget) setOrientationPicking(null); }}
-        >
-          <div style={{
-            background: "var(--bg-elevated)",
-            border: "1px solid var(--border)",
-            borderRadius: 12,
-            padding: "28px 32px",
-            maxWidth: 360,
-            width: "90%",
-            textAlign: "center",
-            boxShadow: "0 24px 64px -12px rgba(0,0,0,0.6)"
-          }}>
-            <div style={{ fontSize: 22, marginBottom: 6 }}>⬛</div>
-            <h3 style={{ margin: "0 0 6px", fontSize: 16, color: "var(--text-primary)" }}>
-              {orientationPicking.name}
-            </h3>
-            <p style={{ margin: "0 0 22px", fontSize: 13, color: "var(--text-secondary)" }}>
-              {(orientationPicking.canvasSize.width / 10).toFixed(1)} ×{" "}
-              {(orientationPicking.canvasSize.height / 10).toFixed(1)} ס&quot;מ — בחר אוריינטציה
-            </p>
-            <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-              <button
-                className="btn btn-ghost"
-                onClick={() => handleOrientationPicked("portrait")}
-                style={{ flexDirection: "column", gap: 6, height: "auto", padding: "12px 20px" }}
-                type="button"
-              >
-                <span style={{ fontSize: 22 }}>▭</span>
-                <span>עומד</span>
-                <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>Portrait</span>
-              </button>
-              <button
-                className="btn btn-ghost"
-                onClick={() => handleOrientationPicked("landscape")}
-                style={{ flexDirection: "column", gap: 6, height: "auto", padding: "12px 20px" }}
-                type="button"
-              >
-                <span style={{ fontSize: 22 }}>▬</span>
-                <span>שוכב</span>
-                <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>Landscape</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {renderOrientationPicker()}
     </>
   );
 }

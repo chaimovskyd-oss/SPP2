@@ -35,9 +35,9 @@
     "id": "698367c5eec16f1c3ae7bd08",
     "name": "ציפית כרית Love ארבע תמונות",
     "category": "טקסטיל",
-    "price": 50.0,
-    "width_cm": 14.0,
-    "height_cm": 14.0,
+    "price": 50,
+    "width_cm": 14,
+    "height_cm": 14,
     "orientation": "any",
     "material": "",
     "audience": [
@@ -55,11 +55,21 @@
     "mockup_image_url": "",
     "mask_path": "",
     "active": true,
-    "bleed_mm": 2.0,
-    "safe_area": null,
+    "bleed_mm": 2,
+    "safe_area": {
+      "top": 2,
+      "right": 2,
+      "bottom": 2,
+      "left": 2
+    },
     "print_zones": [],
-    "production_type": null,
-    "instructions": null,
+    "production_type": "sublimation",
+    "instructions": {
+      "requiresHeatPress": true,
+      "heatPressTimeSeconds": 75,
+      "heatPressPressure": "medium",
+      "requiresMirrorPrint": true
+    },
     "recommended_dpi": null,
     "tags": []
   },

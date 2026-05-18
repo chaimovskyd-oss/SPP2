@@ -30,6 +30,7 @@ import {
   Link2,
   Lock,
   Maximize2,
+  MoreVertical,
   MousePointer2,
   Plus,
   Redo2,
@@ -167,6 +168,8 @@ import { GoogleFontsBrowser } from "@/ui/utilities/GoogleFontsBrowser";
 import { openInPhotoshop, stopPhotoshopWatch } from "@/integrations/photoshopIntegration";
 import { openInColorLab, stopColorLabWatch } from "@/integrations/colorLabIntegration";
 import { useUtilitiesSettings } from "@/utilities/settingsStore";
+import { isEditableShortcutTarget, matchShortcut, shortcutBindingsToShortcuts } from "@/core/input/inputSystem";
+import { useAppSettings } from "@/settings";
 import { applySmartCropToAssignment } from "@/core/collage/collageFrameSync";
 import { syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import {
@@ -178,6 +181,64 @@ import {
 import { GraphicsLibraryPanel } from "@/ui/emoji/EmojiLibraryPanel";
 
 type ToolId = "move" | "text" | "image" | "layers";
+
+const BLEND_MODE_OPTIONS: Array<{ value: BlendMode; label: string }> = [
+  { value: "normal", label: "Normal" },
+  { value: "multiply", label: "Multiply" },
+  { value: "screen", label: "Screen" },
+  { value: "overlay", label: "Overlay" },
+  { value: "darken", label: "Darken" },
+  { value: "lighten", label: "Lighten" }
+];
+
+type LayerEffectsClipboard = {
+  effects?: ImageLayerEffects;
+  visualEffects?: VisualEffectStack;
+  opacity: number;
+  blendMode: BlendMode;
+};
+
+function canUseLayerEffects(layer: VisualLayer | undefined): layer is Extract<VisualLayer, { type: "image" | "frame" }> {
+  return layer?.type === "image" || layer?.type === "frame";
+}
+
+function makeLayerEffectsClipboard(layer: Extract<VisualLayer, { type: "image" | "frame" }>): LayerEffectsClipboard {
+  const visualEffects = "visualEffects" in layer && layer.visualEffects !== undefined
+    ? structuredClone(layer.visualEffects)
+    : undefined;
+  return {
+    effects: layer.type === "image" ? structuredClone(layer.effects) : undefined,
+    visualEffects,
+    opacity: layer.opacity,
+    blendMode: layer.blendMode
+  };
+}
+
+function applyLayerEffectsClipboard<T extends Extract<VisualLayer, { type: "image" | "frame" }>>(
+  layer: T,
+  clipboard: LayerEffectsClipboard
+): T {
+  return {
+    ...layer,
+    ...(layer.type === "image" && clipboard.effects !== undefined ? { effects: structuredClone(clipboard.effects) } : {}),
+    ...(clipboard.visualEffects !== undefined ? { visualEffects: structuredClone(clipboard.visualEffects) } : {}),
+    opacity: clipboard.opacity,
+    blendMode: clipboard.blendMode
+  } as T;
+}
+
+function hasLayerFx(layer: VisualLayer): boolean {
+  if (layer.type === "image") {
+    return hasAnyImageEffect(layer.effects) || (layer.visualEffects?.effects.some((effect) => effect.enabled) ?? false);
+  }
+  if ("visualEffects" in layer) {
+    return layer.visualEffects?.effects.some((effect) => effect.enabled) ?? false;
+  }
+  if (layer.type === "text") {
+    return layer.effects.some((effect) => effect.enabled) || layer.shadow !== undefined || layer.stroke !== undefined;
+  }
+  return false;
+}
 
 interface EditorScreenProps {
   onBackHome: () => void;
@@ -219,7 +280,9 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const [status, setStatus] = useState("שמירה אוטומטית מוכנה");
   const [canvasContextMenu, setCanvasContextMenu] = useState<CanvasContextMenuTarget | null>(null);
   const [layerContextMenu, setLayerContextMenu] = useState<{ layerId: string; screenX: number; screenY: number } | null>(null);
-  const [effectsClipboard, setEffectsClipboard] = useState<ImageLayerEffects | null>(null);
+  const [effectsClipboard, setEffectsClipboard] = useState<LayerEffectsClipboard | null>(null);
+  const [layerClipboard, setLayerClipboard] = useState<VisualLayer[] | null>(null);
+  const [renamingLayerId, setRenamingLayerId] = useState<string | null>(null);
   const [imageEditorBusy, setImageEditorBusy] = useState(false);
   const [showFontsBrowser, setShowFontsBrowser] = useState(false);
   const [extWatchId, setExtWatchId] = useState<string | null>(null);
@@ -229,6 +292,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const [saveDropdownOpen, setSaveDropdownOpen] = useState(false);
   const [dynamicGridMode, setDynamicGridMode] = useState(false);
   const utilSettings = useUtilitiesSettings();
+  const shortcutSettings = useAppSettings((state) => state.settings.shortcuts.shortcuts);
   const document = useDocumentStore((state) => state.document);
   const activePageId = useDocumentStore((state) => state.activePageId);
   const setDocument = useDocumentStore((state) => state.setDocument);
@@ -512,6 +576,121 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
       autosaveRef.current.stop();
     };
   }, []);
+
+  const editorShortcuts = useMemo(
+    () => [
+      ...shortcutBindingsToShortcuts(shortcutSettings),
+      { key: "z", ctrl: true, shift: true, action: "redo" }
+    ],
+    [shortcutSettings]
+  );
+
+  useEffect(() => {
+    function onEditorShortcut(event: KeyboardEvent): void {
+      if (document === null || activePage === null) return;
+      if (isEditableShortcutTarget(event.target)) return;
+
+      const action = matchShortcut(event, editorShortcuts);
+      if (action === null) return;
+
+      const hasSelection = selectedLayerIds.length > 0;
+      const handledActions = new Set([
+        "save", "saveAs", "undo", "redo", "delete", "duplicate", "selectAll", "deselect",
+        "copy", "paste", "cut", "zoomIn", "zoomOut", "zoomFit", "zoom100",
+        "toggleGrid", "toggleRulers", "settings"
+      ]);
+      if (!handledActions.has(action)) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (imageEditMode) {
+        if (action === "delete") handleDeleteSelection();
+        if (action === "deselect") handleImageEditCancel();
+        return;
+      }
+
+      switch (action) {
+        case "save":
+          handleSaveLifecycle();
+          break;
+        case "saveAs":
+          void handleSavePortableLifecycle();
+          break;
+        case "undo":
+          undo();
+          setStatus("Undo");
+          break;
+        case "redo":
+          redo();
+          setStatus("Redo");
+          break;
+        case "delete":
+          if (hasSelection) handleDeleteSelected();
+          break;
+        case "duplicate":
+          if (hasSelection) handleDuplicateSelected();
+          break;
+        case "selectAll":
+          handleSelectAllLayers();
+          break;
+        case "deselect":
+          clearSelection();
+          setCollageSwapSourceSlotId(null);
+          setCanvasContextMenu(null);
+          setLayerContextMenu(null);
+          setStatus("Selection cleared");
+          break;
+        case "copy":
+          if (hasSelection) handleCopySelectedLayers();
+          break;
+        case "paste":
+          handlePasteLayers();
+          break;
+        case "cut":
+          if (hasSelection) handleCutSelectedLayers();
+          break;
+        case "zoomIn":
+          viewport.zoomIn();
+          break;
+        case "zoomOut":
+          viewport.zoomOut();
+          break;
+        case "zoomFit":
+          viewport.fitPage();
+          break;
+        case "zoom100":
+          viewport.actualSize();
+          break;
+        case "toggleGrid":
+          viewport.toggleGrid();
+          break;
+        case "toggleRulers":
+          viewport.toggleRulers();
+          break;
+        case "settings":
+          onOpenSettings?.();
+          break;
+      }
+    }
+
+    window.addEventListener("keydown", onEditorShortcut, true);
+    return () => window.removeEventListener("keydown", onEditorShortcut, true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    activePage,
+    document,
+    editorShortcuts,
+    imageEditMode,
+    layerClipboard,
+    selectedLayerIds,
+    selectedLayers,
+    undo,
+    redo,
+    clearSelection,
+    viewport,
+    onOpenSettings
+  ]);
 
   if (document === null || activePage === null) {
     return (
@@ -1176,8 +1355,9 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   }
 
   function handleDeleteSelected(): void {
-    if (selectedLayerIds.length === 0) return;
-    selectedLayerIds.forEach((layerId) => removeLayer(currentPage.id, layerId));
+    const removableIds = selectedLayers.filter((layer) => !layer.locked).map((layer) => layer.id);
+    if (removableIds.length === 0) return;
+    removableIds.forEach((layerId) => removeLayer(currentPage.id, layerId));
     clearSelection();
     setStatus("השכבה נמחקה");
   }
@@ -1207,6 +1387,66 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     );
     setSelection(clones.map((layer) => layer.id));
     setStatus("Layer duplicated");
+  }
+
+  function cloneLayerForPaste(layer: VisualLayer, index: number, maxZIndex: number): VisualLayer {
+    const clone = structuredClone(layer) as VisualLayer;
+    const pasted = {
+      ...clone,
+      id: crypto.randomUUID(),
+      name: `${clone.name} copy`,
+      x: clone.x + 18,
+      y: clone.y + 18,
+      zIndex: maxZIndex + index + 1,
+      selected: false,
+      parentId: undefined,
+      metadata: { ...clone.metadata }
+    } as VisualLayer;
+
+    if (pasted.type === "text") {
+      const size = measureTextLayerSize(pasted);
+      return { ...pasted, width: size.width, height: size.height };
+    }
+    return pasted;
+  }
+
+  function handleCopySelectedLayers(): void {
+    if (selectedLayers.length === 0) return;
+    setLayerClipboard(selectedLayers.map((layer) => structuredClone(layer) as VisualLayer));
+    setStatus("Selection copied");
+  }
+
+  function handlePasteLayers(): void {
+    if (layerClipboard === null || layerClipboard.length === 0) return;
+    const maxZIndex = Math.max(0, ...currentPage.layers.map((layer) => layer.zIndex));
+    const clones = layerClipboard.map((layer, index) => cloneLayerForPaste(layer, index, maxZIndex));
+    applyDocumentChange(
+      "PasteLayersCommand",
+      (doc) => ({
+        ...doc,
+        pages: doc.pages.map((page) =>
+          page.id === currentPage.id ? { ...page, layers: [...page.layers, ...clones] } : page
+        )
+      }),
+      currentPage.id
+    );
+    setSelection(clones.map((layer) => layer.id));
+    setStatus("Selection pasted");
+  }
+
+  function handleCutSelectedLayers(): void {
+    if (selectedLayers.length === 0) return;
+    setLayerClipboard(selectedLayers.map((layer) => structuredClone(layer) as VisualLayer));
+    handleDeleteSelected();
+    setStatus("Selection cut");
+  }
+
+  function handleSelectAllLayers(): void {
+    const selectableIds = currentPage.layers
+      .filter((layer) => layer.type !== "background" && layer.type !== "guide" && !layer.locked)
+      .map((layer) => layer.id);
+    setSelection(selectableIds);
+    setStatus(selectableIds.length > 0 ? "All layers selected" : "No selectable layers");
   }
 
   function updateSelectedText(text: string): void {
@@ -1318,13 +1558,81 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
 
   function patchSelectedLayer(patch: Partial<VisualLayer>): void {
     if (selectedLayer === null) return;
-    const nextLayer = { ...selectedLayer, ...patch } as VisualLayer;
-    if (nextLayer.type === "text") {
-      const size = measureTextLayerSize(nextLayer);
-      updateLayer(currentPage.id, { ...nextLayer, width: size.width, height: size.height });
+
+    // Single selection: existing behavior unchanged
+    if (selectedLayerIds.length <= 1) {
+      const nextLayer = { ...selectedLayer, ...patch } as VisualLayer;
+      if (nextLayer.type === "text") {
+        const size = measureTextLayerSize(nextLayer);
+        updateLayer(currentPage.id, { ...nextLayer, width: size.width, height: size.height });
+        return;
+      }
+      handleCanvasLayerChange(nextLayer);
       return;
     }
-    handleCanvasLayerChange(nextLayer);
+
+    // Multi-selection: apply patch to all selected layers of the same type, in one history entry
+    const primaryType = selectedLayer.type;
+    const matchingLayers = selectedLayers.filter((l) => l.type === primaryType);
+
+    if (matchingLayers.length <= 1) {
+      const nextLayer = { ...selectedLayer, ...patch } as VisualLayer;
+      if (nextLayer.type === "text") {
+        const size = measureTextLayerSize(nextLayer);
+        updateLayer(currentPage.id, { ...nextLayer, width: size.width, height: size.height });
+        return;
+      }
+      handleCanvasLayerChange(nextLayer);
+      return;
+    }
+
+    // For image effects patches, compute a delta so each layer keeps its own other effects intact
+    const patchEffects = (patch as { effects?: ImageLayerEffects }).effects;
+    const effectsDelta: Partial<ImageLayerEffects> | null =
+      patchEffects !== undefined && selectedLayer.type === "image"
+        ? (() => {
+            const origEffects = (selectedLayer as Extract<VisualLayer, { type: "image" }>).effects;
+            const delta: Partial<ImageLayerEffects> = {};
+            for (const key of Object.keys(patchEffects) as (keyof ImageLayerEffects)[]) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              if ((patchEffects as any)[key] !== (origEffects as any)[key]) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (delta as any)[key] = (patchEffects as any)[key];
+              }
+            }
+            return delta;
+          })()
+        : null;
+
+    applyDocumentChange(
+      `UpdateMultiLayerPatch(${matchingLayers.length})`,
+      (doc) => ({
+        ...doc,
+        pages: doc.pages.map((page) =>
+          page.id !== currentPage.id
+            ? page
+            : {
+                ...page,
+                layers: page.layers.map((layer) => {
+                  if (!matchingLayers.some((t) => t.id === layer.id)) return layer;
+                  if (effectsDelta !== null && layer.type === "image") {
+                    return {
+                      ...layer,
+                      effects: { ...(layer as Extract<VisualLayer, { type: "image" }>).effects, ...effectsDelta }
+                    } as VisualLayer;
+                  }
+                  if (layer.type === "text") {
+                    const next = { ...layer, ...patch } as Extract<VisualLayer, { type: "text" }>;
+                    const size = measureTextLayerSize(next);
+                    return { ...next, width: size.width, height: size.height } as VisualLayer;
+                  }
+                  return { ...layer, ...patch } as VisualLayer;
+                })
+              }
+        )
+      }),
+      currentPage.id
+    );
   }
 
   function handleAlign(command: AlignmentCommand): void {
@@ -1876,12 +2184,22 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
               <LayerList
                 assets={currentDocument.assets}
                 layers={currentPage.layers}
+                renamingLayerId={renamingLayerId}
                 selectedLayerIds={selectedLayerIds}
                 selectedLayerId={selectedLayerId}
-                onMove={(layerId, direction) => moveLayer(currentPage.id, layerId, direction)}
+                onRenameComplete={() => setRenamingLayerId(null)}
+                onStartRename={(layerId) => setRenamingLayerId(layerId)}
                 onReorder={(layerIdsTopToBottom) => reorderLayers(currentPage.id, layerIdsTopToBottom)}
                 onSelect={(layerId) => setSelection([layerId])}
                 onSelectMany={(layerIds) => setSelection(layerIds)}
+                onRename={(layerId, name) => {
+                  const layer = currentPage.layers.find((l) => l.id === layerId);
+                  if (layer !== undefined) updateLayer(currentPage.id, { ...layer, name });
+                }}
+                onToggleLock={(layerId) => {
+                  const layer = currentPage.layers.find((l) => l.id === layerId);
+                  if (layer !== undefined) updateLayer(currentPage.id, { ...layer, locked: !layer.locked });
+                }}
                 onToggleVisibility={(layerId) => {
                   const layer = currentPage.layers.find((l) => l.id === layerId);
                   if (layer !== undefined) updateLayer(currentPage.id, { ...layer, visible: !layer.visible });
@@ -2007,32 +2325,43 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
           )}
           {layerContextMenu !== null && (() => {
             const ctxLayer = currentPage.layers.find((l) => l.id === layerContextMenu.layerId);
-            const ctxIsImage = ctxLayer?.type === "image";
-            const ctxSelectedImageLayers = selectedLayerIds
+            const ctxCanUseFx = canUseLayerEffects(ctxLayer);
+            const ctxSelectedFxLayers = selectedLayerIds
               .flatMap((id) => {
                 const l = currentPage.layers.find((layer) => layer.id === id);
-                return l?.type === "image" ? [l] : [];
+                return canUseLayerEffects(l) ? [l] : [];
               });
             return (
               <LayerContextMenu
                 target={layerContextMenu}
-                isImageLayer={ctxIsImage}
+                layer={ctxLayer}
+                canUseEffects={ctxCanUseFx}
                 hasEffectsClipboard={effectsClipboard !== null}
                 onClose={() => setLayerContextMenu(null)}
+                onRename={() => setRenamingLayerId(layerContextMenu.layerId)}
+                onToggleVisibility={() => {
+                  if (ctxLayer !== undefined) updateLayer(currentPage.id, { ...ctxLayer, visible: !ctxLayer.visible });
+                }}
+                onToggleLock={() => {
+                  if (ctxLayer !== undefined) updateLayer(currentPage.id, { ...ctxLayer, locked: !ctxLayer.locked });
+                }}
+                onMoveForward={() => moveLayer(currentPage.id, layerContextMenu.layerId, "forward")}
+                onMoveBackward={() => moveLayer(currentPage.id, layerContextMenu.layerId, "backward")}
                 onMoveToFront={() => moveLayer(currentPage.id, layerContextMenu.layerId, "front")}
                 onMoveToBack={() => moveLayer(currentPage.id, layerContextMenu.layerId, "back")}
                 onDuplicate={handleDuplicateSelected}
                 onDelete={handleDeleteSelected}
                 onCopyEffects={() => {
-                  if (ctxLayer?.type === "image") {
-                    setEffectsClipboard({ ...ctxLayer.effects });
+                  if (canUseLayerEffects(ctxLayer)) {
+                    setEffectsClipboard(makeLayerEffectsClipboard(ctxLayer));
                     setStatus("אפקטים הועתקו");
                   }
                 }}
                 onPasteEffects={() => {
                   if (effectsClipboard === null) return;
-                  ctxSelectedImageLayers.forEach((imgLayer) => {
-                    updateLayer(currentPage.id, { ...imgLayer, effects: { ...effectsClipboard } });
+                  const targets = ctxSelectedFxLayers.length > 0 ? ctxSelectedFxLayers : canUseLayerEffects(ctxLayer) ? [ctxLayer] : [];
+                  targets.forEach((fxLayer) => {
+                    updateLayer(currentPage.id, applyLayerEffectsClipboard(fxLayer, effectsClipboard));
                   });
                   setStatus("אפקטים הודבקו");
                 }}
@@ -2483,6 +2812,7 @@ function TextContextToolbar({
         </select>
         <CompactRange label="Fill" max={1} min={0} step={0.01} value={layer.fillOpacity} onChange={(value) => onPatch({ fillOpacity: value } as Partial<VisualLayer>)} />
         <CompactRange label="Layer" max={1} min={0} step={0.01} value={layer.opacity} onChange={(value) => onPatch({ opacity: value } as Partial<VisualLayer>)} />
+        <BlendModeSelect value={layer.blendMode} onChange={(blendMode) => onPatch({ blendMode } as Partial<VisualLayer>)} />
       </div>
       <ToolbarMenu label="Presets" title="פריסטים לטקסט">
         <div className="context-menu-actions">
@@ -2935,6 +3265,7 @@ function ImageContextToolbar({
       {/* Opacity + Rotate + Flip */}
       <div className="context-group">
         <CompactRange label="Opacity" min={0} max={1} step={0.01} value={layer.opacity} onChange={(v) => onPatch({ opacity: v } as Partial<VisualLayer>)} />
+        <BlendModeSelect value={layer.blendMode} onChange={(blendMode) => onPatch({ blendMode } as Partial<VisualLayer>)} />
       </div>
       <div className="context-group">
         <ToolbarButton icon={RotateCw} label="סובב 90°" onClick={() => onPatch({ rotation: ((layer.rotation ?? 0) + 90) % 360 } as Partial<VisualLayer>)} />
@@ -2970,6 +3301,19 @@ function ToolbarButton({ active = false, danger = false, icon: Icon, label, onCl
 
 function ToolbarMenu({ children, label, title }: { children: ReactNode; label: string; title: string }): ReactElement {
   return <details className="context-menu"><summary title={title}>{label}</summary><div className="context-popover">{children}</div></details>;
+}
+
+function BlendModeSelect({ value, onChange }: { value: BlendMode; onChange: (value: BlendMode) => void }): ReactElement {
+  return (
+    <label className="blend-mode-control" title="Blend mode">
+      <span>Blend</span>
+      <select value={value} onChange={(event) => onChange(event.target.value as BlendMode)}>
+        {BLEND_MODE_OPTIONS.map((option) => (
+          <option key={option.value} value={option.value}>{option.label}</option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 function ShapePickerContent({
@@ -3572,14 +3916,26 @@ function ImageStudio({
   // For ImageLayer: read from layer.effects; for FrameLayer: read from metadata["imageEditParams"]
   const savedParams = useMemo((): EngineParams => {
     if (layer.type === "image") {
+      const e = layer.effects;
       return {
-        exposure: layer.effects.exposure,
-        brightness: layer.effects.brightness,
-        contrast: layer.effects.contrast,
-        saturation: layer.effects.saturation,
-        hue: layer.effects.hue,
-        blur: layer.effects.blur,
-        black_white: layer.effects.grayscale
+        exposure: e.exposure,
+        brightness: e.brightness,
+        contrast: e.contrast,
+        saturation: e.saturation,
+        hue: e.hue,
+        blur: e.blur,
+        black_white: e.grayscale,
+        luminance: e.luminance ?? 0,
+        sepia: e.sepia ?? false,
+        invert: e.invert ?? false,
+        threshold: e.threshold ?? 0,
+        posterize: e.posterize ?? 0,
+        remove_white: e.remove_white ?? false,
+        remove_white_tolerance: e.remove_white_tolerance ?? 22,
+        color_pop: e.color_pop ?? false,
+        color_pop_color: e.color_pop_color ?? "#ff0000",
+        color_pop_tolerance: e.color_pop_tolerance ?? 28,
+        color_pop_background: e.color_pop_background ?? 100
       };
     }
     return (layer.metadata["imageEditParams"] ?? {}) as EngineParams;
@@ -5837,31 +6193,55 @@ function Metric({ label, value }: { label: string; value: number }): ReactElemen
 function LayerList({
   assets,
   layers,
+  renamingLayerId,
   selectedLayerIds,
   selectedLayerId,
-  onMove,
+  onRename,
+  onRenameComplete,
+  onStartRename,
   onReorder,
   onSelect,
   onSelectMany,
+  onToggleLock,
   onToggleVisibility,
   onLayerContextMenu
 }: {
   assets: Asset[];
   layers: VisualLayer[];
+  renamingLayerId: string | null;
   selectedLayerIds: string[];
   selectedLayerId: string | null;
-  onMove: (layerId: string, direction: "forward" | "backward" | "front" | "back") => void;
+  onRename: (layerId: string, name: string) => void;
+  onRenameComplete: () => void;
+  onStartRename: (layerId: string) => void;
   onReorder: (layerIdsTopToBottom: string[]) => void;
   onSelect: (layerId: string) => void;
   onSelectMany: (layerIds: string[]) => void;
+  onToggleLock: (layerId: string) => void;
   onToggleVisibility: (layerId: string) => void;
   onLayerContextMenu: (layerId: string, screenX: number, screenY: number) => void;
 }): ReactElement {
   const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"all" | "images" | "text" | "frames" | "hidden" | "locked">("all");
+  const [draftName, setDraftName] = useState("");
   const ordered = [...layers].sort((a, b) => b.zIndex - a.zIndex);
+  const filtered = ordered.filter((layer) => {
+    if (filter === "images") return layer.type === "image";
+    if (filter === "text") return layer.type === "text";
+    if (filter === "frames") return layer.type === "frame";
+    if (filter === "hidden") return !layer.visible;
+    if (filter === "locked") return layer.locked;
+    return true;
+  });
+  const canReorder = filter === "all";
+
+  useEffect(() => {
+    const layer = layers.find((item) => item.id === renamingLayerId);
+    if (layer !== undefined) setDraftName(layer.name);
+  }, [layers, renamingLayerId]);
 
   function handleDrop(targetLayerId: string): void {
-    if (draggingLayerId === null || draggingLayerId === targetLayerId) {
+    if (!canReorder || draggingLayerId === null || draggingLayerId === targetLayerId) {
       setDraggingLayerId(null);
       return;
     }
@@ -5879,7 +6259,7 @@ function LayerList({
         : [...selectedLayerIds, layerId];
       onSelectMany(next);
     } else if (e.shiftKey) {
-      const ids = ordered.map((l) => l.id);
+      const ids = filtered.map((l) => l.id);
       const anchorId = selectedLayerId ?? layerId;
       const anchorIdx = ids.indexOf(anchorId);
       const targetIdx = ids.indexOf(layerId);
@@ -5896,19 +6276,55 @@ function LayerList({
     onLayerContextMenu(layerId, e.clientX, e.clientY);
   }
 
+  function commitRename(layer: VisualLayer): void {
+    const nextName = draftName.trim();
+    if (nextName !== "" && nextName !== layer.name) {
+      onRename(layer.id, nextName);
+    }
+    onRenameComplete();
+  }
+
+  const filterOptions: Array<{ id: typeof filter; label: string }> = [
+    { id: "all", label: "All" },
+    { id: "images", label: "Images" },
+    { id: "text", label: "Text" },
+    { id: "frames", label: "Frames" },
+    { id: "hidden", label: "Hidden" },
+    { id: "locked", label: "Locked" }
+  ];
+
   return (
     <section className="layer-list" aria-label="שכבות">
       <h3>שכבות</h3>
       {ordered.length === 0 ? <p>אין שכבות עדיין.</p> : null}
-      {ordered.map((layer) => (
+      <div className="layer-filter-bar" aria-label="Layer filters">
+        {filterOptions.map((option) => (
+          <button
+            aria-pressed={filter === option.id}
+            className={filter === option.id ? "active" : ""}
+            key={option.id}
+            onClick={() => {
+              setFilter(option.id);
+              setDraggingLayerId(null);
+            }}
+            type="button"
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      <div className="layer-list-count">{filtered.length}/{ordered.length}</div>
+      {ordered.length > 0 && filtered.length === 0 ? <p>No layers match this filter.</p> : null}
+      {filtered.map((layer) => (
         <div
-          className={`layer-row ${selectedLayerIds.includes(layer.id) ? "active" : ""} ${draggingLayerId === layer.id ? "dragging" : ""} ${!layer.visible ? "hidden" : ""}`}
-          draggable
+          className={`layer-row ${selectedLayerIds.includes(layer.id) ? "active" : ""} ${draggingLayerId === layer.id ? "dragging" : ""} ${!layer.visible ? "hidden" : ""} ${layer.locked ? "locked" : ""}`}
+          draggable={canReorder}
           key={layer.id}
           onContextMenu={(e) => handleRowContextMenu(e, layer.id)}
           onDragEnd={() => setDraggingLayerId(null)}
-          onDragOver={(e) => e.preventDefault()}
+          onDragOver={(e) => { if (canReorder) e.preventDefault(); }}
           onDragStart={(e) => {
+            if (!canReorder) return;
             e.dataTransfer.effectAllowed = "move";
             e.dataTransfer.setData("text/plain", layer.id);
             setDraggingLayerId(layer.id);
@@ -5916,10 +6332,44 @@ function LayerList({
           onDrop={() => handleDrop(layer.id)}
         >
           <GripVertical className="layer-drag-handle" size={14} />
-          <button className="layer-main" onClick={(e) => handleLayerClick(e, layer.id)} type="button">
+          <div
+            className="layer-main"
+            onClick={(e) => handleLayerClick(e, layer.id)}
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              setDraftName(layer.name);
+              onStartRename(layer.id);
+            }}
+            role="button"
+            tabIndex={0}
+          >
             <LayerThumbnail assets={assets} layer={layer} />
-            <strong>{layer.name}</strong>
-          </button>
+            <span className="layer-type-icon">{layerTypeIcon(layer)}</span>
+            {renamingLayerId === layer.id ? (
+              <input
+                autoFocus
+                className="layer-name-input"
+                value={draftName}
+                onBlur={() => commitRename(layer)}
+                onChange={(event) => setDraftName(event.target.value)}
+                onClick={(event) => event.stopPropagation()}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    commitRename(layer);
+                  } else if (event.key === "Escape") {
+                    event.preventDefault();
+                    onRenameComplete();
+                  }
+                }}
+              />
+            ) : (
+              <strong>{layer.name}</strong>
+            )}
+            {layer.opacity < 0.995 ? <em className="layer-opacity-badge">{Math.round(layer.opacity * 100)}%</em> : null}
+            {layer.blendMode !== "normal" ? <em className="layer-blend-badge">{layer.blendMode}</em> : null}
+            {hasLayerFx(layer) ? <em className="layer-fx-pill">fx</em> : null}
+          </div>
           <button
             aria-label={layer.visible ? "הסתר שכבה" : "הצג שכבה"}
             className={`layer-eye-btn ${!layer.visible ? "hidden" : ""}`}
@@ -5932,12 +6382,21 @@ function LayerList({
           >
             {layer.visible ? <Eye size={13} /> : <EyeOff size={13} />}
           </button>
+          <button
+            aria-label={layer.locked ? "Unlock layer" : "Lock layer"}
+            className={`layer-lock-btn ${layer.locked ? "locked" : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleLock(layer.id);
+            }}
+            title={layer.locked ? "Unlock layer" : "Lock layer"}
+            type="button"
+          >
+            {layer.locked ? <Lock size={13} /> : <Unlock size={13} />}
+          </button>
           <span className="layer-actions">
-            <button aria-label="שלח אחורה" onClick={() => onMove(layer.id, "backward")} type="button">
-              <ChevronsDown size={12} />
-            </button>
-            <button aria-label="הבא קדימה" onClick={() => onMove(layer.id, "forward")} type="button">
-              <ChevronsUp size={12} />
+            <button aria-label="Layer menu" onClick={(event) => handleRowContextMenu(event, layer.id)} type="button">
+              <MoreVertical size={12} />
             </button>
           </span>
         </div>
@@ -5948,11 +6407,25 @@ function LayerList({
 
 // ─── Layer Panel Context Menu ─────────────────────────────────────────────────
 
+function layerTypeIcon(layer: VisualLayer): ReactElement {
+  if (layer.type === "image") return <ImagePlus size={12} />;
+  if (layer.type === "text") return <Type size={12} />;
+  if (layer.type === "frame") return <Frame size={12} />;
+  if (layer.type === "shape") return <Square size={12} />;
+  return <Layers size={12} />;
+}
+
 function LayerContextMenu({
   target,
-  isImageLayer,
+  layer,
+  canUseEffects,
   hasEffectsClipboard,
   onClose,
+  onRename,
+  onToggleVisibility,
+  onToggleLock,
+  onMoveForward,
+  onMoveBackward,
   onMoveToFront,
   onMoveToBack,
   onDuplicate,
@@ -5961,9 +6434,15 @@ function LayerContextMenu({
   onPasteEffects
 }: {
   target: { layerId: string; screenX: number; screenY: number };
-  isImageLayer: boolean;
+  layer: VisualLayer | undefined;
+  canUseEffects: boolean;
   hasEffectsClipboard: boolean;
   onClose: () => void;
+  onRename: () => void;
+  onToggleVisibility: () => void;
+  onToggleLock: () => void;
+  onMoveForward: () => void;
+  onMoveBackward: () => void;
   onMoveToFront: () => void;
   onMoveToBack: () => void;
   onDuplicate: () => void;
@@ -5972,6 +6451,18 @@ function LayerContextMenu({
   onPasteEffects: () => void;
 }): ReactElement {
   const menuRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ left: target.screenX, top: target.screenY });
+
+  useEffect(() => {
+    const menu = menuRef.current;
+    if (menu === null) return;
+    const rect = menu.getBoundingClientRect();
+    const pad = 8;
+    setPosition({
+      left: Math.max(pad, Math.min(target.screenX, window.innerWidth - rect.width - pad)),
+      top: Math.max(pad, Math.min(target.screenY, window.innerHeight - rect.height - pad))
+    });
+  }, [target.screenX, target.screenY]);
 
   useEffect(() => {
     function handleClick(event: MouseEvent): void {
@@ -5999,8 +6490,25 @@ function LayerContextMenu({
     <div
       ref={menuRef}
       className="canvas-context-menu"
-      style={{ left: target.screenX, top: target.screenY }}
+      style={{ left: position.left, top: position.top }}
     >
+      <div className="ctx-title">{layer?.name ?? "Layer"}</div>
+      <button className="ctx-item" onClick={action(onRename)} type="button">
+        Rename
+      </button>
+      <button className="ctx-item" onClick={action(onToggleVisibility)} type="button">
+        {layer?.visible === false ? "Show Layer" : "Hide Layer"}
+      </button>
+      <button className="ctx-item" onClick={action(onToggleLock)} type="button">
+        {layer?.locked === true ? "Unlock Layer" : "Lock Layer"}
+      </button>
+      <div className="ctx-divider" />
+      <button className="ctx-item" onClick={action(onMoveForward)} type="button">
+        Bring Forward
+      </button>
+      <button className="ctx-item" onClick={action(onMoveBackward)} type="button">
+        Send Backward
+      </button>
       <button className="ctx-item" onClick={action(onMoveToFront)} type="button">
         העבר לעליון
       </button>
@@ -6014,7 +6522,7 @@ function LayerContextMenu({
       <button className="ctx-item" onClick={action(onDelete)} type="button">
         מחק
       </button>
-      {isImageLayer && (
+      {canUseEffects && (
         <>
           <div className="ctx-divider" />
           <button className="ctx-item" onClick={action(onCopyEffects)} type="button">

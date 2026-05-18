@@ -1,8 +1,9 @@
 import "./ProductLibraryScreen.css";
-import { ArrowLeft, Boxes, LayoutGrid, RefreshCw, Search, Tag } from "lucide-react";
+import { ArrowLeft, Boxes, LayoutGrid, Pencil, RefreshCw, Search, Tag } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { isProductBridgeAvailable, loadProductLibrary } from "@/services/python_bridge/productBridge";
 import type { ProductDefinition } from "@/types/product";
+import { ProductEditModal } from "./ProductEditModal";
 
 interface ProductLibraryScreenProps {
   onOpenStandard: (product: ProductDefinition) => void;
@@ -21,6 +22,7 @@ export function ProductLibraryScreen({
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedProduct, setSelectedProduct] = useState<ProductDefinition | null>(null);
+  const [editingProduct, setEditingProduct] = useState<ProductDefinition | null>(null);
 
   useEffect(() => {
     void loadLibrary();
@@ -75,7 +77,13 @@ export function ProductLibraryScreen({
     setSelectedProduct((prev) => (prev?.id === product.id ? null : product));
   }
 
+  function handleProductSaved(updated: ProductDefinition): void {
+    setProducts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    setSelectedProduct((prev) => (prev?.id === updated.id ? updated : prev));
+  }
+
   return (
+    <>
     <div className="product-lib-screen">
       {/* ── Header ── */}
       <header className="product-lib-header">
@@ -216,6 +224,15 @@ export function ProductLibraryScreen({
           <div className="product-lib-footer-actions">
             <button
               className="btn btn-ghost"
+              onClick={() => setEditingProduct(selectedProduct)}
+              title="ערוך מוצר בספרייה"
+              type="button"
+            >
+              <Pencil size={14} />
+              ערוך
+            </button>
+            <button
+              className="btn btn-ghost"
               onClick={() => onOpenCollage(selectedProduct)}
               type="button"
             >
@@ -234,5 +251,15 @@ export function ProductLibraryScreen({
         </footer>
       )}
     </div>
+
+    {/* Product editor modal */}
+    {editingProduct && (
+      <ProductEditModal
+        onClose={() => setEditingProduct(null)}
+        onSaved={handleProductSaved}
+        product={editingProduct}
+      />
+    )}
+    </>
   );
 }

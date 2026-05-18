@@ -130,10 +130,110 @@ export interface KonvaEffectsOutline {
   strokeEnabled: boolean;
 }
 
+// ─── Extra quick effects (sepia, invert, threshold, posterize, luminance,
+//     remove_white, color_pop) — used by both ImageLayer.effects and
+//     FrameLayer metadata.imageEditParams. ────────────────────────────────────
+
+export interface ExtraQuickEffects {
+  sepia: boolean;
+  invert: boolean;
+  /** Konva.Filters.Threshold attribute — 0..1, 0 = off */
+  threshold: number;
+  /** Konva.Filters.Posterize "levels" attribute — 0..1, 0 = off, lower = stronger */
+  posterize: number;
+  /** Konva.Filters.HSL "luminance" attribute — -1..1, 0 = neutral */
+  luminance: number;
+  /** Remove near-white pixels (alpha = 0). null = off. */
+  removeWhite: { tolerance: number } | null;
+  /** Desaturate everything except a target colour. null = off. */
+  colorPop: {
+    color: [number, number, number];
+    tolerance: number;
+    /** 0..1 — how strongly to desaturate non-matching pixels */
+    background: number;
+  } | null;
+  hasAny: boolean;
+}
+
+const EMPTY_EXTRAS: ExtraQuickEffects = {
+  sepia: false,
+  invert: false,
+  threshold: 0,
+  posterize: 0,
+  luminance: 0,
+  removeWhite: null,
+  colorPop: null,
+  hasAny: false
+};
+
+function hexToRgb(hex: string): [number, number, number] {
+  let h = hex.trim();
+  if (h.startsWith("#")) h = h.slice(1);
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  if (h.length !== 6 || /[^0-9a-fA-F]/.test(h)) return [255, 0, 0];
+  const n = parseInt(h, 16);
+  return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+}
+
+export function extractExtraQuickEffects(
+  src: Record<string, unknown> | null | undefined
+): ExtraQuickEffects {
+  if (src === null || src === undefined) return EMPTY_EXTRAS;
+
+  const num = (k: string, d = 0): number => {
+    const v = src[k];
+    return typeof v === "number" && Number.isFinite(v) ? v : d;
+  };
+  const bool = (k: string): boolean => src[k] === true;
+  const str = (k: string, d: string): string => {
+    const v = src[k];
+    return typeof v === "string" ? v : d;
+  };
+
+  const sepia = bool("sepia");
+  const invert = bool("invert");
+
+  const thresholdRaw = num("threshold");
+  const threshold = thresholdRaw > 0 ? clamp(thresholdRaw / 100, 0, 1) : 0;
+
+  const posterizeRaw = num("posterize");
+  // UI 1 (subtle) → 0.86 levels, UI 6 (strong) → 0.14 levels
+  const posterize = posterizeRaw > 0 ? clamp((7 - posterizeRaw) / 7, 0.05, 1) : 0;
+
+  const luminanceRaw = num("luminance");
+  const luminance = clamp(luminanceRaw / 50, -0.6, 0.6);
+
+  const removeWhite = bool("remove_white")
+    ? { tolerance: clamp(num("remove_white_tolerance", 22) * 2.55, 5, 200) }
+    : null;
+
+  const colorPop = bool("color_pop")
+    ? {
+        color: hexToRgb(str("color_pop_color", "#ff0000")),
+        tolerance: clamp(num("color_pop_tolerance", 28) * 2.55, 5, 255),
+        background: clamp(num("color_pop_background", 100) / 100, 0, 1)
+      }
+    : null;
+
+  const hasAny =
+    sepia ||
+    invert ||
+    threshold > 0 ||
+    posterize > 0 ||
+    Math.abs(luminance) > 0.001 ||
+    removeWhite !== null ||
+    colorPop !== null;
+
+  return { sepia, invert, threshold, posterize, luminance, removeWhite, colorPop, hasAny };
+}
+
+export { EMPTY_EXTRAS as EMPTY_EXTRA_QUICK_EFFECTS };
+
 export interface ImageEffectsKonva extends KonvaColorParams {
   blurRadius: number;
   shadow: KonvaEffectsShadow | null;
   outline: KonvaEffectsOutline | null;
+  extras: ExtraQuickEffects;
 }
 
 export function imageEffectsToKonva(effects: ImageLayerEffects): ImageEffectsKonva {
@@ -144,13 +244,16 @@ export function imageEffectsToKonva(effects: ImageLayerEffects): ImageEffectsKon
   const grayscale = effects.grayscale;
   const blurRadius = clamp(effects.blur, 0, 8);
 
+  const extras = extractExtraQuickEffects(effects as unknown as Record<string, unknown>);
+
   const hasAny =
     Math.abs(brightness) > 0.001 ||
     Math.abs(contrast) > 0.001 ||
     Math.abs(saturation - 1) > 0.001 ||
     Math.abs(hue) > 0.001 ||
     grayscale ||
-    blurRadius > 0;
+    blurRadius > 0 ||
+    extras.hasAny;
 
   const shadow =
     effects.shadow !== null && effects.shadow.enabled
@@ -173,5 +276,5 @@ export function imageEffectsToKonva(effects: ImageLayerEffects): ImageEffectsKon
         }
       : null;
 
-  return { needsCache: hasAny, brightness, contrast, saturation, hue, grayscale, hasAny, blurRadius, shadow, outline };
+  return { needsCache: hasAny, brightness, contrast, saturation, hue, grayscale, hasAny, blurRadius, shadow, outline, extras };
 }

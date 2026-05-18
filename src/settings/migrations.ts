@@ -52,6 +52,28 @@ function deepMerge(defaults: PlainObj, stored: PlainObj): PlainObj {
   return result;
 }
 
+function reconcileShortcutSettings(settings: AppSettings): AppSettings {
+  const storedShortcuts = Array.isArray(settings.shortcuts.shortcuts) ? settings.shortcuts.shortcuts : [];
+  const storedByAction = new Map(
+    storedShortcuts
+      .filter((shortcut): shortcut is AppSettings["shortcuts"]["shortcuts"][number] =>
+        isPlainObject(shortcut) && typeof shortcut.action === "string"
+      )
+      .map((shortcut) => [shortcut.action, shortcut])
+  );
+
+  return {
+    ...settings,
+    shortcuts: {
+      ...settings.shortcuts,
+      shortcuts: DEFAULT_APP_SETTINGS.shortcuts.shortcuts.map((defaultShortcut) => ({
+        ...defaultShortcut,
+        ...storedByAction.get(defaultShortcut.action)
+      }))
+    }
+  };
+}
+
 /**
  * Takes any unknown persisted blob and returns a fully-typed, fully-populated
  * AppSettings by:
@@ -73,5 +95,5 @@ export function migrateSettings(stored: unknown): AppSettings {
     version = migration.toVersion;
   }
 
-  return deepMerge(DEFAULT_APP_SETTINGS as unknown as PlainObj, raw) as unknown as AppSettings;
+  return reconcileShortcutSettings(deepMerge(DEFAULT_APP_SETTINGS as unknown as PlainObj, raw) as unknown as AppSettings);
 }

@@ -1,0 +1,247 @@
+/* ═══════════════════════════════════════════════════
+   ProductEditModal — slide-in overlay panel
+   ═══════════════════════════════════════════════════ */
+
+.prod-edit-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 1200;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-start;
+  direction: rtl;
+}
+
+.prod-edit-panel {
+  width: 420px;
+  max-width: 95vw;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border);
+  box-shadow: -6px 0 32px rgba(0, 0, 0, 0.35);
+  animation: prod-edit-slide-in 0.18s ease-out;
+  overflow: hidden;
+}
+
+@keyframes prod-edit-slide-in {
+  from { transform: translateX(40px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+/* ── Header ── */
+
+.prod-edit-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  height: 50px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  flex-shrink: 0;
+}
+
+.prod-edit-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.prod-edit-subtitle {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Body ── */
+
+.prod-edit-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.prod-edit-section {
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border-soft);
+  padding-bottom: 10px;
+}
+
+.prod-edit-section:last-child {
+  border-bottom: none;
+}
+
+.prod-edit-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: 10px;
+  padding-top: 4px;
+}
+
+.prod-edit-subsection-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin: 12px 0 8px;
+  border-top: 1px solid var(--border-soft);
+  padding-top: 10px;
+}
+
+/* ── Fields ── */
+
+.prod-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.prod-edit-field label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.prod-edit-input,
+.prod-edit-select,
+.prod-edit-textarea {
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 6px 9px;
+  outline: none;
+  font-family: inherit;
+  direction: rtl;
+  transition: border-color 0.12s;
+}
+
+.prod-edit-input:focus,
+.prod-edit-select:focus,
+.prod-edit-textarea:focus {
+  border-color: var(--accent);
+}
+
+.prod-edit-select {
+  cursor: pointer;
+}
+
+.prod-edit-textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+.prod-edit-input-sm {
+  width: 90px;
+}
+
+/* ── Layout helpers ── */
+
+.prod-edit-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.prod-edit-row-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+
+/* ── Collapsible ── */
+
+.prod-edit-collapsible {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 6px 0;
+  width: 100%;
+  text-align: right;
+  transition: color 0.12s;
+}
+
+.prod-edit-collapsible:hover {
+  color: var(--text-primary);
+}
+
+.prod-edit-instructions {
+  padding-top: 6px;
+}
+
+.prod-edit-indent {
+  padding-right: 16px;
+  margin-bottom: 8px;
+}
+
+/* ── Checkboxes ── */
+
+.prod-edit-check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.prod-edit-check-row input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.prod-edit-check-row label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+/* ── Footer ── */
+
+.prod-edit-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated);
+  flex-shrink: 0;
+  justify-content: flex-end;
+}
+
+.prod-edit-error {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--danger, #e05);
+}
+
+.btn-success {
+  background: var(--success, #22c55e) !important;
+  color: #fff !important;
+  border-color: var(--success, #22c55e) !important;
+}

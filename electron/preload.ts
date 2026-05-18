@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 contextBridge.exposeInMainWorld("spp", {
   platform: process.platform,
@@ -18,6 +18,15 @@ contextBridge.exposeInMainWorld("spp", {
   /** Convert an Office document to PDF using LibreOffice headless. */
   convertOfficeToPdf: (inputPath: string): Promise<{ success: boolean; pdfBase64?: string; outputPath?: string; outputName?: string; error?: string }> =>
     ipcRenderer.invoke("spp:convert-office-to-pdf", inputPath),
+
+  getFilePath: (file: File): string =>
+    webUtils.getPathForFile(file),
+
+  checkLibreOffice: (): Promise<{ found: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke("spp:check-libreoffice"),
+
+  chooseLibreOfficePath: (): Promise<{ success: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke("spp:choose-libreoffice-path"),
 
   /**
    * Open the Python image editor for a specific file.
@@ -40,6 +49,15 @@ contextBridge.exposeInMainWorld("spp", {
     orientation?: "portrait" | "landscape";
   }): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke("spp:open-print-preview", payload),
+
+  openModeWindow: (payload: { mode: string; title?: string; snapshot?: unknown }): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("spp:open-mode-window", payload),
+
+  getModeWindowSnapshot: (snapshotId: string): Promise<{ success: boolean; snapshot?: unknown; error?: string }> =>
+    ipcRenderer.invoke("spp:get-mode-window-snapshot", snapshotId),
+
+  openPdfStudioWindow: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("spp:open-mode-window", { mode: "pdf-studio", title: "SPP2-PDF EDITOR" }),
 
   /**
    * Apply edit params to an image headlessly (no UI).

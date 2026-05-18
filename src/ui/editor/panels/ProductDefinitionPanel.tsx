@@ -1,6 +1,6 @@
 /**
  * Right-panel section shown in EditorScreen when a product is active.
- * - Shows product info, guide toggles, production instructions
+ * - Shows product info, production instructions, guide toggles
  * - Orientation flip: swaps canvas width/height and re-creates the page
  * - Save to Library: persists changes back to Python product JSON
  */
@@ -12,7 +12,6 @@ import {
   ChevronRight,
   Eye,
   EyeOff,
-  Info,
   Monitor,
   RotateCcw,
   RotateCw,
@@ -22,20 +21,21 @@ import {
 import { useState, type ReactElement } from "react";
 import { applyOrientationToProduct, createDocumentFromProduct } from "@/core/product/productDocument";
 import { createProjectEnvelope, withProjectMetadata } from "@/core";
+import { reflowCollage, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import { useProductStore } from "@/state/productStore";
 import { useDocumentStore } from "@/state/documentStore";
 import { useProjectLifecycleStore } from "@/state/projectLifecycleStore";
 import { saveProductDefinition } from "@/services/python_bridge/productBridge";
-import type { ProductGuideVisibility } from "@/types/product";
+import type { FrameLayer, ShapeLayer } from "@/types/layers";
 
 export function ProductDefinitionPanel(): ReactElement | null {
   const activeProduct = useProductStore((s) => s.activeProduct);
   const isDirty = useProductStore((s) => s.isDirty);
-  const patchActiveProduct = useProductStore((s) => s.patchActiveProduct);
   const setActiveProduct = useProductStore((s) => s.setActiveProduct);
   const markProductClean = useProductStore((s) => s.markProductClean);
 
   const setDocument = useDocumentStore((s) => s.setDocument);
+  const updateLayer = useDocumentStore((s) => s.updateLayer);
   const currentDoc = useDocumentStore((s) => s.document);
   const beginProject = useProjectLifecycleStore((s) => s.beginProject);
 
@@ -56,13 +56,14 @@ export function ProductDefinitionPanel(): ReactElement | null {
     ? ((activeProduct.bleed.top + activeProduct.bleed.right + activeProduct.bleed.bottom + activeProduct.bleed.left) / 4).toFixed(1)
     : "2.0";
 
-  const guideVisibility: ProductGuideVisibility = {
-    bleed: true,
-    safeArea: true,
-    maskOverlay: true,
-    nonPrintableArea: true,
-    printZones: true
-  };
+  // Guide layer references from the active page
+  const currentPage = currentDoc?.pages[0];
+  const safeAreaGuideLayer = currentPage?.layers.find(
+    (l): l is ShapeLayer => l.type === "shape" && l.metadata?.role === "safeAreaGuide"
+  );
+  const safeAreaVisible = safeAreaGuideLayer?.visible ?? true;
+
+  const ins = activeProduct.instructions;
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
@@ -70,27 +71,87 @@ export function ProductDefinitionPanel(): ReactElement | null {
     if (!activeProduct) return;
     const targetOrientation = isPortrait ? "landscape" : "portrait";
     const flipped = applyOrientationToProduct(activeProduct, targetOrientation);
-    // Update store (so the panel reflects the new size immediately)
     setActiveProduct(flipped);
-    // Re-create the document with flipped dimensions, preserving doc-level data
+
     const newDoc = createDocumentFromProduct(flipped);
-    if (currentDoc) {
-      setDocument({
-        ...newDoc,
-        id: currentDoc.id,
-        name: currentDoc.name,
-        createdAt: currentDoc.createdAt,
-        assets: currentDoc.assets
-      });
-    } else {
+    const dpi = flipped.recommendedDPI ?? flipped.printSpec.dpi;
+    const newPage = newDoc.pages[0];
+
+    if (!currentDoc) {
       const envelope = beginProject(createProjectEnvelope({ document: newDoc, linkedGroups: [], batchJobs: [] }));
       setDocument(withProjectMetadata(envelope.document, envelope.metadata));
+      return;
     }
+
+    // Check if we're in collage mode (document has collage rules)
+    const hasCollage = currentDoc.collageRules.length > 0;
+
+    if (hasCollage && newPage) {
+      // Reflow each collage rule to the new canvas size, then sync frame layers
+      const newW = newPage.width;
+      const newH = newPage.height;
+      const updatedRules = currentDoc.collageRules.map((rule) =>
+        reflowCollage(rule, newW, newH, dpi)
+      );
+      const updatedPages = currentDoc.pages.map((oldPage) => {
+        const rule = updatedRules.find((r) => r.pageId === oldPage.id);
+        if (!rule) {
+          // Non-collage page: resize to match new canvas
+          return { ...oldPage, width: newW, height: newH,
+            setup: { ...oldPage.setup, size: { width: newW, height: newH } }
+          };
+        }
+        const { page: synced } = syncFrameLayersToPage(
+          { ...oldPage, width: newW, height: newH,
+            setup: { ...oldPage.setup, size: { width: newW, height: newH } }
+          },
+          rule, newW, newH
+        );
+        return synced;
+      });
+      setDocument({
+        ...currentDoc,
+        collageRules: updatedRules,
+        pages: updatedPages
+      });
+      return;
+    }
+
+    // Regular product mode: preserve placed image in the editable frame
+    let finalPages = newDoc.pages;
+    const existingPage = currentDoc.pages[0];
+    if (existingPage && newPage) {
+      const oldFrame = existingPage.layers.find(
+        (l): l is FrameLayer => l.type === "frame" && l.metadata?.role === "editableZone"
+      );
+      if (oldFrame?.imageAssetId) {
+        const updatedLayers = newPage.layers.map((layer) => {
+          if (layer.type === "frame" && layer.metadata?.role === "editableZone") {
+            return {
+              ...layer,
+              contentType: oldFrame.contentType,
+              imageAssetId: oldFrame.imageAssetId,
+              fitMode: oldFrame.fitMode
+            } satisfies FrameLayer;
+          }
+          return layer;
+        });
+        finalPages = [{ ...newPage, layers: updatedLayers }, ...newDoc.pages.slice(1)];
+      }
+    }
+    setDocument({
+      ...newDoc,
+      id: currentDoc.id,
+      name: currentDoc.name,
+      createdAt: currentDoc.createdAt,
+      assets: currentDoc.assets,
+      pages: finalPages
+    });
   }
 
-  function toggleGuide(_key: keyof ProductGuideVisibility): void {
-    // Full guide-toggle wiring: updates page.metadata.productContext
-    // (to be wired in a future iteration)
+  function toggleSafeAreaGuide(): void {
+    if (!currentPage || !safeAreaGuideLayer) return;
+    updateLayer(currentPage.id, { ...safeAreaGuideLayer, visible: !safeAreaGuideLayer.visible });
   }
 
   async function handleSave(): Promise<void> {
@@ -125,7 +186,6 @@ export function ProductDefinitionPanel(): ReactElement | null {
           <span>{activeProduct.category || "—"}</span>
         </div>
 
-        {/* Orientation row with flip button */}
         <div className="product-def-row product-def-orientation-row">
           <label>אוריינטציה</label>
           <div className="product-def-orientation-ctrl">
@@ -169,73 +229,80 @@ export function ProductDefinitionPanel(): ReactElement | null {
       {/* ── Guide visibility ── */}
       <div className="product-def-section">
         <div className="product-def-section-title">מדריכים</div>
-        {(
-          [
-            { key: "bleed" as const,            label: "Bleed" },
-            { key: "safeArea" as const,          label: "Safe Area" },
-            { key: "printZones" as const,        label: "אזורי הדפסה" },
-            { key: "maskOverlay" as const,       label: "גבול מסיכה" },
-            { key: "nonPrintableArea" as const,  label: "אפלת חוץ" }
-          ] as const
-        ).map(({ key, label }) => (
-          <div className="product-def-guide-row" key={key}>
-            <span>{label}</span>
-            <button
-              className={`icon-btn ${guideVisibility[key] ? "active" : ""}`}
-              onClick={() => toggleGuide(key)}
-              title={guideVisibility[key] ? "הסתר" : "הצג"}
-              type="button"
-            >
-              {guideVisibility[key] ? <Eye size={13} /> : <EyeOff size={13} />}
-            </button>
-          </div>
-        ))}
+        <div className="product-def-guide-row">
+          <span>איזור בטוח</span>
+          <button
+            className={`icon-btn ${safeAreaVisible ? "active" : ""}`}
+            onClick={toggleSafeAreaGuide}
+            title={safeAreaVisible ? "הסתר איזור בטוח" : "הצג איזור בטוח"}
+            type="button"
+          >
+            {safeAreaVisible ? <Eye size={13} /> : <EyeOff size={13} />}
+          </button>
+        </div>
       </div>
 
       {/* ── Production instructions ── */}
-      {activeProduct.instructions && (
+      {ins && (
         <div className="product-def-section">
           <button
             className="product-def-collapsible"
             onClick={() => setInstructionsOpen((v) => !v)}
             type="button"
           >
-            <Info size={12} />
-            הוראות ייצור
+            הוראות ייצור / כבישה
             {instructionsOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
           </button>
           {instructionsOpen && (
             <div className="product-def-instructions">
-              {activeProduct.instructions.printerType && (
+              {ins.printerType && (
                 <div className="product-def-row">
                   <label>מדפסת</label>
-                  <span>{activeProduct.instructions.printerType}</span>
+                  <span>{ins.printerType}</span>
                 </div>
               )}
-              {activeProduct.instructions.requiresHeatPress && (
+              {ins.requiresHeatPress && (
                 <>
                   <div className="product-def-row">
                     <label>חום</label>
-                    <span>{activeProduct.instructions.heatPressTemperature ?? "—"}°C</span>
+                    <span>{ins.heatPressTemperature ?? "—"}°C</span>
                   </div>
                   <div className="product-def-row">
                     <label>זמן</label>
-                    <span>{activeProduct.instructions.heatPressTimeSeconds ?? "—"}s</span>
+                    <span>{ins.heatPressTimeSeconds ?? "—"}s</span>
                   </div>
                   <div className="product-def-row">
                     <label>לחץ</label>
-                    <span>{activeProduct.instructions.heatPressPressure ?? "—"}</span>
+                    <span>{ins.heatPressPressure ?? "—"}</span>
                   </div>
                 </>
               )}
-              {activeProduct.instructions.requiresMirrorPrint && (
+              {ins.requiresMirrorPrint && (
                 <div className="product-def-row product-def-info">
                   <AlertTriangle size={11} />
-                  <span>הדפסה מראה (informational only)</span>
+                  <span>הדפסה מראה</span>
                 </div>
               )}
-              {activeProduct.instructions.notes && (
-                <div className="product-def-notes">{activeProduct.instructions.notes}</div>
+              {ins.washTemperatureCelsius != null && (
+                <div className="product-def-row">
+                  <label>כבישה</label>
+                  <span>{ins.washTemperatureCelsius}°C</span>
+                </div>
+              )}
+              {ins.doNotTumbleDry && (
+                <div className="product-def-row product-def-info">
+                  <AlertTriangle size={11} />
+                  <span>לא לייבש במייבש</span>
+                </div>
+              )}
+              {ins.ironingAllowed === false && (
+                <div className="product-def-row product-def-info">
+                  <AlertTriangle size={11} />
+                  <span>אסור לגהץ</span>
+                </div>
+              )}
+              {ins.notes && (
+                <div className="product-def-notes">{ins.notes}</div>
               )}
             </div>
           )}
