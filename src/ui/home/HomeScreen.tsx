@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, Clock, FileUp, ImageIcon, Layers, Link2, QrCode, Search, Settings } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Clock, FileUp, ImageIcon, Layers, Link2, QrCode, Search, Settings, Zap } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type ReactElement } from "react";
 import { getProjectIndexEntries, type ProjectIndexEntry } from "@/core";
 import type { ModeType } from "@/types/template";
@@ -14,9 +14,10 @@ interface HomeScreenProps {
   onOpenMode: (mode: ModeType) => void;
   onOpenProjectFile: (file: File) => void;
   onOpenSettings?: () => void;
+  onOpenBatchLibrary?: () => void;
 }
 
-export function HomeScreen({ onOpenMode, onOpenProjectFile, onOpenSettings }: HomeScreenProps): ReactElement {
+export function HomeScreen({ onOpenMode, onOpenProjectFile, onOpenSettings, onOpenBatchLibrary }: HomeScreenProps): ReactElement {
   const projectInputRef = useRef<HTMLInputElement>(null);
   const [projects, setProjects] = useState<ProjectIndexEntry[]>(() => getProjectIndexEntries());
   const [query, setQuery] = useState("");
@@ -147,6 +148,26 @@ export function HomeScreen({ onOpenMode, onOpenProjectFile, onOpenSettings }: Ho
             ))}
           </div>
         </section>
+
+        {onOpenBatchLibrary && (
+          <section className="util-hub-section" aria-label="ייצור סדרתי">
+            <div className="ext-hub-header">
+              <h2>ייצור סדרתי</h2>
+            </div>
+            <div className="util-hub-grid">
+              <button
+                className="util-hub-card"
+                onClick={onOpenBatchLibrary}
+                type="button"
+                style={{ "--mode-color": "#a855f7" } as React.CSSProperties}
+              >
+                <span className="util-hub-card-icon"><Zap size={18} /></span>
+                <span className="util-hub-card-label">תבניות ייצור</span>
+                <span className="util-hub-card-sub">Batch Production</span>
+              </button>
+            </div>
+          </section>
+        )}
 
         <ExternalAppsHub onOpenSettings={onOpenSettings ?? (() => setShowExtSettings(true))} />
 

@@ -43,6 +43,7 @@ export function ImageEditToolbar({
       <div className="context-group">
         {toolBtn("crop", <Crop size={14} />, "קרופ")}
         {toolBtn("eraser", <Eraser size={14} />, "מחיקה")}
+        {toolBtn("white-bg", <Scissors size={14} />, "הסר רקע לבן")}
         {toolBtn("wand", <Wand2 size={14} />, "שרביט קסם")}
         {toolBtn("rect-select", <RectangleHorizontal size={14} />, "בחירה מרובעת")}
       </div>

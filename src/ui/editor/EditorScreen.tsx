@@ -179,6 +179,9 @@ import {
   type FontEntry
 } from "./fonts";
 import { GraphicsLibraryPanel } from "@/ui/emoji/EmojiLibraryPanel";
+import { getBatchProductionMeta, upsertVariableField, removeVariableFieldForLayer, setBatchProductionMeta } from "@/core/batchProduction/batchProductionMeta";
+import { saveTemplateToStore } from "@/core/batchProduction/batchTemplateStore";
+import type { BatchVariableField } from "@/types/batchProduction";
 
 type ToolId = "move" | "text" | "image" | "layers";
 
@@ -333,6 +336,8 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const imageEditLayerId = useImageEditStore((s) => s.editingLayerId);
   const imageActiveTool = useImageEditStore((s) => s.activeTool);
   const cropPreview = useImageEditStore((s) => s.cropPreview);
+  const whiteBackgroundThreshold = useImageEditStore((s) => s.whiteBackgroundThreshold);
+  const setWhiteBackgroundThreshold = useImageEditStore((s) => s.setWhiteBackgroundThreshold);
   const enterImageEditMode = useImageEditStore((s) => s.enterImageEditMode);
   const exitImageEditMode = useImageEditStore((s) => s.exitImageEditMode);
   const maskContentEditActive = useMaskContentEditStore((s) => s.active);
@@ -692,6 +697,17 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     onOpenSettings
   ]);
 
+  // Batch production derived state — must be BEFORE any early return (Rules of Hooks)
+  const batchProductionMeta = useMemo(
+    () => (document !== null ? getBatchProductionMeta(document) : null),
+    [document]
+  );
+  const variableLayerIds = useMemo(
+    () => new Set((batchProductionMeta?.variableFields ?? []).map((f) => f.layerId)),
+    [batchProductionMeta]
+  );
+  const [templateSaveModal, setTemplateSaveModal] = useState<{ name: string } | null>(null);
+
   if (document === null || activePage === null) {
     return (
       <main className="empty-state">
@@ -705,6 +721,82 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const currentDocument = document;
   const currentPage = activePage;
   const currentPageIndex = Math.max(0, currentDocument.pages.findIndex((page) => page.id === currentPage.id));
+
+  function handleToggleBatchVariable(layer: VisualLayer): void {
+    if (variableLayerIds.has(layer.id)) {
+      handleBatchFieldChange(layer.id, null);
+      return;
+    }
+    if (layer.type === "frame" || layer.type === "image") {
+      handleBatchFieldChange(layer.id, {
+        id: "photo",
+        type: "image",
+        layerId: layer.id,
+        label: "תמונה",
+        fitMode: "cover",
+        smartCrop: false,
+        preserveMask: layer.type === "frame",
+        applyImageAdjustmentsByDefault: false,
+      });
+    } else if (layer.type === "text") {
+      handleBatchFieldChange(layer.id, {
+        id: "name",
+        type: "text",
+        layerId: layer.id,
+        label: "שם",
+        sourceField: "name",
+        preserveTextStyle: true,
+        autoResize: true,
+        minFontScale: 0.7,
+      });
+    }
+  }
+
+  function handleBatchFieldChange(layerId: string, field: BatchVariableField | null): void {
+    applyDocumentChange("SetBatchVariableFieldCommand", (doc) => {
+      if (field === null) return removeVariableFieldForLayer(doc, layerId);
+      return upsertVariableField(doc, field);
+    });
+  }
+
+  function handleSaveAsBatchTemplate(): void {
+    const meta = getBatchProductionMeta(currentDocument);
+    if (!meta || meta.variableFields.length === 0) {
+      setStatus("שגיאה: לפחות שדה משתנה אחד נדרש — סמן שכבה כ'אלמנט מתחלף' קודם");
+      return;
+    }
+    setTemplateSaveModal({ name: meta.templateName || currentDocument.name });
+  }
+
+  function confirmSaveAsBatchTemplate(name: string): void {
+    setTemplateSaveModal(null);
+    const meta = getBatchProductionMeta(currentDocument);
+    if (!meta) return;
+
+    const trimmed = name.trim();
+    if (!trimmed) return;
+
+    const updatedMeta = { ...meta, templateName: trimmed };
+    const docToSave = setBatchProductionMeta(currentDocument, updatedMeta);
+
+    let thumbnail: string | undefined;
+    if (stageRef.current !== null) {
+      try {
+        thumbnail = captureProjectThumbnail(stageRef.current, currentPage);
+      } catch {
+        // thumbnail optional — save without it
+      }
+    }
+
+    try {
+      saveTemplateToStore(docToSave, thumbnail);
+      setStatus(`התבנית "${trimmed}" נשמרה בהצלחה ✓`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Save batch template failed:", err);
+      setStatus(`שגיאה בשמירת התבנית: ${msg}`);
+    }
+  }
 
   function handleAddText(): void {
     const layer = createStarterTextLayer(currentPage.width, currentPage.height);
@@ -1358,6 +1450,14 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     const removableIds = selectedLayers.filter((layer) => !layer.locked).map((layer) => layer.id);
     if (removableIds.length === 0) return;
     removableIds.forEach((layerId) => removeLayer(currentPage.id, layerId));
+    const hasBatchFields = removableIds.some((id) => variableLayerIds.has(id));
+    if (hasBatchFields) {
+      applyDocumentChange("CleanupBatchVariableFieldsCommand", (doc) => {
+        let updated = doc;
+        for (const id of removableIds) updated = removeVariableFieldForLayer(updated, id);
+        return updated;
+      });
+    }
     clearSelection();
     setStatus("השכבה נמחקה");
   }
@@ -1468,6 +1568,19 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     }
     if (imageActiveTool === "crop" && cropPreview !== null) {
       updateLayer(activePage.id, { ...layer, crop: cropPreview });
+      exitImageEditMode();
+      return;
+    }
+    if (imageActiveTool === "white-bg") {
+      updateLayer(activePage.id, {
+        ...layer,
+        effects: {
+          ...layer.effects,
+          remove_white: true,
+          remove_white_tolerance: whiteBackgroundThreshold
+        }
+      });
+      setStatus("White background removal applied");
       exitImageEditMode();
       return;
     }
@@ -1789,6 +1902,14 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
 
   return (
     <main className="canvas-shell" data-testid="editor-screen">
+      {/* Save as Batch Template modal */}
+      {templateSaveModal !== null && (
+        <TemplateSaveModal
+          initialName={templateSaveModal.name}
+          onConfirm={confirmSaveAsBatchTemplate}
+          onCancel={() => setTemplateSaveModal(null)}
+        />
+      )}
       {/* Print range dialog */}
       {showPrintDialog && (
         <PrintRangeDialog
@@ -1961,6 +2082,14 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                   >
                     <FileDown size={13} /> שמירה SPP
                   </button>
+                  <button
+                    className="save-dropdown-item"
+                    type="button"
+                    onClick={() => { handleSaveAsBatchTemplate(); setSaveDropdownOpen(false); }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "#c084fc" }}
+                  >
+                    <Zap size={13} /> שמור כתבנית ייצור
+                  </button>
                   <hr style={{ margin: "4px 0", border: "none", borderTop: "1px solid var(--color-border, #eee)" }} />
                   <button
                     className="save-dropdown-item"
@@ -2065,6 +2194,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
         onDuplicate={handleDuplicateSelected}
         onEnterImageEditMode={() => {
           if (selectedLayer?.type === "image") {
+            setWhiteBackgroundThreshold(selectedLayer.effects.remove_white_tolerance ?? 22);
             enterImageEditMode(selectedLayer.id, selectedLayer.crop ?? undefined);
           }
         }}
@@ -2187,6 +2317,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                 renamingLayerId={renamingLayerId}
                 selectedLayerIds={selectedLayerIds}
                 selectedLayerId={selectedLayerId}
+                variableLayerIds={variableLayerIds}
                 onRenameComplete={() => setRenamingLayerId(null)}
                 onStartRename={(layerId) => setRenamingLayerId(layerId)}
                 onReorder={(layerIdsTopToBottom) => reorderLayers(currentPage.id, layerIdsTopToBottom)}
@@ -2337,6 +2468,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                 layer={ctxLayer}
                 canUseEffects={ctxCanUseFx}
                 hasEffectsClipboard={effectsClipboard !== null}
+                isVariableLayer={ctxLayer !== undefined && variableLayerIds.has(ctxLayer.id)}
                 onClose={() => setLayerContextMenu(null)}
                 onRename={() => setRenamingLayerId(layerContextMenu.layerId)}
                 onToggleVisibility={() => {
@@ -2351,6 +2483,12 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                 onMoveToBack={() => moveLayer(currentPage.id, layerContextMenu.layerId, "back")}
                 onDuplicate={handleDuplicateSelected}
                 onDelete={handleDeleteSelected}
+                onToggleBatchVariable={
+                  ctxLayer !== undefined &&
+                  (ctxLayer.type === "frame" || ctxLayer.type === "text" || ctxLayer.type === "image")
+                    ? () => handleToggleBatchVariable(ctxLayer)
+                    : undefined
+                }
                 onCopyEffects={() => {
                   if (canUseLayerEffects(ctxLayer)) {
                     setEffectsClipboard(makeLayerEffectsClipboard(ctxLayer));
@@ -2456,7 +2594,9 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                 <TextStudio
                   hasTextStyleClipboard={hasTextStyleClipboard}
                   layer={selectedLayer}
+                  batchField={batchProductionMeta?.variableFields.find((f) => f.layerId === selectedLayer.id)}
                   onApplyPreset={(preset) => applyTextPreset(currentPage.id, selectedLayer.id, preset)}
+                  onBatchFieldChange={(field) => handleBatchFieldChange(selectedLayer.id, field)}
                   onCopyTextStyle={() => {
                     copyTextStyle(currentPage.id, selectedLayer.id);
                     setStatus("סגנון טקסט הועתק");
@@ -2490,6 +2630,8 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                 <ImageStudio
                   layer={selectedLayer}
                   assets={currentDocument.assets}
+                  batchField={(selectedLayer.type === "frame" || selectedLayer.type === "image") ? batchProductionMeta?.variableFields.find((f) => f.layerId === selectedLayer.id) : undefined}
+                  onBatchFieldChange={(selectedLayer.type === "frame" || selectedLayer.type === "image") ? (field) => handleBatchFieldChange(selectedLayer.id, field) : undefined}
                   onDelete={handleDeleteSelected}
                   onPatch={patchSelectedLayer}
                   onUpdateAsset={updateAsset}
@@ -3491,6 +3633,238 @@ function AccordionSection({
   );
 }
 
+// ─── Template Save Modal ──────────────────────────────────────────────────────
+
+function TemplateSaveModal({
+  initialName,
+  onConfirm,
+  onCancel,
+}: {
+  initialName: string;
+  onConfirm: (name: string) => void;
+  onCancel: () => void;
+}): ReactElement {
+  const [name, setName] = useState(initialName);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.select();
+  }, []);
+
+  function handleKeyDown(e: React.KeyboardEvent): void {
+    if (e.key === "Enter" && name.trim()) onConfirm(name);
+    if (e.key === "Escape") onCancel();
+  }
+
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 9999,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        background: "rgba(0,0,0,0.55)",
+      }}
+      onClick={onCancel}
+    >
+      <div
+        style={{
+          background: "var(--color-surface, #17233d)",
+          border: "1px solid rgba(255,255,255,0.15)",
+          borderRadius: 14, padding: "26px 28px", width: 340,
+          display: "flex", flexDirection: "column", gap: 14, direction: "rtl",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Zap size={16} style={{ color: "#c084fc", flexShrink: 0 }} />
+          <strong style={{ fontSize: 15 }}>שמירה כתבנית ייצור</strong>
+        </div>
+        <p style={{ margin: 0, fontSize: 12.5, color: "var(--color-text-secondary, #aebbd0)", lineHeight: 1.5 }}>
+          התבנית תישמר בספריית ייצור סדרתי ותהיה זמינה להפקה.
+        </p>
+        <input
+          ref={inputRef}
+          dir="auto"
+          placeholder="שם התבנית"
+          style={{
+            padding: "8px 10px",
+            borderRadius: 8, border: "1px solid rgba(255,255,255,0.18)",
+            background: "rgba(255,255,255,0.06)", color: "inherit",
+            fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box",
+          }}
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={handleKeyDown}
+        />
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button
+            style={{ padding: "7px 16px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "inherit", cursor: "pointer", fontSize: 13 }}
+            onClick={onCancel}
+            type="button"
+          >
+            ביטול
+          </button>
+          <button
+            disabled={!name.trim()}
+            style={{ padding: "7px 16px", borderRadius: 8, border: "none", background: "#a855f7", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, opacity: name.trim() ? 1 : 0.5 }}
+            onClick={() => name.trim() && onConfirm(name)}
+            type="button"
+          >
+            שמור תבנית
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Batch Variable Section ───────────────────────────────────────────────────
+
+function BatchVariableSection({
+  layerId,
+  layerType,
+  batchField,
+  onFieldChange,
+}: {
+  layerId: string;
+  layerType: "frame" | "text";
+  batchField: BatchVariableField | undefined;
+  onFieldChange: (field: BatchVariableField | null) => void;
+}): ReactElement {
+  const isEnabled = batchField !== undefined;
+
+  function toggle(): void {
+    if (isEnabled) {
+      onFieldChange(null);
+      return;
+    }
+    if (layerType === "frame") {
+      onFieldChange({
+        id: "photo",
+        type: "image",
+        layerId,
+        label: "תמונה",
+        fitMode: "cover",
+        smartCrop: false,
+        preserveMask: true,
+        applyImageAdjustmentsByDefault: false,
+      });
+    } else {
+      onFieldChange({
+        id: "name",
+        type: "text",
+        layerId,
+        label: "שם",
+        sourceField: "name",
+        preserveTextStyle: true,
+        autoResize: true,
+        minFontScale: 0.7,
+      });
+    }
+  }
+
+  return (
+    <AccordionSection title="ייצור סדרתי" defaultOpen={isEnabled}>
+      <div className="batch-var-enabled-row">
+        <button
+          className={isEnabled ? "toggle on" : "toggle"}
+          onClick={toggle}
+          type="button"
+        >
+          <Zap size={13} />
+          שדה משתנה
+        </button>
+        {isEnabled && (
+          <span className="batch-var-badge-inline">
+            {batchField!.type === "image" ? "VAR IMG" : "VAR TXT"}
+          </span>
+        )}
+      </div>
+
+      {isEnabled && batchField && (
+        <div className="batch-variable-fields">
+          <label>
+            מזהה שדה
+            <input
+              type="text"
+              value={batchField.id}
+              onChange={(e) => onFieldChange({ ...batchField, id: e.target.value })}
+            />
+          </label>
+          <label>
+            תווית
+            <input
+              type="text"
+              value={batchField.label}
+              onChange={(e) => onFieldChange({ ...batchField, label: e.target.value })}
+            />
+          </label>
+
+          {batchField.type === "image" && (
+            <>
+              <label>
+                התאמת תמונה
+                <select
+                  value={batchField.fitMode}
+                  onChange={(e) =>
+                    onFieldChange({
+                      ...batchField,
+                      fitMode: e.target.value as "cover" | "contain" | "fill",
+                    })
+                  }
+                >
+                  <option value="cover">Cover (מלא)</option>
+                  <option value="contain">Contain (כולל)</option>
+                  <option value="fill">Fill (נמתח)</option>
+                </select>
+              </label>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={batchField.applyImageAdjustmentsByDefault}
+                  onChange={(e) =>
+                    onFieldChange({ ...batchField, applyImageAdjustmentsByDefault: e.target.checked })
+                  }
+                />
+                העבר כוונוני תמונה לכל הרשומות
+              </label>
+            </>
+          )}
+
+          {batchField.type === "text" && (
+            <>
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={batchField.autoResize}
+                  onChange={(e) => onFieldChange({ ...batchField, autoResize: e.target.checked })}
+                />
+                התאמת גודל אוטומטית
+              </label>
+              <label>
+                גודל פונט מינימלי
+                <div className="range-row">
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={1}
+                    step={0.05}
+                    value={batchField.minFontScale}
+                    onChange={(e) =>
+                      onFieldChange({ ...batchField, minFontScale: Number(e.target.value) })
+                    }
+                  />
+                  <span>{Math.round(batchField.minFontScale * 100)}%</span>
+                </div>
+              </label>
+            </>
+          )}
+        </div>
+      )}
+    </AccordionSection>
+  );
+}
+
 // ─── Empty inspector state ────────────────────────────────────────────────────
 
 function EmptyInspectorState(): ReactElement {
@@ -3508,7 +3882,9 @@ function EmptyInspectorState(): ReactElement {
 function TextStudio({
   hasTextStyleClipboard,
   layer,
+  batchField,
   onApplyPreset,
+  onBatchFieldChange,
   onCopyTextStyle,
   onDelete,
   onPatch,
@@ -3517,7 +3893,9 @@ function TextStudio({
 }: {
   hasTextStyleClipboard: boolean;
   layer: Extract<VisualLayer, { type: "text" }>;
+  batchField?: BatchVariableField;
   onApplyPreset: (preset: TextPreset) => void;
+  onBatchFieldChange: (field: BatchVariableField | null) => void;
   onCopyTextStyle: () => void;
   onDelete: () => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
@@ -3563,6 +3941,12 @@ function TextStudio({
           </button>
         </div>
       </AccordionSection>
+      <BatchVariableSection
+        layerId={layer.id}
+        layerType="text"
+        batchField={batchField}
+        onFieldChange={onBatchFieldChange}
+      />
       <div className="accordion-content">
         <button className="btn-block btn-danger" onClick={onDelete} type="button">
           <Trash2 size={14} />
@@ -3900,12 +4284,16 @@ function QuickSlider({
 function ImageStudio({
   layer,
   assets,
+  batchField,
+  onBatchFieldChange,
   onDelete,
   onPatch,
   onUpdateAsset,
 }: {
   layer: VisualLayer;
   assets: Asset[];
+  batchField?: BatchVariableField;
+  onBatchFieldChange?: (field: BatchVariableField | null) => void;
   onDelete: () => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
   onUpdateAsset: (asset: Asset) => void;
@@ -4183,6 +4571,15 @@ function ImageStudio({
           <AccordionSection title="אפקטים ויזואליים (FX)" defaultOpen={false}>
             <VisualEffectsControls layer={layer} onPatch={onPatch} />
           </AccordionSection>
+
+          {onBatchFieldChange !== undefined && (
+            <BatchVariableSection
+              layerId={layer.id}
+              layerType="frame"
+              batchField={batchField}
+              onFieldChange={onBatchFieldChange}
+            />
+          )}
 
           <div className="accordion-content">
             <button className="btn-block btn-danger" onClick={onDelete} type="button">
@@ -6196,6 +6593,7 @@ function LayerList({
   renamingLayerId,
   selectedLayerIds,
   selectedLayerId,
+  variableLayerIds,
   onRename,
   onRenameComplete,
   onStartRename,
@@ -6211,6 +6609,7 @@ function LayerList({
   renamingLayerId: string | null;
   selectedLayerIds: string[];
   selectedLayerId: string | null;
+  variableLayerIds: Set<string>;
   onRename: (layerId: string, name: string) => void;
   onRenameComplete: () => void;
   onStartRename: (layerId: string) => void;
@@ -6369,6 +6768,7 @@ function LayerList({
             {layer.opacity < 0.995 ? <em className="layer-opacity-badge">{Math.round(layer.opacity * 100)}%</em> : null}
             {layer.blendMode !== "normal" ? <em className="layer-blend-badge">{layer.blendMode}</em> : null}
             {hasLayerFx(layer) ? <em className="layer-fx-pill">fx</em> : null}
+            {variableLayerIds.has(layer.id) ? <em className="layer-var-pill">VAR</em> : null}
           </div>
           <button
             aria-label={layer.visible ? "הסתר שכבה" : "הצג שכבה"}
@@ -6420,6 +6820,7 @@ function LayerContextMenu({
   layer,
   canUseEffects,
   hasEffectsClipboard,
+  isVariableLayer,
   onClose,
   onRename,
   onToggleVisibility,
@@ -6430,6 +6831,7 @@ function LayerContextMenu({
   onMoveToBack,
   onDuplicate,
   onDelete,
+  onToggleBatchVariable,
   onCopyEffects,
   onPasteEffects
 }: {
@@ -6437,6 +6839,7 @@ function LayerContextMenu({
   layer: VisualLayer | undefined;
   canUseEffects: boolean;
   hasEffectsClipboard: boolean;
+  isVariableLayer?: boolean;
   onClose: () => void;
   onRename: () => void;
   onToggleVisibility: () => void;
@@ -6447,6 +6850,7 @@ function LayerContextMenu({
   onMoveToBack: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  onToggleBatchVariable?: () => void;
   onCopyEffects: () => void;
   onPasteEffects: () => void;
 }): ReactElement {
@@ -6522,6 +6926,20 @@ function LayerContextMenu({
       <button className="ctx-item" onClick={action(onDelete)} type="button">
         מחק
       </button>
+      {onToggleBatchVariable !== undefined && (
+        <>
+          <div className="ctx-divider" />
+          <button
+            className="ctx-item"
+            onClick={action(onToggleBatchVariable)}
+            type="button"
+            style={{ color: isVariableLayer ? "#f87171" : "#c084fc" }}
+          >
+            <Zap size={12} style={{ display: "inline", marginInlineEnd: 5 }} />
+            {isVariableLayer ? "בטל שדה משתנה" : "הפוך לאלמנט מתחלף"}
+          </button>
+        </>
+      )}
       {canUseEffects && (
         <>
           <div className="ctx-divider" />

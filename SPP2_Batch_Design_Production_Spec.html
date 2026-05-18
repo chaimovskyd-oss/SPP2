@@ -1,0 +1,1090 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SPP2 - Batch Design Production Variable Spec</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111c33;
+      --panel2: #17233d;
+      --text: #edf4ff;
+      --muted: #aebbd0;
+      --accent: #38bdf8;
+      --accent2: #facc15;
+      --good: #22c55e;
+      --warn: #f59e0b;
+      --bad: #ef4444;
+      --border: rgba(255,255,255,0.12);
+      --code: #08111f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background:
+        radial-gradient(circle at top right, rgba(56,189,248,0.22), transparent 36%),
+        radial-gradient(circle at top left, rgba(250,204,21,0.12), transparent 30%),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    header {
+      padding: 56px 7vw 36px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0));
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(30px, 4vw, 54px);
+      color: white;
+      letter-spacing: -0.04em;
+    }
+    h2 {
+      margin-top: 46px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+      color: var(--accent);
+      font-size: 28px;
+    }
+    h3 {
+      color: var(--accent2);
+      margin-top: 30px;
+      font-size: 21px;
+    }
+    h4 { color: #fff; margin-top: 24px; }
+    .subtitle {
+      max-width: 980px;
+      font-size: 19px;
+      color: var(--muted);
+      margin: 0;
+    }
+    main {
+      width: min(1180px, 92vw);
+      margin: 0 auto;
+      padding: 34px 0 80px;
+    }
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.025));
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      padding: 24px;
+      margin: 22px 0;
+      box-shadow: 0 18px 50px rgba(0,0,0,0.22);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 18px;
+      margin: 18px 0;
+    }
+    .mini {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+    }
+    .pill {
+      display: inline-block;
+      padding: 4px 10px;
+      margin: 2px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(56,189,248,0.10);
+      color: #dff6ff;
+      font-size: 13px;
+    }
+    .ok { color: var(--good); font-weight: 700; }
+    .warn { color: var(--warn); font-weight: 700; }
+    .bad { color: var(--bad); font-weight: 700; }
+    code, pre {
+      direction: ltr;
+      text-align: left;
+      font-family: Consolas, "Courier New", monospace;
+    }
+    pre {
+      background: var(--code);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      line-height: 1.55;
+    }
+    .prompt {
+      border-right: 5px solid var(--accent2);
+      background: rgba(250,204,21,0.08);
+    }
+    .checklist li { margin-bottom: 8px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 18px 0;
+      overflow: hidden;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+    }
+    th, td {
+      border-bottom: 1px solid var(--border);
+      padding: 12px 14px;
+      vertical-align: top;
+    }
+    th {
+      background: rgba(56,189,248,0.15);
+      color: white;
+      text-align: right;
+    }
+    tr:last-child td { border-bottom: none; }
+    .toc a {
+      color: var(--text);
+      text-decoration: none;
+      display: block;
+      padding: 8px 0;
+      border-bottom: 1px dashed rgba(255,255,255,0.10);
+    }
+    .toc a:hover { color: var(--accent); }
+    .note {
+      border-right: 5px solid var(--accent);
+      padding: 12px 16px;
+      background: rgba(56,189,248,0.08);
+      border-radius: 14px;
+      color: #dcefff;
+    }
+    .footer {
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 60px;
+      border-top: 1px solid var(--border);
+      padding-top: 24px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>SPP2 — Batch Design Production Variable</h1>
+    <p class="subtitle">
+      אפיון מלא למודול ייצור סדרתי מעיצוב משתנה: יצירת תבניות מתוך Free Mode,
+      סימון שכבות כמשתנות, ספריית תבניות, קישור ל־Product Library, אשף ייצור,
+      בדיקות, ופרומפטים מחולקים ל־Phases.
+    </p>
+  </header>
+
+  <main>
+    <section class="card toc">
+      <h2 id="toc">תוכן עניינים</h2>
+      <a href="#vision">1. חזון והחלטות ליבה</a>
+      <a href="#flow">2. Flow מלא למשתמש</a>
+      <a href="#template-creation">3. יצירת תבנית מתוך Free Mode</a>
+      <a href="#saved-data">4. מה נשמר ומה לא נשמר</a>
+      <a href="#library">5. ספריית תבניות ייצור</a>
+      <a href="#product-link">6. קישור דו־כיווני ל־Product Library</a>
+      <a href="#wizard">7. אשף הייצור</a>
+      <a href="#generated-doc">8. המסמך שנוצר</a>
+      <a href="#data-model">9. מודל נתונים מוצע</a>
+      <a href="#validation">10. בדיקות ו־Acceptance Criteria</a>
+      <a href="#phases">11. חלוקה ל־Phases</a>
+      <a href="#prompts">12. פרומפטים מלאים</a>
+    </section>
+
+    <section class="card" id="vision">
+      <h2>1. חזון והחלטות ליבה</h2>
+      <p>
+        המודול מיועד להפוך עיצוב אחד לתהליך ייצור סדרתי: לדוגמה עיצוב לתיק, קלמר,
+        בקבוק, מגנט, תמונת מחזור, מדבקת שם או מוצר אישי אחר. המשתמש מעצב פעם אחת,
+        מסמן איפה התמונה והשם משתנים, ואז מייצר עותקים לפי רשימת תמונות/שמות.
+      </p>
+
+      <div class="grid">
+        <div class="mini">
+          <h3>החלטה 1</h3>
+          <p><strong>לא בונים עורך תבניות נפרד.</strong><br>מעצבים רגיל ב־Free Mode, ואז מסמנים שכבות כ־Variable.</p>
+        </div>
+        <div class="mini">
+          <h3>החלטה 2</h3>
+          <p><strong>Template הוא מסמך SPP רגיל + metadata.</strong><br>כל מנוע השכבות, הטקסט, המסיכות וההדפסה נשארים קיימים.</p>
+        </div>
+        <div class="mini">
+          <h3>החלטה 3</h3>
+          <p><strong>Generate יוצר מסמך רגיל.</strong><br>אחרי הייצור כל דף ניתן לעריכה חופשית, בלי קשר חי לתבנית.</p>
+        </div>
+        <div class="mini">
+          <h3>החלטה 4</h3>
+          <p><strong>התוכן מתחלף, העיצוב נשמר.</strong><br>שם ותמונה משתנים; מיקום, סגנון, מסיכה, אפקטים ו־Blend Mode נשמרים.</p>
+        </div>
+      </div>
+
+      <p class="note">
+        כלל הזהב: <strong>Design first. Mark variables later. Generate detached editable pages.</strong>
+      </p>
+    </section>
+
+    <section class="card" id="flow">
+      <h2>2. Flow מלא למשתמש</h2>
+      <ol>
+        <li>המשתמש פותח Free Mode או מוצר מתוך Product Library.</li>
+        <li>מעצב כרגיל: רקע, מסיכה לתמונה, טקסט שם, אפקטים, פריסטים, קווים, צללים וכו’.</li>
+        <li>בוחר שכבת תמונה/מסיכה ומסמן אותה כ־<strong>Variable Image Slot</strong>.</li>
+        <li>בוחר שכבת טקסט ומסמן אותה כ־<strong>Variable Text Slot</strong>.</li>
+        <li>שומר כ־<strong>Batch Production Template</strong>.</li>
+        <li>ניגש דרך Hub למסך Batch Production.</li>
+        <li>בוחר תבנית מתוך הספרייה.</li>
+        <li>מעלה תמונות.</li>
+        <li>המערכת מזהה שמות משמות קבצים ומציגה טבלה לעריכה.</li>
+        <li>המשתמש מאשר.</li>
+        <li>נוצר מסמך SPP רגיל עם עמוד לכל רשומה.</li>
+        <li>המסמך נפתח ב־Free Mode לעריכה, הדפסה או Export.</li>
+      </ol>
+    </section>
+
+    <section class="card" id="template-creation">
+      <h2>3. יצירת תבנית מתוך Free Mode</h2>
+      <p>
+        ה־Flow הקריטי: המשתמש לא צריך להבין “תכנות תבניות”. הוא עובד רגיל,
+        ורק בסוף אומר למערכת אילו שכבות הן משתנות.
+      </p>
+
+      <h3>פעולות UI מומלצות</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>מצב</th>
+            <th>פעולה</th>
+            <th>תוצאה</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>בחירת שכבת תמונה/מסיכה</td>
+            <td>Batch Variable → Enable → Variable Image</td>
+            <td>השכבה מקבלת Field ID כמו <code>photo</code></td>
+          </tr>
+          <tr>
+            <td>בחירת שכבת טקסט</td>
+            <td>Batch Variable → Enable → Variable Text</td>
+            <td>השכבה מקבלת Field ID כמו <code>name</code></td>
+          </tr>
+          <tr>
+            <td>שמירה</td>
+            <td>Save as Batch Template</td>
+            <td>נשמרת תבנית בספריית Batch Templates</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>אינדיקציה ויזואלית</h3>
+      <ul>
+        <li>Badge קטן על שכבה משתנה: <span class="pill">VAR IMG</span> או <span class="pill">VAR TXT</span></li>
+        <li>בפאנל שכבות: אייקון קטן ליד השכבה.</li>
+        <li>ב־Properties Panel: אזור בשם Batch Variable Settings.</li>
+      </ul>
+
+      <h3>שמות שדות מומלצים ל־V1</h3>
+      <ul>
+        <li><code>photo</code> — תמונה ראשית.</li>
+        <li><code>name</code> — שם/כיתוב ראשי.</li>
+      </ul>
+    </section>
+
+    <section class="card" id="saved-data">
+      <h2>4. מה נשמר ומה לא נשמר</h2>
+
+      <h3>עיקרון בסיסי</h3>
+      <p>
+        יש להפריד בין <strong>תוכן משתנה</strong> לבין <strong>עיצוב קבוע</strong>.
+        התוכן מתחלף בכל רשומה, אבל כל ההגדרות העיצוביות נשמרות.
+      </p>
+
+      <h3>טקסט משתנה</h3>
+      <table>
+        <thead><tr><th>לא נשמר כערך קבוע</th><th>כן נשמר</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>הטקסט עצמו, למשל “נועה כהן”. בתבנית זה Placeholder בלבד.</td>
+            <td>
+              מיקום, גודל תיבה, פונט, גודל פונט, צבע, יישור, RTL, ריווח, Stroke,
+              Shadow, Glow, Preset, Opacity, Rotation, Scale, Blend Mode, Layer Order,
+              Auto Resize, Min Font Scale.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>תמונה/מסיכה משתנה</h3>
+      <table>
+        <thead><tr><th>לא נשמר כברירת מחדל</th><th>כן נשמר</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>
+              קובץ תמונת הדוגמה, קרופ ידני ספציפי, כוונוני תמונה ספציפיים כמו
+              Brightness/Contrast/Exposure, Background Removal, ריטוש ידני.
+            </td>
+            <td>
+              מיקום המסיכה, גודל, צורה, Rotation, Scale, Opacity, Layer Order,
+              Blend Mode, Stroke/Shadow של מסגרת, Fit Mode, Cover/Contain,
+              Smart Crop On/Off, Safe Area, Clip Behavior.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p class="note">
+        כוונוני תמונה יכולים לעבור רק אם המשתמש מסמן במפורש:
+        “Apply template image adjustments to all generated images”.
+      </p>
+    </section>
+
+    <section class="card" id="library">
+      <h2>5. ספריית תבניות ייצור</h2>
+      <p>
+        יש לגשת לתבניות ממיקום נפרד ב־Hub: <strong>Batch Production</strong>.
+        זה לא עורך חדש, אלא אזור ניהול והפקה.
+      </p>
+
+      <h3>כרטיס תבנית צריך לכלול</h3>
+      <ul>
+        <li>Preview של התבנית.</li>
+        <li>שם התבנית.</li>
+        <li>גודל / יחס / Orientation.</li>
+        <li>מספר שדות משתנים.</li>
+        <li>Tags או מוצר מתאים.</li>
+        <li>תאריך עדכון אחרון.</li>
+      </ul>
+
+      <h3>כפתורים חובה</h3>
+      <div class="grid">
+        <div class="mini"><strong>Produce</strong><br>פותח אשף ייצור מהתבנית.</div>
+        <div class="mini"><strong>Edit</strong><br>פותח את התבנית ב־Free Mode לעריכה.</div>
+        <div class="mini"><strong>Duplicate</strong><br>יוצר עותק עצמאי לשינוי מידות/מוצר.</div>
+        <div class="mini"><strong>Delete</strong><br>מחיקת תבנית אחרי אישור.</div>
+      </div>
+
+      <h3>Duplicate — שימוש חשוב</h3>
+      <p>
+        לדוגמה: יש עיצוב מוצלח לתיק גן. המשתמש לוחץ Duplicate, משנה שם ל“קלמר תואם”,
+        משנה פרופורציות ומיקומי טקסט/מסיכה, ושומר כתבנית חדשה.
+      </p>
+    </section>
+
+    <section class="card" id="product-link">
+      <h2>6. קישור דו־כיווני ל־Product Library</h2>
+      <p>
+        ב־V1 אפשר לבנות קישור פשוט וחכם לפי מידות/יחס. אין צורך במערכת כבדה.
+      </p>
+
+      <h3>בתבנית Batch</h3>
+      <pre>{
+  compatibleProductIds: ["kids_bag", "pencil_case"]
+}</pre>
+
+      <h3>במוצר Product Library</h3>
+      <pre>{
+  compatibleBatchTemplateIds: ["template_123", "template_456"]
+}</pre>
+
+      <h3>התאמה אוטומטית</h3>
+      <ul>
+        <li>בדיקת Width/Height.</li>
+        <li>בדיקת Ratio.</li>
+        <li>בדיקת Orientation.</li>
+        <li>Tolerance של 3%–5%.</li>
+        <li>בעתיד: Bleed / Safe Area / Print Zones.</li>
+      </ul>
+
+      <p class="note">
+        חשוב לקשור לפי <code>productId</code>, לא לפי שם מוצר, כי שמות יכולים להשתנות.
+      </p>
+    </section>
+
+    <section class="card" id="wizard">
+      <h2>7. אשף הייצור</h2>
+
+      <h3>שלב 1 — בחירת תבנית</h3>
+      <p>נבחרת מתוך ספריית התבניות או מתוך Product Library.</p>
+
+      <h3>שלב 2 — העלאת תמונות</h3>
+      <ul>
+        <li>Drag & Drop לתמונות.</li>
+        <li>תמיכה ב־jpg/png/webp.</li>
+        <li>בעתיד: ZIP, CSV/Excel.</li>
+      </ul>
+
+      <h3>שלב 3 — זיהוי שמות</h3>
+      <p>
+        ברירת מחדל: שם הקובץ ללא סיומת נכנס לשדה <code>name</code>.
+      </p>
+      <pre>Noa Cohen.jpg   → Noa Cohen
+עמית דניאל.png → עמית דניאל</pre>
+
+      <h3>שלב 4 — טבלת עריכה</h3>
+      <table>
+        <thead><tr><th>תמונה</th><th>שם</th><th>פעולות</th></tr></thead>
+        <tbody>
+          <tr><td>Thumbnail</td><td>שדה טקסט ניתן לעריכה</td><td>החלפה / מחיקה / סדר</td></tr>
+        </tbody>
+      </table>
+
+      <h3>שלב 5 — Preview</h3>
+      <p>
+        ב־V1 מספיק Preview לרשומה הראשונה או 3 דוגמאות. לא חובה לרנדר מאות תצוגות.
+      </p>
+
+      <h3>שלב 6 — Generate</h3>
+      <p>
+        יוצר מסמך SPP רגיל. ברירת מחדל מומלצת:
+        <strong>1 record = 1 page</strong>.
+      </p>
+    </section>
+
+    <section class="card" id="generated-doc">
+      <h2>8. המסמך שנוצר</h2>
+      <p>
+        לאחר Generate נוצר מסמך חדש רגיל ונפתח ב־Free Mode. אין קשר חי לתבנית.
+      </p>
+
+      <h3>מה נשמר במסמך שנוצר</h3>
+      <pre>{
+  generatedBatch: {
+    templateId: "template_123",
+    templateName: "תיק גן עם שם ותמונה",
+    generatedAt: "2026-05-18T10:00:00Z",
+    recordCount: 38
+  }
+}</pre>
+
+      <h3>יתרונות</h3>
+      <ul>
+        <li>כל עמוד ניתן לעריכה עצמאית.</li>
+        <li>אפשר לתקן רק ילד אחד.</li>
+        <li>אפשר להוסיף אלמנטים ידנית.</li>
+        <li>אפשר למחוק או לסדר עמודים.</li>
+        <li>Print/Export משתמשים במערכת הקיימת.</li>
+      </ul>
+    </section>
+
+    <section class="card" id="data-model">
+      <h2>9. מודל נתונים מוצע</h2>
+
+      <h3>אחסון Metadata — איפה נשמר</h3>
+      <p>
+        כל metadata של Batch Production נשמר ב-<code>document.metadata.batchProduction</code> בלבד.<br>
+        <strong>לא</strong> ב-<code>batchJobs[]</code> (שהם progress trackers בלבד) ו<strong>לא</strong> על השכבות עצמן.
+      </p>
+      <p class="note">
+        <strong>בדיקה לפני יישום:</strong> <code>BatchJob</code> ו-<code>batchJobs[]</code> ב-ProjectEnvelope הם progress tracking בלבד (pending/running/completed).
+        <code>FrameLayer.batchIndex</code> שייך ל-Grid/ClassPhoto layouts. שניהם לא נוגעים ל-Batch Production.
+      </p>
+
+      <h3>Batch Template Metadata</h3>
+      <pre>// נשמר ב: document.metadata.batchProduction
+type BatchProductionDocMeta = {
+  isTemplate: boolean;
+  templateId: string;
+  templateName: string;
+  description?: string;
+  tags?: string[];
+  compatibleProductIds?: string[];
+  canvas: {
+    widthPx: number;
+    heightPx: number;
+    widthMm?: number;   // לצורך התאמת Product Library
+    heightMm?: number;
+    dpi: number;
+    unit: "mm" | "px";
+    orientation: "portrait" | "landscape" | "square";
+    ratio: number;
+  };
+  variableFields: BatchVariableField[];
+  createdAt: string;
+  updatedAt: string;
+};</pre>
+
+      <h3>Variable Field</h3>
+      <p class="note">
+        <strong>V1: Variable Image עובד על FrameLayer בלבד</strong> (לא ImageLayer).<br>
+        אם המשתמש מנסה לסמן ImageLayer, יש להציג: <em>"Variable image slot requires a Frame/Mask layer."</em>
+      </p>
+      <pre>type BatchVariableField =
+  | {
+      id: string;
+      type: "image";
+      layerId: string;          // חייב להיות layerId של FrameLayer
+      label: string;
+      fitMode: "cover" | "contain" | "fill";
+      smartCrop: boolean;
+      preserveMask: boolean;
+      applyImageAdjustmentsByDefault: boolean;
+      // אם false: כוונוני תמונה (brightness/contrast/exposure וכו')
+      // מאופסים במפורש ב-Generate Engine על כל עמוד
+    }
+  | {
+      id: string;
+      type: "text";
+      layerId: string;
+      label: string;
+      sourceField: "name" | string;
+      preserveTextStyle?: boolean;  // ברירת מחדל: true
+      autoResize: boolean;
+      minFontScale: number;
+    };</pre>
+
+      <h3>Batch Record</h3>
+      <pre>type BatchRecord = {
+  id: string;
+  imageFileId?: string;
+  fields: {
+    name?: string;
+    [customField: string]: string | undefined;
+  };
+  status: "ready" | "warning" | "error";
+};
+
+// נשמר ב: document.metadata.generatedBatch (במסמך שנוצר)
+type GeneratedBatchMeta = {
+  templateId: string;
+  templateName: string;
+  generatedAt: string;
+  recordCount: number;
+};</pre>
+
+      <h3>Template Library Index</h3>
+      <pre>// נשמר ב: AppData/SPP2/batch-templates/index.json
+type BatchTemplateIndexItem = {
+  templateId: string;
+  templateName: string;
+  filePath: string;       // נתיב לקובץ .spp2
+  thumbnailPath?: string; // נתיב ל-thumbnail.png
+  canvasWidth: number;
+  canvasHeight: number;
+  widthMm?: number;
+  heightMm?: number;
+  unit: "mm" | "px";
+  ratio: number;
+  compatibleProductIds: string[];
+  fieldCount: number;
+  updatedAt: string;
+};</pre>
+    </section>
+
+    <section class="card" id="validation">
+      <h2>10. בדיקות ו־Acceptance Criteria</h2>
+
+      <h3>בדיקות יצירת תבנית</h3>
+      <ul class="checklist">
+        <li>אפשר לסמן שכבת תמונה כ־Variable Image.</li>
+        <li>אפשר לסמן שכבת טקסט כ־Variable Text.</li>
+        <li>Badge מופיע על שכבות משתנות.</li>
+        <li>שכבה שמסומנת משתנה מופיעה גם בפאנל שכבות.</li>
+        <li>שמירה כ־Batch Template לא שוברת מסמך רגיל.</li>
+        <li>מחיקת שכבה משתנה מנקה metadata שבור.</li>
+      </ul>
+
+      <h3>בדיקות ספרייה</h3>
+      <ul class="checklist">
+        <li>תבנית מופיעה בספריית Batch Production.</li>
+        <li>Preview מוצג.</li>
+        <li>Edit פותח Free Mode.</li>
+        <li>Duplicate יוצר ID חדש ולא מקשר למקור.</li>
+        <li>Produce פותח אשף ייצור.</li>
+      </ul>
+
+      <h3>בדיקות אשף</h3>
+      <ul class="checklist">
+        <li>העלאת תמונות מרובות עובדת.</li>
+        <li>שם נוצר אוטומטית משם קובץ.</li>
+        <li>אפשר לערוך שם ידנית.</li>
+        <li>אפשר למחוק רשומה.</li>
+        <li>יש אזהרה לשם ריק.</li>
+        <li>יש אזהרה אם חסרה תמונה לשדה תמונה.</li>
+      </ul>
+
+      <h3>בדיקות Generate</h3>
+      <ul class="checklist">
+        <li>נוצר עמוד לכל רשומה.</li>
+        <li>התמונה נכנסת למסיכה הנכונה.</li>
+        <li>הטקסט מחליף תוכן ושומר עיצוב מלא.</li>
+        <li>Blend Mode / Opacity / Layer Order נשמרים.</li>
+        <li>המסמך שנוצר נפתח ב־Free Mode.</li>
+        <li>אפשר לערוך כל עמוד ידנית.</li>
+        <li>Print/Export עובדים דרך המערכת הקיימת.</li>
+      </ul>
+    </section>
+
+    <section class="card" id="phases">
+      <h2>11. חלוקה ל־Phases</h2>
+
+      <div class="grid">
+        <div class="mini">
+          <h3>Phase 0</h3>
+          <p>
+            <strong>Codebase Audit:</strong> בדיקת <code>batch.ts</code>, <code>batchStore</code>,
+            <code>FrameLayer.batchIndex</code>, <code>ProjectEnvelope.batchJobs</code>,
+            Transaction API, ו-clone utilities.<br>
+            קביעת Integration Contract לפני שורת קוד ראשונה.
+          </p>
+        </div>
+        <div class="mini">
+          <h3>Phase 1</h3>
+          <p>Data Model — <code>document.metadata.batchProduction</code> + סימון שכבות כ־Variable בתוך Free Mode.</p>
+        </div>
+        <div class="mini">
+          <h3>Phase 2</h3>
+          <p>שמירה וטעינה של Batch Templates + ספרייה בסיסית + Thumbnail ב-Save.</p>
+        </div>
+        <div class="mini">
+          <h3>Phase 3</h3>
+          <p>אשף העלאת תמונות וטבלת שמות (תמונות כ-DataURL זמני עד Generate).</p>
+        </div>
+        <div class="mini">
+          <h3>Phase 4</h3>
+          <p>
+            בניית <code>deepClonePageWithRemappedIds()</code> + Generate Engine:
+            יצירת עמודים רגילים מתוך רשומות, כ-Transaction אחד, עם איפוס כוונוני תמונה.
+          </p>
+        </div>
+        <div class="mini">
+          <h3>Phase 5</h3>
+          <p>קישור ל־Product Library לפי IDs + מידות/יחס + פעולות Produce/Edit/Duplicate.</p>
+        </div>
+        <div class="mini">
+          <h3>Phase 6</h3>
+          <p>Polish: בדיקות, שגיאות, ביצועים, RTL, Preview ושיפור UX.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="prompts">
+      <h2>12. פרומפטים מלאים</h2>
+
+      <div class="card prompt">
+        <h3>Phase 0 Prompt — Codebase Audit &amp; Integration Contract</h3>
+        <pre>Phase 0: Codebase Audit and Integration Contract for Batch Design Production.
+
+Goal:
+Before writing any new code, audit the existing codebase to avoid conflicts
+and establish the integration points.
+
+Files to inspect:
+- src/types/batch.ts
+- src/state/batchStore.ts
+- src/types/layers.ts (FrameLayer.batchIndex)
+- src/types/document.ts (Document.metadata, Page.metadata)
+- src/core/save/projectFormat.ts (ProjectEnvelope.batchJobs)
+- src/core/history/actions.ts (beginTransaction, commitTransaction)
+- Any existing page clone/duplicate utilities
+
+Confirm and document the following integration decisions:
+
+1. BatchJob (src/types/batch.ts) is a progress tracker for background operations.
+   batchJobs: BatchJob[] in ProjectEnvelope tracks job progress only.
+   Do not use it for template storage.
+   Template metadata must go in document.metadata.batchProduction (freeform JSON).
+
+2. FrameLayer.batchIndex is used for Grid/ClassPhoto layout indexing.
+   Do not reuse it for Variable Slot marking.
+   Variable fields are tracked only via document.metadata.batchProduction.variableFields[].layerId.
+
+3. Confirm that beginTransaction/commitTransaction exist in src/core/history/actions.ts
+   and are accessible through documentStore. The Generate Engine must use them.
+
+4. No page cloning utility exists in the codebase. You must create:
+   deepClonePageWithRemappedIds(page: Page): { page: Page; layerIdMap: Record<ID, ID> }
+   This utility must remap:
+   - pageId
+   - all layer IDs
+   - parentId references
+   - children arrays
+   - linkedGroup IDs
+   - linkedSlotId
+   - textLayerId inside FrameLayer
+   - maskId
+   - Any other internal layer ID references
+   This utility will also be used by Duplicate Template.
+
+5. V1 Variable Image Slot supports FrameLayer only (not ImageLayer).
+   If a user tries to mark an ImageLayer as Variable Image, show a clear error:
+   "Variable image slot requires a Frame/Mask layer.
+    Add your image inside a frame first."
+
+6. Image adjustments (brightness, contrast, exposure, saturation, hue, etc.)
+   are stored on the FrameLayer, not on the Asset.
+   During Generate, if applyImageAdjustmentsByDefault is false,
+   reset all image adjustment properties on the cloned FrameLayer
+   before assigning the new image. This is mandatory.
+
+7. Template thumbnail: use Konva Stage.toDataURL() at "Save as Batch Template" time.
+   Store as thumbnail.png inside the template package.
+
+8. Template storage location:
+   AppData/SPP2/batch-templates/
+     index.json              (BatchTemplateIndexItem[])
+     {templateId}/
+       template.spp2
+       thumbnail.png
+   Each template is a standard SPP package with batchProduction metadata.
+
+9. Batch Production Hub entry must be a React internal screen, similar to
+   ProductLibraryScreen, not an external folder or Electron bridge.
+
+Output: A written integration contract listing confirmed findings and decisions.
+Only after this audit, implement Phase 1.</pre>
+      </div>
+
+      <div class="card prompt">
+        <h3>פרומפט ראשי — בסיס לכל הפרויקט</h3>
+        <pre>We are adding a new major module to SPP2 called Batch Design Production / Variable Design Mode.
+
+This module allows the user to design once and generate many personalized design pages from images and names.
+
+Important architecture decisions:
+1. Do not create a separate template editor.
+2. Templates are created inside the existing Free Mode editor.
+3. The user designs normally, then marks existing layers as variable fields.
+4. A Batch Template is a normal SPP document with additional batch metadata.
+5. Generated output is a new normal SPP document opened in Free Mode.
+6. Generated pages must be fully editable with all existing SPP2 tools.
+7. There is no live link between generated pages and the original template.
+8. Variable content is replaced; design properties are preserved.
+9. Product Library integration should be simple and bidirectional, based mainly on product/template dimensions and aspect ratio.
+
+Core V1 field types:
+- Variable Image Slot
+- Variable Text Slot
+
+Variable Text:
+- The actual placeholder text is replaced during generation.
+- Preserve text design: font, size, color, alignment, RTL, stroke, shadow, effects, preset, opacity, rotation, scale, blend mode, layer order, auto-fit settings.
+
+Variable Image:
+- Replace the source image.
+- Preserve mask/frame position, size, shape, rotation, scale, opacity, layer order, blend mode, fit mode, smart crop setting, clipping behavior.
+- Do not preserve image-specific adjustments by default unless the user explicitly enables that option.
+
+Template Library:
+- Add a Batch Production area in the Hub.
+- Display templates as cards with preview, name, size, field count, tags/products.
+- Each template must have Produce, Edit, Duplicate, Delete.
+- Edit opens the template in Free Mode.
+- Duplicate creates an independent template copy with a new ID.
+
+Generate:
+- The wizard uploads images, extracts default names from filenames, allows editing in a table, then generates one page per record.
+- The generated document opens in Free Mode as a normal editable document.
+- Add generatedBatch metadata for reference only.
+
+Build this gradually in phases. Preserve existing SPP2 architecture, stores, history, document model, export, and print systems.</pre>
+      </div>
+
+      <div class="card prompt">
+        <h3>Phase 1 Prompt — Data Model + סימון שכבות</h3>
+        <pre>Implement Phase 1 of Batch Design Production in SPP2.
+
+Goal:
+Allow users inside Free Mode to mark existing layers as Batch Variable fields.
+
+Requirements:
+1. Add batch metadata support to the document model.
+2. Add variable field definitions:
+   - image field
+   - text field
+3. Do not create new special layer types. Use existing image/mask/text layers and attach metadata/role to them.
+4. Add UI in the selected layer properties panel:
+   - Enable Batch Variable
+   - Field Type: Image / Text
+   - Field ID
+   - Label
+5. For image fields expose:
+   - fitMode: cover/contain/fill
+   - smartCrop: boolean
+   - preserveMask: true
+   - applyImageAdjustmentsByDefault: false
+6. For text fields expose:
+   - sourceField: name by default
+   - preserveTextStyle: true
+   - autoResize: true
+   - minFontScale: 0.7
+7. Add visual indicators:
+   - badge on canvas/layer overlay
+   - icon/tag in layers panel
+8. If a variable layer is deleted, remove or invalidate its variable field metadata safely.
+9. Ensure normal documents still work exactly the same.
+
+Acceptance tests:
+- Mark text layer as variable text.
+- Mark image/mask layer as variable image.
+- Save and reload document, metadata persists.
+- Delete variable layer, no broken references remain.
+- Existing Free Mode tools still work.</pre>
+      </div>
+
+      <div class="card prompt">
+        <h3>Phase 2 Prompt — שמירת תבניות וספריית Templates</h3>
+        <pre>Implement Phase 2 of Batch Design Production in SPP2.
+
+Goal:
+Create a Batch Templates Library and allow saving the current Free Mode document as a Batch Production Template.
+
+Requirements:
+1. Add "Save as Batch Template" action.
+2. Validate before saving:
+   - at least one variable field exists
+   - variable field layerIds exist
+   - field IDs are unique
+3. Store template as a normal SPP document plus batchProduction metadata
+   in document.metadata.batchProduction (not in batchJobs, not on layers).
+4. Generate and save a preview thumbnail using Konva Stage.toDataURL() at
+   save time. Store as thumbnail.png inside the template package folder.
+   Do not regenerate thumbnails later — capture when the canvas is open.
+5. Add a new Hub entry: Batch Production.
+6. Add a Batch Templates Library screen with template cards.
+7. Each card should show:
+   - preview
+   - template name
+   - canvas size / ratio / orientation
+   - number of variable fields
+   - compatible products if available
+   - updated date
+8. Add actions:
+   - Produce
+   - Edit
+   - Duplicate
+   - Delete
+9. Edit opens the template in Free Mode.
+10. Duplicate creates a fully independent copy with a new templateId and new updatedAt.
+11. Delete asks for confirmation.
+
+Acceptance tests:
+- Save current design as template.
+- Template appears in library.
+- Edit opens it correctly.
+- Duplicate creates independent copy.
+- Deleting original does not delete duplicate.
+- Produce button exists but may be placeholder until Phase 3.</pre>
+      </div>
+
+      <div class="card prompt">
+        <h3>Phase 3 Prompt — אשף העלאת תמונות וטבלת שמות</h3>
+        <pre>Implement Phase 3 of Batch Design Production in SPP2.
+
+Goal:
+Create the Produce wizard for a selected Batch Template.
+
+Wizard steps:
+1. Template summary
+2. Upload images
+3. Build/edit records table
+4. Preview sample
+5. Confirm generate
+
+Requirements:
+1. User can upload multiple image files.
+2. Supported formats: jpg, jpeg, png, webp.
+3. For each image create a BatchRecord.
+4. Default name field is derived from filename without extension.
+5. Clean simple filename separators:
+   - underscores and hyphens become spaces
+   - trim extra spaces
+6. Show records in an RTL-friendly editable table.
+7. Columns:
+   - thumbnail
+   - name
+   - file name
+   - status
+   - actions
+8. Allow:
+   - edit name
+   - delete record
+   - replace image
+   - reorder records if easy
+9. Validate:
+   - empty names show warning
+   - missing image shows error
+10. Add a small preview using the first record if possible.
+11. Do not generate pages yet unless Phase 4 is already ready.
+
+Acceptance tests:
+- Upload 10 images.
+- Names are extracted from filenames.
+- Hebrew filenames display correctly.
+- User can edit names.
+- User can delete records.
+- Wizard can proceed only when records are valid enough.</pre>
+      </div>
+
+      <div class="card prompt">
+        <h3>Phase 4 Prompt — Generate Engine</h3>
+        <pre>Implement Phase 4 of Batch Design Production in SPP2.
+
+Goal:
+Generate a new normal SPP document from a Batch Template and BatchRecords.
+
+Architecture:
+- Generated output must be a normal SPP document.
+- One record creates one page in V1.
+- No live link to the template.
+- All generated pages open in Free Mode and remain fully editable.
+
+Critical utilities required before implementing this phase:
+- deepClonePageWithRemappedIds(page): { page, layerIdMap }
+  Must remap all IDs: pageId, layerIds, parentId, linkedGroup,
+  linkedSlotId, textLayerId, maskId. Built in Phase 4a as a prerequisite.
+
+Requirements:
+1. Clone the template page once per valid record using deepClonePageWithRemappedIds.
+   Every generated page must have fully independent IDs. Shared IDs between
+   pages will cause cross-page editing corruption.
+2. For each generated page:
+   - Use layerIdMap to find the cloned FrameLayer for the variable image field.
+   - Assign the record image to that FrameLayer (imageAssetId).
+   - If applyImageAdjustmentsByDefault is false: reset all image adjustments
+     on the cloned FrameLayer (brightness, contrast, exposure, saturation,
+     hue, sepia, grayscale, colorMatrix, backgroundRemoval result).
+     This is MANDATORY — adjustments live on the layer, not the asset.
+   - Preserve mask/frame position, size, shape, rotation, scale, opacity,
+     blend mode, layer order, fit mode.
+   - Use layerIdMap to find the cloned TextLayer for the variable text field.
+   - Replace the text content with record.fields.name.
+   - Preserve all text styling and effects.
+3. Text auto-resize:
+   - Only scale down if text exceeds bounds.
+   - Respect minFontScale.
+   - Do not scale up above original size.
+4. Image fit:
+   - Use cover by default.
+   - Use smartCrop if available; otherwise center crop.
+5. Import each record image as a document Asset before assigning.
+   Do not pre-import images during the wizard. Import only at Generate time.
+   Use existing asset deduplication (hash-based) before adding.
+6. Add generatedBatch metadata to document.metadata.generatedBatch:
+   - templateId
+   - templateName
+   - generatedAt
+   - recordCount
+7. Open the generated document in Free Mode after generation.
+8. MANDATORY: wrap the entire generation in a single history transaction:
+   beginTransaction → generate all pages → commitTransaction("Generate Batch Production")
+   One Undo must undo the entire generation. This is not optional.
+9. Do not flatten layers.
+
+Acceptance tests:
+- 5 images create 5 pages.
+- Each page has the correct image.
+- Each page has the correct name.
+- Text style is preserved.
+- Image mask is preserved.
+- Blend modes and opacity are preserved.
+- Image adjustments from the template are NOT applied to new images (unless option enabled).
+- Editing a layer on page 1 does NOT affect page 2 (IDs are independent).
+- One Undo removes all generated pages at once.
+- User can edit any generated page manually after generation.
+- Print/export sees all generated pages.</pre>
+      </div>
+
+      <div class="card prompt">
+        <h3>Phase 5 Prompt — Product Library Link</h3>
+        <pre>Implement Phase 5 of Batch Design Production in SPP2.
+
+Goal:
+Add simple bidirectional compatibility between Batch Templates and Product Library products.
+
+Requirements:
+1. Add compatibleProductIds to Batch Template metadata.
+2. Add compatibleBatchTemplateIds to Product metadata if appropriate.
+3. Create automatic compatibility suggestion by:
+   - matching width/height
+   - matching aspect ratio
+   - matching orientation
+   - tolerance 3% to 5%
+4. In Batch Template cards, show compatible products.
+5. In Product Library, show compatible Batch Templates.
+6. From a product card, allow:
+   - Create Batch Template from product
+   - Produce using compatible template
+7. From a template card, allow:
+   - link/unlink products manually
+8. Use stable productId/templateId links, not product/template names.
+9. Do not make this system blocking. Compatibility is helpful metadata, not a hard restriction.
+
+Acceptance tests:
+- Product with matching ratio suggests template.
+- Template can be manually linked to product.
+- Product shows linked templates.
+- Duplicate template does not automatically overwrite links unless intentionally copied.
+- Create template from product opens Free Mode with product canvas dimensions/guides.</pre>
+      </div>
+
+      <div class="card prompt">
+        <h3>Phase 6 Prompt — Polish, Errors, Performance</h3>
+        <pre>Implement Phase 6 polish for Batch Design Production in SPP2.
+
+Focus:
+UX, validation, performance, and reliability.
+
+Requirements:
+1. Add clear error states:
+   - no variable fields
+   - missing image field
+   - missing text field if template expects name
+   - broken layer reference
+   - empty record name
+   - failed image load
+2. Add warnings, not blockers, when appropriate.
+3. Optimize thumbnails:
+   - do not store huge base64 unnecessarily
+   - avoid rerendering all previews on every edit
+4. Improve previews:
+   - preview first record
+   - optional preview first 3 records
+5. Add Hebrew/RTL polish:
+   - labels
+   - table direction
+   - text input alignment
+6. Add template badges:
+   - Batch Template Mode when editing template
+   - Variable field badges on canvas/layers
+7. Add save prompts:
+   - if editing template and leaving with unsaved changes
+8. Add logs/debug info only where useful.
+9. Make sure Batch Production does not break existing Free Mode, Product Library, Print, Export, or history behavior.
+
+Acceptance tests:
+- Works with 1 image.
+- Works with 50 images.
+- Hebrew names work.
+- Long names shrink correctly.
+- Missing image shows understandable error.
+- Broken template metadata does not crash.
+- Generated document prints/exports normally.
+- App remains responsive during wizard and generation.</pre>
+      </div>
+
+      <div class="card prompt">
+        <h3>פרומפט קצר לתיקון/בדיקה אחרי יישום</h3>
+        <pre>Please audit the Batch Design Production implementation.
+
+Check specifically:
+1. Are templates normal SPP documents with metadata, not a separate incompatible format?
+2. Are generated outputs normal editable Free Mode documents?
+3. Is there no live link that can unexpectedly change generated pages?
+4. Are text styles fully preserved when replacing content?
+5. Are masks and image placement rules preserved when replacing images?
+6. Does Duplicate create an independent template with a new ID?
+7. Are Product Library links based on IDs and ratio/dimensions, not names?
+8. Are broken layer references handled safely?
+9. Does print/export work with generated multi-page documents?
+10. Are Hebrew/RTL names and text fields handled correctly?
+
+Report any architecture risks before changing code.</pre>
+      </div>
+    </section>
+
+    <section class="footer">
+      <p>
+        מסמך זה נועד לשמש כמסמך אפיון ופרומפט עבודה הדרגתי עבור SPP2.
+        ההמלצה המרכזית: להתחיל ב־Phase 1–2 בלבד, לוודא שה־metadata וה־Template Library יציבים,
+        ורק לאחר מכן לעבור לאשף ול־Generate Engine.
+      </p>
+    </section>
+  </main>
+</body>
+</html>

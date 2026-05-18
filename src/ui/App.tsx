@@ -36,6 +36,13 @@ import "./photoPrint/photoPrint.css";
 import "./classPhoto/classPhoto.css";
 import { SettingsWindow } from "./settings/SettingsWindow";
 import type { PdfStudioDocument } from "./pdf/pdfStudioTypes";
+import { BatchProductionLibraryScreen } from "./batchProduction/BatchProductionLibraryScreen";
+import { BatchProductionWizard } from "./batchProduction/BatchProductionWizard";
+import type { BatchTemplateIndexItem } from "@/core/batchProduction/batchTemplateStore";
+import { loadTemplateDocument } from "@/core/batchProduction/batchTemplateStore";
+import { getBatchProductionMeta } from "@/core/batchProduction/batchProductionMeta";
+import { generateBatchProduction } from "@/core/batchProduction/generateEngine";
+import type { BatchWizardResult } from "@/types/batchProduction";
 
 const EditorScreen = lazy(() =>
   import("./editor/EditorScreen").then((module) => ({
@@ -49,7 +56,7 @@ const PdfStudioScreen = lazy(() =>
   }))
 );
 
-type AppScreen = "home" | "setup" | "editor" | "collage-wizard" | "photo-print-wizard" | "pdf-studio" | "class-photo-wizard" | "mask-wizard" | "product-library";
+type AppScreen = "home" | "setup" | "editor" | "collage-wizard" | "photo-print-wizard" | "pdf-studio" | "class-photo-wizard" | "mask-wizard" | "product-library" | "batch-production-library" | "batch-wizard";
 
 interface ModeWindowInfo {
   mode: string;
@@ -142,6 +149,8 @@ export function App(): ReactElement {
   const [orientationPicking, setOrientationPicking] = useState<ProductDefinition | null>(null);
   const [isCreatingPhotoPrint, setIsCreatingPhotoPrint] = useState(false);
   const [creatingProgress, setCreatingProgress] = useState("");
+  const [isCreatingBatch, setIsCreatingBatch] = useState(false);
+  const [creatingBatchProgress, setCreatingBatchProgress] = useState("");
   const canShowEditor = useMemo(() => screen === "editor" && document !== null, [document, screen]);
 
   // Global Ctrl+, shortcut to open settings from anywhere in the app
@@ -210,6 +219,8 @@ export function App(): ReactElement {
       setScreen("mask-wizard");
     } else if (mode === "product") {
       setScreen("product-library");
+    } else if (mode === "batch_production") {
+      setScreen("batch-production-library");
     } else {
       setScreen("setup");
     }
@@ -751,6 +762,85 @@ export function App(): ReactElement {
     setScreen("home");
   }
 
+  function handleOpenBatchLibrary(): void {
+    setScreen("batch-production-library");
+  }
+
+  function handleEditBatchTemplate(doc: SppDocument): void {
+    const envelope = beginProject(
+      createProjectEnvelope({ document: doc, linkedGroups: [], batchJobs: [] })
+    );
+    void envelope;
+    setScreen("editor");
+  }
+
+  const [batchWizardTemplate, setBatchWizardTemplate] =
+    useState<BatchTemplateIndexItem | null>(null);
+
+  function handleOpenBatchWizard(item: BatchTemplateIndexItem): void {
+    setBatchWizardTemplate(item);
+    setScreen("batch-wizard");
+  }
+
+  async function handleBatchWizardComplete(result: BatchWizardResult): Promise<void> {
+    setBatchWizardTemplate(null);
+    setIsCreatingBatch(true);
+    setCreatingBatchProgress("טוען תבנית...");
+    try {
+      const templateDoc = loadTemplateDocument(result.templateId);
+      if (templateDoc === null) throw new Error("Template not found");
+      const meta = getBatchProductionMeta(templateDoc);
+      if (meta === null) throw new Error("No batch metadata");
+
+      const hasImageField = meta.variableFields.some((f) => f.type === "image");
+      const importedAssets: Asset[] = [];
+
+      // Map recordId → assetId for image import
+      const recordAssetMap = new Map<string, string>();
+
+      for (let i = 0; i < result.records.length; i++) {
+        const rec = result.records[i];
+        if (hasImageField && rec.file !== undefined) {
+          setCreatingBatchProgress(`מייבא תמונות… ${i + 1} / ${result.records.length}`);
+          const { asset } = await importImageAsset(
+            rec.file,
+            [...templateDoc.assets, ...importedAssets],
+          );
+          if (!importedAssets.some((a) => a.id === asset.id)) importedAssets.push(asset);
+          recordAssetMap.set(rec.id, asset.id);
+        }
+      }
+
+      setCreatingBatchProgress("מייצר עמודים...");
+
+      const generationRecords = result.records.map((rec) => ({
+        fields: rec.fields,
+        imageAssetId: recordAssetMap.get(rec.id),
+      }));
+
+      const generatedDoc = generateBatchProduction(
+        templateDoc,
+        meta,
+        generationRecords,
+        importedAssets,
+      );
+
+      const envelope = beginProject(
+        createProjectEnvelope({ document: generatedDoc, linkedGroups: [], batchJobs: [] }),
+      );
+      setDocument(withProjectMetadata(envelope.document, envelope.metadata));
+      resetViewport();
+      clearSelection();
+      setScreen("editor");
+    } catch (err) {
+      console.error("Batch generation failed", err);
+      setScreen("batch-production-library");
+    } finally {
+      setIsCreatingBatch(false);
+      setCreatingBatchProgress("");
+    }
+  }
+
   async function openCurrentScreenInSeparateWindow(): Promise<void> {
     const mode = screenToMode(screen);
     if (mode === null || mode === "pdf-studio") return;
@@ -925,6 +1015,36 @@ export function App(): ReactElement {
   }
 
 
+  if (isCreatingBatch) {
+    return (
+      <div className="pp-creating-screen">
+        <div className="pp-spinner" />
+        <div className="pp-creating-title">מייצר עיצובים...</div>
+        {creatingBatchProgress && <div className="pp-creating-sub">{creatingBatchProgress}</div>}
+      </div>
+    );
+  }
+
+  if (screen === "batch-wizard" && batchWizardTemplate !== null) {
+    return (
+      <BatchProductionWizard
+        template={batchWizardTemplate}
+        onComplete={(result) => void handleBatchWizardComplete(result)}
+        onCancel={() => setScreen("batch-production-library")}
+      />
+    );
+  }
+
+  if (screen === "batch-production-library") {
+    return (
+      <BatchProductionLibraryScreen
+        onEditTemplate={handleEditBatchTemplate}
+        onProduce={handleOpenBatchWizard}
+        onCancel={backHome}
+      />
+    );
+  }
+
   if (screen === "product-library") {
     return (
       <>
@@ -993,6 +1113,7 @@ export function App(): ReactElement {
             onOpenMode={openMode}
             onOpenProjectFile={(file) => void openProjectFile(file)}
             onOpenSettings={() => setSettingsOpen(true)}
+            onOpenBatchLibrary={handleOpenBatchLibrary}
           />
         </>
       )}

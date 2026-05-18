@@ -7,7 +7,8 @@ import {
   Printer,
   Users,
   GalleryHorizontalEnd,
-  FileText
+  FileText,
+  Zap
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ModeType } from "@/types/template";
@@ -76,6 +77,13 @@ export const homeModes: HomeMode[] = [
     description: "עיצוב על מוצרים מוגדרים עם safe area.",
     icon: Package,
     color: "#E08A50"
+  },
+  {
+    id: "batch_production",
+    title: "ייצור סדרתי",
+    description: "עצב תבנית אחת, הפק מאות עיצובים מותאמים אישית.",
+    icon: Zap,
+    color: "#a855f7"
   }
 ];
 

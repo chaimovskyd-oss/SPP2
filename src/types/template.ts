@@ -9,7 +9,8 @@ export type ModeType =
   | "photo_print"
   | "product"
   | "collage"
-  | "pdf_tools";
+  | "pdf_tools"
+  | "batch_production";
 
 export interface TextStyle extends VersionedEntity {
   fontFamily: string;

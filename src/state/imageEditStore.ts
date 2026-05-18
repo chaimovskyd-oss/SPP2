@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type ImageEditTool = "crop" | "eraser" | "wand" | "rect-select";
+export type ImageEditTool = "crop" | "eraser" | "white-bg" | "wand" | "rect-select";
 
 export interface CropPreview {
   x: number;
@@ -28,6 +28,7 @@ export interface ImageEditState {
   eraserFeather: number;
   eraserStrength: number;
   showMask: boolean;
+  whiteBackgroundThreshold: number;
 
   wandTolerance: number;
   wandContiguous: boolean;
@@ -44,6 +45,7 @@ export interface ImageEditState {
   setEraserFeather: (v: number) => void;
   setEraserStrength: (v: number) => void;
   setShowMask: (v: boolean) => void;
+  setWhiteBackgroundThreshold: (v: number) => void;
   setWandTolerance: (v: number) => void;
   setWandContiguous: (v: boolean) => void;
   setSelectionMask: (mask: SelectionMask | null) => void;
@@ -65,6 +67,7 @@ export const useImageEditStore = create<ImageEditState>((set) => ({
   eraserFeather: 0.3,
   eraserStrength: 1,
   showMask: false,
+  whiteBackgroundThreshold: 22,
 
   wandTolerance: 30,
   wandContiguous: true,
@@ -95,6 +98,7 @@ export const useImageEditStore = create<ImageEditState>((set) => ({
   setEraserFeather: (v) => set({ eraserFeather: v }),
   setEraserStrength: (v) => set({ eraserStrength: v }),
   setShowMask: (v) => set({ showMask: v }),
+  setWhiteBackgroundThreshold: (v) => set({ whiteBackgroundThreshold: v }),
   setWandTolerance: (v) => set({ wandTolerance: v }),
   setWandContiguous: (v) => set({ wandContiguous: v }),
   setSelectionMask: (mask) => set({ selectionMask: mask }),

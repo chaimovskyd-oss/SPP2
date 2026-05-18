@@ -10,6 +10,7 @@ export function ImageEditFloatingBar(): ReactElement | null {
     eraserFeather, setEraserFeather,
     eraserStrength, setEraserStrength,
     showMask, setShowMask,
+    whiteBackgroundThreshold, setWhiteBackgroundThreshold,
     wandTolerance, setWandTolerance,
     wandContiguous, setWandContiguous,
     selectionMask,
@@ -91,6 +92,22 @@ export function ImageEditFloatingBar(): ReactElement | null {
               onChange={(e) => setShowMask(e.target.checked)}
             />
             הצג מסכה
+          </label>
+        </>
+      )}
+
+      {activeTool === "white-bg" && (
+        <>
+          <label className="float-param">
+            Threshold
+            <input
+              type="range"
+              min={5}
+              max={55}
+              value={whiteBackgroundThreshold}
+              onChange={(e) => setWhiteBackgroundThreshold(Number(e.target.value))}
+            />
+            <span>{whiteBackgroundThreshold}</span>
           </label>
         </>
       )}

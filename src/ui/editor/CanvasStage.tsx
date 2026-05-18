@@ -93,6 +93,7 @@ export function CanvasStage({
   const isPaintingRef = useRef(false);
   const lastPaintPosRef = useRef<{ x: number; y: number } | null>(null);
   const [selectionCanvas, setSelectionCanvas] = useState<HTMLCanvasElement | null>(null);
+  const [whiteBgPreviewCanvas, setWhiteBgPreviewCanvas] = useState<HTMLCanvasElement | null>(null);
   const [eraserCursorPos, setEraserCursorPos] = useState<{ x: number; y: number } | null>(null);
   const rectStartRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -459,6 +460,87 @@ export function CanvasStage({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageEditMode, imageActiveTool, imageEditLayerId]);
+
+  useEffect(() => {
+    if (!imageEditMode || imageActiveTool !== "white-bg") {
+      setWhiteBgPreviewCanvas(null);
+      return;
+    }
+    const layer = getEditingImageLayer();
+    if (layer === null) {
+      setWhiteBgPreviewCanvas(null);
+      return;
+    }
+    const asset = assets.find((item) => item.id === layer.assetId);
+    const source = resolveCanvasAssetPath(asset);
+    if (source === undefined) {
+      setWhiteBgPreviewCanvas(null);
+      return;
+    }
+
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      if (cancelled) return;
+      const width = Math.max(1, Math.round(layer.width));
+      const height = Math.max(1, Math.round(layer.height));
+      const sample = window.document.createElement("canvas");
+      sample.width = width;
+      sample.height = height;
+      const sampleCtx = sample.getContext("2d");
+      if (sampleCtx === null) return;
+
+      const crop = layer.crop;
+      const sourceWidth = img.naturalWidth || img.width;
+      const sourceHeight = img.naturalHeight || img.height;
+      sampleCtx.drawImage(
+        img,
+        crop.x * sourceWidth,
+        crop.y * sourceHeight,
+        crop.width * sourceWidth,
+        crop.height * sourceHeight,
+        0,
+        0,
+        width,
+        height
+      );
+
+      const imageData = sampleCtx.getImageData(0, 0, width, height);
+      const overlay = window.document.createElement("canvas");
+      overlay.width = width;
+      overlay.height = height;
+      const overlayCtx = overlay.getContext("2d");
+      if (overlayCtx === null) return;
+      const preview = overlayCtx.createImageData(width, height);
+      const cutoff = 255 - imageEditStore.whiteBackgroundThreshold * 2.55;
+      const sourceData = imageData.data;
+      const previewData = preview.data;
+      for (let i = 0; i < sourceData.length; i += 4) {
+        if (
+          sourceData[i + 3] > 0 &&
+          sourceData[i] >= cutoff &&
+          sourceData[i + 1] >= cutoff &&
+          sourceData[i + 2] >= cutoff
+        ) {
+          previewData[i] = 255;
+          previewData[i + 1] = 56;
+          previewData[i + 2] = 120;
+          previewData[i + 3] = 135;
+        }
+      }
+      overlayCtx.putImageData(preview, 0, 0);
+      setWhiteBgPreviewCanvas(overlay);
+    };
+    img.onerror = () => {
+      if (!cancelled) setWhiteBgPreviewCanvas(null);
+    };
+    img.src = source;
+
+    return () => {
+      cancelled = true;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageEditMode, imageActiveTool, imageEditLayerId, imageEditStore.whiteBackgroundThreshold, assets]);
 
   // ── Magic Wand click handler ─────────────────────────────────────────────────
   const handleWandClick = useCallback((stageX: number, stageY: number) => {
@@ -964,6 +1046,16 @@ export function CanvasStage({
                       />
                     ))}
                   </>
+                )}
+                {/* White background removal preview */}
+                {imageActiveTool === "white-bg" && whiteBgPreviewCanvas !== null && (
+                  <KonvaImage
+                    x={0} y={0}
+                    width={lw}
+                    height={lh}
+                    image={whiteBgPreviewCanvas}
+                    listening={false}
+                  />
                 )}
                 {/* Selection overlay (wand / rect-select) */}
                 {(imageActiveTool === "wand" || imageActiveTool === "rect-select") && selectionCanvas !== null && (
