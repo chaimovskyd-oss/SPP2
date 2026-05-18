@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.VITE_DEV_SERVER_URL !== undefined;
@@ -599,6 +599,29 @@ function createSnapshotId(): string {
   return `snapshot-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function isAppIndexFileUrl(targetUrl: string): boolean {
+  try {
+    return targetUrl === pathToFileURL(path.join(getAppRoot(), "dist", "index.html")).href;
+  } catch {
+    return false;
+  }
+}
+
+function installFileDropNavigationGuard(win: BrowserWindow): void {
+  win.webContents.on("will-navigate", (event, targetUrl) => {
+    if (targetUrl.startsWith("file://") && !isAppIndexFileUrl(targetUrl)) {
+      event.preventDefault();
+    }
+  });
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith("file://") && !isAppIndexFileUrl(url)) {
+      return { action: "deny" };
+    }
+    return { action: "allow" };
+  });
+}
+
 interface ModeWindowPayload {
   mode?: unknown;
   title?: unknown;
@@ -619,6 +642,7 @@ async function createWindow(): Promise<void> {
     }
   });
 
+  installFileDropNavigationGuard(win);
   if (isDev) {
     await win.loadURL(process.env.VITE_DEV_SERVER_URL as string);
   } else {
@@ -651,6 +675,7 @@ async function createModeWindow(payload: ModeWindowPayload = {}): Promise<void> 
     }
   });
 
+  installFileDropNavigationGuard(win);
   win.on("closed", () => {
     if (snapshotId !== undefined) modeWindowSnapshots.delete(snapshotId);
   });

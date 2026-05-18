@@ -270,6 +270,7 @@ async function runInitialSmartCrop(
 
 export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSettings }: EditorScreenProps): ReactElement {
   const stageRef = useRef<Konva.Stage | null>(null);
+  const canvasAreaRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const replaceImageInputRef = useRef<HTMLInputElement>(null);
   const classPhotoAddInputRef = useRef<HTMLInputElement>(null);
@@ -293,6 +294,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   const [isPrintBusy, setIsPrintBusy] = useState(false);
   const [saveDropdownOpen, setSaveDropdownOpen] = useState(false);
+  const [fileDropActive, setFileDropActive] = useState(false);
   const [dynamicGridMode, setDynamicGridMode] = useState(false);
   const utilSettings = useUtilitiesSettings();
   const shortcutSettings = useAppSettings((state) => state.settings.shortcuts.shortcuts);
@@ -1135,6 +1137,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
 
   function handleDrop(event: DragEvent<HTMLDivElement>): void {
     event.preventDefault();
+    event.stopPropagation();
     // Graphics library drag (new)
     const graphicUrl = event.dataTransfer.getData("graphic/url");
     if (graphicUrl) {
@@ -1152,6 +1155,66 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     }
     void handleImageFiles(event.dataTransfer.files);
   }
+
+  useEffect(() => {
+    function dataTransferHasFiles(dataTransfer: DataTransfer | null): boolean {
+      return dataTransfer !== null && Array.from(dataTransfer.types).includes("Files");
+    }
+
+    function eventTargetsCanvas(event: globalThis.DragEvent): boolean {
+      const canvasArea = canvasAreaRef.current;
+      const stageContainer = stageRef.current?.container() ?? null;
+      const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+      if (canvasArea !== null && path.includes(canvasArea)) return true;
+      if (stageContainer !== null && path.includes(stageContainer)) return true;
+
+      const target = event.target;
+      if (!(target instanceof Node)) return false;
+      return (
+        (canvasArea !== null && canvasArea.contains(target)) ||
+        (stageContainer !== null && stageContainer.contains(target))
+      );
+    }
+
+    function prepareFileDrop(event: globalThis.DragEvent): void {
+      if (!dataTransferHasFiles(event.dataTransfer)) return;
+      event.preventDefault();
+      if (event.dataTransfer !== null) event.dataTransfer.dropEffect = "copy";
+      setFileDropActive(true);
+    }
+
+    function onDragOver(event: globalThis.DragEvent): void {
+      prepareFileDrop(event);
+    }
+
+    function onDrop(event: globalThis.DragEvent): void {
+      const dataTransfer = event.dataTransfer;
+      if (dataTransfer === null || !dataTransferHasFiles(dataTransfer)) return;
+      event.preventDefault();
+      setFileDropActive(false);
+      if (!eventTargetsCanvas(event)) return;
+      event.stopPropagation();
+      void handleImageFiles(dataTransfer.files);
+    }
+
+    function onDragLeave(event: globalThis.DragEvent): void {
+      if (!dataTransferHasFiles(event.dataTransfer)) return;
+      event.preventDefault();
+      if (event.relatedTarget === null) setFileDropActive(false);
+    }
+
+    const capture = { capture: true };
+    window.addEventListener("dragenter", prepareFileDrop, capture);
+    window.addEventListener("dragover", onDragOver, capture);
+    window.addEventListener("dragleave", onDragLeave, capture);
+    window.addEventListener("drop", onDrop, capture);
+    return () => {
+      window.removeEventListener("dragenter", prepareFileDrop, capture);
+      window.removeEventListener("dragover", onDragOver, capture);
+      window.removeEventListener("dragleave", onDragLeave, capture);
+      window.removeEventListener("drop", onDrop, capture);
+    };
+  });
 
   function handleSave(): void {
     saveProject(withViewport(currentDocument, viewport));
@@ -2371,7 +2434,11 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
 
         <div
           className="canvas-area"
-          onDragOver={(event) => event.preventDefault()}
+          ref={canvasAreaRef}
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
           onDrop={handleDrop}
           onClick={(event) => {
             // Deselect when clicking the canvas-area background (outside the Konva stage)
@@ -2441,6 +2508,11 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
             />
           )}
           <div className="drop-hint">גרור תמונות אל הקנבס או לחץ על כלי התמונה</div>
+          {fileDropActive ? (
+            <div className="canvas-file-drop-overlay">
+              <div>שחרר כאן כדי להוסיף תמונות לקנבס</div>
+            </div>
+          ) : null}
           {canvasContextMenu !== null && (
             <CanvasContextMenu
               target={canvasContextMenu}
@@ -6639,7 +6711,9 @@ function LayerList({
     if (layer !== undefined) setDraftName(layer.name);
   }, [layers, renamingLayerId]);
 
-  function handleDrop(targetLayerId: string): void {
+  function handleDrop(event: React.DragEvent<HTMLDivElement>, targetLayerId: string): void {
+    event.preventDefault();
+    event.stopPropagation();
     if (!canReorder || draggingLayerId === null || draggingLayerId === targetLayerId) {
       setDraggingLayerId(null);
       return;
@@ -6721,14 +6795,19 @@ function LayerList({
           key={layer.id}
           onContextMenu={(e) => handleRowContextMenu(e, layer.id)}
           onDragEnd={() => setDraggingLayerId(null)}
-          onDragOver={(e) => { if (canReorder) e.preventDefault(); }}
+          onDragOver={(e) => {
+            if (!canReorder) return;
+            e.preventDefault();
+            e.stopPropagation();
+          }}
           onDragStart={(e) => {
             if (!canReorder) return;
+            e.stopPropagation();
             e.dataTransfer.effectAllowed = "move";
             e.dataTransfer.setData("text/plain", layer.id);
             setDraggingLayerId(layer.id);
           }}
-          onDrop={() => handleDrop(layer.id)}
+          onDrop={(e) => handleDrop(e, layer.id)}
         >
           <GripVertical className="layer-drag-handle" size={14} />
           <div

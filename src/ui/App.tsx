@@ -124,6 +124,11 @@ function isModeWindowSnapshot(value: unknown): value is ModeWindowSnapshot {
   return typeof value === "object" && value !== null;
 }
 
+function dragEventHasFiles(event: DragEvent): boolean {
+  const types = event.dataTransfer?.types;
+  return types !== undefined && Array.from(types).includes("Files");
+}
+
 export function App(): ReactElement {
   const modeWindow = useMemo(() => parseModeWindowHash(window.location.hash), []);
   const isModeWindow = modeWindow !== null;
@@ -152,6 +157,37 @@ export function App(): ReactElement {
   const [isCreatingBatch, setIsCreatingBatch] = useState(false);
   const [creatingBatchProgress, setCreatingBatchProgress] = useState("");
   const canShowEditor = useMemo(() => screen === "editor" && document !== null, [document, screen]);
+
+  // Keep external file drops inside the app. Without this, Electron/Chromium can
+  // navigate to the dropped file when a local drop target misses the event.
+  useEffect(() => {
+    function onDragEnter(event: DragEvent): void {
+      if (!dragEventHasFiles(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer !== null) event.dataTransfer.dropEffect = "copy";
+    }
+
+    function onDragOver(event: DragEvent): void {
+      if (!dragEventHasFiles(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer !== null) event.dataTransfer.dropEffect = "copy";
+    }
+
+    function onDrop(event: DragEvent): void {
+      if (!dragEventHasFiles(event)) return;
+      event.preventDefault();
+    }
+
+    const capture = { capture: true };
+    globalThis.window.addEventListener("dragenter", onDragEnter, capture);
+    globalThis.window.addEventListener("dragover", onDragOver, capture);
+    globalThis.window.addEventListener("drop", onDrop, capture);
+    return () => {
+      globalThis.window.removeEventListener("dragenter", onDragEnter, capture);
+      globalThis.window.removeEventListener("dragover", onDragOver, capture);
+      globalThis.window.removeEventListener("drop", onDrop, capture);
+    };
+  }, []);
 
   // Global Ctrl+, shortcut to open settings from anywhere in the app
   useEffect(() => {

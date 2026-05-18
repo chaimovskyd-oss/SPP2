@@ -3,6 +3,7 @@ const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 
 const { ensurePythonEnv, getVenvPythonExe } = require("./pythonBootstrap.cjs");
 const { registerHealthCheckIpc } = require("./healthCheck.cjs");
@@ -797,6 +798,29 @@ function createSnapshotId() {
   return `snapshot-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function isAppIndexFileUrl(targetUrl) {
+  try {
+    return targetUrl === pathToFileURL(path.join(getAppRoot(), "dist", "index.html")).href;
+  } catch {
+    return false;
+  }
+}
+
+function installFileDropNavigationGuard(win) {
+  win.webContents.on("will-navigate", (event, targetUrl) => {
+    if (typeof targetUrl === "string" && targetUrl.startsWith("file://") && !isAppIndexFileUrl(targetUrl)) {
+      event.preventDefault();
+    }
+  });
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (typeof url === "string" && url.startsWith("file://") && !isAppIndexFileUrl(url)) {
+      return { action: "deny" };
+    }
+    return { action: "allow" };
+  });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1360,
@@ -811,6 +835,7 @@ function createWindow() {
     }
   });
 
+  installFileDropNavigationGuard(win);
   win.loadFile(path.join(getAppRoot(), "dist", "index.html"));
 
   // לפתיחת DevTools זמנית אם צריך דיבוג:
@@ -842,6 +867,7 @@ function createModeWindow(payload = {}) {
     }
   });
 
+  installFileDropNavigationGuard(win);
   win.on("closed", () => {
     if (snapshotId !== undefined) modeWindowSnapshots.delete(snapshotId);
   });
