@@ -465,31 +465,17 @@
     <section class="card" id="data-model">
       <h2>9. מודל נתונים מוצע</h2>
 
-      <h3>אחסון Metadata — איפה נשמר</h3>
-      <p>
-        כל metadata של Batch Production נשמר ב-<code>document.metadata.batchProduction</code> בלבד.<br>
-        <strong>לא</strong> ב-<code>batchJobs[]</code> (שהם progress trackers בלבד) ו<strong>לא</strong> על השכבות עצמן.
-      </p>
-      <p class="note">
-        <strong>בדיקה לפני יישום:</strong> <code>BatchJob</code> ו-<code>batchJobs[]</code> ב-ProjectEnvelope הם progress tracking בלבד (pending/running/completed).
-        <code>FrameLayer.batchIndex</code> שייך ל-Grid/ClassPhoto layouts. שניהם לא נוגעים ל-Batch Production.
-      </p>
-
       <h3>Batch Template Metadata</h3>
-      <pre>// נשמר ב: document.metadata.batchProduction
-type BatchProductionDocMeta = {
-  isTemplate: boolean;
+      <pre>type BatchTemplateMetadata = {
+  enabled: boolean;
   templateId: string;
   templateName: string;
   description?: string;
   tags?: string[];
   compatibleProductIds?: string[];
   canvas: {
-    widthPx: number;
-    heightPx: number;
-    widthMm?: number;   // לצורך התאמת Product Library
-    heightMm?: number;
-    dpi: number;
+    width: number;
+    height: number;
     unit: "mm" | "px";
     orientation: "portrait" | "landscape" | "square";
     ratio: number;
@@ -500,22 +486,16 @@ type BatchProductionDocMeta = {
 };</pre>
 
       <h3>Variable Field</h3>
-      <p class="note">
-        <strong>V1: Variable Image עובד על FrameLayer בלבד</strong> (לא ImageLayer).<br>
-        אם המשתמש מנסה לסמן ImageLayer, יש להציג: <em>"Variable image slot requires a Frame/Mask layer."</em>
-      </p>
       <pre>type BatchVariableField =
   | {
       id: string;
       type: "image";
-      layerId: string;          // חייב להיות layerId של FrameLayer
+      layerId: string;
       label: string;
       fitMode: "cover" | "contain" | "fill";
       smartCrop: boolean;
       preserveMask: boolean;
       applyImageAdjustmentsByDefault: boolean;
-      // אם false: כוונוני תמונה (brightness/contrast/exposure וכו')
-      // מאופסים במפורש ב-Generate Engine על כל עמוד
     }
   | {
       id: string;
@@ -523,7 +503,7 @@ type BatchProductionDocMeta = {
       layerId: string;
       label: string;
       sourceField: "name" | string;
-      preserveTextStyle?: boolean;  // ברירת מחדל: true
+      preserveTextStyle: true;
       autoResize: boolean;
       minFontScale: number;
     };</pre>
@@ -537,32 +517,6 @@ type BatchProductionDocMeta = {
     [customField: string]: string | undefined;
   };
   status: "ready" | "warning" | "error";
-};
-
-// נשמר ב: document.metadata.generatedBatch (במסמך שנוצר)
-type GeneratedBatchMeta = {
-  templateId: string;
-  templateName: string;
-  generatedAt: string;
-  recordCount: number;
-};</pre>
-
-      <h3>Template Library Index</h3>
-      <pre>// נשמר ב: AppData/SPP2/batch-templates/index.json
-type BatchTemplateIndexItem = {
-  templateId: string;
-  templateName: string;
-  filePath: string;       // נתיב לקובץ .spp2
-  thumbnailPath?: string; // נתיב ל-thumbnail.png
-  canvasWidth: number;
-  canvasHeight: number;
-  widthMm?: number;
-  heightMm?: number;
-  unit: "mm" | "px";
-  ratio: number;
-  compatibleProductIds: string[];
-  fieldCount: number;
-  updatedAt: string;
 };</pre>
     </section>
 
@@ -615,120 +569,34 @@ type BatchTemplateIndexItem = {
 
       <div class="grid">
         <div class="mini">
-          <h3>Phase 0</h3>
-          <p>
-            <strong>Codebase Audit:</strong> בדיקת <code>batch.ts</code>, <code>batchStore</code>,
-            <code>FrameLayer.batchIndex</code>, <code>ProjectEnvelope.batchJobs</code>,
-            Transaction API, ו-clone utilities.<br>
-            קביעת Integration Contract לפני שורת קוד ראשונה.
-          </p>
-        </div>
-        <div class="mini">
           <h3>Phase 1</h3>
-          <p>Data Model — <code>document.metadata.batchProduction</code> + סימון שכבות כ־Variable בתוך Free Mode.</p>
+          <p>Data Model + סימון שכבות כ־Variable בתוך Free Mode.</p>
         </div>
         <div class="mini">
           <h3>Phase 2</h3>
-          <p>שמירה וטעינה של Batch Templates + ספרייה בסיסית + Thumbnail ב-Save.</p>
+          <p>שמירה וטעינה של Batch Templates + ספרייה בסיסית.</p>
         </div>
         <div class="mini">
           <h3>Phase 3</h3>
-          <p>אשף העלאת תמונות וטבלת שמות (תמונות כ-DataURL זמני עד Generate).</p>
+          <p>אשף העלאת תמונות וטבלת שמות.</p>
         </div>
         <div class="mini">
           <h3>Phase 4</h3>
-          <p>
-            בניית <code>deepClonePageWithRemappedIds()</code> + Generate Engine:
-            יצירת עמודים רגילים מתוך רשומות, כ-Transaction אחד, עם איפוס כוונוני תמונה.
-          </p>
+          <p>Generate Engine: יצירת עמודים רגילים מתוך רשומות.</p>
         </div>
         <div class="mini">
           <h3>Phase 5</h3>
-          <p>קישור ל־Product Library לפי IDs + מידות/יחס + פעולות Produce/Edit/Duplicate.</p>
+          <p>קישור ל־Product Library לפי מידות/יחס + פעולות Produce/Edit/Duplicate.</p>
         </div>
         <div class="mini">
           <h3>Phase 6</h3>
-          <p>Polish: בדיקות, שגיאות, ביצועים, RTL, Preview ושיפור UX.</p>
+          <p>Polish: בדיקות, שגיאות, ביצועים, Preview ושיפור UX.</p>
         </div>
       </div>
     </section>
 
     <section class="card" id="prompts">
       <h2>12. פרומפטים מלאים</h2>
-
-      <div class="card prompt">
-        <h3>Phase 0 Prompt — Codebase Audit &amp; Integration Contract</h3>
-        <pre>Phase 0: Codebase Audit and Integration Contract for Batch Design Production.
-
-Goal:
-Before writing any new code, audit the existing codebase to avoid conflicts
-and establish the integration points.
-
-Files to inspect:
-- src/types/batch.ts
-- src/state/batchStore.ts
-- src/types/layers.ts (FrameLayer.batchIndex)
-- src/types/document.ts (Document.metadata, Page.metadata)
-- src/core/save/projectFormat.ts (ProjectEnvelope.batchJobs)
-- src/core/history/actions.ts (beginTransaction, commitTransaction)
-- Any existing page clone/duplicate utilities
-
-Confirm and document the following integration decisions:
-
-1. BatchJob (src/types/batch.ts) is a progress tracker for background operations.
-   batchJobs: BatchJob[] in ProjectEnvelope tracks job progress only.
-   Do not use it for template storage.
-   Template metadata must go in document.metadata.batchProduction (freeform JSON).
-
-2. FrameLayer.batchIndex is used for Grid/ClassPhoto layout indexing.
-   Do not reuse it for Variable Slot marking.
-   Variable fields are tracked only via document.metadata.batchProduction.variableFields[].layerId.
-
-3. Confirm that beginTransaction/commitTransaction exist in src/core/history/actions.ts
-   and are accessible through documentStore. The Generate Engine must use them.
-
-4. No page cloning utility exists in the codebase. You must create:
-   deepClonePageWithRemappedIds(page: Page): { page: Page; layerIdMap: Record<ID, ID> }
-   This utility must remap:
-   - pageId
-   - all layer IDs
-   - parentId references
-   - children arrays
-   - linkedGroup IDs
-   - linkedSlotId
-   - textLayerId inside FrameLayer
-   - maskId
-   - Any other internal layer ID references
-   This utility will also be used by Duplicate Template.
-
-5. V1 Variable Image Slot supports FrameLayer only (not ImageLayer).
-   If a user tries to mark an ImageLayer as Variable Image, show a clear error:
-   "Variable image slot requires a Frame/Mask layer.
-    Add your image inside a frame first."
-
-6. Image adjustments (brightness, contrast, exposure, saturation, hue, etc.)
-   are stored on the FrameLayer, not on the Asset.
-   During Generate, if applyImageAdjustmentsByDefault is false,
-   reset all image adjustment properties on the cloned FrameLayer
-   before assigning the new image. This is mandatory.
-
-7. Template thumbnail: use Konva Stage.toDataURL() at "Save as Batch Template" time.
-   Store as thumbnail.png inside the template package.
-
-8. Template storage location:
-   AppData/SPP2/batch-templates/
-     index.json              (BatchTemplateIndexItem[])
-     {templateId}/
-       template.spp2
-       thumbnail.png
-   Each template is a standard SPP package with batchProduction metadata.
-
-9. Batch Production Hub entry must be a React internal screen, similar to
-   ProductLibraryScreen, not an external folder or Electron bridge.
-
-Output: A written integration contract listing confirmed findings and decisions.
-Only after this audit, implement Phase 1.</pre>
-      </div>
 
       <div class="card prompt">
         <h3>פרומפט ראשי — בסיס לכל הפרויקט</h3>
@@ -830,11 +698,8 @@ Requirements:
    - at least one variable field exists
    - variable field layerIds exist
    - field IDs are unique
-3. Store template as a normal SPP document plus batchProduction metadata
-   in document.metadata.batchProduction (not in batchJobs, not on layers).
-4. Generate and save a preview thumbnail using Konva Stage.toDataURL() at
-   save time. Store as thumbnail.png inside the template package folder.
-   Do not regenerate thumbnails later — capture when the canvas is open.
+3. Store template as a normal SPP document plus batchTemplate metadata.
+4. Generate and save a preview thumbnail for the template card.
 5. Add a new Hub entry: Batch Production.
 6. Add a Batch Templates Library screen with template cards.
 7. Each card should show:
@@ -924,26 +789,12 @@ Architecture:
 - No live link to the template.
 - All generated pages open in Free Mode and remain fully editable.
 
-Critical utilities required before implementing this phase:
-- deepClonePageWithRemappedIds(page): { page, layerIdMap }
-  Must remap all IDs: pageId, layerIds, parentId, linkedGroup,
-  linkedSlotId, textLayerId, maskId. Built in Phase 4a as a prerequisite.
-
 Requirements:
-1. Clone the template page once per valid record using deepClonePageWithRemappedIds.
-   Every generated page must have fully independent IDs. Shared IDs between
-   pages will cause cross-page editing corruption.
+1. Duplicate the template page once per valid record.
 2. For each generated page:
-   - Use layerIdMap to find the cloned FrameLayer for the variable image field.
-   - Assign the record image to that FrameLayer (imageAssetId).
-   - If applyImageAdjustmentsByDefault is false: reset all image adjustments
-     on the cloned FrameLayer (brightness, contrast, exposure, saturation,
-     hue, sepia, grayscale, colorMatrix, backgroundRemoval result).
-     This is MANDATORY — adjustments live on the layer, not the asset.
-   - Preserve mask/frame position, size, shape, rotation, scale, opacity,
-     blend mode, layer order, fit mode.
-   - Use layerIdMap to find the cloned TextLayer for the variable text field.
-   - Replace the text content with record.fields.name.
+   - Replace variable image field content with the record image.
+   - Preserve mask/frame position, size, shape, rotation, scale, opacity, blend mode, layer order, fit mode.
+   - Replace variable text field content with record.fields.name.
    - Preserve all text styling and effects.
 3. Text auto-resize:
    - Only scale down if text exceeds bounds.
@@ -952,19 +803,14 @@ Requirements:
 4. Image fit:
    - Use cover by default.
    - Use smartCrop if available; otherwise center crop.
-5. Import each record image as a document Asset before assigning.
-   Do not pre-import images during the wizard. Import only at Generate time.
-   Use existing asset deduplication (hash-based) before adding.
-6. Add generatedBatch metadata to document.metadata.generatedBatch:
+5. Add generatedBatch metadata:
    - templateId
    - templateName
    - generatedAt
    - recordCount
-7. Open the generated document in Free Mode after generation.
-8. MANDATORY: wrap the entire generation in a single history transaction:
-   beginTransaction → generate all pages → commitTransaction("Generate Batch Production")
-   One Undo must undo the entire generation. This is not optional.
-9. Do not flatten layers.
+6. Open the generated document in Free Mode after generation.
+7. The whole generation should be one history/logical action if possible.
+8. Do not flatten layers.
 
 Acceptance tests:
 - 5 images create 5 pages.
@@ -973,10 +819,7 @@ Acceptance tests:
 - Text style is preserved.
 - Image mask is preserved.
 - Blend modes and opacity are preserved.
-- Image adjustments from the template are NOT applied to new images (unless option enabled).
-- Editing a layer on page 1 does NOT affect page 2 (IDs are independent).
-- One Undo removes all generated pages at once.
-- User can edit any generated page manually after generation.
+- User can edit any generated page manually.
 - Print/export sees all generated pages.</pre>
       </div>
 

@@ -5,6 +5,7 @@ import {
   duplicateTemplate,
   loadTemplateDocument,
   loadTemplateIndex,
+  loadTemplateThumbnail,
   type BatchTemplateIndexItem,
 } from "@/core/batchProduction/batchTemplateStore";
 import type { Document } from "@/types/document";
@@ -21,15 +22,27 @@ export function BatchProductionLibraryScreen({
   onProduce,
   onCancel,
 }: BatchProductionLibraryScreenProps): ReactElement {
-  const [templates, setTemplates] = useState<BatchTemplateIndexItem[]>(() =>
-    loadTemplateIndex()
-  );
+  const [templates, setTemplates] = useState<BatchTemplateIndexItem[]>([]);
+  const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<BatchTemplateIndexItem | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
+  async function refreshTemplates(): Promise<void> {
+    const items = await loadTemplateIndex();
+    setTemplates(items);
+    const thumbs: Record<string, string> = {};
+    await Promise.all(
+      items.map(async (t) => {
+        const url = t.thumbnailDataUrl ?? (await loadTemplateThumbnail(t.templateId));
+        if (url) thumbs[t.templateId] = url;
+      })
+    );
+    setThumbnails(thumbs);
+  }
+
   useEffect(() => {
-    setTemplates(loadTemplateIndex());
+    void refreshTemplates();
   }, []);
 
   const filtered = useMemo(() => {
@@ -38,18 +51,18 @@ export function BatchProductionLibraryScreen({
     return templates.filter((t) => t.templateName.toLowerCase().includes(q));
   }, [templates, query]);
 
-  function handleEdit(): void {
+  async function handleEdit(): Promise<void> {
     if (!selected) return;
-    const doc = loadTemplateDocument(selected.templateId);
+    const doc = await loadTemplateDocument(selected.templateId);
     if (!doc) return;
     onEditTemplate(doc);
   }
 
-  function handleDuplicate(): void {
+  async function handleDuplicate(): Promise<void> {
     if (!selected) return;
-    const newItem = duplicateTemplate(selected.templateId);
+    const newItem = await duplicateTemplate(selected.templateId);
     if (newItem) {
-      setTemplates(loadTemplateIndex());
+      await refreshTemplates();
       setSelected(newItem);
     }
   }
@@ -59,11 +72,10 @@ export function BatchProductionLibraryScreen({
     setConfirmDelete(selected.templateId);
   }
 
-  function confirmDeleteAction(): void {
+  async function confirmDeleteAction(): Promise<void> {
     if (!confirmDelete) return;
-    deleteTemplate(confirmDelete);
-    const next = loadTemplateIndex();
-    setTemplates(next);
+    await deleteTemplate(confirmDelete);
+    await refreshTemplates();
     if (selected?.templateId === confirmDelete) setSelected(null);
     setConfirmDelete(null);
   }
@@ -121,8 +133,8 @@ export function BatchProductionLibraryScreen({
                 onClick={() => setSelected((prev) => prev?.templateId === t.templateId ? null : t)}
               >
                 <div className="bp-card-thumb">
-                  {t.thumbnailDataUrl ? (
-                    <img alt={t.templateName} src={t.thumbnailDataUrl} />
+                  {thumbnails[t.templateId] ? (
+                    <img alt={t.templateName} src={thumbnails[t.templateId]} />
                   ) : (
                     <div className="bp-card-thumb-placeholder">
                       <ImageIcon size={32} strokeWidth={1} />

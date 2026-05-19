@@ -74,6 +74,13 @@ export interface FaceAnchorData extends VersionedEntity {
   confidence: number;
 }
 
+export interface FrameMaskSource extends VersionedEntity {
+  type: "alphaAsset";
+  assetId: ID;
+  width: number;
+  height: number;
+}
+
 export interface FrameLayer extends BaseLayer {
   type: "frame";
   behaviorMode: FrameBehaviorMode;
@@ -89,6 +96,7 @@ export interface FrameLayer extends BaseLayer {
   stroke?: StrokeStyle;
   fill?: FillStyle;
   maskId?: ID;
+  maskSource?: FrameMaskSource;
   linkedGroup?: ID;
   batchIndex?: number;
   smartCropMode?: "none" | "face" | "center" | "ruleOfThirds" | "custom";

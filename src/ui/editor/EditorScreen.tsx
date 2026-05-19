@@ -53,9 +53,12 @@ import {
   ZoomIn,
   ZoomOut,
   UserRound as UserRoundIcon,
-  Smile as SmileIcon
+  Smile as SmileIcon,
+  Pipette as PipetteIcon,
+  PaintBucket as PaintBucketIcon
 } from "lucide-react";
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -79,9 +82,12 @@ import {
   applyMaskFitModeToAll,
   AutosaveManager,
   createGridTextOverlay,
+  createFrameLayer,
+  createImageLayer,
   createMaskTextOverlay,
   createPage,
   createProjectEnvelope,
+  defaultContentTransform,
   deleteGridImageAndCompactFromEnd,
   deleteMaskImageAndCompactFromEnd,
   PAGE_PRESETS,
@@ -103,20 +109,21 @@ import {
   withProjectMetadata,
   type AlignmentCommand
 } from "@/core";
-import { importImageAsset, createMaskAsset } from "@/core/assets/assetManager";
+import { importImageAsset, createMaskAsset, resolveCanvasAssetPath } from "@/core/assets/assetManager";
 import { measureTextLayerSize } from "@/core/text/measurement";
 import { BUILTIN_TEXT_PRESETS } from "@/core/text/presets";
 import { useDocumentStore } from "@/state/documentStore";
 import { generateMaskThumbnail, useMaskLibraryStore } from "@/state/maskLibraryStore";
 import { useSelectionStore } from "@/state/selectionStore";
 import { useImageEditStore } from "@/state/imageEditStore";
+import { useDrawingToolsStore } from "@/state/drawingToolsStore";
 import { useMaskContentEditStore } from "@/state/maskContentEditStore";
 import { ImageEditToolbar } from "./ImageEditToolbar";
 import { ImageEditFloatingBar } from "./ImageEditFloatingBar";
 import { CropUI } from "./CropUI";
 import { useViewportStore, type ViewportStore } from "@/state/viewportStore";
 import type { Asset, Document } from "@/types/document";
-import type { BlendMode, FrameLayer, ImageLayerEffects, VisualLayer } from "@/types/layers";
+import type { BlendMode, FrameLayer, ImageLayer, ImageLayerEffects, VisualLayer } from "@/types/layers";
 import { DEFAULT_IMAGE_LAYER_EFFECTS } from "@/types/layers";
 import type { GridLayoutRule } from "@/types/grid";
 import type { MaskLayoutRule } from "@/types/mask";
@@ -144,12 +151,26 @@ import {
   saveProject
 } from "../projectActions";
 import type { PrintableStageImage } from "../projectActions";
+import { composeFrameMaskFromImageLayer } from "@/core/layers/composeFrameMask";
+import {
+  clearFrameImage as clearFrameImageDoc,
+  convertFrameMaskBackToImage,
+  insertImageIntoFrame as insertImageIntoFrameDoc,
+  isFrameMaskLayer,
+  moveImageLayerIntoFrame as moveImageLayerIntoFrameDoc
+} from "@/core/layers/frameMask";
 import { CanvasStage } from "./CanvasStage";
+import { ColorPanel } from "./ColorPanel";
 import { CanvasErrorBoundary } from "./CanvasErrorBoundary";
 import { CollageGridOverlay } from "./CollageGridOverlay";
 import type { CanvasContextMenuTarget } from "./KonvaLayerNode";
 import { isImageEditorAvailable, openImageEditorForAsset } from "@/services/imageEditorService";
 import { isPrintPreviewAvailable, openPrintPreviewForRenderedPage, openPrintPreviewForPages } from "@/services/printPreviewService";
+import {
+  maskResultToSelectionMask,
+  runSmartAutoSegment,
+  runSmartRefineMask
+} from "@/services/ai/smartSelectionService";
 import { PrintRangeDialog } from "@/ui/print/PrintRangeDialog";
 import type { PrintRangeMode } from "@/ui/print/printRangeUtils";
 import { getPagesForPrint } from "@/ui/print/printRangeUtils";
@@ -181,6 +202,7 @@ import {
 import { GraphicsLibraryPanel } from "@/ui/emoji/EmojiLibraryPanel";
 import { getBatchProductionMeta, upsertVariableField, removeVariableFieldForLayer, setBatchProductionMeta } from "@/core/batchProduction/batchProductionMeta";
 import { saveTemplateToStore } from "@/core/batchProduction/batchTemplateStore";
+import { convertImageLayerToVariableFrame } from "@/core/batchProduction/imageToFrameConversion";
 import type { BatchVariableField } from "@/types/batchProduction";
 
 type ToolId = "move" | "text" | "image" | "layers";
@@ -199,6 +221,16 @@ type LayerEffectsClipboard = {
   visualEffects?: VisualEffectStack;
   opacity: number;
   blendMode: BlendMode;
+};
+
+type SelectionClipboard = {
+  dataUrl: string;
+  width: number;
+  height: number;
+  canvasX: number;
+  canvasY: number;
+  sourceLayerId: string;
+  sourceName: string;
 };
 
 function canUseLayerEffects(layer: VisualLayer | undefined): layer is Extract<VisualLayer, { type: "image" | "frame" }> {
@@ -286,7 +318,9 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const [layerContextMenu, setLayerContextMenu] = useState<{ layerId: string; screenX: number; screenY: number } | null>(null);
   const [effectsClipboard, setEffectsClipboard] = useState<LayerEffectsClipboard | null>(null);
   const [layerClipboard, setLayerClipboard] = useState<VisualLayer[] | null>(null);
+  const [selectionClipboard, setSelectionClipboard] = useState<SelectionClipboard | null>(null);
   const [renamingLayerId, setRenamingLayerId] = useState<string | null>(null);
+  const [hoveredLayerId, setHoveredLayerId] = useState<string | null>(null);
   const [imageEditorBusy, setImageEditorBusy] = useState(false);
   const [showFontsBrowser, setShowFontsBrowser] = useState(false);
   const [extWatchId, setExtWatchId] = useState<string | null>(null);
@@ -295,6 +329,15 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const [isPrintBusy, setIsPrintBusy] = useState(false);
   const [saveDropdownOpen, setSaveDropdownOpen] = useState(false);
   const [fileDropActive, setFileDropActive] = useState(false);
+  const [dropTargetFrame, setDropTargetFrame] = useState<{
+    id: string;
+    name: string;
+    hasImage: boolean;
+    screenLeft: number;
+    screenTop: number;
+    screenWidth: number;
+    screenHeight: number;
+  } | null>(null);
   const [dynamicGridMode, setDynamicGridMode] = useState(false);
   const utilSettings = useUtilitiesSettings();
   const shortcutSettings = useAppSettings((state) => state.settings.shortcuts.shortcuts);
@@ -323,6 +366,19 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const copyTextStyle = useDocumentStore((state) => state.copyTextStyle);
   const pasteTextStyle = useDocumentStore((state) => state.pasteTextStyle);
   const hasTextStyleClipboard = useDocumentStore((state) => state.textStyleClipboard !== null);
+
+  useEffect(() => {
+    const unsubscribe = window.spp?.smartSelection?.onProgress?.((progress) => {
+      const store = useImageEditStore.getState();
+      store.setSmartSelectionProgress(progress);
+      if (progress.phase !== "ready") {
+        store.setSmartSelectionStatus("working", progress.message);
+      }
+    });
+    return () => {
+      unsubscribe?.();
+    };
+  }, []);
   const undo = useDocumentStore((state) => state.undo);
   const redo = useDocumentStore((state) => state.redo);
   const canUndo = useDocumentStore((state) => state.canUndo);
@@ -487,14 +543,22 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   useEffect(() => {
     if (!imageEditMode) return;
     function onImageEditKey(event: KeyboardEvent): void {
+      const target = event.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+        if (useImageEditStore.getState().undoSelectionStep()) {
+          event.preventDefault();
+          setStatus("Selection step undone");
+        }
+        return;
+      }
       if (event.key === "Delete" || event.key === "Backspace") {
-        const target = event.target as HTMLElement;
-        if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
         event.preventDefault();
         handleDeleteSelection();
       }
       if (event.key === "Escape") {
-        handleImageEditCancel();
+        if (useImageEditStore.getState().selectionMask !== null) handleClearImageSelection();
+        else handleImageEditCancel();
       }
     }
     window.addEventListener("keydown", onImageEditKey);
@@ -613,7 +677,16 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
 
       if (imageEditMode) {
         if (action === "delete") handleDeleteSelection();
-        if (action === "deselect") handleImageEditCancel();
+        if (action === "copy") void handleCopySelection();
+        if (action === "cut") void handleCutSelection();
+        if (action === "paste") handlePasteSelection();
+        if (action === "undo" && useImageEditStore.getState().undoSelectionStep()) {
+          setStatus("Selection step undone");
+        }
+        if (action === "deselect") {
+          if (useImageEditStore.getState().selectionMask !== null) handleClearImageSelection();
+          else handleImageEditCancel();
+        }
         return;
       }
 
@@ -690,6 +763,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     editorShortcuts,
     imageEditMode,
     layerClipboard,
+    selectionClipboard,
     selectedLayerIds,
     selectedLayers,
     undo,
@@ -698,6 +772,20 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     viewport,
     onOpenSettings
   ]);
+
+  // Drawing tool shortcut: 'I' toggles the eyedropper (works regardless of selection state)
+  useEffect(() => {
+    function onKey(event: KeyboardEvent): void {
+      if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+      if (isEditableShortcutTarget(event.target)) return;
+      if (event.key !== "i" && event.key !== "I") return;
+      event.preventDefault();
+      const store = useDrawingToolsStore.getState();
+      store.setActiveTool(store.activeTool === "eyedropper" ? null : "eyedropper");
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Batch production derived state — must be BEFORE any early return (Rules of Hooks)
   const batchProductionMeta = useMemo(
@@ -730,17 +818,39 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
       return;
     }
     if (layer.type === "frame" || layer.type === "image") {
-      handleBatchFieldChange(layer.id, {
-        id: "photo",
-        type: "image",
-        layerId: layer.id,
-        label: "תמונה",
-        fitMode: "cover",
-        smartCrop: false,
-        preserveMask: layer.type === "frame",
-        applyImageAdjustmentsByDefault: false,
+      const wasPlainImage = layer.type === "image";
+      // A Variable Image field always lives on a FrameLayer. If the user
+      // selected a plain ImageLayer, convert it in place first — same visible
+      // bounds, image becomes the frame's placeholder, fitMode cover + clip.
+      applyDocumentChange("SetBatchVariableFieldCommand", (doc) => {
+        let nextDoc = doc;
+        let droppedEffects = false;
+        if (wasPlainImage) {
+          const conv = convertImageLayerToVariableFrame(nextDoc, layer.id);
+          nextDoc = conv.doc;
+          droppedEffects = conv.effectsDropped;
+        }
+        nextDoc = upsertVariableField(nextDoc, {
+          id: "photo",
+          type: "image",
+          layerId: layer.id,
+          label: "תמונה",
+          fitMode: "cover",
+          smartCrop: false,
+          preserveMask: true,
+          applyImageAdjustmentsByDefault: false,
+        });
+        if (droppedEffects) {
+          // Toast outside the updater so we don't fire it during render.
+          queueMicrotask(() =>
+            setStatus("האפקטים על התמונה לא נשמרו במעבר ל-Variable Slot"),
+          );
+        }
+        return nextDoc;
       });
-    } else if (layer.type === "text") {
+      return;
+    }
+    if (layer.type === "text") {
       handleBatchFieldChange(layer.id, {
         id: "name",
         type: "text",
@@ -770,7 +880,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     setTemplateSaveModal({ name: meta.templateName || currentDocument.name });
   }
 
-  function confirmSaveAsBatchTemplate(name: string): void {
+  async function confirmSaveAsBatchTemplate(name: string): Promise<void> {
     setTemplateSaveModal(null);
     const meta = getBatchProductionMeta(currentDocument);
     if (!meta) return;
@@ -791,7 +901,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     }
 
     try {
-      saveTemplateToStore(docToSave, thumbnail);
+      await saveTemplateToStore(docToSave, thumbnail);
       setStatus(`התבנית "${trimmed}" נשמרה בהצלחה ✓`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1046,8 +1156,50 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     updateLayer(currentPage.id, layer);
   }
 
-  async function handleImageFiles(files: FileList | File[]): Promise<void> {
+  /**
+   * Returns the topmost Frame layer whose AABB contains the given client point,
+   * or null if none. Used to route image drops into Frame/Mask placeholders.
+   */
+  function findFrameAtClientPoint(clientX: number, clientY: number): FrameLayer | null {
+    const stage = stageRef.current;
+    if (stage === null) return null;
+    const container = stage.container();
+    const rect = container.getBoundingClientRect();
+    const screen = { x: clientX - rect.left, y: clientY - rect.top };
+    const transform = stage.getAbsoluteTransform().copy().invert();
+    const pt = transform.point(screen);
+    const candidates = currentPage.layers
+      .filter((layer): layer is FrameLayer => layer.type === "frame" && layer.visible && !layer.locked)
+      .sort((a, b) => b.zIndex - a.zIndex);
+    for (const frame of candidates) {
+      if (pt.x >= frame.x && pt.x <= frame.x + frame.width
+        && pt.y >= frame.y && pt.y <= frame.y + frame.height) {
+        return frame;
+      }
+    }
+    return null;
+  }
+
+  async function handleImageFiles(files: FileList | File[], targetFrameId?: string): Promise<void> {
     const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
+    if (targetFrameId !== undefined && imageFiles.length > 0) {
+      const file = imageFiles[0];
+      const { asset } = await importImageAsset(file, currentDocument.assets, { createPreview: true });
+      applyDocumentChange(
+        "InsertImageIntoFrameCommand",
+        (doc) => insertImageIntoFrameDoc(
+          { ...doc, assets: doc.assets.some((a) => a.id === asset.id) ? doc.assets : [...doc.assets, asset] },
+          currentPage.id,
+          targetFrameId,
+          asset.id,
+          "insert"
+        ),
+        currentPage.id
+      );
+      setSelection([targetFrameId]);
+      setStatus("התמונה הוכנסה לפריים");
+      return;
+    }
     if (isGridMode && activeGridRule !== null) {
       const assets: Asset[] = [];
       for (const file of imageFiles) {
@@ -1153,7 +1305,8 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
       handleInsertGraphic(emojiUrl, name);
       return;
     }
-    void handleImageFiles(event.dataTransfer.files);
+    const targetFrame = findFrameAtClientPoint(event.clientX, event.clientY);
+    void handleImageFiles(event.dataTransfer.files, targetFrame?.id);
   }
 
   useEffect(() => {
@@ -1185,6 +1338,34 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
 
     function onDragOver(event: globalThis.DragEvent): void {
       prepareFileDrop(event);
+      if (!dataTransferHasFiles(event.dataTransfer)) return;
+      if (!eventTargetsCanvas(event)) {
+        setDropTargetFrame(null);
+        return;
+      }
+      const frame = findFrameAtClientPoint(event.clientX, event.clientY);
+      if (frame === null) {
+        setDropTargetFrame(null);
+        return;
+      }
+      const stage = stageRef.current;
+      const canvasArea = canvasAreaRef.current;
+      if (stage === null || canvasArea === null) return;
+      const container = stage.container();
+      const containerRect = container.getBoundingClientRect();
+      const areaRect = canvasArea.getBoundingClientRect();
+      const tf = stage.getAbsoluteTransform();
+      const tl = tf.point({ x: frame.x, y: frame.y });
+      const br = tf.point({ x: frame.x + frame.width, y: frame.y + frame.height });
+      setDropTargetFrame({
+        id: frame.id,
+        name: frame.name,
+        hasImage: frame.imageAssetId !== undefined,
+        screenLeft: containerRect.left - areaRect.left + Math.min(tl.x, br.x),
+        screenTop: containerRect.top - areaRect.top + Math.min(tl.y, br.y),
+        screenWidth: Math.abs(br.x - tl.x),
+        screenHeight: Math.abs(br.y - tl.y)
+      });
     }
 
     function onDrop(event: globalThis.DragEvent): void {
@@ -1194,13 +1375,18 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
       setFileDropActive(false);
       if (!eventTargetsCanvas(event)) return;
       event.stopPropagation();
-      void handleImageFiles(dataTransfer.files);
+      const targetFrame = findFrameAtClientPoint(event.clientX, event.clientY);
+      setDropTargetFrame(null);
+      void handleImageFiles(dataTransfer.files, targetFrame?.id);
     }
 
     function onDragLeave(event: globalThis.DragEvent): void {
       if (!dataTransferHasFiles(event.dataTransfer)) return;
       event.preventDefault();
-      if (event.relatedTarget === null) setFileDropActive(false);
+      if (event.relatedTarget === null) {
+        setFileDropActive(false);
+        setDropTargetFrame(null);
+      }
     }
 
     const capture = { capture: true };
@@ -1604,6 +1790,304 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     setStatus("Selection cut");
   }
 
+  function makeSelectionAsset(clip: SelectionClipboard): Asset {
+    return {
+      version: 1,
+      id: crypto.randomUUID(),
+      name: `${clip.sourceName.replace(/\.[^/.]+$/, "")} selection.png`,
+      kind: "image",
+      status: "ready",
+      originalPath: clip.dataUrl,
+      previewPath: clip.dataUrl,
+      thumbnailPath: clip.dataUrl,
+      mimeType: "image/png",
+      width: clip.width,
+      height: clip.height,
+      fileSize: Math.round(clip.dataUrl.length * 0.75),
+      metadata: {
+        generatedFromSelection: true,
+        sourceLayerId: clip.sourceLayerId
+      }
+    };
+  }
+
+  async function createSelectionClipboardFromActiveLayer(): Promise<SelectionClipboard | null> {
+    const storeState = useImageEditStore.getState();
+    const selMask = storeState.selectionMask;
+    if (selMask === null || imageEditLayerId === null || activePage === null) return null;
+    const layer = activePage.layers.find((item): item is ImageLayer => item.id === imageEditLayerId && item.type === "image");
+    if (layer === undefined) return null;
+    const asset = currentDocument.assets.find((item) => item.id === layer.assetId);
+    if (asset === undefined) return null;
+    const bounds = selectionMaskBounds(selMask.data, selMask.width, selMask.height);
+    if (bounds === null) {
+      setStatus("No selected pixels to copy");
+      return null;
+    }
+    const rendered = await renderImageLayerToSelectionCanvas(layer, asset, currentDocument.assets, selMask.width, selMask.height);
+    if (rendered === null) return null;
+    const context = rendered.getContext("2d");
+    if (context === null) return null;
+
+    const imageData = context.getImageData(0, 0, selMask.width, selMask.height);
+    for (let index = 0; index < selMask.data.length; index += 1) {
+      if (selMask.data[index] <= 128) {
+        imageData.data[index * 4 + 3] = 0;
+      }
+    }
+    context.putImageData(imageData, 0, 0);
+
+    const cropped = window.document.createElement("canvas");
+    cropped.width = bounds.width;
+    cropped.height = bounds.height;
+    const croppedContext = cropped.getContext("2d");
+    if (croppedContext === null) return null;
+    croppedContext.putImageData(context.getImageData(bounds.x, bounds.y, bounds.width, bounds.height), 0, 0);
+
+    const scaleX = layer.width / selMask.width;
+    const scaleY = layer.height / selMask.height;
+    return {
+      dataUrl: cropped.toDataURL("image/png"),
+      width: Math.max(1, Math.round(bounds.width * scaleX)),
+      height: Math.max(1, Math.round(bounds.height * scaleY)),
+      canvasX: layer.x + bounds.x * scaleX,
+      canvasY: layer.y + bounds.y * scaleY,
+      sourceLayerId: layer.id,
+      sourceName: layer.name || asset.name || "Selection"
+    };
+  }
+
+  function pasteSelectionClipboard(clip: SelectionClipboard): void {
+    const asset = makeSelectionAsset(clip);
+    const maxZIndex = Math.max(0, ...currentPage.layers.map((layer) => layer.zIndex));
+    const layer = createImageLayer({
+      name: asset.name,
+      assetId: asset.id,
+      rect: {
+        x: Math.round(clip.canvasX),
+        y: Math.round(clip.canvasY),
+        width: clip.width,
+        height: clip.height
+      },
+      fitMode: "stretch",
+      zIndex: maxZIndex + 1,
+      metadata: {
+        generatedFromSelection: true,
+        sourceLayerId: clip.sourceLayerId
+      }
+    });
+    applyDocumentChange("PasteSelectionAsLayerCommand", (doc) => ({
+      ...doc,
+      assets: [...doc.assets, asset],
+      pages: doc.pages.map((page) => page.id === currentPage.id ? { ...page, layers: [...page.layers, layer] } : page)
+    }), currentPage.id);
+    exitImageEditMode();
+    setSelection([layer.id]);
+    setStatus("Selection pasted as a new layer");
+  }
+
+  async function handleConvertLayerAlphaToFrameMask(layerId: string): Promise<void> {
+    const layer = currentPage.layers.find((item): item is ImageLayer => item.id === layerId && item.type === "image");
+    if (layer === undefined) return;
+
+    const asset = currentDocument.assets.find((item) => item.id === layer.assetId);
+    if (asset === undefined) {
+      setStatus("Cannot convert: image asset is missing");
+      return;
+    }
+
+    // Render the layer's *current visible alpha* (image alpha ∩ shape clip ∩
+    // pixelMask ∩ library mask, with crop/flip/imageScale/imageOffset) into a
+    // new mask asset so the Frame/Mask exactly matches what the user saw.
+    let maskAsset: Asset;
+    try {
+      const composed = await composeFrameMaskFromImageLayer(layer, currentDocument.assets);
+      maskAsset = createMaskAsset(composed.dataUrl, composed.width, composed.height, layer.id);
+    } catch (err) {
+      console.error("composeFrameMaskFromImageLayer failed", err);
+      setStatus("Conversion failed: could not compose mask");
+      return;
+    }
+
+    const frame = createFrameLayer({
+      id: layer.id,
+      name: `${layer.name || asset.name || "Selection"} Frame`,
+      rect: {
+        x: layer.x,
+        y: layer.y,
+        width: layer.width,
+        height: layer.height
+      },
+      behaviorMode: "freeform",
+      shape: "customMask",
+      contentType: "empty",
+      fitMode: "fill",
+      contentTransform: { ...defaultContentTransform },
+      lockedFrame: layer.locked,
+      zIndex: layer.zIndex,
+      maskSource: {
+        version: 1,
+        type: "alphaAsset",
+        assetId: maskAsset.id,
+        width: maskAsset.width ?? Math.max(1, Math.round(layer.width)),
+        height: maskAsset.height ?? Math.max(1, Math.round(layer.height))
+      },
+      // Reset metadata — the visual alpha is now baked into the mask asset, so
+      // carrying over imageShape/cornerRadius/flip/imageMaskDataUrl would
+      // double-apply on the frame side.
+      metadata: {
+        frameMask: {
+          source: "imageAlpha",
+          sourceAssetId: layer.assetId,
+          maskAssetId: maskAsset.id,
+          convertedFromLayerId: layer.id
+        }
+      }
+    });
+
+    applyDocumentChange("ConvertLayerAlphaToFrameMaskCommand", (doc) => ({
+      ...doc,
+      assets: [...doc.assets, maskAsset],
+      pages: doc.pages.map((page) => page.id === currentPage.id ? {
+        ...page,
+        layers: page.layers.map((l) => l.id === layer.id ? {
+          ...frame,
+          rotation: layer.rotation,
+          visible: layer.visible,
+          opacity: layer.opacity,
+          blendMode: layer.blendMode,
+          selected: layer.selected
+        } : l)
+      } : page)
+    }), currentPage.id);
+    setSelection([frame.id]);
+    setStatus("Converted layer alpha to an empty image frame");
+  }
+
+  function handleConvertAlphaToFrameMask(): void {
+    if (selectedLayer?.type !== "image") return;
+    void handleConvertLayerAlphaToFrameMask(selectedLayer.id);
+  }
+
+  async function handleCopySelection(): Promise<void> {
+    const clip = await createSelectionClipboardFromActiveLayer();
+    if (clip === null) return;
+    setSelectionClipboard(clip);
+    setStatus("Selection copied. Press Ctrl+V to paste as a new layer.");
+  }
+
+  async function handleCutSelection(): Promise<void> {
+    const clip = await createSelectionClipboardFromActiveLayer();
+    if (clip === null) return;
+    setSelectionClipboard(clip);
+    const storeState = useImageEditStore.getState();
+    const selMask = storeState.selectionMask;
+    if (selMask !== null) {
+      await handleApplyMaskFromSelection(selMask.data, selMask.width, selMask.height);
+      storeState.clearSelection();
+    }
+    setStatus("Selection cut. Press Ctrl+V to paste as a new layer.");
+  }
+
+  async function handleCopySelectionToNewLayer(): Promise<void> {
+    const clip = await createSelectionClipboardFromActiveLayer();
+    if (clip === null) return;
+    setSelectionClipboard(clip);
+    pasteSelectionClipboard(clip);
+  }
+
+  async function handleCutSelectionToNewLayer(): Promise<void> {
+    const clip = await createSelectionClipboardFromActiveLayer();
+    if (clip === null) return;
+    setSelectionClipboard(clip);
+    const storeState = useImageEditStore.getState();
+    const selMask = storeState.selectionMask;
+    if (selMask !== null) {
+      await handleApplyMaskFromSelection(selMask.data, selMask.width, selMask.height);
+      storeState.clearSelection();
+    }
+    pasteSelectionClipboard(clip);
+  }
+
+  function handlePasteSelection(): void {
+    if (selectionClipboard === null) return;
+    pasteSelectionClipboard(selectionClipboard);
+  }
+
+  function handleClearImageSelection(): void {
+    useImageEditStore.getState().clearSelection();
+    setStatus("Selection cleared");
+  }
+
+  function getSmartSelectionTarget(): { layer: ImageLayer; asset: Asset } | null {
+    if (imageEditLayerId === null || activePage === null) return null;
+    const layer = activePage.layers.find((item): item is ImageLayer => item.id === imageEditLayerId && item.type === "image");
+    if (layer === undefined) return null;
+    const asset = currentDocument.assets.find((item) => item.id === layer.assetId);
+    if (asset === undefined) return null;
+    return { layer, asset };
+  }
+
+  async function handleSmartAutoSelect(): Promise<void> {
+    const target = getSmartSelectionTarget();
+    if (target === null) {
+      setStatus("Smart selection needs an image layer");
+      return;
+    }
+    const store = useImageEditStore.getState();
+    store.setSmartSelectionStatus("preparing", "Preparing smart selection...");
+    store.setSmartSelectionProgress({ phase: "prepare", message: "Preparing smart selection...", percent: null });
+    setStatus("Preparing smart selection...");
+    try {
+      const result = await runSmartAutoSegment(target.asset, target.layer);
+      if (result === null) {
+        store.setSmartSelectionStatus("error", "Smart selection is unavailable");
+        store.setSmartSelectionProgress(null);
+        setStatus("Smart selection is unavailable");
+        return;
+      }
+      const mask = await maskResultToSelectionMask(result, target.asset.hash ?? target.asset.checksum ?? target.asset.id);
+      store.setSelectionMask(mask);
+      store.setSmartSelectionStatus(result.fallback ? "fallback" : "ready", result.message ?? "Smart selection ready");
+      store.setSmartSelectionProgress(null);
+      setStatus(result.fallback ? "Smart selection used fallback preview" : "Smart selection ready");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Smart selection failed";
+      store.setSmartSelectionStatus("error", message);
+      store.setSmartSelectionProgress(null);
+      setStatus(message);
+    }
+  }
+
+  async function handleSmartRefineSelection(): Promise<void> {
+    const target = getSmartSelectionTarget();
+    const store = useImageEditStore.getState();
+    const selection = store.selectionMask;
+    if (target === null || selection === null) return;
+    store.setSmartSelectionStatus("working", "Refining edges...");
+    store.setSmartSelectionProgress({ phase: "refine", message: "Refining edges...", percent: null });
+    setStatus("Refining selection edges...");
+    try {
+      const result = await runSmartRefineMask(target.asset.id, selection.data, selection.width, selection.height, store.smartSelectionSoftness);
+      if (result === null) {
+        store.setSmartSelectionStatus("error", "Edge refinement is unavailable");
+        store.setSmartSelectionProgress(null);
+        setStatus("Edge refinement is unavailable");
+        return;
+      }
+      const mask = await maskResultToSelectionMask(result, target.asset.hash ?? target.asset.checksum ?? target.asset.id);
+      store.setSelectionMask(mask);
+      store.setSmartSelectionStatus(result.fallback ? "fallback" : "ready", result.message ?? "Edges refined");
+      store.setSmartSelectionProgress(null);
+      setStatus("Selection edges refined");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Edge refinement failed";
+      store.setSmartSelectionStatus("error", message);
+      store.setSmartSelectionProgress(null);
+      setStatus(message);
+    }
+  }
+
   function handleSelectAllLayers(): void {
     const selectableIds = currentPage.layers
       .filter((layer) => layer.type !== "background" && layer.type !== "guide" && !layer.locked)
@@ -1647,13 +2131,8 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
       exitImageEditMode();
       return;
     }
-    // Apply selection (wand / rect-select) as mask — erase selected region
-    const storeState = useImageEditStore.getState();
-    const selMask = storeState.selectionMask;
-    if ((imageActiveTool === "wand" || imageActiveTool === "rect-select") && selMask !== null) {
-      void handleApplyMaskFromSelection(selMask.data, selMask.width, selMask.height).then(() => {
-        exitImageEditMode();
-      });
+    if ((imageActiveTool === "wand" || imageActiveTool === "rect-select" || imageActiveTool === "smart-select") && useImageEditStore.getState().selectionMask !== null) {
+      setStatus("Choose Delete, Copy, Cut, or Clear for the active selection");
       return;
     }
     exitImageEditMode();
@@ -1666,7 +2145,9 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     if (selMask === null || imageEditLayerId === null || activePage === null) return;
     const layer = activePage.layers.find((l) => l.id === imageEditLayerId);
     if (layer?.type !== "image") return;
-    void handleApplyMaskFromSelection(selMask.data, selMask.width, selMask.height);
+    void handleApplyMaskFromSelection(selMask.data, selMask.width, selMask.height).then(() => {
+      setStatus("Selection deleted");
+    });
     useImageEditStore.getState().clearSelection();
   }
 
@@ -2269,6 +2750,9 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
         onExitMaskContentEditMode={exitMaskContentEdit}
         onImageEditApply={handleImageEditApply}
         onImageEditCancel={handleImageEditCancel}
+        onImageEditClearSelection={handleClearImageSelection}
+        onImageEditCopySelection={() => { void handleCopySelectionToNewLayer(); }}
+        onImageEditCutSelection={() => { void handleCutSelectionToNewLayer(); }}
         onImageEditDeleteSelection={handleDeleteSelection}
         onImageEditResetCrop={handleImageEditResetCrop}
         onImageEditResetMask={handleImageEditResetMask}
@@ -2402,6 +2886,16 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                   if (!selectedLayerIds.includes(layerId)) setSelection([layerId]);
                   setLayerContextMenu({ layerId, screenX, screenY });
                 }}
+                onHoverLayer={setHoveredLayerId}
+                onMoveImageIntoFrame={(imageLayerId, frameId) => {
+                  applyDocumentChange(
+                    "MoveImageLayerIntoFrameCommand",
+                    (doc) => moveImageLayerIntoFrameDoc(doc, currentPage.id, imageLayerId, frameId),
+                    currentPage.id
+                  );
+                  setSelection([frameId]);
+                  setStatus("התמונה הועברה לתוך הפריים");
+                }}
               />
             )}
             {leftTab === "pages" && (
@@ -2457,6 +2951,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
               page={currentPage}
               selectedLayerIds={selectedLayerIds}
               selectedLayerId={selectedLayerId}
+              hoveredLayerId={hoveredLayerId}
               stageRef={stageRef}
               onBeginTextEdit={(layerId) => {
                 setSelection([layerId]);
@@ -2485,7 +2980,12 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
             />
           </CanvasErrorBoundary>
           {/* Image Edit floating params bar */}
-          {imageEditMode && <ImageEditFloatingBar />}
+          {imageEditMode && (
+            <ImageEditFloatingBar
+              onSmartAutoSelect={() => { void handleSmartAutoSelect(); }}
+              onSmartRefine={() => { void handleSmartRefineSelection(); }}
+            />
+          )}
           {/* Mask content edit mode banner */}
           {maskContentEditActive && (
             <div className="collage-swap-banner">
@@ -2511,6 +3011,19 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
           {fileDropActive ? (
             <div className="canvas-file-drop-overlay">
               <div>שחרר כאן כדי להוסיף תמונות לקנבס</div>
+            </div>
+          ) : null}
+          {fileDropActive && dropTargetFrame !== null ? (
+            <div
+              className={`canvas-frame-drop-target ${dropTargetFrame.hasImage ? "replace" : "insert"}`}
+              style={{
+                left: dropTargetFrame.screenLeft,
+                top: dropTargetFrame.screenTop,
+                width: dropTargetFrame.screenWidth,
+                height: dropTargetFrame.screenHeight
+              }}
+            >
+              <span>{dropTargetFrame.hasImage ? "החלף תמונה בפריים" : "שחרר תמונה לפריים"}</span>
             </div>
           ) : null}
           {canvasContextMenu !== null && (
@@ -2561,6 +3074,64 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                     ? () => handleToggleBatchVariable(ctxLayer)
                     : undefined
                 }
+                onConvertAlphaToFrame={
+                  ctxLayer?.type === "image"
+                    ? () => handleConvertLayerAlphaToFrameMask(ctxLayer.id)
+                    : undefined
+                }
+                onInsertImageIntoFrame={
+                  ctxLayer?.type === "frame"
+                    ? () => {
+                        setSelection([ctxLayer.id]);
+                        replaceImageInputRef.current?.click();
+                      }
+                    : undefined
+                }
+                onClearFrameImage={
+                  ctxLayer?.type === "frame" && ctxLayer.imageAssetId !== undefined
+                    ? () => {
+                        applyDocumentChange(
+                          "ClearFrameImageCommand",
+                          (doc) => clearFrameImageDoc(doc, currentPage.id, ctxLayer.id),
+                          currentPage.id
+                        );
+                        setStatus("התמונה נוקתה מהפריים");
+                      }
+                    : undefined
+                }
+                onEditInsideFrame={
+                  ctxLayer?.type === "frame" && ctxLayer.imageAssetId !== undefined
+                    ? () => {
+                        setSelection([ctxLayer.id]);
+                        enterMaskContentEdit(ctxLayer.id);
+                      }
+                    : undefined
+                }
+                onConvertFrameBackToImage={
+                  ctxLayer?.type === "frame" && ctxLayer.imageAssetId !== undefined
+                    ? () => {
+                        applyDocumentChange(
+                          "ConvertFrameMaskBackToImageCommand",
+                          (doc) => convertFrameMaskBackToImage(
+                            doc,
+                            currentPage.id,
+                            ctxLayer.id,
+                            (args) => createImageLayer({
+                              id: args.id,
+                              name: args.name,
+                              rect: args.rect,
+                              assetId: args.assetId,
+                              fitMode: "fill",
+                              zIndex: args.zIndex
+                            })
+                          ),
+                          currentPage.id
+                        );
+                        setStatus("הומר חזרה לשכבת תמונה");
+                      }
+                    : undefined
+                }
+                frameHasImage={ctxLayer?.type === "frame" && ctxLayer.imageAssetId !== undefined}
                 onCopyEffects={() => {
                   if (canUseLayerEffects(ctxLayer)) {
                     setEffectsClipboard(makeLayerEffectsClipboard(ctxLayer));
@@ -2581,6 +3152,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
         </div>
 
         <aside className="right-sidebar">
+          <ColorPanel />
           {/* Mode-specific panel at top */}
           {isProductMode ? (
             <div className="rs-mode-section">
@@ -2686,7 +3258,9 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
               <>
                 <div className="rs-inspector-header">
                   <span className="rs-inspector-name">{selectedLayer.name}</span>
-                  <span className="rs-inspector-type">{selectedLayer.type === "image" ? "תמונה" : "פריים"}</span>
+                  <span className="rs-inspector-type">
+                    {selectedLayer.type === "image" ? "תמונה" : (selectedLayer.maskSource !== undefined ? "Frame/Mask" : "פריים")}
+                  </span>
                   {!(selectedLayer.type === "frame" && (selectedLayer.metadata["collageFrame"] as { isCollageFrame?: boolean } | undefined)?.isCollageFrame === true) && (
                     <button
                       className="rs-replace-btn"
@@ -2699,11 +3273,52 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                     </button>
                   )}
                 </div>
+                {selectedLayer.type === "frame" && isFrameMaskLayer(selectedLayer) && (
+                  <div className="rs-frame-mask-toolbar" role="toolbar" aria-label="Frame/Mask actions">
+                    <button
+                      className="rs-frame-mask-btn"
+                      title={selectedLayer.imageAssetId !== undefined ? "החלף תמונה" : "בחר תמונה"}
+                      type="button"
+                      onClick={() => replaceImageInputRef.current?.click()}
+                    >
+                      <ImagePlus size={12} />
+                      {selectedLayer.imageAssetId !== undefined ? "החלף" : "בחר תמונה"}
+                    </button>
+                    <button
+                      className="rs-frame-mask-btn"
+                      disabled={selectedLayer.imageAssetId === undefined}
+                      title="הסר תמונה"
+                      type="button"
+                      onClick={() => {
+                        applyDocumentChange(
+                          "ClearFrameImageCommand",
+                          (doc) => clearFrameImageDoc(doc, currentPage.id, selectedLayer.id),
+                          currentPage.id
+                        );
+                        setStatus("התמונה נוקתה מהפריים");
+                      }}
+                    >
+                      <X size={12} />
+                      נקה
+                    </button>
+                    <button
+                      className="rs-frame-mask-btn"
+                      disabled={selectedLayer.imageAssetId === undefined}
+                      title="ערוך תמונה בתוך הפריים"
+                      type="button"
+                      onClick={() => enterMaskContentEdit(selectedLayer.id)}
+                    >
+                      <Maximize2 size={12} />
+                      ערוך פנימה
+                    </button>
+                  </div>
+                )}
                 <ImageStudio
                   layer={selectedLayer}
                   assets={currentDocument.assets}
                   batchField={(selectedLayer.type === "frame" || selectedLayer.type === "image") ? batchProductionMeta?.variableFields.find((f) => f.layerId === selectedLayer.id) : undefined}
                   onBatchFieldChange={(selectedLayer.type === "frame" || selectedLayer.type === "image") ? (field) => handleBatchFieldChange(selectedLayer.id, field) : undefined}
+                  onConvertAlphaToFrame={selectedLayer.type === "image" ? handleConvertAlphaToFrameMask : undefined}
                   onDelete={handleDeleteSelected}
                   onPatch={patchSelectedLayer}
                   onUpdateAsset={updateAsset}
@@ -2814,6 +3429,85 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   );
 }
 
+function selectionMaskBounds(data: Uint8Array, width: number, height: number): { x: number; y: number; width: number; height: number } | null {
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let index = 0; index < data.length; index += 1) {
+    if (data[index] <= 128) continue;
+    const x = index % width;
+    const y = Math.floor(index / width);
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+  if (maxX < minX || maxY < minY) return null;
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+}
+
+async function renderImageLayerToSelectionCanvas(
+  layer: ImageLayer,
+  asset: Asset,
+  assets: Asset[],
+  width: number,
+  height: number
+): Promise<HTMLCanvasElement | null> {
+  const source = resolveCanvasAssetPath(asset);
+  if (source === undefined) return null;
+  const image = await loadHtmlImage(source).catch(() => null);
+  if (image === null) return null;
+  const canvas = window.document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (context === null) return null;
+
+  const crop = layer.crop;
+  const sx = crop.x * image.naturalWidth;
+  const sy = crop.y * image.naturalHeight;
+  const sw = crop.width * image.naturalWidth;
+  const sh = crop.height * image.naturalHeight;
+  const imageScale = Math.max(0.05, Math.min(20, layer.imageScale ?? 1));
+  const scaleX = width / layer.width;
+  const scaleY = height / layer.height;
+  const flipH = (layer.metadata["flipH"] as boolean | undefined) ?? false;
+  const flipV = (layer.metadata["flipV"] as boolean | undefined) ?? false;
+  const imageX = (flipH ? layer.width * (1 + imageScale) / 2 : layer.width * (1 - imageScale) / 2) + (layer.imageOffsetX ?? 0);
+  const imageY = (flipV ? layer.height * (1 + imageScale) / 2 : layer.height * (1 - imageScale) / 2) + (layer.imageOffsetY ?? 0);
+
+  context.save();
+  context.translate(imageX * scaleX, imageY * scaleY);
+  context.scale((flipH ? -1 : 1) * imageScale * scaleX, (flipV ? -1 : 1) * imageScale * scaleY);
+  context.drawImage(image, sx, sy, sw, sh, 0, 0, layer.width, layer.height);
+  context.restore();
+
+  if (layer.pixelMask !== undefined) {
+    const maskAsset = assets.find((item) => item.id === layer.pixelMask?.assetId);
+    const maskSource = resolveCanvasAssetPath(maskAsset);
+    if (maskSource !== undefined) {
+      const mask = await loadHtmlImage(maskSource).catch(() => null);
+      if (mask === null) return canvas;
+      context.save();
+      context.globalCompositeOperation = "destination-in";
+      context.drawImage(mask, 0, 0, width, height);
+      context.restore();
+    }
+  }
+
+  return canvas;
+}
+
+function loadHtmlImage(source: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Cannot load image"));
+    image.src = source;
+  });
+}
+
 // ─── Tool button ──────────────────────────────────────────────────────────────
 
 function ContextToolbar({
@@ -2838,6 +3532,9 @@ function ContextToolbar({
   onExitMaskContentEditMode,
   onImageEditApply,
   onImageEditCancel,
+  onImageEditClearSelection,
+  onImageEditCopySelection,
+  onImageEditCutSelection,
   onImageEditDeleteSelection,
   onImageEditResetCrop,
   onImageEditResetMask,
@@ -2868,6 +3565,9 @@ function ContextToolbar({
   onExitMaskContentEditMode: () => void;
   onImageEditApply: () => void;
   onImageEditCancel: () => void;
+  onImageEditClearSelection: () => void;
+  onImageEditCopySelection: () => void;
+  onImageEditCutSelection: () => void;
   onImageEditDeleteSelection: () => void;
   onImageEditResetCrop: () => void;
   onImageEditResetMask: () => void;
@@ -2882,6 +3582,9 @@ function ContextToolbar({
       <ImageEditToolbar
         onApply={onImageEditApply}
         onCancel={onImageEditCancel}
+        onClearSelection={onImageEditClearSelection}
+        onCopySelection={onImageEditCopySelection}
+        onCutSelection={onImageEditCutSelection}
         onDeleteSelection={onImageEditDeleteSelection}
         onResetCrop={onImageEditResetCrop}
         onResetMask={onImageEditResetMask}
@@ -2945,9 +3648,52 @@ function EmptyContextToolbar({
   onToggleGrid: () => void;
   onToggleSnap: () => void;
 }): ReactElement {
+  const drawingTool = useDrawingToolsStore((s) => s.activeTool);
+  const setDrawingTool = useDrawingToolsStore((s) => s.setActiveTool);
+  const bucketMode = useDrawingToolsStore((s) => s.bucketMode);
+  const setBucketMode = useDrawingToolsStore((s) => s.setBucketMode);
   return (
     <section className="context-toolbar" aria-label="Context toolbar" data-testid="context-toolbar">
       <span className="context-toolbar-label">כלים כלליים</span>
+      <div className="context-group">
+        <button
+          type="button"
+          className={`context-eyedropper${drawingTool === "eyedropper" ? " on" : ""}`}
+          onClick={() => setDrawingTool(drawingTool === "eyedropper" ? null : "eyedropper")}
+          title="טפטפת — דגום צבע מהקנבס (I)"
+          data-testid="tool-eyedropper"
+        >
+          <PipetteIcon size={15} />
+          <span>טפטפת</span>
+        </button>
+      </div>
+      <div className="context-group">
+        <button
+          type="button"
+          className={`context-icon${drawingTool === "bucket" ? " on" : ""}`}
+          onClick={() => setDrawingTool(drawingTool === "bucket" ? null : "bucket")}
+          title="דלי צבע — מלא צבע בשכבה מתחת לסמן (G)"
+          data-testid="tool-bucket"
+        >
+          <PaintBucketIcon size={14} />
+        </button>
+        {drawingTool === "bucket" ? (
+          <div className="context-bucket-modes">
+            <button
+              type="button"
+              className={bucketMode === "fill" ? "context-toggle on" : "context-toggle"}
+              onClick={() => setBucketMode("fill")}
+              title="מלא את כל השכבה"
+            >Fill</button>
+            <button
+              type="button"
+              className={bucketMode === "contiguous" ? "context-toggle on" : "context-toggle"}
+              onClick={() => setBucketMode("contiguous")}
+              title="מלא רק את האזור הרציף תחת הקליק"
+            >Contig</button>
+          </div>
+        ) : null}
+      </div>
       <div className="context-group">
         <ToolbarButton icon={Type} label="הוסף טקסט" onClick={onAddText} />
         <ToolbarButton icon={ImagePlus} label="הוסף תמונה" onClick={onAddImage} />
@@ -3713,7 +4459,7 @@ function TemplateSaveModal({
   onCancel,
 }: {
   initialName: string;
-  onConfirm: (name: string) => void;
+  onConfirm: (name: string) => void | Promise<void>;
   onCancel: () => void;
 }): ReactElement {
   const [name, setName] = useState(initialName);
@@ -4358,6 +5104,7 @@ function ImageStudio({
   assets,
   batchField,
   onBatchFieldChange,
+  onConvertAlphaToFrame,
   onDelete,
   onPatch,
   onUpdateAsset,
@@ -4366,6 +5113,7 @@ function ImageStudio({
   assets: Asset[];
   batchField?: BatchVariableField;
   onBatchFieldChange?: (field: BatchVariableField | null) => void;
+  onConvertAlphaToFrame?: () => void;
   onDelete: () => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
   onUpdateAsset: (asset: Asset) => void;
@@ -4512,6 +5260,16 @@ function ImageStudio({
               >
                 {layer.locked ? <Lock size={14} /> : <Unlock size={14} />} נעילה
               </button>
+              {layer.type === "image" && onConvertAlphaToFrame !== undefined && (
+                <button
+                  className="toggle"
+                  onClick={onConvertAlphaToFrame}
+                  title="Use this layer alpha as an empty image frame mask"
+                  type="button"
+                >
+                  <Frame size={14} /> Use Alpha as Mask
+                </button>
+              )}
             </div>
             <SliderField
               decimals={2}
@@ -6674,7 +7432,9 @@ function LayerList({
   onSelectMany,
   onToggleLock,
   onToggleVisibility,
-  onLayerContextMenu
+  onLayerContextMenu,
+  onHoverLayer,
+  onMoveImageIntoFrame
 }: {
   assets: Asset[];
   layers: VisualLayer[];
@@ -6691,15 +7451,19 @@ function LayerList({
   onToggleLock: (layerId: string) => void;
   onToggleVisibility: (layerId: string) => void;
   onLayerContextMenu: (layerId: string, screenX: number, screenY: number) => void;
+  onHoverLayer?: (layerId: string | null) => void;
+  onMoveImageIntoFrame?: (imageLayerId: string, frameId: string) => void;
 }): ReactElement {
   const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"all" | "images" | "text" | "frames" | "hidden" | "locked">("all");
+  const [filter, setFilter] = useState<"all" | "images" | "text" | "frames" | "framesMasks" | "shapes" | "hidden" | "locked">("all");
   const [draftName, setDraftName] = useState("");
   const ordered = [...layers].sort((a, b) => b.zIndex - a.zIndex);
   const filtered = ordered.filter((layer) => {
     if (filter === "images") return layer.type === "image";
     if (filter === "text") return layer.type === "text";
-    if (filter === "frames") return layer.type === "frame";
+    if (filter === "frames") return layer.type === "frame" && !isFrameMaskLayer(layer);
+    if (filter === "framesMasks") return isFrameMaskLayer(layer);
+    if (filter === "shapes") return layer.type === "shape";
     if (filter === "hidden") return !layer.visible;
     if (filter === "locked") return layer.locked;
     return true;
@@ -6714,7 +7478,23 @@ function LayerList({
   function handleDrop(event: React.DragEvent<HTMLDivElement>, targetLayerId: string): void {
     event.preventDefault();
     event.stopPropagation();
-    if (!canReorder || draggingLayerId === null || draggingLayerId === targetLayerId) {
+    if (draggingLayerId === null || draggingLayerId === targetLayerId) {
+      setDraggingLayerId(null);
+      return;
+    }
+    // If an ImageLayer is being dropped onto a Frame row, move it into the frame.
+    const draggedLayer = layers.find((l) => l.id === draggingLayerId);
+    const targetLayer = layers.find((l) => l.id === targetLayerId);
+    if (
+      onMoveImageIntoFrame !== undefined
+      && draggedLayer?.type === "image"
+      && targetLayer?.type === "frame"
+    ) {
+      onMoveImageIntoFrame(draggingLayerId, targetLayerId);
+      setDraggingLayerId(null);
+      return;
+    }
+    if (!canReorder) {
       setDraggingLayerId(null);
       return;
     }
@@ -6762,6 +7542,8 @@ function LayerList({
     { id: "images", label: "Images" },
     { id: "text", label: "Text" },
     { id: "frames", label: "Frames" },
+    { id: "framesMasks", label: "Frames-Masks" },
+    { id: "shapes", label: "Shapes" },
     { id: "hidden", label: "Hidden" },
     { id: "locked", label: "Locked" }
   ];
@@ -6788,26 +7570,32 @@ function LayerList({
       </div>
       <div className="layer-list-count">{filtered.length}/{ordered.length}</div>
       {ordered.length > 0 && filtered.length === 0 ? <p>No layers match this filter.</p> : null}
-      {filtered.map((layer) => (
+      {filtered.map((layer) => {
+        const isFM = isFrameMaskLayer(layer);
+        const fmFrame = isFM ? (layer as FrameLayer) : null;
+        const fmAsset = fmFrame !== null && fmFrame.imageAssetId !== undefined
+          ? assets.find((a) => a.id === fmFrame.imageAssetId)
+          : undefined;
+        return (
+        <Fragment key={layer.id}>
         <div
           className={`layer-row ${selectedLayerIds.includes(layer.id) ? "active" : ""} ${draggingLayerId === layer.id ? "dragging" : ""} ${!layer.visible ? "hidden" : ""} ${layer.locked ? "locked" : ""}`}
-          draggable={canReorder}
-          key={layer.id}
+          draggable
           onContextMenu={(e) => handleRowContextMenu(e, layer.id)}
           onDragEnd={() => setDraggingLayerId(null)}
           onDragOver={(e) => {
-            if (!canReorder) return;
             e.preventDefault();
             e.stopPropagation();
           }}
           onDragStart={(e) => {
-            if (!canReorder) return;
             e.stopPropagation();
             e.dataTransfer.effectAllowed = "move";
             e.dataTransfer.setData("text/plain", layer.id);
             setDraggingLayerId(layer.id);
           }}
           onDrop={(e) => handleDrop(e, layer.id)}
+          onMouseEnter={() => onHoverLayer?.(layer.id)}
+          onMouseLeave={() => onHoverLayer?.(null)}
         >
           <GripVertical className="layer-drag-handle" size={14} />
           <div
@@ -6879,7 +7667,29 @@ function LayerList({
             </button>
           </span>
         </div>
-      ))}
+        {isFM && fmFrame !== null ? (
+          <div
+            className={`layer-row-child ${fmAsset === undefined ? "empty" : ""}`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onDrop={(e) => handleDrop(e, fmFrame.id)}
+            onClick={() => onSelect(fmFrame.id)}
+          >
+            {fmAsset?.previewPath !== undefined ? (
+              <>
+                <img alt="" className="layer-row-child-thumb" src={fmAsset.previewPath} />
+                <span className="layer-row-child-label">{fmAsset.name ?? "תמונה"}</span>
+              </>
+            ) : (
+              <span className="layer-row-child-empty">שחרר תמונה כאן</span>
+            )}
+          </div>
+        ) : null}
+        </Fragment>
+        );
+      })}
     </section>
   );
 }
@@ -6911,6 +7721,12 @@ function LayerContextMenu({
   onDuplicate,
   onDelete,
   onToggleBatchVariable,
+  onConvertAlphaToFrame,
+  onInsertImageIntoFrame,
+  onClearFrameImage,
+  onEditInsideFrame,
+  onConvertFrameBackToImage,
+  frameHasImage,
   onCopyEffects,
   onPasteEffects
 }: {
@@ -6930,6 +7746,12 @@ function LayerContextMenu({
   onDuplicate: () => void;
   onDelete: () => void;
   onToggleBatchVariable?: () => void;
+  onConvertAlphaToFrame?: () => void;
+  onInsertImageIntoFrame?: () => void;
+  onClearFrameImage?: () => void;
+  onEditInsideFrame?: () => void;
+  onConvertFrameBackToImage?: () => void;
+  frameHasImage?: boolean;
   onCopyEffects: () => void;
   onPasteEffects: () => void;
 }): ReactElement {
@@ -7017,6 +7839,42 @@ function LayerContextMenu({
             <Zap size={12} style={{ display: "inline", marginInlineEnd: 5 }} />
             {isVariableLayer ? "בטל שדה משתנה" : "הפוך לאלמנט מתחלף"}
           </button>
+        </>
+      )}
+      {onConvertAlphaToFrame !== undefined && (
+        <>
+          <div className="ctx-divider" />
+          <button className="ctx-item" onClick={action(onConvertAlphaToFrame)} type="button">
+            <Frame size={12} style={{ display: "inline", marginInlineEnd: 5 }} />
+            Use Alpha as Mask
+          </button>
+        </>
+      )}
+      {onInsertImageIntoFrame !== undefined && (
+        <>
+          <div className="ctx-divider" />
+          <button className="ctx-item" onClick={action(onInsertImageIntoFrame)} type="button">
+            <ImagePlus size={12} style={{ display: "inline", marginInlineEnd: 5 }} />
+            {frameHasImage === true ? "Replace image..." : "Insert image..."}
+          </button>
+          {frameHasImage === true && onClearFrameImage !== undefined && (
+            <button className="ctx-item" onClick={action(onClearFrameImage)} type="button">
+              <X size={12} style={{ display: "inline", marginInlineEnd: 5 }} />
+              Clear image
+            </button>
+          )}
+          {frameHasImage === true && onEditInsideFrame !== undefined && (
+            <button className="ctx-item" onClick={action(onEditInsideFrame)} type="button">
+              <Maximize2 size={12} style={{ display: "inline", marginInlineEnd: 5 }} />
+              Edit image inside frame
+            </button>
+          )}
+          {frameHasImage === true && onConvertFrameBackToImage !== undefined && (
+            <button className="ctx-item" onClick={action(onConvertFrameBackToImage)} type="button">
+              <Replace size={12} style={{ display: "inline", marginInlineEnd: 5 }} />
+              Convert back to normal image
+            </button>
+          )}
         </>
       )}
       {canUseEffects && (
@@ -7150,6 +8008,18 @@ function LayerThumbnail({ assets, layer }: { assets: Asset[]; layer: VisualLayer
     const asset = assets.find((item) => item.id === layer.imageAssetId);
     if (asset?.previewPath !== undefined) {
       return <img alt="" className="layer-thumb image" src={asset.previewPath} />;
+    }
+  }
+
+  if (layer.type === "frame" && layer.maskSource?.type === "alphaAsset") {
+    const asset = assets.find((item) => item.id === layer.maskSource?.assetId);
+    if (asset?.previewPath !== undefined) {
+      return (
+        <span className="layer-thumb image-wrap">
+          <img alt="" className="layer-thumb image" src={asset.previewPath} />
+          <em className="fx-badge">mask</em>
+        </span>
+      );
     }
   }
 

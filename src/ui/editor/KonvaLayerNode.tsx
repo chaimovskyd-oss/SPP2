@@ -323,6 +323,7 @@ function TextNode({
 
   const commonDrag = {
     draggable: !layer.locked,
+    listening: !layer.locked,
     onDragEnd: (event: Konva.KonvaEventObject<DragEvent>) => {
       onChange({ ...layer, x: event.target.x(), y: event.target.y() });
     }
@@ -785,6 +786,7 @@ function ImageNode({
     visible: layer.visible,
     globalCompositeOperation: mapBlendMode(layer.blendMode) as "source-over",
     draggable: !layer.locked && !isBeingEdited && !isMaskContentEditMode,
+    listening: !layer.locked || isBeingEdited || isMaskContentEditMode,
     onClick: () => { if (!isBeingEdited && !isMaskContentEditMode) onSelect(layer.id); },
     onTap: () => { if (!isBeingEdited && !isMaskContentEditMode) onSelect(layer.id); },
     onDblClick: () => {
@@ -1123,6 +1125,13 @@ function FrameNode({
   const asset = assets.find((item) => item.id === layer.imageAssetId);
   const image = useKonvaImage(resolveCanvasAssetPath(asset));
   const blurRef = useRef<Konva.Image | null>(null);
+  const frameMaskAsset = layer.maskSource?.type === "alphaAsset"
+    ? assets.find((item) => item.id === layer.maskSource?.assetId)
+    : undefined;
+  const frameMaskImage = useKonvaImage(resolveCanvasAssetPath(frameMaskAsset));
+  const frameMaskGroupRef = useRef<Konva.Group | null>(null);
+  const enterMaskContentEditFrame = useMaskContentEditStore((s) => s.enter);
+  const isFrameContentEditMode = useMaskContentEditStore((s) => s.active && s.editingLayerId === layer.id);
   const fx = useMemo(
     () => resolveFrameEffects(layer.visualEffects),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1182,6 +1191,17 @@ function FrameNode({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frameNeedsCache, frameFilterCount, image, layer.width, layer.height]);
 
+  useEffect(() => {
+    const group = frameMaskGroupRef.current;
+    if (group === null) return;
+    if (frameMaskImage !== null) {
+      group.cache();
+    } else {
+      group.clearCache();
+    }
+    group.getLayer()?.batchDraw();
+  }, [frameMaskImage, image, layer.width, layer.height, layer.contentType, layer.imageAssetId, layer.contentTransform]);
+
   // האם הפריים עצמו ניתן לגרירה
   const frameIsDraggable =
     !isGridCell &&
@@ -1189,6 +1209,7 @@ function FrameNode({
     !isCollageFrame &&
     !layer.locked &&
     !layer.lockedFrame &&
+    !isFrameContentEditMode &&
     (layer.behaviorMode === "freeform" || layoutEditMode);
 
   // האם התמונה ניתנת לגרירה (הזזת תוכן בתוך הפריים)
@@ -1397,8 +1418,21 @@ function FrameNode({
       visible={layer.visible}
       globalCompositeOperation={mapBlendMode(layer.blendMode) as "source-over"}
       draggable={frameIsDraggable}
+      listening={!layer.locked}
       onClick={() => onSelect(layer.id)}
       onTap={() => onSelect(layer.id)}
+      onDblClick={() => {
+        if (layer.imageAssetId !== undefined) {
+          onSelect(layer.id);
+          enterMaskContentEditFrame(layer.id);
+        }
+      }}
+      onDblTap={() => {
+        if (layer.imageAssetId !== undefined) {
+          onSelect(layer.id);
+          enterMaskContentEditFrame(layer.id);
+        }
+      }}
       onContextMenu={handleFrameContextMenu}
       onDragEnd={handleFrameDragEnd}
       onTransformEnd={handleTransformEnd}
@@ -1406,6 +1440,7 @@ function FrameNode({
     >
       {/* שכבת תוכן עם clip לפי צורת הפריים */}
       <Group clipFunc={clipFunc}>
+        <Group ref={frameMaskGroupRef}>
         {/* רקע פריים ריק */}
         <Rect
           x={0}
@@ -1480,6 +1515,19 @@ function FrameNode({
         {fx.gradientOverlay !== undefined && (
           <Rect x={0} y={0} width={layer.width} height={layer.height} {...gradientOverlayRectProps(fx.gradientOverlay, layer.width, layer.height)} opacity={fx.gradientOverlay.opacity} globalCompositeOperation={mapBlendMode(fx.gradientOverlay.blendMode) as "source-over"} listening={false} />
         )}
+        {frameMaskImage !== null && (
+          <KonvaImage
+            x={0}
+            y={0}
+            width={layer.width}
+            height={layer.height}
+            image={frameMaskImage}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            globalCompositeOperation={"destination-in" as any}
+            listening={false}
+          />
+        )}
+        </Group>
       </Group>
 
       {/* מסגרת חיצונית (מעל התמונה, ללא fill) */}

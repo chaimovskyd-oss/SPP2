@@ -1,7 +1,15 @@
 import type { ReactElement } from "react";
 import { useImageEditStore } from "@/state/imageEditStore";
 
-export function ImageEditFloatingBar(): ReactElement | null {
+interface ImageEditFloatingBarProps {
+  onSmartAutoSelect?: () => void;
+  onSmartRefine?: () => void;
+}
+
+export function ImageEditFloatingBar({
+  onSmartAutoSelect,
+  onSmartRefine
+}: ImageEditFloatingBarProps = {}): ReactElement | null {
   const {
     activeTool,
     cropLockRatio, setCropLockRatio,
@@ -14,7 +22,13 @@ export function ImageEditFloatingBar(): ReactElement | null {
     wandTolerance, setWandTolerance,
     wandContiguous, setWandContiguous,
     selectionMask,
-    invertSelection, clearSelection
+    invertSelection, clearSelection,
+    smartSelectionMode, setSmartSelectionMode,
+    smartSelectionSoftness, setSmartSelectionSoftness,
+    smartSelectionStatus,
+    smartSelectionMessage,
+    smartSelectionProgress,
+    clearSmartSelectionPrompts
   } = useImageEditStore();
 
   if (activeTool === null) return null;
@@ -22,16 +36,14 @@ export function ImageEditFloatingBar(): ReactElement | null {
   return (
     <div className="image-edit-floating-bar" data-tool={activeTool}>
       {activeTool === "crop" && (
-        <>
-          <label className="float-param">
-            <input
-              type="checkbox"
-              checked={cropLockRatio}
-              onChange={(e) => setCropLockRatio(e.target.checked)}
-            />
-            נעל יחס
-          </label>
-        </>
+        <label className="float-param">
+          <input
+            type="checkbox"
+            checked={cropLockRatio}
+            onChange={(e) => setCropLockRatio(e.target.checked)}
+          />
+          Lock ratio
+        </label>
       )}
 
       {activeTool === "eraser" && (
@@ -42,18 +54,18 @@ export function ImageEditFloatingBar(): ReactElement | null {
               type="button"
               onClick={() => setEraserMode("erase")}
             >
-              מחיקה
+              Erase
             </button>
             <button
               className={`float-toggle ${eraserMode === "restore" ? "on" : ""}`}
               type="button"
               onClick={() => setEraserMode("restore")}
             >
-              שחזור
+              Restore
             </button>
           </div>
           <label className="float-param">
-            גודל
+            Size
             <input
               type="range"
               min={4}
@@ -64,7 +76,7 @@ export function ImageEditFloatingBar(): ReactElement | null {
             <span>{eraserSize}px</span>
           </label>
           <label className="float-param">
-            ריכוך
+            Feather
             <input
               type="range"
               min={0}
@@ -75,7 +87,7 @@ export function ImageEditFloatingBar(): ReactElement | null {
             />
           </label>
           <label className="float-param">
-            עוצמה
+            Strength
             <input
               type="range"
               min={0.1}
@@ -91,31 +103,89 @@ export function ImageEditFloatingBar(): ReactElement | null {
               checked={showMask}
               onChange={(e) => setShowMask(e.target.checked)}
             />
-            הצג מסכה
+            Show mask
           </label>
         </>
       )}
 
       {activeTool === "white-bg" && (
+        <label className="float-param">
+          Threshold
+          <input
+            type="range"
+            min={5}
+            max={55}
+            value={whiteBackgroundThreshold}
+            onChange={(e) => setWhiteBackgroundThreshold(Number(e.target.value))}
+          />
+          <span>{whiteBackgroundThreshold}</span>
+        </label>
+      )}
+
+      {activeTool === "smart-select" && (
         <>
-          <label className="float-param">
-            Threshold
-            <input
-              type="range"
-              min={5}
-              max={55}
-              value={whiteBackgroundThreshold}
-              onChange={(e) => setWhiteBackgroundThreshold(Number(e.target.value))}
-            />
-            <span>{whiteBackgroundThreshold}</span>
-          </label>
+          <div className="float-param-group">
+            <button
+              className={`float-toggle ${smartSelectionMode === "add" ? "on" : ""}`}
+              type="button"
+              onClick={() => setSmartSelectionMode("add")}
+            >
+              Add
+            </button>
+            <button
+              className={`float-toggle ${smartSelectionMode === "remove" ? "on" : ""}`}
+              type="button"
+              onClick={() => setSmartSelectionMode("remove")}
+            >
+              Remove
+            </button>
+          </div>
+          <div className="float-param-group">
+            <button className="float-toggle" type="button" onClick={onSmartAutoSelect}>
+              Select Object
+            </button>
+            <button className="float-toggle" type="button" disabled={selectionMask === null} onClick={onSmartRefine}>
+              Refine Edges
+            </button>
+          </div>
+          <div className="float-param-group" aria-label="Edge softness">
+            {(["sharp", "natural", "soft"] as const).map((softness) => (
+              <button
+                key={softness}
+                className={`float-toggle ${smartSelectionSoftness === softness ? "on" : ""}`}
+                type="button"
+                onClick={() => setSmartSelectionSoftness(softness)}
+              >
+                {softness}
+              </button>
+            ))}
+          </div>
+          <button className="float-toggle" type="button" onClick={clearSmartSelectionPrompts}>
+            Clear Points
+          </button>
+          <div className="smart-selection-status">
+            <span>{smartSelectionMessage ?? smartSelectionStatus}</span>
+            {smartSelectionProgress !== null && (
+              <div className="smart-selection-progress" aria-label={smartSelectionProgress.message}>
+                <div className="smart-selection-progress-track">
+                  <span
+                    className={smartSelectionProgress.percent == null ? "indeterminate" : ""}
+                    style={smartSelectionProgress.percent == null ? undefined : { width: `${Math.max(0, Math.min(100, smartSelectionProgress.percent))}%` }}
+                  />
+                </div>
+                <span className="smart-selection-progress-text">
+                  {formatSmartSelectionProgress(smartSelectionProgress)}
+                </span>
+              </div>
+            )}
+          </div>
         </>
       )}
 
       {activeTool === "wand" && (
         <>
           <label className="float-param">
-            רגישות
+            Tolerance
             <input
               type="range"
               min={1}
@@ -131,20 +201,38 @@ export function ImageEditFloatingBar(): ReactElement | null {
               checked={wandContiguous}
               onChange={(e) => setWandContiguous(e.target.checked)}
             />
-            אזורים מחוברים
+            Contiguous
           </label>
           {selectionMask !== null && (
             <div className="float-param-group">
               <button className="float-toggle" type="button" onClick={invertSelection}>
-                היפוך בחירה
+                Invert Selection
               </button>
               <button className="float-toggle" type="button" onClick={clearSelection}>
-                נקה בחירה
+                Clear Selection
               </button>
             </div>
           )}
         </>
       )}
+
+      {(activeTool === "rect-select" || activeTool === "smart-select") && selectionMask !== null && (
+        <div className="float-param-group">
+          <button className="float-toggle" type="button" onClick={invertSelection}>
+            Invert Selection
+          </button>
+          <button className="float-toggle" type="button" onClick={clearSelection}>
+            Clear Selection
+          </button>
+        </div>
+      )}
     </div>
   );
+}
+
+function formatSmartSelectionProgress(progress: { message: string; percent?: number | null; bytesDone?: number | null; bytesTotal?: number | null }): string {
+  if (typeof progress.percent === "number") {
+    return `${progress.message} ${Math.round(progress.percent)}%`;
+  }
+  return progress.message;
 }

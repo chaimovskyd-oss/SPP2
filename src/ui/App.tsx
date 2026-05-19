@@ -823,7 +823,7 @@ export function App(): ReactElement {
     setIsCreatingBatch(true);
     setCreatingBatchProgress("טוען תבנית...");
     try {
-      const templateDoc = loadTemplateDocument(result.templateId);
+      const templateDoc = await loadTemplateDocument(result.templateId);
       if (templateDoc === null) throw new Error("Template not found");
       const meta = getBatchProductionMeta(templateDoc);
       if (meta === null) throw new Error("No batch metadata");

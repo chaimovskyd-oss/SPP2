@@ -7,6 +7,11 @@ import { calculateRotateHandlePosition, nodeAABBInCanvasUnits, type RotateHandle
 import { useKonvaImage } from "./useKonvaImage";
 import { createMaskAsset, resolveCanvasAssetPath } from "@/core/assets/assetManager";
 import { runMagicWand } from "@/core/imageEdit/magicWandWorker";
+import {
+  makeSmartSelectionInput,
+  maskResultToSelectionMask,
+  runSmartPromptSelection
+} from "@/services/ai/smartSelectionService";
 import type Konva from "konva";
 import { beginPointer, createInputState, endPointer, movePointer } from "@/core/input/inputSystem";
 import { normalizeRect } from "@/core/bounds/bounds";
@@ -16,7 +21,10 @@ import { marqueeSelect } from "@/core/selection/selectionEngine";
 import { snapLayerBounds, snapLayerPosition, type SnapLine, type SnapLineKind, type SnapSourceRole } from "@/core/snap/snapEngine";
 import { measureTextLayerSize } from "@/core/text/measurement";
 import { useViewportStore } from "@/state/viewportStore";
-import { useImageEditStore } from "@/state/imageEditStore";
+import { useImageEditStore, type SmartSelectionPrompt } from "@/state/imageEditStore";
+import { useDrawingToolsStore } from "@/state/drawingToolsStore";
+import { useColorStore, rgbaToHex } from "@/state/colorStore";
+import { useDocumentStore } from "@/state/documentStore";
 import type { Asset, Page } from "@/types/document";
 import type { Rect as RectType } from "@/types/primitives";
 import type { ImageLayer, TextLayer, VisualLayer } from "@/types/layers";
@@ -28,6 +36,36 @@ import { KonvaLayerNode, type CanvasContextMenuTarget } from "./KonvaLayerNode";
 // object extends beyond the canvas boundary.  Content is clipped to the canvas
 // area by a Konva Group clipFunc; only the Transformer sits outside that clip.
 const OVERFLOW_PAD = 200; // px
+
+// AABB hit-test in canvas units, taking rotation into account.
+// Used for Alt+Click to bypass listening={false} on locked layers.
+function findTopmostLayerAtPoint(layers: Page["layers"], pt: { x: number; y: number }): string | null {
+  const candidates = [...layers]
+    .filter((l) => l.visible !== false && "x" in l && "width" in l && "height" in l)
+    .sort((a, b) => b.zIndex - a.zIndex);
+  for (const l of candidates) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const lx = (l as any).x as number;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ly = (l as any).y as number;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const lw = (l as any).width as number;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const lh = (l as any).height as number;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rot = ((l as any).rotation as number | undefined) ?? 0;
+    if (typeof lx !== "number" || typeof ly !== "number" || typeof lw !== "number" || typeof lh !== "number") continue;
+    const rad = -rot * Math.PI / 180;
+    const dx = pt.x - lx;
+    const dy = pt.y - ly;
+    const localX = dx * Math.cos(rad) - dy * Math.sin(rad);
+    const localY = dx * Math.sin(rad) + dy * Math.cos(rad);
+    if (localX >= 0 && localX <= lw && localY >= 0 && localY <= lh) {
+      return l.id;
+    }
+  }
+  return null;
+}
 
 // ─── Guide color palette ──────────────────────────────────────────────────────
 const GUIDE_COLORS: Partial<Record<SnapLineKind, string>> = {
@@ -45,6 +83,7 @@ interface CanvasStageProps {
   assets: Asset[];
   selectedLayerId: string | null;
   selectedLayerIds: string[];
+  hoveredLayerId?: string | null;
   layoutEditMode: boolean;
   onSelectLayer: (layerId: string | null) => void;
   onSelectLayers: (layerIds: string[]) => void;
@@ -62,6 +101,7 @@ export function CanvasStage({
   assets,
   selectedLayerId,
   selectedLayerIds,
+  hoveredLayerId,
   layoutEditMode,
   onSelectLayer,
   onSelectLayers,
@@ -86,6 +126,78 @@ export function CanvasStage({
   const [marqueeRect, setMarqueeRect] = useState<RectType | null>(null);
   const [smartLines, setSmartLines] = useState<SnapLine[]>([]);
 
+  // ── Drawing tools (no-selection global tools) ─────────────────────────────
+  const drawingTool = useDrawingToolsStore((s) => s.activeTool);
+  const setDrawingTool = useDrawingToolsStore((s) => s.setActiveTool);
+  const sampleColorToStore = useColorStore((s) => s.sampleColor);
+  const [eyedropperPreview, setEyedropperPreview] = useState<{ x: number; y: number; hex: string } | null>(null);
+  const eyedropperRafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (drawingTool !== "eyedropper") setEyedropperPreview(null);
+  }, [drawingTool]);
+
+  function sampleColorAtStagePoint(): string | null {
+    const stage = stageRef.current;
+    if (stage === null) return null;
+    const raw = stage.getPointerPosition();
+    if (raw === null) return null;
+    try {
+      const cnv = stage.toCanvas({ x: raw.x, y: raw.y, width: 1, height: 1, pixelRatio: 1 });
+      const ctx = cnv.getContext("2d");
+      if (ctx === null) return null;
+      const data = ctx.getImageData(0, 0, 1, 1).data;
+      return rgbaToHex(data[0] ?? 0, data[1] ?? 0, data[2] ?? 0);
+    } catch {
+      return null;
+    }
+  }
+
+  function scheduleEyedropperPreview(): void {
+    if (eyedropperRafRef.current !== null) return;
+    eyedropperRafRef.current = requestAnimationFrame(() => {
+      eyedropperRafRef.current = null;
+      const stage = stageRef.current;
+      if (stage === null) return;
+      const raw = stage.getPointerPosition();
+      const hex = sampleColorAtStagePoint();
+      if (raw !== null && hex !== null) {
+        setEyedropperPreview({ x: raw.x, y: raw.y, hex });
+      }
+    });
+  }
+
+  // ── Paint Bucket ──────────────────────────────────────────────────────────
+  const updatePage = useDocumentStore((s) => s.updatePage);
+  function applyBucketFill(canvasPoint: { x: number; y: number }): "ok" | "image-unsupported" | "noop" {
+    const color = useColorStore.getState().currentColor;
+    const hitId = findTopmostLayerAtPoint(page.layers, canvasPoint);
+    if (hitId === null) {
+      // No layer under cursor → fill page background
+      updatePage({ ...page, background: { ...page.background, type: "color", color } });
+      return "ok";
+    }
+    const layer = page.layers.find((l) => l.id === hitId);
+    if (layer === undefined) return "noop";
+    if (layer.type === "shape") {
+      const existingFill = layer.fill;
+      const nextFill = existingFill !== undefined
+        ? { ...existingFill, color }
+        : { version: 1 as const, color, opacity: 1 };
+      onLayerChange({ ...layer, fill: nextFill });
+      return "ok";
+    }
+    if (layer.type === "text") {
+      onLayerChange({ ...layer, color });
+      return "ok";
+    }
+    if (layer.type === "image" || layer.type === "frame") {
+      // Destructive image painting deferred — see plans/serialized-herding-petal.md
+      return "image-unsupported";
+    }
+    return "noop";
+  }
+
   // ── Image edit mode state ────────────────────────────────────────────────────
   const imageEditStore = useImageEditStore();
   const { imageEditMode, editingLayerId: imageEditLayerId, activeTool: imageActiveTool } = imageEditStore;
@@ -96,6 +208,14 @@ export function CanvasStage({
   const [whiteBgPreviewCanvas, setWhiteBgPreviewCanvas] = useState<HTMLCanvasElement | null>(null);
   const [eraserCursorPos, setEraserCursorPos] = useState<{ x: number; y: number } | null>(null);
   const rectStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (imageEditStore.selectionMask === null || (imageActiveTool !== "wand" && imageActiveTool !== "rect-select" && imageActiveTool !== "smart-select" && imageActiveTool !== "brush-select")) {
+      setSelectionCanvas(null);
+      return;
+    }
+    setSelectionCanvas(createSelectionOverlayCanvas(imageEditStore.selectionMask.data, imageEditStore.selectionMask.width, imageEditStore.selectionMask.height));
+  }, [imageEditStore.selectionMask, imageActiveTool]);
 
   // Live snap state — updated via RAF during drag to avoid render thrashing
   const pendingLinesRef = useRef<SnapLine[]>([]);
@@ -150,7 +270,10 @@ export function CanvasStage({
     }
     const nonTransformableIds = new Set(
       page.layers
-        .filter((l) => l.type === "frame" && (l.metadata["gridCell"] !== undefined || l.metadata["maskFrame"] !== undefined || (l.behaviorMode === "layoutLocked" && !layoutEditMode)))
+        .filter((l) =>
+          l.locked ||
+          (l.type === "frame" && (l.metadata["gridCell"] !== undefined || l.metadata["maskFrame"] !== undefined || (l.behaviorMode === "layoutLocked" && !layoutEditMode)))
+        )
         .map((l) => l.id)
     );
     const nodes = selectedLayerIds
@@ -429,6 +552,79 @@ export function CanvasStage({
     onMaskPainted(layer.id, dataUrl, cnv.width, cnv.height);
   }
 
+  // ── Selection brush (paints onto the selection mask inside image-edit) ─────
+  const selectionBrushCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  function paintSelectionBrushStroke(x: number, y: number, prevX: number | null, prevY: number | null): void {
+    const layer = getEditingImageLayer();
+    if (layer === null) return;
+    const cnv = selectionBrushCanvasRef.current;
+    if (cnv === null) return;
+    const ctx = cnv.getContext("2d");
+    if (ctx === null) return;
+    const r = imageEditStore.selectionBrushSize / 2;
+    const lx = x - layer.x;
+    const ly = y - layer.y;
+    const plx = prevX !== null ? prevX - layer.x : lx;
+    const ply = prevY !== null ? prevY - layer.y : ly;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = "#ffffff";
+    if (prevX !== null && prevY !== null) {
+      const steps = Math.max(1, Math.ceil(Math.hypot(lx - plx, ly - ply) / Math.max(1, r * 0.3)));
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const cx = plx + (lx - plx) * t;
+        const cy = ply + (ly - ply) * t;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else {
+      ctx.beginPath();
+      ctx.arc(lx, ly, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  function commitSelectionBrushStroke(): void {
+    const layer = getEditingImageLayer();
+    const cnv = selectionBrushCanvasRef.current;
+    if (layer === null || cnv === null) return;
+    const ctx = cnv.getContext("2d");
+    if (ctx === null) return;
+    const w = layer.width, h = layer.height;
+    const imageData = ctx.getImageData(0, 0, w, h);
+    const data = new Uint8Array(w * h);
+    let any = false;
+    for (let i = 0; i < data.length; i++) {
+      const a = imageData.data[i * 4 + 3] ?? 0;
+      data[i] = a > 32 ? 255 : 0;
+      if (data[i] > 0) any = true;
+    }
+    if (!any) return;
+    const mask = { data, width: w, height: h };
+    if (imageEditStore.selectionBrushMode === "subtract") {
+      imageEditStore.subtractFromSelectionMask(mask);
+    } else {
+      imageEditStore.addToSelectionMask(mask);
+    }
+    // clear stroke buffer for next stroke
+    ctx.clearRect(0, 0, w, h);
+  }
+
+  // Initialize selection-brush canvas when entering brush-select mode
+  useEffect(() => {
+    if (!imageEditMode || imageActiveTool !== "brush-select") {
+      selectionBrushCanvasRef.current = null;
+      return;
+    }
+    const layer = getEditingImageLayer();
+    if (layer === null) return;
+    const cnv = window.document.createElement("canvas");
+    cnv.width = layer.width;
+    cnv.height = layer.height;
+    selectionBrushCanvasRef.current = cnv;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageEditMode, imageActiveTool, imageEditLayerId]);
+
   // Initialize eraser canvas when entering eraser mode
   useEffect(() => {
     if (!imageEditMode || imageActiveTool !== "eraser") return;
@@ -582,34 +778,49 @@ export function CanvasStage({
       contiguous: imageEditStore.wandContiguous
     });
 
-    imageEditStore.setSelectionMask({ data: mask, width, height });
-
-    // Build a selection overlay canvas for rendering
-    const overlayCanvas = window.document.createElement("canvas");
-    overlayCanvas.width = width;
-    overlayCanvas.height = height;
-    const octx = overlayCanvas.getContext("2d");
-    if (octx !== null) {
-      const id = octx.createImageData(width, height);
-      for (let i = 0; i < mask.length; i++) {
-        if (mask[i] > 128) {
-          id.data[i * 4] = 80;
-          id.data[i * 4 + 1] = 130;
-          id.data[i * 4 + 2] = 220;
-          id.data[i * 4 + 3] = 100;
-        }
-      }
-      octx.putImageData(id, 0, 0);
-    }
-    setSelectionCanvas(overlayCanvas);
+    imageEditStore.addToSelectionMask({ data: mask, width, height });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageEditLayerId, imageEditStore.wandTolerance, imageEditStore.wandContiguous, scale, stageWidth, stageHeight]);
+
+  async function handleSmartSelectionPrompt(prompt: SmartSelectionPrompt): Promise<void> {
+    const layer = getEditingImageLayer();
+    if (layer === null) return;
+    const asset = assets.find((item) => item.id === layer.assetId);
+    if (asset === undefined) return;
+    const input = makeSmartSelectionInput(asset, layer);
+    if (input === null) {
+      imageEditStore.setSmartSelectionStatus("error", "Smart selection cannot read this image");
+      return;
+    }
+    const prompts = [...imageEditStore.smartSelectionPrompts, prompt];
+    imageEditStore.addSmartSelectionPrompt(prompt);
+    imageEditStore.setSmartSelectionStatus("working", "Updating smart selection...");
+    imageEditStore.setSmartSelectionProgress({ phase: "predict", message: "Updating smart selection...", percent: null });
+    try {
+      const result = await runSmartPromptSelection({ ...input, prompts });
+      if (result === null) {
+        imageEditStore.setSmartSelectionStatus("error", "Smart selection is unavailable");
+        imageEditStore.setSmartSelectionProgress(null);
+        return;
+      }
+      const mask = await maskResultToSelectionMask(result, input.sourceHash);
+      imageEditStore.setSelectionMask(mask);
+      imageEditStore.setSmartSelectionStatus(result.fallback ? "fallback" : "ready", result.message ?? "Smart selection ready");
+      imageEditStore.setSmartSelectionProgress(null);
+    } catch (error) {
+      imageEditStore.setSmartSelectionStatus("error", error instanceof Error ? error.message : "Smart selection failed");
+      imageEditStore.setSmartSelectionProgress(null);
+    }
+  }
 
   return (
     <div
       className="canvas-frame"
       data-testid="canvas-frame"
-      style={{ transform: `translate(${viewport.panX}px, ${viewport.panY}px)` }}
+      style={{
+        transform: `translate(${viewport.panX}px, ${viewport.panY}px)`,
+        cursor: drawingTool === "eyedropper" ? "crosshair" : undefined
+      }}
       onWheel={(event) => {
         event.preventDefault();
         const direction = event.deltaY > 0 ? 1 / 1.08 : 1.08;
@@ -637,6 +848,27 @@ export function CanvasStage({
             inputStateRef.current = beginPointer(inputStateRef.current, panStartRef.current, event.evt.button);
             return;
           }
+          // Eyedropper: sample pixel at pointer (highest priority, works regardless of selection)
+          if (drawingTool === "eyedropper") {
+            event.evt.preventDefault();
+            const hex = sampleColorAtStagePoint();
+            if (hex !== null) {
+              sampleColorToStore(hex);
+            }
+            if (!event.evt.altKey) {
+              setDrawingTool(null);
+            }
+            return;
+          }
+          // Paint Bucket: fill the layer under the cursor (or page background if empty)
+          if (drawingTool === "bucket") {
+            event.evt.preventDefault();
+            const pointer = getPointerPosition();
+            if (pointer !== null) {
+              applyBucketFill(pointer);
+            }
+            return;
+          }
           // Eraser mode: start painting stroke
           if (imageEditMode && imageActiveTool === "eraser") {
             isPaintingRef.current = true;
@@ -647,16 +879,35 @@ export function CanvasStage({
             }
             return;
           }
-          // Wand/rect-select: handled on mouse up
+          // Selection brush: start painting stroke onto temp mask buffer
+          if (imageEditMode && imageActiveTool === "brush-select") {
+            isPaintingRef.current = true;
+            const pointer = getPointerPosition();
+            if (pointer !== null) {
+              paintSelectionBrushStroke(pointer.x, pointer.y, null, null);
+              lastPaintPosRef.current = pointer;
+              setEraserCursorPos(pointer);
+            }
+            return;
+          }
+          // Wand/rect-select/smart-select: handled on mouse up
           if (imageEditMode && imageActiveTool === "wand") return;
-          // Rect-select: start drag
-          if (imageEditMode && imageActiveTool === "rect-select") {
+          // Rect-select and smart-select box prompt: start drag
+          if (imageEditMode && (imageActiveTool === "rect-select" || imageActiveTool === "smart-select")) {
             const pointer = getPointerPosition();
             if (pointer !== null) rectStartRef.current = pointer;
             return;
           }
           if (event.target === event.target.getStage()) {
             const pointer = getPointerPosition();
+            // Alt+Click bypass: select topmost layer at point, including locked ones
+            if (event.evt.altKey && pointer !== null) {
+              const hit = findTopmostLayerAtPoint(page.layers, pointer);
+              if (hit !== null) {
+                onSelectLayer(hit);
+                return;
+              }
+            }
             if (pointer !== null) {
               inputStateRef.current = beginPointer(inputStateRef.current, pointer, event.evt.button);
             }
@@ -670,6 +921,11 @@ export function CanvasStage({
             panStartRef.current = { x: event.evt.clientX, y: event.evt.clientY };
             return;
           }
+          // Eyedropper: live preview swatch follows pointer
+          if (drawingTool === "eyedropper") {
+            scheduleEyedropperPreview();
+            return;
+          }
           // Update eraser cursor position
           if (imageEditMode && imageActiveTool === "eraser") {
             const pointer = getPointerPosition();
@@ -681,8 +937,19 @@ export function CanvasStage({
             }
             return;
           }
-          // Rect-select: update preview
-          if (imageEditMode && imageActiveTool === "rect-select" && rectStartRef.current !== null) {
+          // Selection brush: paint into temp mask buffer
+          if (imageEditMode && imageActiveTool === "brush-select") {
+            const pointer = getPointerPosition();
+            if (pointer !== null) setEraserCursorPos(pointer);
+            if (isPaintingRef.current && pointer !== null) {
+              const prev = lastPaintPosRef.current;
+              paintSelectionBrushStroke(pointer.x, pointer.y, prev?.x ?? null, prev?.y ?? null);
+              lastPaintPosRef.current = pointer;
+            }
+            return;
+          }
+          // Rect-select and smart-select box prompt: update preview
+          if (imageEditMode && (imageActiveTool === "rect-select" || imageActiveTool === "smart-select") && rectStartRef.current !== null) {
             const pointer = getPointerPosition();
             if (pointer !== null) {
               const editLayer = getEditingImageLayer();
@@ -704,7 +971,7 @@ export function CanvasStage({
             setMarqueeRect(normalizeRect(start, pointer));
           }
         }}
-        onMouseUp={() => {
+        onMouseUp={(event) => {
           // Eraser mode: commit stroke
           if (imageEditMode && imageActiveTool === "eraser") {
             if (isPaintingRef.current) {
@@ -714,12 +981,52 @@ export function CanvasStage({
             }
             return;
           }
+          // Selection brush: commit stroke to mask
+          if (imageEditMode && imageActiveTool === "brush-select") {
+            if (isPaintingRef.current) {
+              isPaintingRef.current = false;
+              lastPaintPosRef.current = null;
+              commitSelectionBrushStroke();
+            }
+            return;
+          }
           // Wand mode: run flood fill on click
           if (imageEditMode && imageActiveTool === "wand") {
             const pointer = getPointerPosition();
             if (pointer !== null) {
               void handleWandClick(pointer.x, pointer.y);
             }
+            return;
+          }
+          // Smart-select: click points or drag box prompts feed the sidecar and update selectionMask
+          if (imageEditMode && imageActiveTool === "smart-select") {
+            const preview = imageEditStore.rectSelectPreview;
+            const editLayer = getEditingImageLayer();
+            const pointer = getPointerPosition();
+            if (editLayer !== null) {
+              const lx = editLayer.x, ly = editLayer.y, lw = editLayer.width, lh = editLayer.height;
+              let prompt: SmartSelectionPrompt | null = null;
+              if (preview !== null && preview.width > 2 && preview.height > 2) {
+                prompt = {
+                  type: "box",
+                  x: Math.max(0, Math.min(1, (preview.x - lx) / lw)),
+                  y: Math.max(0, Math.min(1, (preview.y - ly) / lh)),
+                  width: Math.max(0, Math.min(1, preview.width / lw)),
+                  height: Math.max(0, Math.min(1, preview.height / lh))
+                };
+              } else if (pointer !== null) {
+                const negative = imageEditStore.smartSelectionMode === "remove" || event.evt.altKey || event.evt.button === 2;
+                prompt = {
+                  type: "point",
+                  x: Math.max(0, Math.min(1, (pointer.x - lx) / lw)),
+                  y: Math.max(0, Math.min(1, (pointer.y - ly) / lh)),
+                  label: negative ? "negative" : "positive"
+                };
+              }
+              if (prompt !== null) void handleSmartSelectionPrompt(prompt);
+            }
+            rectStartRef.current = null;
+            imageEditStore.setRectSelectPreview(null);
             return;
           }
           // Rect-select: finalize selection
@@ -743,20 +1050,6 @@ export function CanvasStage({
                 }
               }
               imageEditStore.setSelectionMask({ data: mask, width: w, height: h });
-              // Build overlay canvas
-              const overlayCanvas = window.document.createElement("canvas");
-              overlayCanvas.width = w; overlayCanvas.height = h;
-              const octx = overlayCanvas.getContext("2d");
-              if (octx !== null) {
-                const id = octx.createImageData(w, h);
-                for (let i = 0; i < mask.length; i++) {
-                  if (mask[i] > 0) {
-                    id.data[i * 4] = 80; id.data[i * 4 + 1] = 130; id.data[i * 4 + 2] = 220; id.data[i * 4 + 3] = 100;
-                  }
-                }
-                octx.putImageData(id, 0, 0);
-              }
-              setSelectionCanvas(overlayCanvas);
             }
             rectStartRef.current = null;
             imageEditStore.setRectSelectPreview(null);
@@ -959,6 +1252,61 @@ export function CanvasStage({
               />
             );
           })}
+          {/* Hover highlight from LayerList panel */}
+          {hoveredLayerId !== null && hoveredLayerId !== undefined && !selectedLayerIds.includes(hoveredLayerId) && (() => {
+            const l = page.layers.find((x) => x.id === hoveredLayerId);
+            if (l === undefined) return null;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const lx = (l as any).x as number; const ly = (l as any).y as number;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const lw = (l as any).width as number; const lh = (l as any).height as number;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const rot = ((l as any).rotation as number | undefined) ?? 0;
+            if (typeof lx !== "number" || typeof lw !== "number") return null;
+            return (
+              <Rect
+                name={SCREEN_HELPER_NODE_NAME}
+                x={lx}
+                y={ly}
+                width={lw}
+                height={lh}
+                rotation={rot}
+                stroke="#4D9EF5"
+                strokeWidth={1.5 / scale}
+                dash={[5 / scale, 3 / scale]}
+                fill="transparent"
+                listening={false}
+              />
+            );
+          })()}
+          {/* Outline for selected locked layers (no Transformer attached) */}
+          {selectedLayerIds.map((id) => {
+            const l = page.layers.find((x) => x.id === id);
+            if (l === undefined || !l.locked) return null;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const lx = (l as any).x as number; const ly = (l as any).y as number;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const lw = (l as any).width as number; const lh = (l as any).height as number;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const rot = ((l as any).rotation as number | undefined) ?? 0;
+            if (typeof lx !== "number" || typeof lw !== "number") return null;
+            return (
+              <Rect
+                key={`locked-outline-${id}`}
+                name={SCREEN_HELPER_NODE_NAME}
+                x={lx}
+                y={ly}
+                width={lw}
+                height={lh}
+                rotation={rot}
+                stroke="#8a8a8a"
+                strokeWidth={1 / scale}
+                dash={[6 / scale, 4 / scale]}
+                fill="transparent"
+                listening={false}
+              />
+            );
+          })}
           <Transformer
             ref={transformerRef}
             name={SCREEN_HELPER_NODE_NAME}
@@ -1057,8 +1405,8 @@ export function CanvasStage({
                     listening={false}
                   />
                 )}
-                {/* Selection overlay (wand / rect-select) */}
-                {(imageActiveTool === "wand" || imageActiveTool === "rect-select") && selectionCanvas !== null && (
+                {/* Selection overlay (wand / rect-select / smart-select) */}
+                {(imageActiveTool === "wand" || imageActiveTool === "rect-select" || imageActiveTool === "smart-select") && selectionCanvas !== null && (
                   <KonvaImage
                     x={0} y={0}
                     width={lw}
@@ -1067,8 +1415,8 @@ export function CanvasStage({
                     listening={false}
                   />
                 )}
-                {/* Rect-select drag preview */}
-                {imageActiveTool === "rect-select" && imageEditStore.rectSelectPreview !== null && (() => {
+                {/* Rect-select drag preview / smart-select box prompt */}
+                {(imageActiveTool === "rect-select" || imageActiveTool === "smart-select") && imageEditStore.rectSelectPreview !== null && (() => {
                   const rp = imageEditStore.rectSelectPreview;
                   return (
                     <Rect
@@ -1111,6 +1459,40 @@ export function CanvasStage({
           />
         );
       })()}
+      {/* Eyedropper live preview swatch */}
+      {drawingTool === "eyedropper" && eyedropperPreview !== null && (
+        <div
+          style={{
+            position: "absolute",
+            left: eyedropperPreview.x + 18,
+            top: eyedropperPreview.y - 38,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "4px 7px",
+            background: "rgba(20,20,22,0.92)",
+            color: "#fff",
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+            fontSize: 11,
+            borderRadius: 5,
+            pointerEvents: "none",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
+            zIndex: 401
+          }}
+        >
+          <span
+            style={{
+              display: "inline-block",
+              width: 18,
+              height: 18,
+              borderRadius: 3,
+              background: eyedropperPreview.hex,
+              border: "1px solid rgba(255,255,255,0.6)"
+            }}
+          />
+          <span>{eyedropperPreview.hex}</span>
+        </div>
+      )}
       {/* Eraser brush cursor ring */}
       {imageEditMode && imageActiveTool === "eraser" && eraserCursorPos !== null && (() => {
         const r = imageEditStore.eraserSize / 2 * scale;
@@ -1126,6 +1508,30 @@ export function CanvasStage({
               height: r * 2,
               borderRadius: "50%",
               border: "2px solid rgba(255,255,255,0.9)",
+              outline: "1px solid rgba(0,0,0,0.5)",
+              pointerEvents: "none",
+              boxSizing: "border-box",
+              zIndex: 400
+            }}
+          />
+        );
+      })()}
+      {/* Selection brush cursor ring (image-edit) */}
+      {imageEditMode && imageActiveTool === "brush-select" && eraserCursorPos !== null && (() => {
+        const r = imageEditStore.selectionBrushSize / 2 * scale;
+        const cx = eraserCursorPos.x * scale;
+        const cy = eraserCursorPos.y * scale;
+        const subtract = imageEditStore.selectionBrushMode === "subtract";
+        return (
+          <div
+            style={{
+              position: "absolute",
+              left: cx - r,
+              top: cy - r,
+              width: r * 2,
+              height: r * 2,
+              borderRadius: "50%",
+              border: subtract ? "2px dashed rgba(255,80,80,0.95)" : "2px solid rgba(80,180,255,0.95)",
               outline: "1px solid rgba(0,0,0,0.5)",
               pointerEvents: "none",
               boxSizing: "border-box",
@@ -1319,6 +1725,25 @@ function RulerOverlay({ page, scale }: { page: Page; scale: number }): React.Rea
 }
 
 // ─── Background image node ────────────────────────────────────────────────────
+
+function createSelectionOverlayCanvas(data: Uint8Array, width: number, height: number): HTMLCanvasElement {
+  const overlayCanvas = window.document.createElement("canvas");
+  overlayCanvas.width = width;
+  overlayCanvas.height = height;
+  const context = overlayCanvas.getContext("2d");
+  if (context === null) return overlayCanvas;
+  const imageData = context.createImageData(width, height);
+  for (let i = 0; i < data.length; i += 1) {
+    if (data[i] > 128) {
+      imageData.data[i * 4] = 80;
+      imageData.data[i * 4 + 1] = 130;
+      imageData.data[i * 4 + 2] = 220;
+      imageData.data[i * 4 + 3] = 100;
+    }
+  }
+  context.putImageData(imageData, 0, 0);
+  return overlayCanvas;
+}
 
 function BackgroundImageNode({
   assetId,

@@ -72,7 +72,9 @@ function getPythonEnvBase() {
   // Common env vars added to every Python spawn so model caches and config
   // land in writable user data, not in Program Files.
   const modelsDir = getModelsCacheDir();
+  const logsDir = path.join(app.getPath("userData"), "logs");
   fs.mkdirSync(modelsDir, { recursive: true });
+  fs.mkdirSync(logsDir, { recursive: true });
   return {
     PYTHONIOENCODING: "utf-8",
     PYTHONUTF8: "1",
@@ -81,6 +83,7 @@ function getPythonEnvBase() {
     HF_HOME: modelsDir,
     XDG_CACHE_HOME: modelsDir,
     SPP2_MODELS_DIR: modelsDir,
+    SPP2_LOGS_DIR: logsDir,
     SPP2_USER_DATA_DIR: app.getPath("userData")
   };
 }
@@ -144,6 +147,113 @@ function runPython(scriptPath, args, options = {}) {
 }
 
 // ─── Image Editor IPC ─────────────────────────────────────────────────────────
+
+class SmartSelectionSidecar {
+  constructor() {
+    this.proc = null;
+    this.nextId = 1;
+    this.pending = new Map();
+    this.stdoutBuffer = Buffer.alloc(0);
+  }
+
+  ensureStarted() {
+    if (this.proc && !this.proc.killed) return;
+    const scriptPath = path.join(getEngineDir(), "smart_selection", "sidecar.py");
+    if (!fs.existsSync(scriptPath)) throw new Error(`Smart Selection sidecar not found: ${scriptPath}`);
+    this.proc = spawn(getPythonCommand(), ["-u", scriptPath], {
+      cwd: getEngineDir(),
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+      env: {
+        ...process.env,
+        ...getPythonEnvBase(),
+        PYTHONPATH: [getEngineDir(), process.env.PYTHONPATH || ""].filter(Boolean).join(path.delimiter)
+      }
+    });
+    this.proc.stdout.on("data", (chunk) => this.onStdout(chunk));
+    this.proc.stderr.on("data", (chunk) => {
+      const text = chunk.toString().trim();
+      if (text) console.warn("[smart-selection:error]", text);
+    });
+    this.proc.on("close", (code) => {
+      this.rejectAll(new Error(`Smart Selection sidecar exited with code ${code}`));
+      this.proc = null;
+      this.stdoutBuffer = Buffer.alloc(0);
+    });
+    this.proc.on("error", (err) => {
+      this.rejectAll(err);
+      this.proc = null;
+    });
+  }
+
+  onStdout(chunk) {
+    this.stdoutBuffer = Buffer.concat([this.stdoutBuffer, chunk]);
+    while (this.stdoutBuffer.length >= 4) {
+      const length = this.stdoutBuffer.readUInt32BE(0);
+      if (this.stdoutBuffer.length < 4 + length) return;
+      const body = this.stdoutBuffer.subarray(4, 4 + length).toString("utf-8");
+      this.stdoutBuffer = this.stdoutBuffer.subarray(4 + length);
+      const message = JSON.parse(body);
+      if (message.event === "smart-selection-progress") {
+        for (const win of BrowserWindow.getAllWindows()) {
+          if (!win.isDestroyed()) win.webContents.send("spp:smart-selection:progress", message.payload || {});
+        }
+        continue;
+      }
+      const pending = this.pending.get(message.id);
+      if (!pending) continue;
+      this.pending.delete(message.id);
+      if (message.error) pending.reject(new Error(message.error.message || String(message.error)));
+      else pending.resolve(message.result);
+    }
+  }
+
+  call(method, params = {}, timeoutMs = 120000) {
+    this.ensureStarted();
+    const id = this.nextId++;
+    const payload = Buffer.from(JSON.stringify({ id, method, params }), "utf-8");
+    const header = Buffer.alloc(4);
+    header.writeUInt32BE(payload.length, 0);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Smart Selection timed out: ${method}`));
+      }, timeoutMs);
+      this.pending.set(id, {
+        resolve: (value) => { clearTimeout(timer); resolve(value); },
+        reject: (error) => { clearTimeout(timer); reject(error); }
+      });
+      this.proc.stdin.write(Buffer.concat([header, payload]), (err) => {
+        if (!err) return;
+        this.pending.delete(id);
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
+  }
+
+  rejectAll(error) {
+    for (const pending of this.pending.values()) pending.reject(error);
+    this.pending.clear();
+  }
+
+  shutdown() {
+    if (!this.proc) return;
+    this.proc.kill();
+    this.proc = null;
+  }
+}
+
+const smartSelectionSidecar = new SmartSelectionSidecar();
+
+function smartSelectionCall(method, params = {}, timeoutMs) {
+  return smartSelectionSidecar.call(method, params, timeoutMs).catch((err) => ({
+    ok: false,
+    error: err instanceof Error ? err.message : String(err),
+    fallback: true,
+    message: "Smart Selection is running in fallback mode."
+  }));
+}
 
 ipcMain.handle("spp:write-temp-image", async (_event, dataUrl, ext) => {
   const base64 = dataUrl.replace(/^data:[^;]+;base64,/, "");
@@ -396,6 +506,18 @@ function spawnPrintPreview(args, engineDir) {
   });
 }
 
+ipcMain.handle("spp:smart-selection:health", async () => smartSelectionCall("health", {}, 8000));
+ipcMain.handle("spp:smart-selection:set-performance-profile", async (_event, profile) => smartSelectionCall("set_performance_profile", { profile }, 8000));
+ipcMain.handle("spp:smart-selection:ensure-model", async (_event, modelId) => smartSelectionCall("ensure_model", { model_id: modelId }, 120000));
+ipcMain.handle("spp:smart-selection:list-models", async () => smartSelectionCall("list_models", {}, 8000));
+ipcMain.handle("spp:smart-selection:load-image", async (_event, imageId, imagePath, sourceHash) => smartSelectionCall("load_image", { image_id: imageId, path: imagePath, source_hash: sourceHash }, 30000));
+ipcMain.handle("spp:smart-selection:encode-sam", async (_event, imageId) => smartSelectionCall("encode_sam", { image_id: imageId }, 120000));
+ipcMain.handle("spp:smart-selection:auto-segment", async (_event, imageId, options) => smartSelectionCall("auto_segment", { image_id: imageId, options: options || {} }, 120000));
+ipcMain.handle("spp:smart-selection:predict-mask", async (_event, imageId, options) => smartSelectionCall("predict_mask", { image_id: imageId, options: options || {} }, 30000));
+ipcMain.handle("spp:smart-selection:refine-mask", async (_event, imageId, options) => smartSelectionCall("refine_mask", { image_id: imageId, options: options || {} }, 120000));
+ipcMain.handle("spp:smart-selection:unload-image", async (_event, imageId) => smartSelectionCall("unload_image", { image_id: imageId }, 8000));
+ipcMain.handle("spp:smart-selection:cancel", async (_event, requestId) => smartSelectionCall("cancel", { request_id: requestId }, 8000));
+
 ipcMain.handle("spp:open-print-preview", async (_event, payload) => {
   const engineDir = getPrintPreviewEngineDir();
   const scriptPath = path.join(engineDir, "launch_spp2_print_preview.py");
@@ -457,6 +579,108 @@ ipcMain.handle("spp:open-print-preview", async (_event, payload) => {
 });
 
 // ─── External Apps & Utilities IPC ────────────────────────────────────────────
+
+// ─── Batch Templates IPC ──────────────────────────────────────────────────────
+// Batch templates are stored as full SPP packages on disk so background/asset
+// quality is preserved (see C:\Users\chaim\.claude\plans\we-need-to-fix-starry-horizon.md).
+
+function getBatchTemplatesDir() {
+  const dir = path.join(app.getPath("userData"), "SPP2", "batch-templates");
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function getBatchTemplatesIndexPath() {
+  return path.join(getBatchTemplatesDir(), "templates-index.json");
+}
+
+function getBatchTemplateFolder(templateId) {
+  // templateId is a UUID; reject anything else to keep us safely inside the dir.
+  if (typeof templateId !== "string" || !/^[A-Za-z0-9_-]+$/.test(templateId)) {
+    throw new Error("Invalid templateId");
+  }
+  return path.join(getBatchTemplatesDir(), `template_${templateId}`);
+}
+
+function readBatchTemplatesIndex() {
+  try {
+    const raw = fs.readFileSync(getBatchTemplatesIndexPath(), "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+function writeBatchTemplatesIndex(items) {
+  fs.writeFileSync(getBatchTemplatesIndexPath(), JSON.stringify(items, null, 2), "utf-8");
+}
+
+ipcMain.handle("spp:batch-template:save", async (_event, payload) => {
+  try {
+    const { templateId, packageBytes, thumbnailPngBytes, indexItem } = payload;
+    const folder = getBatchTemplateFolder(templateId);
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, "template.spp2"), Buffer.from(packageBytes));
+    if (thumbnailPngBytes && thumbnailPngBytes.byteLength > 0) {
+      fs.writeFileSync(path.join(folder, "thumbnail.png"), Buffer.from(thumbnailPngBytes));
+    }
+
+    const items = readBatchTemplatesIndex();
+    const idx = items.findIndex((t) => t.templateId === templateId);
+    const next = idx >= 0
+      ? items.map((t, i) => (i === idx ? indexItem : t))
+      : [...items, indexItem];
+    writeBatchTemplatesIndex(next);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle("spp:batch-template:load", async (_event, templateId) => {
+  try {
+    const folder = getBatchTemplateFolder(templateId);
+    const pkgPath = path.join(folder, "template.spp2");
+    if (!fs.existsSync(pkgPath)) return { success: false, error: "Template not found" };
+    const buf = fs.readFileSync(pkgPath);
+    return { success: true, packageBytes: buf };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle("spp:batch-template:list", async () => {
+  try {
+    return { success: true, items: readBatchTemplatesIndex() };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle("spp:batch-template:load-thumbnail", async (_event, templateId) => {
+  try {
+    const folder = getBatchTemplateFolder(templateId);
+    const thumbPath = path.join(folder, "thumbnail.png");
+    if (!fs.existsSync(thumbPath)) return { success: true, thumbnailBytes: null };
+    return { success: true, thumbnailBytes: fs.readFileSync(thumbPath) };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle("spp:batch-template:delete", async (_event, templateId) => {
+  try {
+    const folder = getBatchTemplateFolder(templateId);
+    if (fs.existsSync(folder)) {
+      fs.rmSync(folder, { recursive: true, force: true });
+    }
+    const items = readBatchTemplatesIndex().filter((t) => t.templateId !== templateId);
+    writeBatchTemplatesIndex(items);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
 
 ipcMain.handle("spp:open-url", async (_event, url) => {
   await shell.openExternal(url);
@@ -929,6 +1153,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
+  smartSelectionSidecar.shutdown();
   for (const watcher of fileWatchers.values()) {
     watcher.close();
   }
@@ -937,6 +1162,10 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+app.on("before-quit", () => {
+  smartSelectionSidecar.shutdown();
 });
 
 app.on("activate", () => {

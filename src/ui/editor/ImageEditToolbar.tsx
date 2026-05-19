@@ -1,4 +1,4 @@
-import { Check, Crop, Eraser, RectangleHorizontal, RotateCcw, Scissors, Wand2, X } from "lucide-react";
+import { Brush, Check, Copy, Crop, Eraser, RectangleHorizontal, RotateCcw, Scissors, Sparkles, Trash2, Wand2, X } from "lucide-react";
 import type { ReactElement } from "react";
 import { useImageEditStore, type ImageEditTool } from "@/state/imageEditStore";
 
@@ -8,6 +8,13 @@ interface ImageEditToolbarProps {
   onResetCrop: () => void;
   onResetMask: () => void;
   onDeleteSelection: () => void;
+  onCopySelection: () => void;
+  onCutSelection: () => void;
+  onClearSelection: () => void;
+}
+
+function isSelectionTool(tool: ImageEditTool | null): boolean {
+  return tool === "wand" || tool === "rect-select" || tool === "smart-select" || tool === "brush-select";
 }
 
 export function ImageEditToolbar({
@@ -15,12 +22,19 @@ export function ImageEditToolbar({
   onCancel,
   onResetCrop,
   onResetMask,
-  onDeleteSelection
+  onDeleteSelection,
+  onCopySelection,
+  onCutSelection,
+  onClearSelection
 }: ImageEditToolbarProps): ReactElement {
   const activeTool = useImageEditStore((s) => s.activeTool);
   const selectionMask = useImageEditStore((s) => s.selectionMask);
   const setActiveTool = useImageEditStore((s) => s.setActiveTool);
   const hasSelection = selectionMask !== null;
+  const selectionBrushSize = useImageEditStore((s) => s.selectionBrushSize);
+  const setSelectionBrushSize = useImageEditStore((s) => s.setSelectionBrushSize);
+  const selectionBrushMode = useImageEditStore((s) => s.selectionBrushMode);
+  const setSelectionBrushMode = useImageEditStore((s) => s.setSelectionBrushMode);
 
   function toolBtn(tool: ImageEditTool, icon: ReactElement, label: string): ReactElement {
     return (
@@ -38,51 +52,93 @@ export function ImageEditToolbar({
 
   return (
     <section className="context-toolbar image-edit-mode" aria-label="Image edit toolbar" data-testid="image-edit-toolbar">
-      <span className="context-toolbar-label">עריכת תמונה</span>
+      <span className="context-toolbar-label">Image Edit</span>
 
       <div className="context-group">
-        {toolBtn("crop", <Crop size={14} />, "קרופ")}
-        {toolBtn("eraser", <Eraser size={14} />, "מחיקה")}
-        {toolBtn("white-bg", <Scissors size={14} />, "הסר רקע לבן")}
-        {toolBtn("wand", <Wand2 size={14} />, "שרביט קסם")}
-        {toolBtn("rect-select", <RectangleHorizontal size={14} />, "בחירה מרובעת")}
+        {toolBtn("crop", <Crop size={14} />, "Crop")}
+        {toolBtn("eraser", <Eraser size={14} />, "Eraser")}
+        {toolBtn("white-bg", <Scissors size={14} />, "Remove white background")}
+        {toolBtn("smart-select", <Sparkles size={14} />, "Smart Select")}
+        {toolBtn("wand", <Wand2 size={14} />, "Magic Wand")}
+        {toolBtn("rect-select", <RectangleHorizontal size={14} />, "Rect Select")}
+        {toolBtn("brush-select", <Brush size={14} />, "מכחול סימון")}
       </div>
+
+      {activeTool === "brush-select" && (
+        <div className="context-group">
+          <label className="ctx-slider" title="גודל מכחול">
+            <span className="ctx-btn-label">גודל</span>
+            <input
+              type="range"
+              min={4}
+              max={300}
+              value={selectionBrushSize}
+              onChange={(e) => setSelectionBrushSize(Number(e.target.value))}
+            />
+            <span className="ctx-btn-label" style={{ minWidth: 26, textAlign: "center" }}>{selectionBrushSize}</span>
+          </label>
+          <button
+            className={`context-icon ${selectionBrushMode === "add" ? "on" : ""}`}
+            title="הוסף לבחירה"
+            type="button"
+            onClick={() => setSelectionBrushMode("add")}
+          >
+            <span className="ctx-btn-label">+ הוסף</span>
+          </button>
+          <button
+            className={`context-icon ${selectionBrushMode === "subtract" ? "on" : ""}`}
+            title="הסר מהבחירה"
+            type="button"
+            onClick={() => setSelectionBrushMode("subtract")}
+          >
+            <span className="ctx-btn-label">− הסר</span>
+          </button>
+        </div>
+      )}
 
       <div className="context-group">
         {activeTool === "crop" && (
-          <button className="context-icon" title="איפוס קרופ" type="button" onClick={onResetCrop}>
+          <button className="context-icon" title="Reset crop" type="button" onClick={onResetCrop}>
             <RotateCcw size={14} />
-            <span className="ctx-btn-label">איפוס קרופ</span>
+            <span className="ctx-btn-label">Reset Crop</span>
           </button>
         )}
-        {(activeTool === "eraser" || activeTool === "wand" || activeTool === "rect-select") && (
-          <button className="context-icon" title="איפוס מסכה" type="button" onClick={onResetMask}>
+        {(activeTool === "eraser" || isSelectionTool(activeTool)) && (
+          <button className="context-icon" title="Reset mask" type="button" onClick={onResetMask}>
             <RotateCcw size={14} />
-            <span className="ctx-btn-label">איפוס מסכה</span>
+            <span className="ctx-btn-label">Reset Mask</span>
           </button>
         )}
-        {/* Delete selection — active for wand/rect-select with active selection */}
-        {hasSelection && (activeTool === "wand" || activeTool === "rect-select") && (
-          <button
-            className="context-icon danger"
-            title="מחק בחירה (Delete)"
-            type="button"
-            onClick={onDeleteSelection}
-          >
-            <Scissors size={14} />
-            <span className="ctx-btn-label">מחק בחירה</span>
-          </button>
+        {hasSelection && isSelectionTool(activeTool) && (
+          <>
+            <button className="context-icon" title="Copy selection to new layer" type="button" onClick={onCopySelection}>
+              <Copy size={14} />
+              <span className="ctx-btn-label">Copy Layer</span>
+            </button>
+            <button className="context-icon" title="Cut selection to new layer" type="button" onClick={onCutSelection}>
+              <Scissors size={14} />
+              <span className="ctx-btn-label">Cut Layer</span>
+            </button>
+            <button className="context-icon danger" title="Delete selection" type="button" onClick={onDeleteSelection}>
+              <Trash2 size={14} />
+              <span className="ctx-btn-label">Delete</span>
+            </button>
+            <button className="context-icon" title="Clear selection" type="button" onClick={onClearSelection}>
+              <X size={14} />
+              <span className="ctx-btn-label">Clear</span>
+            </button>
+          </>
         )}
       </div>
 
       <div className="context-group" style={{ marginInlineStart: "auto" }}>
-        <button className="context-icon danger" title="בטל (Escape)" type="button" onClick={onCancel}>
+        <button className="context-icon danger" title="Cancel" type="button" onClick={onCancel}>
           <X size={14} />
-          <span className="ctx-btn-label">בטל</span>
+          <span className="ctx-btn-label">Cancel</span>
         </button>
-        <button className="context-icon on" title="החל שינויים" type="button" onClick={onApply}>
+        <button className="context-icon on" title="Apply changes" type="button" onClick={onApply}>
           <Check size={14} />
-          <span className="ctx-btn-label">החל</span>
+          <span className="ctx-btn-label">Apply</span>
         </button>
       </div>
     </section>

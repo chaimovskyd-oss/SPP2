@@ -42,6 +42,25 @@ contextBridge.exposeInMainWorld("spp", {
   applyImageParams: (inputPath, outputPath, paramsJson) =>
     ipcRenderer.invoke("spp:apply-image-params", inputPath, outputPath, paramsJson),
 
+  smartSelection: {
+    health: () => ipcRenderer.invoke("spp:smart-selection:health"),
+    setPerformanceProfile: (profile) => ipcRenderer.invoke("spp:smart-selection:set-performance-profile", profile),
+    ensureModel: (modelId) => ipcRenderer.invoke("spp:smart-selection:ensure-model", modelId),
+    listModels: () => ipcRenderer.invoke("spp:smart-selection:list-models"),
+    loadImage: (imageId, imagePath, sourceHash) => ipcRenderer.invoke("spp:smart-selection:load-image", imageId, imagePath, sourceHash),
+    encodeSam: (imageId) => ipcRenderer.invoke("spp:smart-selection:encode-sam", imageId),
+    autoSegment: (imageId, options) => ipcRenderer.invoke("spp:smart-selection:auto-segment", imageId, options),
+    predictMask: (imageId, options) => ipcRenderer.invoke("spp:smart-selection:predict-mask", imageId, options),
+    refineMask: (imageId, options) => ipcRenderer.invoke("spp:smart-selection:refine-mask", imageId, options),
+    unloadImage: (imageId) => ipcRenderer.invoke("spp:smart-selection:unload-image", imageId),
+    cancel: (requestId) => ipcRenderer.invoke("spp:smart-selection:cancel", requestId),
+    onProgress: (callback) => {
+      const handler = (_event, payload) => callback(payload);
+      ipcRenderer.on("spp:smart-selection:progress", handler);
+      return () => ipcRenderer.removeListener("spp:smart-selection:progress", handler);
+    },
+  },
+
   openUrl: (url) =>
     ipcRenderer.invoke("spp:open-url", url),
 
@@ -67,6 +86,15 @@ contextBridge.exposeInMainWorld("spp", {
     const handler = (_event, watchId, filePath) => callback(watchId, filePath);
     ipcRenderer.on("spp:file-changed", handler);
     return () => ipcRenderer.removeListener("spp:file-changed", handler);
+  },
+
+  /** Batch Production Templates — stored as full SPP packages in userData. */
+  batchTemplates: {
+    save: (payload) => ipcRenderer.invoke("spp:batch-template:save", payload),
+    load: (templateId) => ipcRenderer.invoke("spp:batch-template:load", templateId),
+    loadThumbnail: (templateId) => ipcRenderer.invoke("spp:batch-template:load-thumbnail", templateId),
+    list: () => ipcRenderer.invoke("spp:batch-template:list"),
+    delete: (templateId) => ipcRenderer.invoke("spp:batch-template:delete", templateId),
   },
 
   /** Product Library — persistent read/write via Python backend. */

@@ -70,6 +70,7 @@ export interface CreateFrameLayerOptions {
   contentTransform?: Partial<ContentTransform>;
   padding?: number;
   cornerRadius?: number;
+  maskSource?: FrameLayer["maskSource"];
   linkedGroup?: string;
   batchIndex?: number;
   smartCropMode?: FrameLayer["smartCropMode"];
@@ -101,6 +102,7 @@ export function createFrameLayer(options: CreateFrameLayerOptions): FrameLayer {
     crop: { ...defaultCrop },
     padding: options.padding ?? 0,
     cornerRadius: options.cornerRadius,
+    maskSource: options.maskSource,
     linkedGroup: options.linkedGroup,
     batchIndex: options.batchIndex,
     smartCropMode: options.smartCropMode ?? "none",

@@ -365,11 +365,16 @@ export function BatchProductionWizard({
   const [records, setRecords] = useState<BatchRecord[]>([]);
 
   // Load template variable fields so we know which text columns to show
-  const textFields = useMemo((): BatchTextVariableField[] => {
-    const doc = loadTemplateDocument(template.templateId);
-    if (!doc) return [];
-    const meta = getBatchProductionMeta(doc);
-    return (meta?.variableFields.filter((f) => f.type === "text") ?? []) as BatchTextVariableField[];
+  const [textFields, setTextFields] = useState<BatchTextVariableField[]>([]);
+  useEffect(() => {
+    void (async () => {
+      const doc = await loadTemplateDocument(template.templateId);
+      if (!doc) return;
+      const meta = getBatchProductionMeta(doc);
+      setTextFields(
+        (meta?.variableFields.filter((f) => f.type === "text") ?? []) as BatchTextVariableField[],
+      );
+    })();
   }, [template.templateId]);
 
   // Revoke blob URLs on unmount

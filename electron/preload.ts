@@ -66,6 +66,25 @@ contextBridge.exposeInMainWorld("spp", {
   applyImageParams: (inputPath: string, outputPath: string, paramsJson: string): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke("spp:apply-image-params", inputPath, outputPath, paramsJson),
 
+  smartSelection: {
+    health: () => ipcRenderer.invoke("spp:smart-selection:health"),
+    setPerformanceProfile: (profile: string) => ipcRenderer.invoke("spp:smart-selection:set-performance-profile", profile),
+    ensureModel: (modelId: string) => ipcRenderer.invoke("spp:smart-selection:ensure-model", modelId),
+    listModels: () => ipcRenderer.invoke("spp:smart-selection:list-models"),
+    loadImage: (imageId: string, imagePath: string, sourceHash: string) => ipcRenderer.invoke("spp:smart-selection:load-image", imageId, imagePath, sourceHash),
+    encodeSam: (imageId: string) => ipcRenderer.invoke("spp:smart-selection:encode-sam", imageId),
+    autoSegment: (imageId: string, options: unknown) => ipcRenderer.invoke("spp:smart-selection:auto-segment", imageId, options),
+    predictMask: (imageId: string, options: unknown) => ipcRenderer.invoke("spp:smart-selection:predict-mask", imageId, options),
+    refineMask: (imageId: string, options: unknown) => ipcRenderer.invoke("spp:smart-selection:refine-mask", imageId, options),
+    unloadImage: (imageId: string) => ipcRenderer.invoke("spp:smart-selection:unload-image", imageId),
+    cancel: (requestId: string) => ipcRenderer.invoke("spp:smart-selection:cancel", requestId),
+    onProgress: (callback: (payload: unknown) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);
+      ipcRenderer.on("spp:smart-selection:progress", handler);
+      return () => ipcRenderer.removeListener("spp:smart-selection:progress", handler);
+    },
+  },
+
   /** Open a URL in the default system browser. */
   openUrl: (url: string): Promise<void> =>
     ipcRenderer.invoke("spp:open-url", url),
