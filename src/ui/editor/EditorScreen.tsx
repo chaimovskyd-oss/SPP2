@@ -169,6 +169,7 @@ import { isPrintPreviewAvailable, openPrintPreviewForRenderedPage, openPrintPrev
 import {
   maskResultToSelectionMask,
   runSmartAutoSegment,
+  runSmartInpaintRemove,
   runSmartRefineMask
 } from "@/services/ai/smartSelectionService";
 import { PrintRangeDialog } from "@/ui/print/PrintRangeDialog";
@@ -309,6 +310,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const projectInputRef = useRef<HTMLInputElement>(null);
   const autosaveRef = useRef(new AutosaveManager({ intervalMs: 1000 * 60 * 2, debounceMs: 3000, actionThreshold: 20 }));
   const lastAutosavedRevisionRef = useRef(0);
+  const aiFillInFlightRef = useRef(false);
   const [tool, setTool] = useState<ToolId>("move");
   const [leftTab, setLeftTab] = useState<"layers" | "pages" | "settings" | "collage" | "emoji">("layers");
   const [collageSwapSourceSlotId, setCollageSwapSourceSlotId] = useState<string | null>(null);
@@ -370,6 +372,13 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   useEffect(() => {
     const unsubscribe = window.spp?.smartSelection?.onProgress?.((progress) => {
       const store = useImageEditStore.getState();
+      if (progress.operation === "inpaint_remove") {
+        store.setAiFillProgress(progress);
+        if (progress.phase !== "ready") {
+          store.setAiFillStatus("working", progress.message);
+        }
+        return;
+      }
       store.setSmartSelectionProgress(progress);
       if (progress.phase !== "ready") {
         store.setSmartSelectionStatus("working", progress.message);
@@ -2088,6 +2097,120 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     }
   }
 
+  async function handleAiFillSelection(): Promise<void> {
+    if (aiFillInFlightRef.current) return;
+    const target = getSmartSelectionTarget();
+    const store = useImageEditStore.getState();
+    const selection = store.selectionMask;
+    if (target === null || activePage === null || selection === null) {
+      setStatus("Select an area first");
+      return;
+    }
+    const selectedPixels = countSelectedPixels(selection.data);
+    if (selectedPixels === 0) {
+      setStatus("Select an area first");
+      return;
+    }
+    const selectedRatio = selectedPixels / Math.max(1, selection.width * selection.height);
+    if (selectedRatio > 0.5) {
+      const message = "Selection is too large for AI Fill; choose a smaller area";
+      store.setAiFillStatus("error", message);
+      store.setAiFillProgress(null);
+      setStatus(message);
+      return;
+    }
+    aiFillInFlightRef.current = true;
+    store.setAiFillStatus("preparing", selectedRatio > 0.3 ? "Large selection: preparing ROI fill..." : "Preparing AI Fill...");
+    store.setAiFillProgress({ operation: "inpaint_remove", phase: "prepare", message: "Preparing AI Fill...", percent: null });
+    setStatus(selectedRatio > 0.3 ? "Large selection: preparing ROI fill..." : "Preparing AI Fill...");
+    try {
+      const result = await runSmartInpaintRemove(target.asset, target.layer, selection);
+      if (result === null) {
+        const message = "AI Fill is unavailable";
+        store.setAiFillStatus("error", message);
+        store.setAiFillProgress(null);
+        setStatus(message);
+        return;
+      }
+      const rendered = await renderImageLayerToSelectionCanvas(target.layer, target.asset, currentDocument.assets, selection.width, selection.height);
+      if (rendered === null) {
+        throw new Error("Cannot render the selected layer for AI Fill");
+      }
+      const filledDataUrl = await composeInpaintPatch(rendered, result.patchPngBase64, result.roi);
+      const generatedAsset: Asset = {
+        version: 1,
+        id: crypto.randomUUID(),
+        name: `${target.asset.name.replace(/\.[^/.]+$/, "")} ai-fill.png`,
+        kind: "image",
+        status: "ready",
+        originalPath: filledDataUrl,
+        previewPath: filledDataUrl,
+        thumbnailPath: filledDataUrl,
+        mimeType: "image/png",
+        width: selection.width,
+        height: selection.height,
+        fileSize: Math.round(filledDataUrl.length * 0.75),
+        hash: `${target.asset.hash ?? target.asset.checksum ?? target.asset.id}:ai-fill:${Date.now()}`,
+        checksum: `${target.asset.checksum ?? target.asset.hash ?? target.asset.id}:ai-fill:${Date.now()}`,
+        metadata: {
+          generatedBy: "ai-fill",
+          sourceAssetId: target.asset.id,
+          sourceLayerId: target.layer.id,
+          roiX: result.roi.x,
+          roiY: result.roi.y,
+          roiWidth: result.roi.width,
+          roiHeight: result.roi.height,
+          modelId: result.modelId,
+          modelVersion: result.modelVersion,
+          fallback: result.fallback,
+          processingMs: result.processingMs,
+          createdAt: new Date().toISOString()
+        }
+      };
+      const nextMetadata = { ...target.layer.metadata };
+      delete nextMetadata["flipH"];
+      delete nextMetadata["flipV"];
+      const nextLayer: ImageLayer = {
+        ...target.layer,
+        assetId: generatedAsset.id,
+        crop: { x: 0, y: 0, width: 1, height: 1 },
+        pixelMask: undefined,
+        imageOffsetX: 0,
+        imageOffsetY: 0,
+        imageScale: 1,
+        metadata: {
+          ...nextMetadata,
+          aiFillSourceAssetId: target.asset.id,
+          aiFillModelId: result.modelId,
+          aiFillFallback: result.fallback
+        }
+      };
+      applyDocumentChange("AiFillRemoveAction", (doc) => ({
+        ...doc,
+        assets: [...doc.assets, generatedAsset],
+        pages: doc.pages.map((page) => page.id === activePage.id ? {
+          ...page,
+          layers: page.layers.map((layer) => layer.id === target.layer.id ? nextLayer : layer)
+        } : page)
+      }), activePage.id);
+      store.clearSelection();
+      store.setAiFillStatus(result.fallback ? "fallback" : "ready", result.message);
+      store.setAiFillProgress(null);
+      setStatus(result.fallback ? "Fast fallback fill applied" : "AI Fill applied");
+    } catch (error) {
+      const message = error instanceof Error && error.message === "selection_too_large"
+        ? "Selection is too large for AI Fill; choose a smaller area"
+        : error instanceof Error
+          ? error.message
+          : "AI Fill failed";
+      store.setAiFillStatus("error", message);
+      store.setAiFillProgress(null);
+      setStatus(message);
+    } finally {
+      aiFillInFlightRef.current = false;
+    }
+  }
+
   function handleSelectAllLayers(): void {
     const selectableIds = currentPage.layers
       .filter((layer) => layer.type !== "background" && layer.type !== "guide" && !layer.locked)
@@ -2131,7 +2254,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
       exitImageEditMode();
       return;
     }
-    if ((imageActiveTool === "wand" || imageActiveTool === "rect-select" || imageActiveTool === "smart-select") && useImageEditStore.getState().selectionMask !== null) {
+    if ((imageActiveTool === "wand" || imageActiveTool === "rect-select" || imageActiveTool === "smart-select" || imageActiveTool === "brush-select") && useImageEditStore.getState().selectionMask !== null) {
       setStatus("Choose Delete, Copy, Cut, or Clear for the active selection");
       return;
     }
@@ -2751,6 +2874,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
         onImageEditApply={handleImageEditApply}
         onImageEditCancel={handleImageEditCancel}
         onImageEditClearSelection={handleClearImageSelection}
+        onImageEditAiFillSelection={() => { void handleAiFillSelection(); }}
         onImageEditCopySelection={() => { void handleCopySelectionToNewLayer(); }}
         onImageEditCutSelection={() => { void handleCutSelectionToNewLayer(); }}
         onImageEditDeleteSelection={handleDeleteSelection}
@@ -3447,6 +3571,32 @@ function selectionMaskBounds(data: Uint8Array, width: number, height: number): {
   return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
 }
 
+function countSelectedPixels(data: Uint8Array): number {
+  let count = 0;
+  for (let index = 0; index < data.length; index += 1) {
+    if (data[index] > 128) count += 1;
+  }
+  return count;
+}
+
+async function composeInpaintPatch(
+  baseCanvas: HTMLCanvasElement,
+  patchPngBase64: string,
+  roi: { x: number; y: number; width: number; height: number }
+): Promise<string> {
+  const patch = await loadHtmlImage(`data:image/png;base64,${patchPngBase64}`);
+  const canvas = window.document.createElement("canvas");
+  canvas.width = baseCanvas.width;
+  canvas.height = baseCanvas.height;
+  const context = canvas.getContext("2d");
+  if (context === null) {
+    throw new Error("Cannot compose AI Fill result");
+  }
+  context.drawImage(baseCanvas, 0, 0);
+  context.drawImage(patch, roi.x, roi.y, roi.width, roi.height);
+  return canvas.toDataURL("image/png");
+}
+
 async function renderImageLayerToSelectionCanvas(
   layer: ImageLayer,
   asset: Asset,
@@ -3533,6 +3683,7 @@ function ContextToolbar({
   onImageEditApply,
   onImageEditCancel,
   onImageEditClearSelection,
+  onImageEditAiFillSelection,
   onImageEditCopySelection,
   onImageEditCutSelection,
   onImageEditDeleteSelection,
@@ -3566,6 +3717,7 @@ function ContextToolbar({
   onImageEditApply: () => void;
   onImageEditCancel: () => void;
   onImageEditClearSelection: () => void;
+  onImageEditAiFillSelection: () => void;
   onImageEditCopySelection: () => void;
   onImageEditCutSelection: () => void;
   onImageEditDeleteSelection: () => void;
@@ -3581,6 +3733,7 @@ function ContextToolbar({
     return (
       <ImageEditToolbar
         onApply={onImageEditApply}
+        onAiFillSelection={onImageEditAiFillSelection}
         onCancel={onImageEditCancel}
         onClearSelection={onImageEditClearSelection}
         onCopySelection={onImageEditCopySelection}

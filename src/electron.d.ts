@@ -7,6 +7,30 @@ interface SmartSelectionProgressEvent {
   fileName?: string;
   bytesDone?: number | null;
   bytesTotal?: number | null;
+  operation?: string;
+}
+
+interface InpaintRemoveOptions {
+  maskPngBase64: string;
+  targetWidth: number;
+  targetHeight: number;
+  roiPadding?: number;
+  maxPatchPixels?: number;
+  forceFallback?: boolean;
+  blend?: "feather";
+}
+
+interface InpaintRemoveResult {
+  ok: true;
+  patchPngBase64: string;
+  roi: { x: number; y: number; width: number; height: number };
+  imageWidth: number;
+  imageHeight: number;
+  modelId: "lama" | "opencv_telea" | string;
+  modelVersion: string;
+  fallback: boolean;
+  message: string;
+  processingMs: number;
 }
 
 interface SppElectronAPI {
@@ -104,6 +128,7 @@ interface SppElectronAPI {
       fallback?: boolean;
       message?: string;
     }>;
+    inpaintRemove(imageId: string, options: InpaintRemoveOptions): Promise<InpaintRemoveResult | { ok?: false; error?: string; message?: string; fallback?: boolean }>;
     unloadImage(imageId: string): Promise<{ ok: boolean }>;
     cancel(requestId: string): Promise<{ ok: boolean }>;
     onProgress(callback: (progress: SmartSelectionProgressEvent) => void): () => void;

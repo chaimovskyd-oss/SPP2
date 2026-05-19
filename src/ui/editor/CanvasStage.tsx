@@ -205,6 +205,7 @@ export function CanvasStage({
   const isPaintingRef = useRef(false);
   const lastPaintPosRef = useRef<{ x: number; y: number } | null>(null);
   const [selectionCanvas, setSelectionCanvas] = useState<HTMLCanvasElement | null>(null);
+  const [selectionBrushPreviewCanvas, setSelectionBrushPreviewCanvas] = useState<HTMLCanvasElement | null>(null);
   const [whiteBgPreviewCanvas, setWhiteBgPreviewCanvas] = useState<HTMLCanvasElement | null>(null);
   const [eraserCursorPos, setEraserCursorPos] = useState<{ x: number; y: number } | null>(null);
   const rectStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -561,11 +562,15 @@ export function CanvasStage({
     if (cnv === null) return;
     const ctx = cnv.getContext("2d");
     if (ctx === null) return;
-    const r = imageEditStore.selectionBrushSize / 2;
-    const lx = x - layer.x;
-    const ly = y - layer.y;
-    const plx = prevX !== null ? prevX - layer.x : lx;
-    const ply = prevY !== null ? prevY - layer.y : ly;
+    const w = Math.max(1, Math.round(layer.width));
+    const h = Math.max(1, Math.round(layer.height));
+    const sx = w / Math.max(1, layer.width);
+    const sy = h / Math.max(1, layer.height);
+    const lx = (x - layer.x) * sx;
+    const ly = (y - layer.y) * sy;
+    const plx = prevX !== null ? (prevX - layer.x) * sx : lx;
+    const ply = prevY !== null ? (prevY - layer.y) * sy : ly;
+    const r = Math.max(1, (imageEditStore.selectionBrushSize / 2) * Math.max(sx, sy));
     ctx.globalCompositeOperation = "source-over";
     ctx.fillStyle = "#ffffff";
     if (prevX !== null && prevY !== null) {
@@ -583,6 +588,7 @@ export function CanvasStage({
       ctx.arc(lx, ly, r, 0, Math.PI * 2);
       ctx.fill();
     }
+    setSelectionBrushPreviewCanvas(createSelectionOverlayCanvas(alphaFromCanvas(cnv), w, h, imageEditStore.selectionBrushMode === "subtract" ? "subtract" : "add"));
   }
   function commitSelectionBrushStroke(): void {
     const layer = getEditingImageLayer();
@@ -590,7 +596,8 @@ export function CanvasStage({
     if (layer === null || cnv === null) return;
     const ctx = cnv.getContext("2d");
     if (ctx === null) return;
-    const w = layer.width, h = layer.height;
+    const w = Math.max(1, Math.round(layer.width));
+    const h = Math.max(1, Math.round(layer.height));
     const imageData = ctx.getImageData(0, 0, w, h);
     const data = new Uint8Array(w * h);
     let any = false;
@@ -608,19 +615,21 @@ export function CanvasStage({
     }
     // clear stroke buffer for next stroke
     ctx.clearRect(0, 0, w, h);
+    setSelectionBrushPreviewCanvas(null);
   }
 
   // Initialize selection-brush canvas when entering brush-select mode
   useEffect(() => {
     if (!imageEditMode || imageActiveTool !== "brush-select") {
       selectionBrushCanvasRef.current = null;
+      setSelectionBrushPreviewCanvas(null);
       return;
     }
     const layer = getEditingImageLayer();
     if (layer === null) return;
     const cnv = window.document.createElement("canvas");
-    cnv.width = layer.width;
-    cnv.height = layer.height;
+    cnv.width = Math.max(1, Math.round(layer.width));
+    cnv.height = Math.max(1, Math.round(layer.height));
     selectionBrushCanvasRef.current = cnv;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageEditMode, imageActiveTool, imageEditLayerId]);
@@ -1035,13 +1044,14 @@ export function CanvasStage({
             const editLayer = getEditingImageLayer();
             if (preview !== null && editLayer !== null && preview.width > 2 && preview.height > 2) {
               const lx = editLayer.x, ly = editLayer.y, lw = editLayer.width, lh = editLayer.height;
-              const w = lw, h = lh;
+              const w = Math.max(1, Math.round(lw));
+              const h = Math.max(1, Math.round(lh));
               const mask = new Uint8Array(w * h);
               // pixels inside the rect → selected
-              const rx0 = Math.round((preview.x - lx) / lw * w);
-              const ry0 = Math.round((preview.y - ly) / lh * h);
-              const rx1 = Math.round((preview.x + preview.width - lx) / lw * w);
-              const ry1 = Math.round((preview.y + preview.height - ly) / lh * h);
+              const rx0 = Math.max(0, Math.min(w, Math.round((preview.x - lx) / lw * w)));
+              const ry0 = Math.max(0, Math.min(h, Math.round((preview.y - ly) / lh * h)));
+              const rx1 = Math.max(0, Math.min(w, Math.round((preview.x + preview.width - lx) / lw * w)));
+              const ry1 = Math.max(0, Math.min(h, Math.round((preview.y + preview.height - ly) / lh * h)));
               for (let py = 0; py < h; py++) {
                 for (let px = 0; px < w; px++) {
                   if (px >= rx0 && px < rx1 && py >= ry0 && py < ry1) {
@@ -1405,13 +1415,22 @@ export function CanvasStage({
                     listening={false}
                   />
                 )}
-                {/* Selection overlay (wand / rect-select / smart-select) */}
-                {(imageActiveTool === "wand" || imageActiveTool === "rect-select" || imageActiveTool === "smart-select") && selectionCanvas !== null && (
+                {/* Selection overlay (wand / rect-select / smart-select / brush-select) */}
+                {(imageActiveTool === "wand" || imageActiveTool === "rect-select" || imageActiveTool === "smart-select" || imageActiveTool === "brush-select") && selectionCanvas !== null && (
                   <KonvaImage
                     x={0} y={0}
                     width={lw}
                     height={lh}
                     image={selectionCanvas}
+                    listening={false}
+                  />
+                )}
+                {imageActiveTool === "brush-select" && selectionBrushPreviewCanvas !== null && (
+                  <KonvaImage
+                    x={0} y={0}
+                    width={lw}
+                    height={lh}
+                    image={selectionBrushPreviewCanvas}
                     listening={false}
                   />
                 )}
@@ -1726,7 +1745,18 @@ function RulerOverlay({ page, scale }: { page: Page; scale: number }): React.Rea
 
 // ─── Background image node ────────────────────────────────────────────────────
 
-function createSelectionOverlayCanvas(data: Uint8Array, width: number, height: number): HTMLCanvasElement {
+function alphaFromCanvas(canvas: HTMLCanvasElement): Uint8Array {
+  const context = canvas.getContext("2d");
+  const alpha = new Uint8Array(canvas.width * canvas.height);
+  if (context === null) return alpha;
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  for (let index = 0; index < alpha.length; index += 1) {
+    alpha[index] = imageData.data[index * 4 + 3] ?? 0;
+  }
+  return alpha;
+}
+
+function createSelectionOverlayCanvas(data: Uint8Array, width: number, height: number, mode: "add" | "subtract" = "add"): HTMLCanvasElement {
   const overlayCanvas = window.document.createElement("canvas");
   overlayCanvas.width = width;
   overlayCanvas.height = height;
@@ -1735,9 +1765,9 @@ function createSelectionOverlayCanvas(data: Uint8Array, width: number, height: n
   const imageData = context.createImageData(width, height);
   for (let i = 0; i < data.length; i += 1) {
     if (data[i] > 128) {
-      imageData.data[i * 4] = 80;
-      imageData.data[i * 4 + 1] = 130;
-      imageData.data[i * 4 + 2] = 220;
+      imageData.data[i * 4] = mode === "subtract" ? 240 : 80;
+      imageData.data[i * 4 + 1] = mode === "subtract" ? 80 : 130;
+      imageData.data[i * 4 + 2] = mode === "subtract" ? 80 : 220;
       imageData.data[i * 4 + 3] = 100;
     }
   }

@@ -28,7 +28,10 @@ export function ImageEditFloatingBar({
     smartSelectionStatus,
     smartSelectionMessage,
     smartSelectionProgress,
-    clearSmartSelectionPrompts
+    clearSmartSelectionPrompts,
+    aiFillStatus,
+    aiFillMessage,
+    aiFillProgress
   } = useImageEditStore();
 
   if (activeTool === null) return null;
@@ -224,6 +227,25 @@ export function ImageEditFloatingBar({
           <button className="float-toggle" type="button" onClick={clearSelection}>
             Clear Selection
           </button>
+        </div>
+      )}
+
+      {selectionMask !== null && aiFillStatus !== "idle" && (
+        <div className="smart-selection-status">
+          <span>{aiFillMessage ?? aiFillStatus}</span>
+          {aiFillProgress !== null && (
+            <div className="smart-selection-progress" aria-label={aiFillProgress.message}>
+              <div className="smart-selection-progress-track">
+                <span
+                  className={aiFillProgress.percent == null ? "indeterminate" : ""}
+                  style={aiFillProgress.percent == null ? undefined : { width: `${Math.max(0, Math.min(100, aiFillProgress.percent))}%` }}
+                />
+              </div>
+              <span className="smart-selection-progress-text">
+                {formatSmartSelectionProgress(aiFillProgress)}
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>

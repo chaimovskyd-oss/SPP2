@@ -54,6 +54,19 @@ export interface SmartSelectionModelList {
   models: SmartSelectionModelStatus[];
 }
 
+export interface InpaintRemoveResult {
+  ok: true;
+  patchPngBase64: string;
+  roi: { x: number; y: number; width: number; height: number };
+  imageWidth: number;
+  imageHeight: number;
+  modelId: "lama" | "opencv_telea" | string;
+  modelVersion: string;
+  fallback: boolean;
+  message: string;
+  processingMs: number;
+}
+
 export interface SmartSelectionPromptInput {
   imageId: string;
   imagePath: string;
@@ -124,6 +137,21 @@ export async function runSmartRefineMask(
   }));
 }
 
+export async function runSmartInpaintRemove(asset: Asset, layer: ImageLayer, selectionMask: SelectionMask): Promise<InpaintRemoveResult | null> {
+  const input = makeSmartSelectionInput(asset, layer);
+  const api = window.spp?.smartSelection;
+  if (input === null || api === undefined || typeof api.inpaintRemove !== "function") return null;
+  await api.loadImage(input.imageId, input.imagePath, input.sourceHash);
+  const result = await api.inpaintRemove(input.imageId, {
+    maskPngBase64: selectionMaskToPngBase64(selectionMask.data, selectionMask.width, selectionMask.height),
+    targetWidth: Math.max(1, Math.round(selectionMask.width)),
+    targetHeight: Math.max(1, Math.round(selectionMask.height)),
+    maxPatchPixels: 6_000_000,
+    blend: "feather"
+  });
+  return normalizeInpaintResult(result);
+}
+
 export function makeSmartSelectionInput(asset: Asset, layer: ImageLayer): SmartSelectionPromptInput | null {
   const imagePath = resolveCanvasAssetPath(asset);
   if (imagePath === undefined) return null;
@@ -177,7 +205,7 @@ export function maskResultToSelectionMask(
   });
 }
 
-function selectionMaskToPngBase64(mask: Uint8Array, width: number, height: number): string {
+export function selectionMaskToPngBase64(mask: Uint8Array, width: number, height: number): string {
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -197,6 +225,14 @@ function selectionMaskToPngBase64(mask: Uint8Array, width: number, height: numbe
 function normalizeMaskResult(result: SmartSelectionMaskResult | { ok?: boolean; message?: string; error?: string } | null | undefined): SmartSelectionMaskResult | null {
   if (result === null || result === undefined) return null;
   if (!("maskPngBase64" in result) || typeof result.maskPngBase64 !== "string" || result.maskPngBase64.length === 0) {
+    return null;
+  }
+  return result;
+}
+
+function normalizeInpaintResult(result: InpaintRemoveResult | { ok?: boolean; message?: string; error?: string } | null | undefined): InpaintRemoveResult | null {
+  if (result === null || result === undefined) return null;
+  if (!("patchPngBase64" in result) || typeof result.patchPngBase64 !== "string" || result.patchPngBase64.length === 0) {
     return null;
   }
   return result;

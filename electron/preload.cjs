@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld("spp", {
     autoSegment: (imageId, options) => ipcRenderer.invoke("spp:smart-selection:auto-segment", imageId, options),
     predictMask: (imageId, options) => ipcRenderer.invoke("spp:smart-selection:predict-mask", imageId, options),
     refineMask: (imageId, options) => ipcRenderer.invoke("spp:smart-selection:refine-mask", imageId, options),
+    inpaintRemove: (imageId, options) => ipcRenderer.invoke("spp:smart-selection:inpaint-remove", imageId, options),
     unloadImage: (imageId) => ipcRenderer.invoke("spp:smart-selection:unload-image", imageId),
     cancel: (requestId) => ipcRenderer.invoke("spp:smart-selection:cancel", requestId),
     onProgress: (callback) => {

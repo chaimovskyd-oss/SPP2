@@ -515,6 +515,7 @@ ipcMain.handle("spp:smart-selection:encode-sam", async (_event, imageId) => smar
 ipcMain.handle("spp:smart-selection:auto-segment", async (_event, imageId, options) => smartSelectionCall("auto_segment", { image_id: imageId, options: options || {} }, 120000));
 ipcMain.handle("spp:smart-selection:predict-mask", async (_event, imageId, options) => smartSelectionCall("predict_mask", { image_id: imageId, options: options || {} }, 30000));
 ipcMain.handle("spp:smart-selection:refine-mask", async (_event, imageId, options) => smartSelectionCall("refine_mask", { image_id: imageId, options: options || {} }, 120000));
+ipcMain.handle("spp:smart-selection:inpaint-remove", async (_event, imageId, options) => smartSelectionCall("inpaint_remove", { image_id: imageId, options: options || {} }, 120000));
 ipcMain.handle("spp:smart-selection:unload-image", async (_event, imageId) => smartSelectionCall("unload_image", { image_id: imageId }, 8000));
 ipcMain.handle("spp:smart-selection:cancel", async (_event, requestId) => smartSelectionCall("cancel", { request_id: requestId }, 8000));
 

@@ -7,6 +7,7 @@ interface ImageEditToolbarProps {
   onCancel: () => void;
   onResetCrop: () => void;
   onResetMask: () => void;
+  onAiFillSelection: () => void;
   onDeleteSelection: () => void;
   onCopySelection: () => void;
   onCutSelection: () => void;
@@ -22,6 +23,7 @@ export function ImageEditToolbar({
   onCancel,
   onResetCrop,
   onResetMask,
+  onAiFillSelection,
   onDeleteSelection,
   onCopySelection,
   onCutSelection,
@@ -35,6 +37,7 @@ export function ImageEditToolbar({
   const setSelectionBrushSize = useImageEditStore((s) => s.setSelectionBrushSize);
   const selectionBrushMode = useImageEditStore((s) => s.selectionBrushMode);
   const setSelectionBrushMode = useImageEditStore((s) => s.setSelectionBrushMode);
+  const aiFillWorking = useImageEditStore((s) => s.aiFillStatus === "working" || s.aiFillStatus === "preparing");
 
   function toolBtn(tool: ImageEditTool, icon: ReactElement, label: string): ReactElement {
     return (
@@ -118,6 +121,10 @@ export function ImageEditToolbar({
             <button className="context-icon" title="Cut selection to new layer" type="button" onClick={onCutSelection}>
               <Scissors size={14} />
               <span className="ctx-btn-label">Cut Layer</span>
+            </button>
+            <button className="context-icon" title="Remove selection and fill naturally" type="button" disabled={aiFillWorking} onClick={onAiFillSelection}>
+              <Sparkles size={14} />
+              <span className="ctx-btn-label">AI Fill</span>
             </button>
             <button className="context-icon danger" title="Delete selection" type="button" onClick={onDeleteSelection}>
               <Trash2 size={14} />

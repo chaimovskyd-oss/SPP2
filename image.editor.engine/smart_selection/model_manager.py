@@ -114,6 +114,18 @@ DEFAULT_MODELS: dict[str, dict[str, Any]] = {
         "requiredFor": ["refine_mask"],
         "profile": ["performance"],
     },
+    "lama": {
+        "id": "lama",
+        "label": "Remove / AI Fill",
+        "filename": "lama/big-lama.ckpt",
+        "version": "simple-lama-inpainting",
+        "url": None,
+        "sha256": None,
+        "sizeBytes": None,
+        "license": "apache-2.0",
+        "requiredFor": ["inpaint_remove"],
+        "profile": ["balanced", "quality"],
+    },
 }
 
 

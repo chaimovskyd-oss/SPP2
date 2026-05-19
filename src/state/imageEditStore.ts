@@ -17,6 +17,7 @@ export interface SmartSelectionProgress {
   fileName?: string;
   bytesDone?: number | null;
   bytesTotal?: number | null;
+  operation?: string;
 }
 
 export interface CropPreview {
@@ -69,6 +70,9 @@ export interface ImageEditState {
   smartSelectionMessage: string | null;
   smartSelectionProgress: SmartSelectionProgress | null;
   smartSelectionPrompts: SmartSelectionPrompt[];
+  aiFillStatus: SmartSelectionStatus;
+  aiFillMessage: string | null;
+  aiFillProgress: SmartSelectionProgress | null;
 
   selectionBrushSize: number;
   selectionBrushMode: SelectionBrushMode;
@@ -98,6 +102,8 @@ export interface ImageEditState {
   setSmartSelectionProgress: (progress: SmartSelectionProgress | null) => void;
   addSmartSelectionPrompt: (prompt: SmartSelectionPrompt) => void;
   clearSmartSelectionPrompts: () => void;
+  setAiFillStatus: (status: SmartSelectionStatus, message?: string | null) => void;
+  setAiFillProgress: (progress: SmartSelectionProgress | null) => void;
 
   setSelectionBrushSize: (v: number) => void;
   setSelectionBrushMode: (mode: SelectionBrushMode) => void;
@@ -134,6 +140,9 @@ export const useImageEditStore = create<ImageEditState>((set) => ({
   smartSelectionMessage: null,
   smartSelectionProgress: null,
   smartSelectionPrompts: [],
+  aiFillStatus: "idle",
+  aiFillMessage: null,
+  aiFillProgress: null,
   selectionBrushSize: 40,
   selectionBrushMode: "add",
 
@@ -148,7 +157,10 @@ export const useImageEditStore = create<ImageEditState>((set) => ({
       smartSelectionStatus: "idle",
       smartSelectionMessage: null,
       smartSelectionProgress: null,
-      smartSelectionPrompts: []
+      smartSelectionPrompts: [],
+      aiFillStatus: "idle",
+      aiFillMessage: null,
+      aiFillProgress: null
     }),
   exitImageEditMode: () =>
     set({
@@ -161,9 +173,12 @@ export const useImageEditStore = create<ImageEditState>((set) => ({
       smartSelectionStatus: "idle",
       smartSelectionMessage: null,
       smartSelectionProgress: null,
-      smartSelectionPrompts: []
+      smartSelectionPrompts: [],
+      aiFillStatus: "idle",
+      aiFillMessage: null,
+      aiFillProgress: null
     }),
-  setActiveTool: (tool) => set({ activeTool: tool, selectionMask: null, selectionHistory: [], rectSelectPreview: null, smartSelectionProgress: null, smartSelectionPrompts: [] }),
+  setActiveTool: (tool) => set({ activeTool: tool, selectionMask: null, selectionHistory: [], rectSelectPreview: null, smartSelectionProgress: null, smartSelectionPrompts: [], aiFillStatus: "idle", aiFillMessage: null, aiFillProgress: null }),
   setCropLockRatio: (v) => set({ cropLockRatio: v }),
   setCropPreview: (crop) => set({ cropPreview: crop }),
   setEraserMode: (mode) => set({ eraserMode: mode }),
@@ -225,6 +240,8 @@ export const useImageEditStore = create<ImageEditState>((set) => ({
   setSmartSelectionProgress: (progress) => set({ smartSelectionProgress: progress }),
   addSmartSelectionPrompt: (prompt) => set((state) => ({ smartSelectionPrompts: [...state.smartSelectionPrompts, prompt] })),
   clearSmartSelectionPrompts: () => set({ smartSelectionPrompts: [] }),
+  setAiFillStatus: (status, message = null) => set({ aiFillStatus: status, aiFillMessage: message }),
+  setAiFillProgress: (progress) => set({ aiFillProgress: progress }),
   setSelectionBrushSize: (v) => set({ selectionBrushSize: Math.max(2, Math.min(400, Math.round(v))) }),
   setSelectionBrushMode: (mode) => set({ selectionBrushMode: mode }),
   subtractFromSelectionMask: (mask) =>

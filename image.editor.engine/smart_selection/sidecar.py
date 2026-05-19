@@ -18,6 +18,7 @@ import numpy as np
 from PIL import Image, ImageFilter
 
 from smart_selection.birefnet_service import BiRefNetService
+from smart_selection.inpaint_service import InpaintService
 from smart_selection.mask_refine_service import MaskRefineService
 from smart_selection.model_manager import ModelManager
 from smart_selection.sam_service import SamService
@@ -30,6 +31,7 @@ MODEL_MANAGER = ModelManager()
 BIREFNET_SERVICE = BiRefNetService()
 SAM_SERVICE = SamService()
 MASK_REFINE_SERVICE = MaskRefineService()
+INPAINT_SERVICE = InpaintService()
 LOG_FILE = Path(os.environ.get("SPP2_LOGS_DIR", "")) / "smart-selection-sidecar.log" if os.environ.get("SPP2_LOGS_DIR") else None
 AUTO_SEGMENT_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
 MAX_AUTO_SEGMENT_CACHE = 12
@@ -262,6 +264,26 @@ def refine_mask(image_id: str, options: dict[str, Any]) -> dict[str, Any]:
     return response
 
 
+def inpaint_remove(image_id: str, options: dict[str, Any]) -> dict[str, Any]:
+    entry = require_image(image_id)
+    mask_b64 = str(options.get("maskPngBase64") or "")
+    if not mask_b64:
+        raise RuntimeError("invalid_mask")
+    width = int(options.get("targetWidth") or options.get("width") or entry.width)
+    height = int(options.get("targetHeight") or options.get("height") or entry.height)
+    emit_progress({
+        "operation": "inpaint_remove",
+        "phase": "prepare",
+        "message": "Preparing AI Fill...",
+        "percent": None,
+        "modelId": "lama",
+    })
+    mask = decode_mask(mask_b64, width, height)
+    image = open_image(entry.path)
+    result = INPAINT_SERVICE.inpaint(image, mask, {**options, "targetWidth": width, "targetHeight": height}, progress=emit_progress)
+    return result.to_json()
+
+
 def unload_image(image_id: str) -> dict[str, Any]:
     IMAGE_CACHE.pop(image_id, None)
     EMBEDDING_CACHE.pop(image_id, None)
@@ -359,6 +381,8 @@ def dispatch(method: str, params: dict[str, Any]) -> Any:
         return predict_mask(str(params["image_id"]), dict(params.get("options") or {}))
     if method == "refine_mask":
         return refine_mask(str(params["image_id"]), dict(params.get("options") or {}))
+    if method == "inpaint_remove":
+        return inpaint_remove(str(params["image_id"]), dict(params.get("options") or {}))
     if method == "unload_image":
         return unload_image(str(params["image_id"]))
     if method == "cancel":
