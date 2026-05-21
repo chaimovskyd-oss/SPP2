@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>דוח סקירת קוד SPP2</title>
+<style>
+:root {
+  --bg:#0f1220; --panel:#171b2e; --panel2:#1f2440; --text:#f4f6ff; --muted:#aeb6d8;
+  --accent:#4fb7ff; --red:#ff6b7a; --orange:#ffb14f; --yellow:#ffe06e; --green:#65d48b; --border:rgba(255,255,255,.11);
+}
+* { box-sizing:border-box; }
+body { margin:0; background:radial-gradient(circle at top right,#263661 0,#0f1220 44%,#0b0d17 100%); color:var(--text); font-family:Arial,'Segoe UI',sans-serif; line-height:1.65; }
+.wrapper { max-width:1220px; margin:0 auto; padding:34px 22px 60px; }
+.hero { border:1px solid var(--border); background:linear-gradient(135deg,rgba(79,183,255,.18),rgba(255,107,122,.10)),rgba(23,27,46,.88); border-radius:28px; padding:30px; box-shadow:0 22px 70px rgba(0,0,0,.35); }
+h1 { margin:0 0 8px; font-size:34px; letter-spacing:-.02em; }
+h2 { margin:34px 0 14px; font-size:24px; }
+h3 { margin:0 0 8px; font-size:19px; }
+p { margin:8px 0; }
+.meta { display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; }
+.pill { border:1px solid var(--border); background:rgba(255,255,255,.07); border-radius:999px; padding:7px 12px; color:var(--muted); font-size:13px; }
+.grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-top:18px; }
+.stat { background:rgba(255,255,255,.06); border:1px solid var(--border); border-radius:18px; padding:16px; }
+.stat b { display:block; font-size:28px; color:#fff; }
+.stat span { color:var(--muted); font-size:13px; }
+.card { border:1px solid var(--border); background:rgba(23,27,46,.88); border-radius:22px; padding:20px; margin:16px 0; box-shadow:0 10px 34px rgba(0,0,0,.22); }
+.finding { border-right:5px solid var(--accent); }
+.finding.critical { border-right-color:var(--red); }
+.finding.high { border-right-color:var(--orange); }
+.finding.medium { border-right-color:var(--yellow); }
+.badge { display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:4px 10px; font-size:12px; font-weight:700; margin-left:6px; }
+.badge.critical { background:rgba(255,107,122,.16); color:#ff9aa5; border:1px solid rgba(255,107,122,.35); }
+.badge.high { background:rgba(255,177,79,.16); color:#ffc27a; border:1px solid rgba(255,177,79,.35); }
+.badge.medium { background:rgba(255,224,110,.13); color:#ffe58a; border:1px solid rgba(255,224,110,.35); }
+.badge.ok { background:rgba(101,212,139,.14); color:#93e7ad; border:1px solid rgba(101,212,139,.35); }
+.files { display:flex; flex-wrap:wrap; gap:7px; margin:10px 0; direction:ltr; justify-content:flex-end; }
+.file { font-family:Consolas,monospace; font-size:12px; color:#cfe7ff; background:rgba(79,183,255,.09); border:1px solid rgba(79,183,255,.25); border-radius:9px; padding:5px 8px; }
+.section-title { color:#fff; font-weight:700; margin-top:12px; }
+.prompt { direction:ltr; text-align:left; white-space:pre-wrap; font-family:Consolas,monospace; background:#090b13; border:1px solid rgba(255,255,255,.12); border-radius:14px; padding:13px; color:#dfe8ff; overflow:auto; }
+.table { width:100%; border-collapse:collapse; overflow:hidden; border-radius:16px; }
+.table th,.table td { border-bottom:1px solid var(--border); padding:12px; text-align:right; vertical-align:top; }
+.table th { color:#fff; background:rgba(255,255,255,.07); }
+.small { color:var(--muted); font-size:13px; }
+code { direction:ltr; unicode-bidi:embed; background:rgba(255,255,255,.08); border:1px solid var(--border); border-radius:6px; padding:1px 5px; font-family:Consolas,monospace; font-size:.92em; }
+ul { margin-top:8px; }
+li { margin:6px 0; }
+.footer { margin-top:36px; color:var(--muted); font-size:13px; }
+@media (max-width:900px) { .grid { grid-template-columns:1fr 1fr; } }
+@media (max-width:560px) { .grid { grid-template-columns:1fr; } h1 { font-size:27px; } .hero { padding:22px; } }
+</style>
+</head>
+<body>
+<div class="wrapper">
+<section class="hero">
+<h1>דוח סקירת קוד SPP2</h1>
+<p>סקירה סטטית של ה־ZIP שנשלח. הדוח מתמקד בנקודות שיכולות להסביר קריסות, איטיות, שמירה לא אמינה, חיבורים חלקיים בין מודולים, ובעיות שיכולות לבלבל מאוד כלי AI בזמן תיקונים.</p>
+<p class="small">חשוב: זו לא הרצה מלאה של התוכנה ולא פרופיילינג בזמן אמת. המסקנות מבוססות על קריאת הקוד, שמות קבצים, דפוסי שימוש, ונקודות חיבור שנמצאו בסריקה.</p>
+<div class="meta">
+<span class="pill">נבדקו כ־456 קבצים ב־ZIP</span>
+<span class="pill">React + Electron + Konva + Python engines</span>
+<span class="pill">מוקד מרכזי: יציבות, שמירה, זיכרון, ארכיטקטורה</span>
+</div>
+<div class="grid">
+<div class="stat"><b>5</b><span>נושאים קריטיים / גבוהים במיוחד</span></div>
+<div class="stat"><b>16</b><span>ממצאים מרכזיים בדוח</span></div>
+<div class="stat"><b>8,943</b><span>שורות ב־EditorScreen.tsx</span></div>
+<div class="stat"><b>3</b><span>מסלולים שחוזרים על בעיית localStorage/base64</span></div>
+</div>
+</section>
+
+<h2>תקציר מנהלים</h2>
+<div class="card">
+<p>הבעיה הגדולה ביותר בפרויקט היא לא באג יחיד, אלא דפוס חוזר: <b>מידע כבד כמו תמונות, previews ו־PDF נשמרים כ־base64 בתוך state/document/localStorage</b>. זה פוגע ב־autosave, ב־undo, בתבניות, ב־PDF ובביצועים כלליים.</p>
+<p>בנוסף, יש בעיית “מקורות אמת כפולים”: קבצי Editor ישנים בתוך <code>src</code>, וגם <code>electron/main.ts</code> לצד <code>electron/main.cjs</code> שלא זהים. זה מסביר למה קלוד/קודקס עלולים “לתקן” מקום שלא באמת רץ.</p>
+<p>הכיוון הנכון הוא לא להוסיף עוד פלסטרים, אלא לבצע סדר בשלושה צירים: <b>AssetStore חיצוני</b>, <b>Autosave קל</b>, ו־<b>ניקוי/פיצול קבצי מקור גדולים וכפולים</b>.</p>
+</div>
+
+<h2>ממצאים לפי עדיפות</h2>
+<article class="card finding critical">
+<div><span class="badge critical">קריטי</span><span class="badge ok">ביטחון: גבוה מאוד</span><span class="pill">Autosave / Recovery</span></div>
+<h3>1. Autosave שומר פרויקט מלא כולל base64, ואז גם מאמת אותו דרך parse</h3>
+<div class="files"><span class="file">src/core/save/autosave.ts:146-187</span><span class="file">src/core/save/autosave.ts:306-327</span><span class="file">src/core/save/projectFormat.ts:18-24</span><span class="file">src/ui/editor/EditorScreen.tsx:711-726</span></div>
+<p class="section-title">מה בעייתי?</p>
+<p>כל revision באדיטור דוחף ProjectEnvelope מלא ל־AutosaveManager. בזמן השמירה נעשה JSON.stringify לכל הפרויקט, נשמר payload כמחרוזת בתוך מערך records, ואז isValidRecoveryRecord עושה parseProject על אותו payload. בפרויקטים עם תמונות/PDF זה יוצר כמה עותקים ענקיים בזיכרון לפני שה־quota בכלל נתפס.</p>
+<p class="section-title">למה זה חשוב?</p>
+<p>מסך שחור, renderer crash, autosave שלא באמת עובד, ושחזור שיכול להיכשל או לפתוח פרויקט ריק/לא תקין.</p>
+<p class="section-title">כיוון תיקון מומלץ</p>
+<p>להפוך autosave ל־lightweight snapshot: לפני stringify למדוד משקל, להסיר originalPath/previewPath כבדים, להשאיר thumbnail קטן ומטא־דאטה, לא לבצע parse מלא ל־payload ענק, ולהעביר recovery לקובץ תחת userData במקום localStorage.</p>
+<p class="section-title">פרומפט קצר לקלוד/קודקס</p>
+<div class="prompt">Fix SPP2 autosave so it serializes an autosave-safe project, not the live full project. Add estimateProjectAutosaveWeight, createAutosaveSafeProject, shallow recovery validation, heavy-project maxRecords=1, and debug logs for asset count / dataUrl MB / payload MB. Manual Save must remain full quality.</div>
+</article>
+<article class="card finding critical">
+<div><span class="badge critical">קריטי</span><span class="badge ok">ביטחון: גבוה מאוד</span><span class="pill">Assets / Memory</span></div>
+<h3>2. כל תמונה נשמרת לפחות 2–3 פעמים כ־dataURL בתוך ה־document</h3>
+<div class="files"><span class="file">src/core/assets/assetManager.ts:72-93</span><span class="file">src/core/assets/assetManager.ts:120-129</span><span class="file">src/core/assets/assetManager.ts:203-216</span><span class="file">src/ui/App.tsx:487-497</span></div>
+<p class="section-title">מה בעייתי?</p>
+<p>importImageAsset קורא את הקובץ ל־dataUrl מלא, מייצר preview ו־thumbnail, ואז שומר originalPath + previewPath + thumbnailPath. בפיתוח תמונות previewMaxSize=2400, שזה עדיין כבד מאוד. כאשר createPreview=false, previewPath ו־thumbnailPath מקבלים את אותו dataUrl מלא, כלומר שכפול לוגי של המקור.</p>
+<p class="section-title">למה זה חשוב?</p>
+<p>זיכרון מנופח, שמירה איטית, autosave קורס, undo כבד, פתיחת פרויקטים איטית, וקושי לעבוד עם עשרות תמונות.</p>
+<p class="section-title">כיוון תיקון מומלץ</p>
+<p>לעבור למודל AssetStore: לשמור קבצים כבדים בדיסק/IndexedDB/userData ולשמור ב־document רק assetId, metadata, thumbnail קטן ו־sourceRef. Canvas ישתמש ב־objectURL/cache, export ישתמש במקור המקורי.</p>
+<p class="section-title">פרומפט קצר לקלוד/קודקס</p>
+<div class="prompt">Refactor SPP2 assets away from embedding full data URLs in Document. Store heavy asset bytes externally in an AssetStore, keep only lightweight refs in Document, dedupe by hash, use object URLs with cleanup, and keep full quality only for manual save/export.</div>
+</article>
+<article class="card finding high">
+<div><span class="badge high">גבוה</span><span class="badge ok">ביטחון: גבוה</span><span class="pill">Undo / History</span></div>
+<h3>3. חלק מפעולות ה־Undo שומרות reference למסמך מלא לפני השינוי</h3>
+<div class="files"><span class="file">src/state/documentStore.ts:423-429</span><span class="file">src/core/history/actions.ts:224-226</span><span class="file">src/state/documentStore.ts:1609-1628</span></div>
+<p class="section-title">מה בעייתי?</p>
+<p>applyDocumentChange יוצר undo שמחזיר את כל document הקודם דרך closure. במצב רגיל זה נוח, אבל כשה־document כולל assets כבדים זה מחזיק גרסאות קודמות בזיכרון. בנוסף ה־history limit לא נראה מותאם לפרויקטים כבדים.</p>
+<p class="section-title">למה זה חשוב?</p>
+<p>אחרי הרבה הזזות/עריכות, גם בלי autosave, הזיכרון עלול לעלות. זה יכול להסביר האטות או קריסות מאוחרות בפרויקטים גדולים.</p>
+<p class="section-title">כיוון תיקון מומלץ</p>
+<p>לעבור ל־patch-based history לפעולות נפוצות: layer transform, contentTransform, adjustment sliders. בפרויקטים כבדים להגביל history, למזג פעולות drag רצופות, ולא לשמור snapshots של כל document.</p>
+<p class="section-title">פרומפט קצר לקלוד/קודקס</p>
+<div class="prompt">Optimize SPP2 history memory. Replace whole-document closures for frequent actions with patch actions that store only before/after layer fields. Merge drag/transform actions, add heavy-project history limits, and ensure asset arrays are never copied into undo snapshots unnecessarily.</div>
+</article>
+<article class="card finding high">
+<div><span class="badge high">גבוה</span><span class="badge ok">ביטחון: גבוה מאוד</span><span class="pill">Editor Architecture</span></div>
+<h3>4. EditorScreen.tsx הוא קובץ ענק מדי ומרכז יותר מדי אחריות</h3>
+<div class="files"><span class="file">src/ui/editor/EditorScreen.tsx:8943 lines</span><span class="file">src/ui/editor/CanvasStage.tsx:2168 lines</span><span class="file">src/ui/editor/KonvaLayerNode.tsx:2045 lines</span></div>
+<p class="section-title">מה בעייתי?</p>
+<p>EditorScreen מטפל יחד ב־autosave, AI Fill, מסיכות, טקסט, toolbar, imports, print, class photo, photo print, collage, settings ועוד. זה מקשה על איתור תקלות וגורם לשינויים קטנים להשפיע על אזורים לא קשורים.</p>
+<p class="section-title">למה זה חשוב?</p>
+<p>קלוד/קודקס מתקשים להבין הקשרים, תיקון באג אחד שובר מקום אחר, וקשה לבצע בדיקות ממוקדות.</p>
+<p class="section-title">כיוון תיקון מומלץ</p>
+<p>לפצל לפי hooks ושירותים: useAutosaveController, useImageImportActions, useMaskActions, useAiFillActions, usePrintActions, useTextToolbarState, useFrameContentEditing. להשאיר EditorScreen כקומפוזיציה בלבד.</p>
+<p class="section-title">פרומפט קצר לקלוד/קודקס</p>
+<div class="prompt">Refactor EditorScreen.tsx without changing behavior. Extract autosave, image import, AI tools, mask tools, print actions, text toolbar state, and frame content editing into dedicated hooks/services. Keep public behavior identical and add small unit tests per extracted hook.</div>
+</article>
+<article class="card finding high">
+<div><span class="badge high">גבוה</span><span class="badge ok">ביטחון: גבוה מאוד</span><span class="pill">Code Hygiene</span></div>
+<h3>5. קבצי Editor ישנים/כפולים נמצאים בתוך src ונכנסים ל־typecheck</h3>
+<div class="files"><span class="file">src/ui/editor/2EditorScreen.tsx</span><span class="file">src/ui/editor/2.1EditorScreen.tsx</span><span class="file">src/ui/editor/2.2EditorScreen.tsx</span><span class="file">src/ui/editor/2.2KonvaLayerNode.tsx</span><span class="file">tsconfig.json include: src</span></div>
+<p class="section-title">מה בעייתי?</p>
+<p>יש כמה גרסאות ישנות של אותו מסך בתוך src. הן לא מיובאות בפועל, אבל TypeScript עדיין כולל אותן ב־include. זה מבלבל מאוד מודלים, מגדיל זמן בדיקה, ויכול ליצור שגיאות build על קוד שאינו בשימוש.</p>
+<p class="section-title">למה זה חשוב?</p>
+<p>כששולחים ZIP לקלוד/קודקס הוא עשוי לתקן קובץ לא פעיל. בנוסף build עתידי יכול להישבר מקובץ גיבוי ישן.</p>
+<p class="section-title">כיוון תיקון מומלץ</p>
+<p>להעביר קבצי גיבוי מחוץ ל־src אל archive/ או למחוק. להשאיר רק EditorScreen.tsx ו־KonvaLayerNode.tsx הפעילים. להוסיף README קצר שמגדיר source of truth.</p>
+<p class="section-title">פרומפט קצר לקלוד/קודקס</p>
+<div class="prompt">Clean SPP2 stale editor backups. Move 2EditorScreen.tsx, 2.1EditorScreen.tsx, 2.2EditorScreen.tsx and 2.2KonvaLayerNode.tsx out of src into archive_not_compiled, update tsconfig exclude if needed, and document that EditorScreen.tsx/KonvaLayerNode.tsx are the only active files.</div>
+</article>
+<article class="card finding high">
+<div><span class="badge high">גבוה</span><span class="badge ok">ביטחון: גבוה מאוד</span><span class="pill">Electron</span></div>
+<h3>6. יש שני מקורות אמת ל־Electron: main.ts ו־main.cjs, והם לא זהים</h3>
+<div class="files"><span class="file">package.json main: electron/main.cjs</span><span class="file">electron/main.ts</span><span class="file">electron/main.cjs</span><span class="file">electron/preload.ts</span><span class="file">electron/preload.cjs</span></div>
+<p class="section-title">מה בעייתי?</p>
+<p>היישום רץ בפועל מ־main.cjs, אבל גם main.ts נמצא בפרויקט ונכנס ל־typecheck. main.cjs כולל bootstrap, healthCheck, product library ועוד שלא זהים ל־main.ts. מי שמתקן את main.ts עלול לחשוב שתיקן את האפליקציה, אבל Electron יריץ main.cjs.</p>
+<p class="section-title">למה זה חשוב?</p>
+<p>תיקונים לא משפיעים בפועל, הבדלי התנהגות בין dev/package, בלבול במודלים, וקושי עצום בדיבוג IPC.</p>
+<p class="section-title">כיוון תיקון מומלץ</p>
+<p>להחליט מקור אמת אחד. עדיף main.ts/preload.ts בלבד, עם build שמייצר cjs אוטומטית; או לחלופין למחוק/להוציא את ts מה־include ולתעד ש־cjs הוא המקור האמיתי.</p>
+<p class="section-title">פרומפט קצר לקלוד/קודקס</p>
+<div class="prompt">Unify Electron entrypoints. Choose one source of truth for main/preload. Prefer TypeScript source compiled to CJS, update package.json main to compiled output, remove manual duplicate cjs or generate it from TS, and verify all IPC handlers exist in the runtime entrypoint.</div>
+</article>
+<article class="card finding high">
+<div><span class="badge high">גבוה</span><span class="badge ok">ביטחון: בינוני-גבוה</span><span class="pill">Packaging / Python Engines</span></div>
+<h3>7. הפרויקט מפנה ל־image.editor.engine אבל התיקייה לא קיימת ב־ZIP</h3>
+<div class="files"><span class="file">package.json build.files</span><span class="file">electron/pythonBootstrap.cjs:23</span><span class="file">electron/main.cjs:34</span><span class="file">electron/healthCheck.cjs:99</span></div>
+<p class="section-title">מה בעייתי?</p>
+<p>package.json כולל image.editor.engine/**/* ו־pythonBootstrap מצפה לדרישות של image.editor.engine, אבל בסריקה של ה־ZIP קיימת print.preview.engine בלבד. ייתכן שהתיקייה קיימת אצלך מקומית ולא צורפה, אבל לפי ה־ZIP הנוכחי הפיצ׳רים שתלויים בה לא ייארזו.</p>
+<p class="section-title">למה זה חשוב?</p>
+<p>עריכת תמונה חיצונית, AI tools, apply params או health check עלולים להיכשל רק בהתקנה/מחשב אחר, למרות שב־dev זה אולי עובד.</p>
+<p class="section-title">כיוון תיקון מומלץ</p>
+<p>לוודא שהתיקייה קיימת ומצורפת לאריזה, או לבצע feature-gate ברור: אם engine חסר, UI מציג “לא מותקן” ולא מנסה להריץ.</p>
+<p class="section-title">פרומפט קצר לקלוד/קודקס</p>
+<div class="prompt">Audit packaged Python engines. Verify image.editor.engine exists in the repository/package, requirements.txt is included, healthCheck reports missing engines clearly, and UI disables image-editor/AI buttons when the engine is unavailable instead of failing at runtime.</div>
+</article>
+<article class="card finding high">
+<div><span class="badge high">בינוני-גבוה</span><span class="badge ok">ביטחון: גבוה</span><span class="pill">Packaging Hygiene</span></div>
+<h3>8. קיימות כפילויות ו־pycache בתוך החבילה</h3>
+<div class="files"><span class="file">print.preview.engine/__pycache__</span><span class="file">print.preview.engine/print_preview/**/__pycache__</span><span class="file">print_preview_module_ui_skeleton</span><span class="file">src/core/assets.zip</span><span class="file">src/core/rendering.zip</span><span class="file">src/services.zip</span></div>
+<p class="section-title">מה בעייתי?</p>
+<p>ה־ZIP כולל קבצי __pycache__, תיקיית skeleton כפולה של print preview, וקבצי zip פנימיים בתוך src. זה לא בהכרח שובר ריצה, אבל מגדיל רעש, בלבול ומקור לשגיאות אריזה.</p>
+<p class="section-title">למה זה חשוב?</p>
+<p>מודלים מתקנים קוד כפול, חבילות גדלות, וקשה להבין מה פעיל ומה דמו/ארכיון.</p>
+<p class="section-title">כיוון תיקון מומלץ</p>
+<p>לנקות לפני build: למחוק __pycache__, להעביר skeleton ו־zip פנימיים ל־archive מחוץ ל־src, ולהוסיף .gitignore/.npmignore או script clean.</p>
+<p class="section-title">פרומפט קצר לקלוד/קודקס</p>
+<div class="prompt">Clean repository/package noise. Remove __pycache__, internal archive zips under src, and duplicate print_preview_module_ui_skeleton from the compiled/package path. Add scripts/clean-artifacts and ignore rules.</div>
+</article>
+<article class="card finding high">
+<div><span class="badge high">גבוה</span><span class="badge ok">ביטחון: גבוה מאוד</span><span class="pill">Frame / FILL behavior</span></div>
+<h3>9. בפיתוח תמונות ביטלו live drag clamp דווקא במקום הכי רגיש</h3>
+<div class="files"><span class="file">src/ui/editor/KonvaLayerNode.tsx:1444-1517</span><span class="file">src/core/rendering/frameFitEngine.ts:141-187</span></div>
+<p class="section-title">מה בעייתי?</p>
+<p>contentDragBoundFunc כולל if (isPhotoPrintFrame) return undefined, וב־onDragMove אין clamp. לכן במצב photo_print אפשר לגרור תמונה כך שתיחשף לבן עד dragEnd, ולעיתים התחושה היא שה־FILL נשבר. בקולאז׳ יש clamp, אבל אין מנגנון axis-aware מספיק ברור שמבטל גרירה כשאין pan room.</p>
+<p class="section-title">למה זה חשוב?</p>
+<p>חוויית crop/drag לא יציבה, משתמשים מצליחים לצאת מ־FILL, ובאגים חוזרים בין photo print/collage/mask.</p>
+<p class="section-title">כיוון תיקון מומלץ</p>
+<p>להסיר החרגה של photo print, להוסיף computeFillPanBounds, לנעול ציר שאין בו עודף, ולבטל draggable אם אין pan room.</p>
+<p class="section-title">פרומפט קצר לקלוד/קודקס</p>
+<div class="prompt">Fix FILL panning invariant in KonvaLayerNode. Remove the isPhotoPrintFrame dragBoundFunc bypass, compute axis-aware fill pan bounds, lock X/Y independently when there is no overflow, disable draggable when there is no pan room, and keep dragEnd clamp as final safety.</div>
+</article>
+<article class="card finding high">
+<div><span class="badge high">בינוני-גבוה</span><span class="badge ok">ביטחון: בינוני-גבוה</span><span class="pill">Photo Print / Async Jobs</span></div>
+<h3>10. Face detection רץ אחרי פתיחת האדיטור ועלול לדרוס שינויים ידניים</h3>
+<div class="files"><span class="file">src/ui/App.tsx:574-585</span><span class="file">src/core/photoPrint/photoPrintModeEngine.ts:523-570</span></div>
+<p class="section-title">מה בעייתי?</p>
+<p>אחרי יצירת פרויקט פיתוח תמונות, face detection רץ async על envelope.document המקורי. אם המשתמש כבר התחיל להזיז/לערוך לפני שהפעולה הסתיימה, then עושה setDocument(updated) על בסיס מסמך ישן. זה יכול למחוק crop/selection/שינויים שנעשו בינתיים.</p>
+<p class="section-title">למה זה חשוב?</p>
+<p>תחושת “התוכנה הזיזה לי לבד” או איבוד עבודה בתחילת פרויקט עם face detection.</p>
+<p class="section-title">כיוון תיקון מומלץ</p>
+<p>להריץ job עם cancellation/version check. לפני setDocument לבדוק שהמסמך הנוכחי הוא אותו project/revision ושלא היו manual overrides. עדיף לעדכן רק transforms ספציפיים דרך action, לא להחליף document שלם.</p>
+<p class="section-title">פרומפט קצר לקלוד/קודקס</p>
+<div class="prompt">Make photo print face detection non-destructive. Capture projectId + revision before async run, skip applying results if current revision changed, and apply only per-frame transforms that still have no manual crop override. Never replace the whole document with a stale async result.</div>
+</article>
+<article class="card finding high">
+<div><span class="badge high">בינוני-גבוה</span><span class="badge ok">ביטחון: בינוני</span><span class="pill">PDF Studio</span></div>
+<h3>11. PDF rendering שומר עמודים כ־canvas dataURL בלי תקציב זיכרון ברור</h3>
+<div class="files"><span class="file">src/ui/pdf/pdfRenderService.ts:84-125</span><span class="file">src/ui/pdf/PdfStudioScreen.tsx:175-178</span><span class="file">src/ui/pdf/PdfStudioScreen.tsx:634-687</span></div>
+<p class="section-title">מה בעייתי?</p>
+<p>שירות PDF מייצר dataURL לכל תצוגת עמוד. dataURL הוא מחרוזת base64 גדולה. אם PDF כולל הרבה עמודים או רזולוציה גבוהה, זה יכול לחזור על אותה מחלת זיכרון כמו התמונות.</p>
+<p class="section-title">למה זה חשוב?</p>
+<p>טעינת PDF מרובה עמודים יכולה לגרום לאיטיות, זיכרון גבוה וקריסות, במיוחד אם שומרים previews בתוך state.</p>
+<p class="section-title">כיוון תיקון מומלץ</p>
+<p>להחזיק cache מוגבל לפי LRU, להשתמש Blob/objectURL לתצוגה, לשחרר URLs כשעמודים יוצאים מהמסך, ולהפריד thumbnail קטן מתצוגה מלאה.</p>
+<p class="section-title">פרומפט קצר לקלוד/קודקס</p>
+<div class="prompt">Optimize PDF Studio page rendering memory. Replace persistent base64 dataURLs with Blob/objectURL cache, add LRU limits, revoke object URLs, render thumbnails separately, and avoid storing full page images in React state for all pages.</div>
+</article>
+<article class="card finding medium">
+<div><span class="badge medium">בינוני</span><span class="badge ok">ביטחון: בינוני-גבוה</span><span class="pill">Print Preview / Temp Files</span></div>
+<h3>12. הדפסה מרובת עמודים כותבת קבצים זמניים בלי מנגנון ניקוי ברור</h3>
+<div class="files"><span class="file">src/services/printPreviewService.ts:99-134</span><span class="file">electron/main.cjs:268-272</span></div>
+<p class="section-title">מה בעייתי?</p>
+<p>openPrintPreviewForPages כותב כל עמוד לקובץ זמני דרך writeTempImage. לא ראיתי מנגנון שמוחק את הקבצים אחרי סגירת print preview או אחרי זמן.</p>
+<p class="section-title">למה זה חשוב?</p>
+<p>אחרי הרבה הדפסות, תיקיית temp יכולה להתמלא בעשרות/מאות קבצי PNG/JPG גדולים.</p>
+<p class="section-title">כיוון תיקון מומלץ</p>
+<p>לכתוב את קבצי ההדפסה לתיקיית job ייעודית תחת temp, להעביר manifest עם jobId, ולמחוק את התיקייה כשה־preview נסגר או ב־startup cleanup לפי גיל.</p>
+<p class="section-title">פרומפט קצר לקלוד/קודקס</p>
+<div class="prompt">Add temp-file lifecycle for SPP2 print preview. Write rendered pages into a per-job temp folder, pass jobId/manifest to Python, clean the folder when print preview exits, and run startup cleanup for old SPP2 temp jobs.</div>
+</article>
+<article class="card finding high">
+<div><span class="badge high">גבוה</span><span class="badge ok">ביטחון: גבוה</span><span class="pill">Batch Templates</span></div>
+<h3>13. תבניות ייצור כמותי נשמרות ל־localStorage כפרויקט מלא</h3>
+<div class="files"><span class="file">src/core/batchProduction/batchTemplateStore.ts:216-222</span><span class="file">src/core/batchProduction/batchTemplateStore.ts:266-268</span></div>
+<p class="section-title">מה בעייתי?</p>
+<p>saveTemplateDocument שומר serializeProject(envelope) לתוך localStorage. אם תבנית כוללת תמונות/גרפיקה כבדה, זו אותה בעיית autosave רק במסלול אחר.</p>
+<p class="section-title">למה זה חשוב?</p>
+<p>שמירת תבניות תיכשל או תאט, localStorage יתמלא, וקשה לנהל ספריית תבניות רצינית.</p>
+<p class="section-title">כיוון תיקון מומלץ</p>
+<p>להעביר template storage לקבצים/userData או IndexedDB, ולשמור assets חיצונית. localStorage צריך להכיל רק index קטן.</p>
+<p class="section-title">פרומפט קצר לקלוד/קודקס</p>
+<div class="prompt">Move batch template storage out of localStorage. Store template documents as files under userData/templates with externalized assets, keep only a small index in localStorage, and migrate existing localStorage templates safely.</div>
+</article>
+<article class="card finding medium">
+<div><span class="badge medium">בינוני</span><span class="badge ok">ביטחון: גבוה</span><span class="pill">Workers / Smart Crop</span></div>
+<h3>14. קיימים placeholders של Python bridge שעדיין זורקים שגיאה</h3>
+<div class="files"><span class="file">src/core/workers/smartCropWorker.ts:59-64</span><span class="file">src/core/workers/workerBridge.ts:23-28</span><span class="file">src/services/python_bridge/PythonBridge.ts:62-75</span></div>
+<p class="section-title">מה בעייתי?</p>
+<p>smartCropWorker מכיל TODO ו־throw Error עבור Python bridge. אם UI מציג smart crop כאילו מחובר, בפועל הוא ייפול ל־fallback או ייכשל.</p>
+<p class="section-title">למה זה חשוב?</p>
+<p>פיצ׳רים של חיתוך חכם/זיהוי פנים יכולים לעבוד חלקית בלבד, והמשתמש לא תמיד מבין אם זה AI אמיתי או fallback.</p>
+<p class="section-title">כיוון תיקון מומלץ</p>
+<p>ליצור capability registry אחד: כל פיצ׳ר כבד מדווח available/loading/error/fallback. UI לא מציג פעולה כפעילה אם bridge לא מחובר.</p>
+<p class="section-title">פרומפט קצר לקלוד/קודקס</p>
+<div class="prompt">Implement a central capability registry for AI/Python features. Smart crop, face detect, background removal, AI fill and PDF tools must expose available/loading/error/fallback states, and UI buttons should be disabled or labeled clearly when running fallback.</div>
+</article>
+<article class="card finding medium">
+<div><span class="badge medium">בינוני</span><span class="badge ok">ביטחון: בינוני</span><span class="pill">Settings / IPC</span></div>
+<h3>15. חלק מה־Settings IPC מוגדרים כ־stubs עתידיים</h3>
+<div class="files"><span class="file">src/electron.d.ts:167</span><span class="file">electron/preload.cjs</span><span class="file">electron/main.cjs</span></div>
+<p class="section-title">מה בעייתי?</p>
+<p>ב־electron.d.ts מופיעה הערה על Settings-related IPC stubs implemented in future Electron update. אם קיימים מסכי הגדרות שמסתמכים על זה, ייתכן שחלק מההגדרות לא באמת נשמרות דרך Electron.</p>
+<p class="section-title">למה זה חשוב?</p>
+<p>העדפות משתמש, נתיבי תוכנות חיצוניות, מדפסות או כלים יכולים להיראות כאילו נשמרו אבל לא לשרוד פתיחה מחדש.</p>
+<p class="section-title">כיוון תיקון מומלץ</p>
+<p>לעשות audit לכל SettingsWindow/panels ולוודא שכל פעולה משתמשת ב־store אחד אמין, עם persistence ברור, ולבדוק restart.</p>
+<p class="section-title">פרומפט קצר לקלוד/קודקס</p>
+<div class="prompt">Audit SPP2 settings persistence. Trace every settings panel field to its storage backend, remove future IPC stubs or implement them, add restart tests, and show clear errors when saving settings fails.</div>
+</article>
+<article class="card finding medium">
+<div><span class="badge medium">בינוני</span><span class="badge ok">ביטחון: בינוני</span><span class="pill">Rendering / Effects</span></div>
+<h3>16. JSON.stringify בתוך dependency arrays יכול להיות יקר ולא יציב</h3>
+<div class="files"><span class="file">src/ui/editor/KonvaLayerNode.tsx:435</span><span class="file">src/ui/editor/KonvaLayerNode.tsx:875</span><span class="file">src/ui/editor/KonvaLayerNode.tsx:1322</span></div>
+<p class="section-title">מה בעייתי?</p>
+<p>יש useMemo/useEffect שתלויים ב־JSON.stringify(layer.effects / visualEffects). זה פתרון מהיר, אבל בשכבות רבות או אפקטים מורכבים זה עושה stringify ברנדר ויכול לגרום לחישובים מיותרים.</p>
+<p class="section-title">למה זה חשוב?</p>
+<p>איטיות באדיטור, במיוחד כשגוררים/משנים סליידרים או כשיש הרבה שכבות.</p>
+<p class="section-title">כיוון תיקון מומלץ</p>
+<p>לייצר revision/hash קטן לאפקטים בעת שינוי, או normalize immutable references כך ש־dependency תהיה reference יציב ולא stringify.</p>
+<p class="section-title">פרומפט קצר לקלוד/קודקס</p>
+<div class="prompt">Remove JSON.stringify from hot React dependencies in KonvaLayerNode. Introduce stable effect revision/hash fields updated only when effects change, and use those in memo dependencies to reduce render cost.</div>
+</article>
+<article class="card finding medium">
+<div><span class="badge medium">בינוני</span><span class="badge ok">ביטחון: גבוה</span><span class="pill">Project Lifecycle</span></div>
+<h3>17. Recovery משחזר payload מלא בלבד — אין מצב ביניים של “נכס חסר אבל פרויקט קיים”</h3>
+<div class="files"><span class="file">src/ui/App.tsx:1033-1048</span><span class="file">src/core/save/autosave.ts:246-250</span><span class="file">src/core/assets/relink.ts</span></div>
+<p class="section-title">מה בעייתי?</p>
+<p>restoreRecoveryRecord מחזיר parseProject(record.payload). אם payload נפגם או assets הוסרו בעתיד, אין עדיין זרימת שחזור הדרגתית שמציגה placeholders ומבקשת relink.</p>
+<p class="section-title">למה זה חשוב?</p>
+<p>Recovery עלול להיכשל לגמרי במקום להציל לפחות את מבנה העבודה.</p>
+<p class="section-title">כיוון תיקון מומלץ</p>
+<p>להוסיף Recovery Load Result עם statuses: full, assetsStripped, missingAssets, invalid. UI יציג “שוחזר מבנה, חסרות X תמונות” ויציע relink folder.</p>
+<p class="section-title">פרומפט קצר לקלוד/קודקס</p>
+<div class="prompt">Redesign recovery restore UX. restoreRecoveryRecord should return a typed result with full/partial/missing-assets statuses. Open partial projects with placeholders and a relink flow instead of discarding invalid records silently.</div>
+</article>
+
+<h2>תוכנית עבודה מומלצת</h2>
+<div class="card">
+<table class="table">
+<thead><tr><th>שלב</th><th>שם</th><th>מה עושים</th></tr></thead><tbody>
+<tr><td><b>1</b></td><td>ייצוב מיידי</td><td>Autosave קל, ביטול localStorage לפרויקטים כבדים, ניקוי קבצי Editor כפולים, תיקון FILL axis clamp.</td></tr><tr><td><b>2</b></td><td>הפחתת זיכרון</td><td>AssetStore חיצוני, history דיפרנציאלי, PDF objectURL cache, ניקוי temp files.</td></tr><tr><td><b>3</b></td><td>סידור ארכיטקטורה</td><td>פיצול EditorScreen, אחידות Electron TS/CJS, capability registry לכל מנוע Python/AI.</td></tr><tr><td><b>4</b></td><td>אמינות ושחזור</td><td>Recovery חלקי עם relink, בדיקות עומס 100 תמונות/50 עמודים, health check ברור בהתקנה.</td></tr></tbody></table></div>
+
+<h2>בדיקות קבלה שחשוב להוסיף</h2>
+<div class="card"><ul>
+<li>יצירת פרויקט פיתוח תמונות עם 100 תמונות והזזה 50 פעמים ללא crash וללא קפיצת זיכרון חריגה.</li><li>פתיחת קולאז׳ עם 40 תמונות, החלפת layout ושמירת manual crop ללא איבוד.</li><li>שמירת batch template עם תמונות כבדות בלי localStorage quota.</li><li>PDF עם 60 עמודים: גלילה, thumbnails, preview והדפסה בלי לשמור את כל העמודים כ־base64 ב־state.</li><li>אריזה במחשב נקי: health check מראה Python/engines/LibreOffice/print preview בצורה ברורה.</li><li>בדיקת restart: הגדרות, ספריית מוצרים, תבניות, recovery ו־last print settings נשמרים ונפתחים תקין.</li></ul></div>
+
+<h2>פרומפט־על לסריקה חוזרת אחרי תיקונים</h2>
+<div class="card">
+<div class="prompt">Audit the current SPP2 codebase after recent fixes. Focus on memory safety, autosave/recovery reliability, asset storage, Electron IPC source-of-truth, stale files under src, and mode-specific regressions in photo_print/collage/PDF/batch production. For every issue, provide exact files, risk level, minimal fix, and acceptance tests. Do not modify archived or unused files. First identify the active runtime entrypoints and active editor files.</div>
+</div>
+
+<h2>המלצה אסטרטגית קצרה</h2>
+<div class="card">
+<p>לא הייתי ממשיך לבנות פיצ׳רים גדולים לפני שמסדרים את שכבת השמירה והנכסים. כל עוד תמונות כבדות נשארות כ־base64 בתוך ה־document, כל פיצ׳ר חדש — PDF, קולאז׳, ייצור כמותי, מסיכות, AI Fill — יירש את אותה בעיית זיכרון.</p>
+<p>הסדר הנכון מבחינתי:</p>
+<ol>
+<li>להחזיר autosave קל ובטוח.</li>
+<li>להוציא נכסים כבדים מה־document.</li>
+<li>לנקות קבצים כפולים ומקורות אמת כפולים.</li>
+<li>לפצל את EditorScreen בהדרגה, לא בפעם אחת.</li>
+<li>להוסיף בדיקות עומס אמיתיות לפרויקטים כמו בחנות: 100 תמונות, 50 עמודים, PDF גדול, תבניות ייצור.</li>
+</ol>
+</div>
+
+<div class="footer">נוצר מסקירה סטטית של הקוד שנשלח. מומלץ להריץ לצד זה גם בדיקת runtime עם Chrome DevTools Memory Performance ו־Electron crash logs.</div>
+</div>
+</body></html>

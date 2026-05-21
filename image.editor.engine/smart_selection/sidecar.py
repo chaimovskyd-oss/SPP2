@@ -265,12 +265,18 @@ def refine_mask(image_id: str, options: dict[str, Any]) -> dict[str, Any]:
 
 
 def inpaint_remove(image_id: str, options: dict[str, Any]) -> dict[str, Any]:
-    entry = require_image(image_id)
     mask_b64 = str(options.get("maskPngBase64") or "")
     if not mask_b64:
         raise RuntimeError("invalid_mask")
-    width = int(options.get("targetWidth") or options.get("width") or entry.width)
-    height = int(options.get("targetHeight") or options.get("height") or entry.height)
+    image_b64 = str(options.get("imagePngBase64") or "")
+    entry: ImageEntry | None = None
+    if image_b64:
+        image = Image.open(io.BytesIO(base64.b64decode(image_b64))).convert("RGBA")
+    else:
+        entry = require_image(image_id)
+        image = open_image(entry.path)
+    width = int(options.get("targetWidth") or options.get("width") or image.width)
+    height = int(options.get("targetHeight") or options.get("height") or image.height)
     emit_progress({
         "operation": "inpaint_remove",
         "phase": "prepare",
@@ -279,7 +285,6 @@ def inpaint_remove(image_id: str, options: dict[str, Any]) -> dict[str, Any]:
         "modelId": "lama",
     })
     mask = decode_mask(mask_b64, width, height)
-    image = open_image(entry.path)
     result = INPAINT_SERVICE.inpaint(image, mask, {**options, "targetWidth": width, "targetHeight": height}, progress=emit_progress)
     return result.to_json()
 
@@ -292,6 +297,107 @@ def unload_image(image_id: str) -> dict[str, Any]:
         if key.startswith(f"{image_id}:"):
             AUTO_SEGMENT_CACHE.pop(key, None)
     return {"ok": True}
+
+
+# ─── Face detection ──────────────────────────────────────────────────────────
+# Priority: MediaPipe BlazeFace (full-range) → OpenCV Haar cascade → empty.
+# Cached lazily; both run on CPU and add no startup cost when unused.
+
+_FACE_DETECTOR_MP = None
+_FACE_DETECTOR_MP_LOADED = False
+_FACE_DETECTOR_HAAR = None
+_FACE_DETECTOR_HAAR_LOADED = False
+
+
+def _mediapipe_face_detector():
+    global _FACE_DETECTOR_MP, _FACE_DETECTOR_MP_LOADED
+    if _FACE_DETECTOR_MP_LOADED:
+        return _FACE_DETECTOR_MP
+    _FACE_DETECTOR_MP_LOADED = True
+    try:
+        import mediapipe as mp  # type: ignore
+        if not hasattr(mp, "solutions") or not hasattr(mp.solutions, "face_detection"):
+            return None
+        _FACE_DETECTOR_MP = mp.solutions.face_detection.FaceDetection(
+            model_selection=1, min_detection_confidence=0.45
+        )
+    except Exception as exc:
+        log("mediapipe face detector load failed", error=str(exc))
+        _FACE_DETECTOR_MP = None
+    return _FACE_DETECTOR_MP
+
+
+def _haar_face_detector():
+    global _FACE_DETECTOR_HAAR, _FACE_DETECTOR_HAAR_LOADED
+    if _FACE_DETECTOR_HAAR_LOADED:
+        return _FACE_DETECTOR_HAAR
+    _FACE_DETECTOR_HAAR_LOADED = True
+    try:
+        import cv2  # type: ignore
+        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        detector = cv2.CascadeClassifier(cascade_path)
+        if detector.empty():
+            _FACE_DETECTOR_HAAR = None
+        else:
+            _FACE_DETECTOR_HAAR = detector
+    except Exception as exc:
+        log("haar face detector load failed", error=str(exc))
+        _FACE_DETECTOR_HAAR = None
+    return _FACE_DETECTOR_HAAR
+
+
+def detect_faces(image_id: str) -> dict[str, Any]:
+    entry = require_image(image_id)
+    image = open_image(entry.path)
+    rgb = np.asarray(image.convert("RGB"))
+    height, width = rgb.shape[:2]
+
+    faces: list[dict[str, Any]] = []
+    backend = "none"
+
+    mp_detector = _mediapipe_face_detector()
+    if mp_detector is not None:
+        try:
+            result = mp_detector.process(rgb)
+            for detection in result.detections or []:
+                box = detection.location_data.relative_bounding_box
+                x = max(0, int(box.xmin * width))
+                y = max(0, int(box.ymin * height))
+                w = max(0, min(width - x, int(box.width * width)))
+                h = max(0, min(height - y, int(box.height * height)))
+                if w > 0 and h > 0:
+                    faces.append({
+                        "x": x, "y": y, "width": w, "height": h,
+                        "score": float(detection.score[0]) if detection.score else 0.5,
+                    })
+            backend = "mediapipe"
+        except Exception as exc:
+            log("mediapipe detect_faces failed", image_id=image_id, error=str(exc))
+
+    if not faces:
+        haar = _haar_face_detector()
+        if haar is not None:
+            try:
+                import cv2  # type: ignore
+                gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+                found = haar.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(32, 32))
+                for (x, y, w, h) in found:
+                    faces.append({
+                        "x": int(x), "y": int(y), "width": int(w), "height": int(h),
+                        "score": 0.5,
+                    })
+                backend = "haar"
+            except Exception as exc:
+                log("haar detect_faces failed", image_id=image_id, error=str(exc))
+
+    return {
+        "ok": True,
+        "imageId": image_id,
+        "width": width,
+        "height": height,
+        "backend": backend,
+        "faces": faces,
+    }
 
 
 def target_size(entry: ImageEntry, options: dict[str, Any]) -> tuple[int, int]:
@@ -385,6 +491,8 @@ def dispatch(method: str, params: dict[str, Any]) -> Any:
         return inpaint_remove(str(params["image_id"]), dict(params.get("options") or {}))
     if method == "unload_image":
         return unload_image(str(params["image_id"]))
+    if method == "detect_faces":
+        return detect_faces(str(params["image_id"]))
     if method == "cancel":
         return {"ok": True}
     if method == "shutdown":

@@ -63,6 +63,12 @@ export interface InpaintRemoveResult {
   modelId: "lama" | "opencv_telea" | string;
   modelVersion: string;
   fallback: boolean;
+  backendAttempted?: string;
+  backendUsed?: string;
+  backendDevice?: string | null;
+  modelWeightsPath?: string | null;
+  fallbackReason?: string | null;
+  debugDir?: string | null;
   message: string;
   processingMs: number;
 }
@@ -137,16 +143,19 @@ export async function runSmartRefineMask(
   }));
 }
 
-export async function runSmartInpaintRemove(asset: Asset, layer: ImageLayer, selectionMask: SelectionMask): Promise<InpaintRemoveResult | null> {
+export async function runSmartInpaintRemove(asset: Asset, layer: ImageLayer, selectionMask: SelectionMask, renderedImageDataUrl?: string): Promise<InpaintRemoveResult | null> {
   const input = makeSmartSelectionInput(asset, layer);
   const api = window.spp?.smartSelection;
   if (input === null || api === undefined || typeof api.inpaintRemove !== "function") return null;
-  await api.loadImage(input.imageId, input.imagePath, input.sourceHash);
+  if (renderedImageDataUrl === undefined) {
+    await api.loadImage(input.imageId, input.imagePath, input.sourceHash);
+  }
   const result = await api.inpaintRemove(input.imageId, {
+    ...(renderedImageDataUrl === undefined ? {} : { imagePngBase64: dataUrlToBase64(renderedImageDataUrl) }),
     maskPngBase64: selectionMaskToPngBase64(selectionMask.data, selectionMask.width, selectionMask.height),
     targetWidth: Math.max(1, Math.round(selectionMask.width)),
     targetHeight: Math.max(1, Math.round(selectionMask.height)),
-    maxPatchPixels: 6_000_000,
+    maxPatchPixels: 10_000_000,
     blend: "feather"
   });
   return normalizeInpaintResult(result);
@@ -233,7 +242,17 @@ function normalizeMaskResult(result: SmartSelectionMaskResult | { ok?: boolean; 
 function normalizeInpaintResult(result: InpaintRemoveResult | { ok?: boolean; message?: string; error?: string } | null | undefined): InpaintRemoveResult | null {
   if (result === null || result === undefined) return null;
   if (!("patchPngBase64" in result) || typeof result.patchPngBase64 !== "string" || result.patchPngBase64.length === 0) {
+    if ("error" in result && typeof result.error === "string" && result.error.length > 0) {
+      throw new Error(result.error);
+    }
+    if ("message" in result && typeof result.message === "string" && result.message.length > 0) {
+      throw new Error(result.message);
+    }
     return null;
   }
   return result;
+}
+
+function dataUrlToBase64(dataUrl: string): string {
+  return dataUrl.replace(/^data:[^;]+;base64,/, "");
 }

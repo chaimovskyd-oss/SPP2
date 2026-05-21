@@ -3,8 +3,10 @@ import { createId } from "@/core/ids";
 import { createFrameLayer, defaultContentTransform } from "@/core/layers/factory";
 import { withProjectMetadata } from "@/core/projectMetadata";
 import { mmToPx } from "@/core/units/conversion";
+import { detectFocalPoint, type FocalPoint } from "@/core/collage/collageFaceDetect";
+import { clampContentTransformToFillBounds, computeContentRect } from "@/core/rendering/frameFitEngine";
 import type { Asset, Document, Page } from "@/types/document";
-import type { FrameLayer, VisualLayer } from "@/types/layers";
+import type { ContentTransform, FrameLayer, VisualLayer } from "@/types/layers";
 import type { FitMode, FillStyle, PageSetup } from "@/types/primitives";
 import type { VisualEffectStack } from "@/types/visualEffects";
 import type {
@@ -30,16 +32,25 @@ export function computeBestGridForCount(
   count: number,
   orientationPolicy: "auto" | "portrait" | "landscape" = "auto"
 ): { rows: number; cols: number } {
+  const safeCount = Math.max(1, Math.floor(Number.isFinite(count) ? count : 1));
+  const safeUsableW = Number.isFinite(usableWPx) ? usableWPx : 0;
+  const safeUsableH = Number.isFinite(usableHPx) ? usableHPx : 0;
+  const safeGap = Math.max(0, Number.isFinite(gapPx) ? gapPx : 0);
+
+  if (safeUsableW <= 0 || safeUsableH <= 0) {
+    return { rows: 1, cols: safeCount };
+  }
+
   const TARGET_RATIO = 1.5;
   const SQUARE_PENALTY_THRESHOLD = 1.2;
   let bestScore = -Infinity;
   let bestRows = 1;
-  let bestCols = count;
+  let bestCols = safeCount;
 
-  for (let rows = 1; rows <= count; rows += 1) {
-    const cols = Math.ceil(count / rows);
-    const slotW = (usableWPx - (cols - 1) * gapPx) / cols;
-    const slotH = (usableHPx - (rows - 1) * gapPx) / rows;
+  for (let rows = 1; rows <= safeCount; rows += 1) {
+    const cols = Math.ceil(safeCount / rows);
+    const slotW = (safeUsableW - (cols - 1) * safeGap) / cols;
+    const slotH = (safeUsableH - (rows - 1) * safeGap) / rows;
     if (slotW <= 0 || slotH <= 0) continue;
 
     const slotIsPortrait = slotH >= slotW;
@@ -58,7 +69,12 @@ export function computeBestGridForCount(
     }
   }
 
-  if (bestScore === -Infinity) return computeBestGridForCount(usableWPx, usableHPx, gapPx, count, "auto");
+  if (bestScore === -Infinity && orientationPolicy !== "auto") {
+    return computeBestGridForCount(safeUsableW, safeUsableH, safeGap, safeCount, "auto");
+  }
+  if (bestScore === -Infinity) {
+    return { rows: 1, cols: safeCount };
+  }
   return { rows: bestRows, cols: bestCols };
 }
 
@@ -78,8 +94,8 @@ export function computePhotoPrintLayout(
 ): PhotoPrintLayoutResult {
   const marginPx = mmToPx(sheetMarginsMm, dpi);
   const gapPx = mmToPx(gapBetweenPrintsMm, dpi);
-  const usableW = pageWidthPx - 2 * marginPx;
-  const usableH = pageHeightPx - 2 * marginPx;
+  const usableW = Math.max(1, pageWidthPx - 2 * marginPx);
+  const usableH = Math.max(1, pageHeightPx - 2 * marginPx);
   const totalPrintItems = Math.max(1, totalSourceImages) * Math.max(1, globalCopies);
 
   // Smart grid: fixed count per page
@@ -368,8 +384,18 @@ function buildPhotoPrintPages(
       };
 
       let slotRotation = 0;
-      if (layout.rotatedOnSheet && rule.autoRotatePolicy === "rotateToSlotOrientation") {
-        slotRotation = 90;
+      if (rule.autoRotatePolicy === "rotateToSlotOrientation" && input !== undefined) {
+        const imgW = input.asset.width;
+        const imgH = input.asset.height;
+        if (typeof imgW === "number" && typeof imgH === "number" && imgW > 0 && imgH > 0) {
+          const imgIsPortrait = imgH > imgW;
+          const slotIsPortrait = layout.slotHeightPx > layout.slotWidthPx;
+          if (imgIsPortrait !== slotIsPortrait) {
+            slotRotation = 90;
+          }
+        } else if (layout.rotatedOnSheet) {
+          slotRotation = 90;
+        }
       }
 
       const fitMode = (input?.manualFitModeOverride ?? rule.fitMode) as FitMode;
@@ -405,7 +431,7 @@ function buildPhotoPrintPages(
         fitMode,
         contentTransform,
         padding: borderPx,
-        lockedFrame: true,
+        lockedFrame: false,
         zIndex: globalIndex,
         metadata: { photoPrintSlot: metadata }
       });
@@ -480,6 +506,156 @@ function getRule(document: Document, ruleId: string): PhotoPrintRule | undefined
 function mergeAssets(existing: Asset[], incoming: Asset[]): Asset[] {
   const ids = new Set(existing.map((a) => a.id));
   return [...existing, ...incoming.filter((a) => !ids.has(a.id))];
+}
+
+/**
+ * One-shot async pass that runs MediaPipe face detection (via the Python
+ * sidecar) on every photo-print frame whose `smartCropMode === "face"` and
+ * shifts the frame's contentTransform.offsetX/Y so the detected face lands at
+ * the cell's center. Rotation (auto-rotate-to-slot) is preserved.
+ *
+ * Safe to call when the sidecar is unavailable: `detectFocalPoint` falls back
+ * to a saliency heuristic and the offsets still get a sensible center.
+ *
+ * Frames whose user has already manually cropped (assignment has
+ * `manualContentTransform` / `hasManualCropOverride`) are skipped.
+ */
+export async function applyFaceDetectionToPhotoPrint(
+  document: Document,
+  ruleId: string
+): Promise<Document> {
+  const rule = getRule(document, ruleId);
+  if (rule === undefined || !rule.faceDetectionEnabled) return document;
+
+  const assignmentByFrame = new Map<string, PhotoPrintImageAssignment>();
+  for (const a of document.photoPrintImageAssignments) {
+    if (a.photoPrintId === ruleId) assignmentByFrame.set(a.frameId, a);
+  }
+  const assetById = new Map<string, Asset>(document.assets.map((a) => [a.id, a]));
+
+  let nextDoc = document;
+  for (const page of document.pages) {
+    if (!rule.pageIds.includes(page.id)) continue;
+    for (const layer of page.layers) {
+      if (!isPhotoPrintSlotLayer(layer)) continue;
+      if (layer.smartCropMode !== "face") continue;
+      if (layer.contentType !== "image" || layer.imageAssetId === undefined) continue;
+
+      const assignment = assignmentByFrame.get(layer.id);
+      if (assignment?.hasManualCropOverride) continue;
+      const asset = assetById.get(layer.imageAssetId);
+      if (asset === undefined) continue;
+
+      const src = asset.previewPath ?? asset.originalPath;
+      if (!src) continue;
+
+      try {
+        const img = await loadHtmlImage(src);
+        const focal = await detectFocalPoint(img, src);
+        const nextTransform = focalToCenteringTransform(
+          focal,
+          layer.contentTransform,
+          layer.width,
+          layer.height,
+          img.naturalWidth,
+          img.naturalHeight,
+          layer.fitMode,
+          layer.padding
+        );
+        nextDoc = updateFrameContentTransform(nextDoc, page.id, layer.id, nextTransform);
+      } catch {
+        // ignore — keep the engine-set transform
+      }
+    }
+  }
+  return nextDoc;
+}
+
+function loadHtmlImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+/**
+ * Given a focal point in image coords (0..1), return a ContentTransform with
+ * offsetX/offsetY that shifts the focal point toward the cell's center along
+ * any axis where the image overflows the cell.
+ *
+ * In "fill" mode the image MUST always cover the cell (no white space). So
+ * face detection can only nudge the image along axes where the image extends
+ * beyond the cell. For exact-fit axes (bbox == cell, e.g. after auto-rotate),
+ * the clamp pulls the offset back to 0 on that axis — face detection becomes
+ * a no-op for that axis, which is the correct behavior given the fill
+ * invariant. No auto-zoom is applied: scale + fit semantics stay intact.
+ */
+function focalToCenteringTransform(
+  focal: FocalPoint,
+  current: ContentTransform,
+  frameWidth: number,
+  frameHeight: number,
+  imageNaturalWidth: number,
+  imageNaturalHeight: number,
+  fitMode: FitMode,
+  padding: number
+): ContentTransform {
+  // Rotated bbox dims at the current scale.
+  const probe = computeContentRect(
+    frameWidth,
+    frameHeight,
+    imageNaturalWidth,
+    imageNaturalHeight,
+    fitMode,
+    { ...current, offsetX: 0, offsetY: 0 },
+    padding
+  );
+
+  // Where does the focal land in the rotated bbox?
+  const rad = ((current.rotation ?? 0) * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const ax = focal.x - 0.5;
+  const ay = focal.y - 0.5;
+  const aBbox = 0.5 + ax * cos - ay * sin;
+  const bBbox = 0.5 + ax * sin + ay * cos;
+
+  // Offset that would put the focal at the cell center (before clamping).
+  const desiredOffsetX = probe.width * (0.5 - aBbox);
+  const desiredOffsetY = probe.height * (0.5 - bBbox);
+
+  return clampContentTransformToFillBounds(
+    { ...current, offsetX: desiredOffsetX, offsetY: desiredOffsetY },
+    frameWidth,
+    frameHeight,
+    imageNaturalWidth,
+    imageNaturalHeight,
+    fitMode,
+    padding
+  );
+}
+
+function updateFrameContentTransform(
+  document: Document,
+  pageId: string,
+  frameId: string,
+  contentTransform: ContentTransform
+): Document {
+  return {
+    ...document,
+    pages: document.pages.map((page) => {
+      if (page.id !== pageId) return page;
+      return {
+        ...page,
+        layers: page.layers.map((layer) =>
+          layer.id === frameId ? { ...layer, contentTransform } : layer
+        )
+      };
+    })
+  };
 }
 
 function deduplicateByAssetId(inputs: PhotoPrintImageInput[]): PhotoPrintImageInput[] {

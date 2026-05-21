@@ -6,6 +6,9 @@ contextBridge.exposeInMainWorld("spp", {
   writeTempImage: (dataUrl, ext) =>
     ipcRenderer.invoke("spp:write-temp-image", dataUrl, ext),
 
+  getMemoryUsage: () =>
+    ipcRenderer.invoke("spp:get-memory-usage"),
+
   readFileBase64: (filePath) =>
     ipcRenderer.invoke("spp:read-file-base64", filePath),
 
@@ -54,6 +57,7 @@ contextBridge.exposeInMainWorld("spp", {
     refineMask: (imageId, options) => ipcRenderer.invoke("spp:smart-selection:refine-mask", imageId, options),
     inpaintRemove: (imageId, options) => ipcRenderer.invoke("spp:smart-selection:inpaint-remove", imageId, options),
     unloadImage: (imageId) => ipcRenderer.invoke("spp:smart-selection:unload-image", imageId),
+    detectFaces: (imageId) => ipcRenderer.invoke("spp:smart-selection:detect-faces", imageId),
     cancel: (requestId) => ipcRenderer.invoke("spp:smart-selection:cancel", requestId),
     onProgress: (callback) => {
       const handler = (_event, payload) => callback(payload);

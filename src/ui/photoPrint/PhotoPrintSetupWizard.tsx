@@ -1,7 +1,8 @@
-import { useRef, useState, type ChangeEvent, type DragEvent, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type DragEvent, type ReactElement } from "react";
 import { ArrowLeft, ArrowRight, Check, Printer, UploadCloud, X } from "lucide-react";
 import { mmToPx } from "@/core/units/conversion";
 import { computeBestGridForCount, computePhotoPrintLayout } from "@/core/photoPrint/photoPrintModeEngine";
+import { GlobalWizardDropTarget, isImageDropFile } from "@/ui/wizard/GlobalWizardDropTarget";
 import type {
   PhotoPagePreset,
   PhotoPrintCreateOptions,
@@ -28,6 +29,14 @@ export function PhotoPrintSetupWizard({ onComplete, onCancel }: PhotoPrintSetupW
   const [images, setImages] = useState<PhotoPrintWizardImageEntry[]>([]);
   const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
+  useEffect(() => () => {
+    for (const entry of imagesRef.current) {
+      try { URL.revokeObjectURL(entry.url); } catch { /* ignore */ }
+    }
+  }, []);
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
 
@@ -59,7 +68,7 @@ export function PhotoPrintSetupWizard({ onComplete, onCancel }: PhotoPrintSetupW
   // ─── Image upload ──────────────────────────────────────────────────────────
 
   function addFiles(files: FileList | File[]): void {
-    const todo = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    const todo = Array.from(files).filter(isImageDropFile);
     if (todo.length === 0) return;
     let pending = todo.length;
     const toAdd: PhotoPrintWizardImageEntry[] = [];
@@ -563,6 +572,10 @@ export function PhotoPrintSetupWizard({ onComplete, onCancel }: PhotoPrintSetupW
 
   return (
     <div className="collage-wizard-overlay">
+      <GlobalWizardDropTarget
+        acceptFile={isImageDropFile}
+        onFiles={addFiles}
+      />
       <div className="collage-wizard" style={{ width: "min(95vw, 740px)" }}>
         <button className="collage-wizard-close" onClick={onCancel} type="button"><X size={18} /></button>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>

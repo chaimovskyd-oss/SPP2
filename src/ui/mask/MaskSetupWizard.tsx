@@ -1,8 +1,10 @@
 import { ArrowLeft, ArrowRight, Check, X } from "lucide-react";
-import { useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { PAGE_PRESETS, pageSetupFromPreset } from "@/core/pageSetup/presets";
+import { commitDraftDimension, formatDimension, MASK_DIMENSION_LABELS, MASK_DIMENSION_UNITS, type MaskDimensionUnit } from "@/core/mask/maskDimensions";
 import { pxToUnit, unitToPx } from "@/core/units/conversion";
-import { useMaskLibraryStore, type MaskLibraryEntry } from "@/state/maskLibraryStore";
+import { generateMaskThumbnail, useMaskLibraryStore, type MaskLibraryEntry } from "@/state/maskLibraryStore";
+import { GlobalWizardDropTarget } from "@/ui/wizard/GlobalWizardDropTarget";
 import type { MaskShape } from "@/types/mask";
 import type { PageSetup, Unit } from "@/types/primitives";
 
@@ -100,6 +102,7 @@ export function ShapeIcon({ shape, size = 40 }: { shape: MaskShape; size?: numbe
 
 export function MaskSetupWizard({ onComplete, onCancel }: MaskSetupWizardProps): ReactElement {
   const libraryEntries = useMaskLibraryStore((s) => s.entries);
+  const addMaskLibraryEntry = useMaskLibraryStore((s) => s.addEntry);
 
   const [step, setStep] = useState<1 | 2>(1);
 
@@ -117,6 +120,9 @@ export function MaskSetupWizard({ onComplete, onCancel }: MaskSetupWizardProps):
   const [maskWidth, setMaskWidth] = useState(5);   // 5 cm default
   const [maskHeight, setMaskHeight] = useState(5); // 5 cm default
   const [spacingW, setSpacingW] = useState(0.5);   // 0.5 cm default
+  const [maskWidthDraft, setMaskWidthDraft] = useState("5");
+  const [maskHeightDraft, setMaskHeightDraft] = useState("5");
+  const [spacingDraft, setSpacingDraft] = useState("0.5");
 
   const selectedLibrary = libraryEntries.find((e) => e.id === selectedLibraryId) ?? null;
   const selectedPreset = MASK_PRESETS.find((p) => p.id === presetId) ?? MASK_PRESETS[0];
@@ -131,7 +137,67 @@ export function MaskSetupWizard({ onComplete, onCancel }: MaskSetupWizardProps):
     setSelectedBuiltIn(null);
   }
 
+  function isMaskFile(file: File): boolean {
+    const name = file.name.toLowerCase();
+    return file.type === "image/svg+xml" || file.type === "image/png" || name.endsWith(".svg") || name.endsWith(".png");
+  }
+
+  function readFileAsDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ""));
+      reader.onerror = () => reject(reader.error ?? new Error("Unable to read file"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function loadImageSize(src: string): Promise<{ width: number; height: number }> {
+    return new Promise((resolve) => {
+      const img = new window.Image();
+      img.onload = () => resolve({
+        width: img.naturalWidth || Math.round(unitToPx(5, "cm", 300)),
+        height: img.naturalHeight || Math.round(unitToPx(5, "cm", 300))
+      });
+      img.onerror = () => resolve({
+        width: Math.round(unitToPx(5, "cm", 300)),
+        height: Math.round(unitToPx(5, "cm", 300))
+      });
+      img.src = src;
+    });
+  }
+
+  async function importMaskFiles(files: File[]): Promise<void> {
+    const imported: MaskLibraryEntry[] = [];
+    for (const file of files.filter(isMaskFile)) {
+      const type = file.name.toLowerCase().endsWith(".svg") || file.type === "image/svg+xml" ? "svg" : "png";
+      const fileDataUrl = await readFileAsDataUrl(file);
+      const size = await loadImageSize(fileDataUrl);
+      const thumbnailDataUrl = await generateMaskThumbnail(fileDataUrl, type, false, "white", 30, 4);
+      imported.push(addMaskLibraryEntry({
+        name: file.name.replace(/\.[^.]+$/, ""),
+        type,
+        fileDataUrl,
+        thumbnailDataUrl,
+        defaultWidth: size.width,
+        defaultHeight: size.height,
+        thresholdEnabled: false,
+        thresholdColor: "white",
+        thresholdTolerance: 30,
+        thresholdFeather: 4
+      }));
+    }
+    if (imported[0]) selectLibrary(imported[0]);
+  }
+
+  useEffect(() => {
+    const unit = maskUnit === "px" ? "mm" : maskUnit;
+    setMaskWidthDraft(formatDimension(maskWidth, unit));
+    setMaskHeightDraft(formatDimension(maskHeight, unit));
+    setSpacingDraft(formatDimension(spacingW, unit));
+  }, [maskUnit, maskWidth, maskHeight, spacingW]);
+
   function changeUnit(newUnit: Unit): void {
+    commitDimensionDrafts();
     const dpi = selectedPreset.dpi;
     // Convert current values (in maskUnit) to px, then to newUnit
     const wPx = unitToPx(maskWidth, maskUnit, dpi);
@@ -160,7 +226,31 @@ export function MaskSetupWizard({ onComplete, onCancel }: MaskSetupWizardProps):
     setMaskHeight(round(value / ratio, maskUnit));
   }
 
+  function commitDimensionDrafts(): void {
+    const unit = maskUnit === "px" ? "mm" : maskUnit;
+    const minVal = unitMin(unit);
+    const maxVal = unitMax(unit);
+    const spacingMax = unit === "cm" ? 5 : unit === "mm" ? 50 : 2;
+    const ratio = maskHeight > 0 && maskWidth > 0 ? maskWidth / maskHeight : 1;
+    const nextWidth = commitDraftDimension(maskWidthDraft, maskWidth, minVal, maxVal);
+    const nextHeight = round(nextWidth / ratio, unit);
+    const nextSpacing = commitDraftDimension(spacingDraft, spacingW, 0, spacingMax);
+    setMaskWidth(nextWidth);
+    setMaskHeight(nextHeight);
+    setSpacingW(nextSpacing);
+    setMaskWidthDraft(formatDimension(nextWidth, unit));
+    setMaskHeightDraft(formatDimension(nextHeight, unit));
+    setSpacingDraft(formatDimension(nextSpacing, unit));
+  }
+
   function handleComplete(): void {
+    const unit = maskUnit === "px" ? "mm" : maskUnit;
+    const minVal = unitMin(unit);
+    const maxVal = unitMax(unit);
+    const ratio = maskHeight > 0 && maskWidth > 0 ? maskWidth / maskHeight : 1;
+    const finalMaskWidth = commitDraftDimension(maskWidthDraft, maskWidth, minVal, maxVal);
+    const finalMaskHeight = round(finalMaskWidth / ratio, unit);
+    const finalSpacing = commitDraftDimension(spacingDraft, spacingW, 0, unit === "cm" ? 5 : unit === "mm" ? 50 : 2);
     const preset = selectedPreset;
     const dpi = preset.dpi;
     const setup = pageSetupFromPreset(preset, orientation);
@@ -174,9 +264,9 @@ export function MaskSetupWizard({ onComplete, onCancel }: MaskSetupWizardProps):
       safeArea: marginsFromValue(marginsPx)
     };
 
-    const maskWidthPx = unitToPx(maskWidth, maskUnit, dpi);
-    const maskHeightPx = unitToPx(maskHeight, maskUnit, dpi);
-    const spacingPx = unitToPx(spacingW, maskUnit, dpi);
+    const maskWidthPx = unitToPx(finalMaskWidth, unit, dpi);
+    const maskHeightPx = unitToPx(finalMaskHeight, unit, dpi);
+    const spacingPx = unitToPx(finalSpacing, unit, dpi);
 
     onComplete({
       name: projectName.trim() || "פרויקט מסיכה",
@@ -197,6 +287,13 @@ export function MaskSetupWizard({ onComplete, onCancel }: MaskSetupWizardProps):
 
   return (
     <div className="mask-wizard-overlay">
+      <GlobalWizardDropTarget
+        acceptFile={isMaskFile}
+        onFiles={(files) => void importMaskFiles(files)}
+        title="שחרר כאן להוספת מסיכה"
+        subtitle="PNG או SVG יתווספו לספריית המסיכות"
+        invalidSubtitle="גרור קבצי PNG או SVG בלבד"
+      />
       <div className="mask-wizard">
         <button className="mask-wizard-close" onClick={onCancel} type="button">
           <X size={18} />
@@ -343,7 +440,7 @@ export function MaskSetupWizard({ onComplete, onCancel }: MaskSetupWizardProps):
             <div className="wizard-field">
               <label>יחידות מידה</label>
               <div className="seg">
-                {(["cm", "mm", "inch", "px"] as Unit[]).map((u) => (
+                {MASK_DIMENSION_UNITS.map((u) => (
                   <button
                     key={u}
                     className={maskUnit === u ? "on" : ""}
@@ -365,20 +462,24 @@ export function MaskSetupWizard({ onComplete, onCancel }: MaskSetupWizardProps):
                 <span style={{ fontSize: 12, color: "var(--text-muted)", minWidth: 36 }}>רוחב</span>
                 <input
                   className="util-input compact"
-                  type="number"
                   min={minVal}
                   max={maxVal}
                   step={inputStep}
-                  value={maskWidth}
-                  onChange={(e) => patchWidth(Number(e.target.value))}
+                  inputMode="decimal"
+                  value={maskWidthDraft}
+                  onBlur={commitDimensionDrafts}
+                  onChange={(e) => setMaskWidthDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") commitDimensionDrafts(); }}
+                  type="text"
                 />
                 <span style={{ color: "var(--text-muted)" }}>×</span>
                 <input
                   className="util-input compact"
-                  type="number"
-                  value={maskHeight}
+                  inputMode="decimal"
+                  value={maskHeightDraft}
                   readOnly
                   style={{ opacity: 0.6 }}
+                  type="text"
                 />
                 <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{UNIT_LABELS[maskUnit]}</span>
               </div>
@@ -402,12 +503,15 @@ export function MaskSetupWizard({ onComplete, onCancel }: MaskSetupWizardProps):
                 />
                 <input
                   className="util-input compact"
-                  type="number"
                   min={0}
                   max={maskUnit === "cm" ? 5 : maskUnit === "mm" ? 50 : maskUnit === "inch" ? 2 : 200}
                   step={inputStep}
-                  value={spacingW}
-                  onChange={(e) => setSpacingW(Number(e.target.value))}
+                  inputMode="decimal"
+                  value={spacingDraft}
+                  onBlur={commitDimensionDrafts}
+                  onChange={(e) => setSpacingDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") commitDimensionDrafts(); }}
+                  type="text"
                   style={{ width: 64 }}
                 />
                 <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{UNIT_LABELS[maskUnit]}</span>

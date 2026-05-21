@@ -1,4 +1,5 @@
 import type { PrintableStageImage } from "@/ui/projectActions";
+import { markDebugEvent } from "@/debug/sppDiagnostics";
 
 export interface PrintPreviewOpenRequest extends PrintableStageImage {
   documentName: string;
@@ -54,8 +55,11 @@ export async function openPrintPreviewForRenderedPage(request: PrintPreviewOpenR
   }
 
   const ext = request.mimeType === "image/jpeg" ? "jpg" : "png";
+  markDebugEvent("print-preview:write-temp-single-start", { pageName: request.pageName, dataUrlLength: request.dataUrl.length, ext });
   const filePath = await spp.writeTempImage(request.dataUrl, ext);
+  markDebugEvent("print-preview:write-temp-single-end", { pageName: request.pageName, filePath });
 
+  markDebugEvent("print-preview:open-single", { pageName: request.pageName, filePath });
   return spp.openPrintPreview({
     filePath,
     documentName: request.documentName,
@@ -92,21 +96,40 @@ export async function openPrintPreviewForPages(
     return { success: false, error: "לא נמצאו עמודים להדפסה." };
   }
 
-  // Write each page image to a temp file
-  const entries: PrintPreviewPageEntry[] = [];
-  for (let i = 0; i < pages.length; i++) {
+  // Write each page image to a temp file.
+  // Use bounded concurrency to avoid freezing the renderer on large jobs
+  // (e.g. 50-page class photo / photo development), while preserving page order.
+  markDebugEvent("print-preview:write-temp-pages-start", { pageCount: pages.length });
+  const entries: PrintPreviewPageEntry[] = new Array(pages.length);
+  const CONCURRENCY = 4;
+  let nextIndex = 0;
+  const writeOne = async (i: number): Promise<void> => {
     const page = pages[i];
     const ext = page.mimeType === "image/jpeg" ? "jpg" : "png";
+    markDebugEvent("print-preview:write-temp-page-start", { index: i, dataUrlLength: page.dataUrl.length, ext });
     const filePath = await spp.writeTempImage(page.dataUrl, ext);
-    entries.push({
+    markDebugEvent("print-preview:write-temp-page-end", { index: i, filePath });
+    entries[i] = {
       filePath,
       pageName: pageNames?.[i] ?? `עמוד ${i + 1}`,
       widthMm: page.widthMm,
       heightMm: page.heightMm,
       dpi: page.dpi,
       orientation: page.orientation
-    });
+    };
+  };
+  const workers: Promise<void>[] = [];
+  for (let w = 0; w < Math.min(CONCURRENCY, pages.length); w++) {
+    workers.push((async () => {
+      while (true) {
+        const i = nextIndex++;
+        if (i >= pages.length) return;
+        await writeOne(i);
+      }
+    })());
   }
+  await Promise.all(workers);
 
+  markDebugEvent("print-preview:open-pages", { pageCount: entries.length });
   return spp.openPrintPreview({ documentName, pages: entries });
 }

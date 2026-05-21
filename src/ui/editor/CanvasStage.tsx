@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Transformer } from "react-konva";
+import { Circle, Group, Image as KonvaImage, Layer, Line, Path, Rect, Stage, Transformer } from "react-konva";
 import { useProductStore } from "@/state/productStore";
 import { ProductGuidesOverlay } from "./ProductGuidesOverlay";
 import type { ProductPageContext } from "@/types/product";
@@ -17,6 +17,7 @@ import { beginPointer, createInputState, endPointer, movePointer } from "@/core/
 import { normalizeRect } from "@/core/bounds/bounds";
 import { isGridCellLayer } from "@/core/grid/gridModeEngine";
 import { isMaskFrameLayer } from "@/core/mask/maskModeEngine";
+import { isPhotoPrintSlotLayer } from "@/core/photoPrint/photoPrintModeEngine";
 import { marqueeSelect } from "@/core/selection/selectionEngine";
 import { snapLayerBounds, snapLayerPosition, type SnapLine, type SnapLineKind, type SnapSourceRole } from "@/core/snap/snapEngine";
 import { measureTextLayerSize } from "@/core/text/measurement";
@@ -25,11 +26,13 @@ import { useImageEditStore, type SmartSelectionPrompt } from "@/state/imageEditS
 import { useDrawingToolsStore } from "@/state/drawingToolsStore";
 import { useColorStore, rgbaToHex } from "@/state/colorStore";
 import { useDocumentStore } from "@/state/documentStore";
+import { createShapeLayer } from "@/core/layers/factory";
 import type { Asset, Page } from "@/types/document";
 import type { Rect as RectType } from "@/types/primitives";
-import type { ImageLayer, TextLayer, VisualLayer } from "@/types/layers";
+import type { ImageLayer, ShapeLayer, TextLayer, VisualLayer } from "@/types/layers";
 import { SCREEN_HELPER_NODE_NAME } from "./canvasNodeNames";
 import { KonvaLayerNode, type CanvasContextMenuTarget } from "./KonvaLayerNode";
+import { markDebugEvent, registerKonvaStage, trackDebugMount } from "@/debug/sppDiagnostics";
 
 // Extra screen-pixel buffer around the Stage canvas so that Transformer anchors
 // and the selection border remain visible and interactive even when the selected
@@ -41,7 +44,7 @@ const OVERFLOW_PAD = 200; // px
 // Used for Alt+Click to bypass listening={false} on locked layers.
 function findTopmostLayerAtPoint(layers: Page["layers"], pt: { x: number; y: number }): string | null {
   const candidates = [...layers]
-    .filter((l) => l.visible !== false && "x" in l && "width" in l && "height" in l)
+    .filter((l) => l.visible !== false && (l.opacity ?? 1) > 0 && "x" in l && "width" in l && "height" in l)
     .sort((a, b) => b.zIndex - a.zIndex);
   for (const l of candidates) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -126,6 +129,19 @@ export function CanvasStage({
   const [marqueeRect, setMarqueeRect] = useState<RectType | null>(null);
   const [smartLines, setSmartLines] = useState<SnapLine[]>([]);
 
+  useEffect(() => {
+    const cleanupMount = trackDebugMount("CanvasStage", { pageId: page.id });
+    return () => {
+      markDebugEvent("canvas-stage:page-cleanup", {
+        pageId: page.id,
+        layerCount: page.layers.length
+      });
+      cleanupMount();
+    };
+  }, [page.id]);
+
+  useEffect(() => registerKonvaStage(() => stageRef.current, page.id), [page.id, stageRef]);
+
   // ── Drawing tools (no-selection global tools) ─────────────────────────────
   const drawingTool = useDrawingToolsStore((s) => s.activeTool);
   const setDrawingTool = useDrawingToolsStore((s) => s.setActiveTool);
@@ -135,6 +151,9 @@ export function CanvasStage({
 
   useEffect(() => {
     if (drawingTool !== "eyedropper") setEyedropperPreview(null);
+    if (drawingTool !== "brush") setBrushPreviewPath(null);
+    if (drawingTool !== "shape") setShapeDragRect(null);
+    if (drawingTool !== "lasso") setLassoPreviewPoints(null);
   }, [drawingTool]);
 
   function sampleColorAtStagePoint(): string | null {
@@ -169,6 +188,142 @@ export function CanvasStage({
 
   // ── Paint Bucket ──────────────────────────────────────────────────────────
   const updatePage = useDocumentStore((s) => s.updatePage);
+  const addLayerToDoc = useDocumentStore((s) => s.addLayer);
+
+  // ── Free-hand Brush stroke recording (no-selection tool) ───────────────────
+  const brushPointsRef = useRef<Array<{ x: number; y: number }>>([]);
+  const [brushPreviewPath, setBrushPreviewPath] = useState<string | null>(null);
+  function brushSvgPathFromPoints(points: Array<{ x: number; y: number }>, offsetX: number, offsetY: number): string {
+    if (points.length === 0) return "";
+    let d = `M ${(points[0]!.x - offsetX).toFixed(2)} ${(points[0]!.y - offsetY).toFixed(2)}`;
+    for (let i = 1; i < points.length; i++) {
+      d += ` L ${(points[i]!.x - offsetX).toFixed(2)} ${(points[i]!.y - offsetY).toFixed(2)}`;
+    }
+    return d;
+  }
+  // ── Lasso (free-hand polygon selection) ────────────────────────────────────
+  const lassoPointsRef = useRef<Array<{ x: number; y: number }>>([]);
+  const [lassoPreviewPoints, setLassoPreviewPoints] = useState<number[] | null>(null);
+  function pointInPolygon(px: number, py: number, poly: Array<{ x: number; y: number }>): boolean {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const xi = poly[i]!.x, yi = poly[i]!.y;
+      const xj = poly[j]!.x, yj = poly[j]!.y;
+      const intersect = ((yi > py) !== (yj > py)) && (px < ((xj - xi) * (py - yi)) / (yj - yi + 1e-9) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+  function commitLassoSelection(): void {
+    const points = lassoPointsRef.current;
+    lassoPointsRef.current = [];
+    setLassoPreviewPoints(null);
+    if (points.length < 3) return;
+    const selectedIds: string[] = [];
+    for (const layer of page.layers) {
+      if (layer.visible === false) continue;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const a = layer as any;
+      if (typeof a.x !== "number" || typeof a.y !== "number" || typeof a.width !== "number" || typeof a.height !== "number") continue;
+      const cx = a.x + a.width / 2;
+      const cy = a.y + a.height / 2;
+      if (pointInPolygon(cx, cy, points)) selectedIds.push(layer.id);
+    }
+    if (selectedIds.length > 0) onSelectLayers(selectedIds);
+  }
+
+  // ── Shape tool drag-to-draw ────────────────────────────────────────────────
+  const shapeDragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const [shapeDragRect, setShapeDragRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+
+  function heartPathData(w: number, h: number): string {
+    // Heart path inscribed in [0,0]..[w,h]
+    const cx = w / 2;
+    const top = h * 0.28;
+    return [
+      `M ${cx} ${h}`,
+      `C ${-w * 0.05} ${h * 0.55}, ${w * 0.05} ${top - h * 0.15}, ${cx} ${top}`,
+      `C ${w * 0.95} ${top - h * 0.15}, ${w * 1.05} ${h * 0.55}, ${cx} ${h}`,
+      "Z"
+    ].join(" ");
+  }
+  function arrowPathData(w: number, h: number): string {
+    // Horizontal arrow inscribed in [0,0]..[w,h]
+    const shaftH = h * 0.35;
+    const headW = Math.min(w * 0.3, h);
+    const y0 = (h - shaftH) / 2;
+    const y1 = y0 + shaftH;
+    return [
+      `M 0 ${y0}`,
+      `L ${w - headW} ${y0}`,
+      `L ${w - headW} 0`,
+      `L ${w} ${h / 2}`,
+      `L ${w - headW} ${h}`,
+      `L ${w - headW} ${y1}`,
+      `L 0 ${y1}`,
+      "Z"
+    ].join(" ");
+  }
+  function commitShapeDraw(rawRect: { x: number; y: number; width: number; height: number }): void {
+    const { shapeKind } = useDrawingToolsStore.getState();
+    const color = useColorStore.getState().currentColor;
+    const x = Math.min(rawRect.x, rawRect.x + rawRect.width);
+    const y = Math.min(rawRect.y, rawRect.y + rawRect.height);
+    const width = Math.max(2, Math.abs(rawRect.width));
+    const height = Math.max(2, Math.abs(rawRect.height));
+    const baseShape: ShapeLayer["shape"] = shapeKind === "heart" || shapeKind === "arrow" ? "svgPath" : shapeKind;
+    const base = createShapeLayer({ shape: baseShape, rect: { x, y, width, height }, name: "צורה" });
+    let pathData: string | undefined;
+    if (shapeKind === "heart") pathData = heartPathData(width, height);
+    else if (shapeKind === "arrow") pathData = arrowPathData(width, height);
+    else if (shapeKind === "line") pathData = `0,${height / 2} ${width},${height / 2}`;
+    const layer: VisualLayer = {
+      ...base,
+      zIndex: page.layers.length,
+      pathData,
+      fill: shapeKind === "line" ? undefined : { version: 1, color, opacity: 1 },
+      stroke: shapeKind === "line"
+        ? { version: 1, color, width: 3, opacity: 1 }
+        : undefined
+    };
+    addLayerToDoc(page.id, layer);
+    onSelectLayer(layer.id);
+  }
+
+  function commitBrushStroke(): void {
+    const points = brushPointsRef.current;
+    brushPointsRef.current = [];
+    setBrushPreviewPath(null);
+    if (points.length < 2) return;
+    const { brushSize, brushOpacity } = useDrawingToolsStore.getState();
+    const color = useColorStore.getState().currentColor;
+    const pad = brushSize / 2 + 2;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of points) {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+    const x = minX - pad;
+    const y = minY - pad;
+    const width = Math.max(1, maxX - minX + pad * 2);
+    const height = Math.max(1, maxY - minY + pad * 2);
+    const base = createShapeLayer({
+      shape: "svgPath",
+      rect: { x, y, width, height },
+      name: "ציור"
+    });
+    const layer: VisualLayer = {
+      ...base,
+      zIndex: page.layers.length,
+      pathData: brushSvgPathFromPoints(points, x, y),
+      fill: undefined,
+      stroke: { version: 1, color, width: brushSize, opacity: brushOpacity / 100 }
+    };
+    addLayerToDoc(page.id, layer);
+    onSelectLayer(layer.id);
+  }
   function applyBucketFill(canvasPoint: { x: number; y: number }): "ok" | "image-unsupported" | "noop" {
     const color = useColorStore.getState().currentColor;
     const hitId = findTopmostLayerAtPoint(page.layers, canvasPoint);
@@ -209,6 +364,16 @@ export function CanvasStage({
   const [whiteBgPreviewCanvas, setWhiteBgPreviewCanvas] = useState<HTMLCanvasElement | null>(null);
   const [eraserCursorPos, setEraserCursorPos] = useState<{ x: number; y: number } | null>(null);
   const rectStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    markDebugEvent("canvas-stage:page-active", {
+      pageId: page.id,
+      layerCount: page.layers.length,
+      selectedLayerIds,
+      imageEditMode,
+      imageEditLayerId
+    });
+  }, [imageEditLayerId, imageEditMode, page.id, page.layers.length, selectedLayerIds]);
 
   useEffect(() => {
     if (imageEditStore.selectionMask === null || (imageActiveTool !== "wand" && imageActiveTool !== "rect-select" && imageActiveTool !== "smart-select" && imageActiveTool !== "brush-select")) {
@@ -269,23 +434,33 @@ export function CanvasStage({
       setRotateHandlePos(null);
       return;
     }
-    const nonTransformableIds = new Set(
-      page.layers
-        .filter((l) =>
-          l.locked ||
-          (l.type === "frame" && (l.metadata["gridCell"] !== undefined || l.metadata["maskFrame"] !== undefined || (l.behaviorMode === "layoutLocked" && !layoutEditMode)))
-        )
-        .map((l) => l.id)
-    );
-    const nodes = selectedLayerIds
-      .filter((layerId) => !nonTransformableIds.has(layerId))
-      .map((layerId) => stage.findOne(`#${layerId}`))
-      .filter((node): node is Konva.Node => node !== undefined);
-    transformer.nodes(nodes);
-    transformer.getLayer()?.batchDraw();
-    if (nodes.length > 0) {
-      setRotateHandlePos(calculateRotateHandlePosition(transformer, page.height));
-    } else {
+    try {
+      const nonTransformableIds = new Set(
+        page.layers
+          .filter((l) =>
+            l.locked ||
+            (l.type === "frame" && (l.metadata["gridCell"] !== undefined || l.metadata["maskFrame"] !== undefined || (l.behaviorMode === "layoutLocked" && !layoutEditMode)))
+          )
+          .map((l) => l.id)
+      );
+      const nodes = selectedLayerIds
+        .filter((layerId) => !nonTransformableIds.has(layerId))
+        .map((layerId) => stage.findOne(`#${layerId}`))
+        .filter((node): node is Konva.Node => node !== undefined && node.getStage() !== null);
+      transformer.nodes(nodes);
+      transformer.getLayer()?.batchDraw();
+      if (nodes.length > 0) {
+        setRotateHandlePos(calculateRotateHandlePosition(transformer, page.height));
+      } else {
+        setRotateHandlePos(null);
+      }
+    } catch (error) {
+      markDebugEvent("konva-transformer:error", {
+        pageId: page.id,
+        selectedLayerIds,
+        message: error instanceof Error ? error.message : String(error)
+      });
+      transformer.nodes([]);
       setRotateHandlePos(null);
     }
   }, [selectedLayerIds, layoutEditMode, imageEditMode, stageRef, page.layers, page.height]);
@@ -374,29 +549,34 @@ export function CanvasStage({
   // Called by Stage onDragMove — applies magnetic snap imperatively then updates guides
   function handleStageDragMove(event: Konva.KonvaEventObject<DragEvent>): void {
     if (!viewport.snapEnabled) return;
+    try {
+      const node = event.target;
+      const layerId = node.id();
+      if (layerId === "") return; // content-inside-frame drag or non-layer node
 
-    const node = event.target;
-    const layerId = node.id();
-    if (layerId === "") return; // content-inside-frame drag or non-layer node
+      const layer = page.layers.find((l) => l.id === layerId);
+      if (layer === undefined) return;
+      if (isGridCellLayer(layer)) return;
+      if (isMaskFrameLayer(layer)) return;
+      if (isPhotoPrintSlotLayer(layer)) return;
 
-    const layer = page.layers.find((l) => l.id === layerId);
-    if (layer === undefined) return;
-    if (isGridCellLayer(layer)) return;
-    if (isMaskFrameLayer(layer)) return;
+      const x = node.x();
+      const y = node.y();
+      const settings = { ...page.setup.snapSettings, enabled: viewport.snapEnabled };
 
-    const x = node.x();
-    const y = node.y();
-    const settings = { ...page.setup.snapSettings, enabled: viewport.snapEnabled };
+      const result = snapLayerPosition({ layer, page, layers: page.layers, x, y, settings });
 
-    const result = snapLayerPosition({ layer, page, layers: page.layers, x, y, settings });
+      // Magnetic correction: move the node to the snapped position
+      if (result.dx !== 0) node.x(result.x);
+      if (result.dy !== 0) node.y(result.y);
 
-    // Magnetic correction: move the node to the snapped position
-    if (result.dx !== 0) node.x(result.x);
-    if (result.dy !== 0) node.y(result.y);
-
-    if (page.setup.snapSettings.showSmartGuides && result.lines.length > 0) {
-      scheduleGuideUpdate(result.lines);
-    } else {
+      if (page.setup.snapSettings.showSmartGuides && result.lines.length > 0) {
+        scheduleGuideUpdate(result.lines);
+      } else {
+        scheduleGuideUpdate([]);
+      }
+    } catch (error) {
+      console.error("[CanvasStage] handleStageDragMove failed:", error);
       scheduleGuideUpdate([]);
     }
   }
@@ -411,23 +591,29 @@ export function CanvasStage({
     if (!viewport.snapEnabled || transformer === undefined || transformer === null || node === undefined) {
       return;
     }
-    const layer = page.layers.find((item) => item.id === node.id());
-    if (layer === undefined) return;
-    if (isGridCellLayer(layer)) return;
-    if (isMaskFrameLayer(layer)) return;
+    try {
+      const layer = page.layers.find((item) => item.id === node.id());
+      if (layer === undefined) return;
+      if (isGridCellLayer(layer)) return;
+      if (isMaskFrameLayer(layer)) return;
+      if (isPhotoPrintSlotLayer(layer)) return;
 
-    const anchor = transformer.getActiveAnchor();
-    const result = snapLayerBounds({
-      movingLayerId: layer.id,
-      page,
-      layers: page.layers,
-      bounds: transformedNodeRect(node),
-      settings: { ...page.setup.snapSettings, enabled: viewport.snapEnabled },
-      allowedSourceRoles: sourceRolesForAnchor(anchor)
-    });
+      const anchor = transformer.getActiveAnchor();
+      const result = snapLayerBounds({
+        movingLayerId: layer.id,
+        page,
+        layers: page.layers,
+        bounds: transformedNodeRect(node),
+        settings: { ...page.setup.snapSettings, enabled: viewport.snapEnabled },
+        allowedSourceRoles: sourceRolesForAnchor(anchor)
+      });
 
-    applyTransformSnap(node, result.dx, result.dy, result.sourceRoles, anchor);
-    scheduleGuideUpdate(page.setup.snapSettings.showSmartGuides ? result.lines : []);
+      applyTransformSnap(node, result.dx, result.dy, result.sourceRoles, anchor);
+      scheduleGuideUpdate(page.setup.snapSettings.showSmartGuides ? result.lines : []);
+    } catch (error) {
+      console.error("[CanvasStage] handleTransformerTransform failed:", error);
+      scheduleGuideUpdate([]);
+    }
   }
 
   // ── Layer change callback (called from KonvaLayerNode onDragEnd / onTransformEnd) ──
@@ -458,6 +644,18 @@ export function CanvasStage({
         rotation: previous.rotation,
         behaviorMode: "layoutLocked",
         lockedFrame: true
+      });
+      return;
+    }
+    if (previous !== undefined && isPhotoPrintSlotLayer(previous) && layer.type === "frame" && !layoutEditMode) {
+      onLayerChange({
+        ...layer,
+        x: previous.x,
+        y: previous.y,
+        width: previous.width,
+        height: previous.height,
+        rotation: previous.rotation,
+        behaviorMode: "layoutLocked"
       });
       return;
     }
@@ -828,7 +1026,14 @@ export function CanvasStage({
       data-testid="canvas-frame"
       style={{
         transform: `translate(${viewport.panX}px, ${viewport.panY}px)`,
-        cursor: drawingTool === "eyedropper" ? "crosshair" : undefined
+        cursor:
+          drawingTool === "eyedropper" ? "crosshair"
+          : drawingTool === "bucket" ? "crosshair"
+          : drawingTool === "brush" ? "crosshair"
+          : drawingTool === "shape" ? "crosshair"
+          : drawingTool === "marquee" ? "crosshair"
+          : drawingTool === "lasso" ? "crosshair"
+          : undefined
       }}
       onWheel={(event) => {
         event.preventDefault();
@@ -875,6 +1080,48 @@ export function CanvasStage({
             const pointer = getPointerPosition();
             if (pointer !== null) {
               applyBucketFill(pointer);
+            }
+            return;
+          }
+          // Brush: start recording free-hand stroke (creates a new shape layer on mouseup)
+          if (drawingTool === "brush") {
+            event.evt.preventDefault();
+            const pointer = getPointerPosition();
+            if (pointer !== null) {
+              brushPointsRef.current = [pointer];
+              isPaintingRef.current = true;
+              setBrushPreviewPath(`M ${pointer.x.toFixed(2)} ${pointer.y.toFixed(2)}`);
+            }
+            return;
+          }
+          // Shape tool: start drag-to-draw
+          if (drawingTool === "shape") {
+            event.evt.preventDefault();
+            const pointer = getPointerPosition();
+            if (pointer !== null) {
+              shapeDragStartRef.current = pointer;
+              setShapeDragRect({ x: pointer.x, y: pointer.y, width: 0, height: 0 });
+            }
+            return;
+          }
+          // Marquee tool: drag to select layers in region (force-trigger marquee logic)
+          if (drawingTool === "marquee") {
+            event.evt.preventDefault();
+            const pointer = getPointerPosition();
+            if (pointer !== null) {
+              marqueeStartRef.current = pointer;
+              setMarqueeRect({ ...pointer, width: 0, height: 0 });
+            }
+            return;
+          }
+          // Lasso tool: start free-hand polygon
+          if (drawingTool === "lasso") {
+            event.evt.preventDefault();
+            const pointer = getPointerPosition();
+            if (pointer !== null) {
+              lassoPointsRef.current = [pointer];
+              isPaintingRef.current = true;
+              setLassoPreviewPoints([pointer.x, pointer.y]);
             }
             return;
           }
@@ -933,6 +1180,53 @@ export function CanvasStage({
           // Eyedropper: live preview swatch follows pointer
           if (drawingTool === "eyedropper") {
             scheduleEyedropperPreview();
+            return;
+          }
+          // Marquee tool: update marquee rect during drag
+          if (drawingTool === "marquee" && marqueeStartRef.current !== null) {
+            const pointer = getPointerPosition();
+            if (pointer !== null) {
+              setMarqueeRect(normalizeRect(marqueeStartRef.current, pointer));
+            }
+            return;
+          }
+          // Lasso tool: append points
+          if (drawingTool === "lasso" && isPaintingRef.current) {
+            const pointer = getPointerPosition();
+            if (pointer !== null) {
+              const points = lassoPointsRef.current;
+              const last = points[points.length - 1];
+              if (last === undefined || Math.hypot(pointer.x - last.x, pointer.y - last.y) >= 2) {
+                points.push(pointer);
+                const flat: number[] = [];
+                for (const p of points) { flat.push(p.x, p.y); }
+                setLassoPreviewPoints(flat);
+              }
+            }
+            return;
+          }
+          // Shape drag: update preview rect
+          if ((drawingTool === "shape") && shapeDragStartRef.current !== null) {
+            const pointer = getPointerPosition();
+            if (pointer !== null) {
+              const s = shapeDragStartRef.current;
+              setShapeDragRect({ x: s.x, y: s.y, width: pointer.x - s.x, height: pointer.y - s.y });
+            }
+            return;
+          }
+          // Brush: extend stroke
+          if (drawingTool === "brush" && isPaintingRef.current) {
+            const pointer = getPointerPosition();
+            if (pointer !== null) {
+              const points = brushPointsRef.current;
+              const last = points[points.length - 1];
+              if (last === undefined || Math.hypot(pointer.x - last.x, pointer.y - last.y) >= 1.5) {
+                points.push(pointer);
+                let d = `M ${points[0]!.x.toFixed(2)} ${points[0]!.y.toFixed(2)}`;
+                for (let i = 1; i < points.length; i++) d += ` L ${points[i]!.x.toFixed(2)} ${points[i]!.y.toFixed(2)}`;
+                setBrushPreviewPath(d);
+              }
+            }
             return;
           }
           // Update eraser cursor position
@@ -996,6 +1290,35 @@ export function CanvasStage({
               isPaintingRef.current = false;
               lastPaintPosRef.current = null;
               commitSelectionBrushStroke();
+            }
+            return;
+          }
+          // Brush: commit stroke as new shape layer
+          if (drawingTool === "brush") {
+            if (isPaintingRef.current) {
+              isPaintingRef.current = false;
+              commitBrushStroke();
+            }
+            return;
+          }
+          // Marquee tool: commit marquee selection
+          if (drawingTool === "marquee" && marqueeStartRef.current !== null) {
+            finishMarqueeSelection();
+            return;
+          }
+          // Lasso tool: commit polygon selection
+          if (drawingTool === "lasso" && isPaintingRef.current) {
+            isPaintingRef.current = false;
+            commitLassoSelection();
+            return;
+          }
+          // Shape: commit drawn rect as new shape layer
+          if ((drawingTool === "shape") && shapeDragStartRef.current !== null) {
+            const rect = shapeDragRect;
+            shapeDragStartRef.current = null;
+            setShapeDragRect(null);
+            if (rect !== null && (Math.abs(rect.width) >= 3 || Math.abs(rect.height) >= 3)) {
+              commitShapeDraw(rect);
             }
             return;
           }
@@ -1093,7 +1416,7 @@ export function CanvasStage({
           {/* All canvas content is clipped to the canvas boundary.
               The Transformer lives outside this Group so its anchors render
               and respond to events even when an object overflows the canvas. */}
-          <Group clipFunc={(ctx: any) => { ctx.rect(0, 0, page.width, page.height); }}>
+          <Group clipFunc={(ctx: any) => { ctx.rect(0, 0, page.width, page.height); }} listening={drawingTool === null}>
           {page.background.type !== "transparent" && page.background.type !== "asset" ? (
             <Rect x={0} y={0} width={page.width} height={page.height} fill={page.background.color ?? "#fbfafa"} listening={false} />
           ) : null}
@@ -1191,6 +1514,47 @@ export function CanvasStage({
               listening={false}
             />
           ) : null}
+          {brushPreviewPath !== null ? (
+            <Path
+              name={SCREEN_HELPER_NODE_NAME}
+              data={brushPreviewPath}
+              stroke={useColorStore.getState().currentColor}
+              strokeWidth={useDrawingToolsStore.getState().brushSize}
+              lineCap="round"
+              lineJoin="round"
+              listening={false}
+              opacity={useDrawingToolsStore.getState().brushOpacity / 100}
+            />
+          ) : null}
+          {lassoPreviewPoints !== null ? (
+            <Line
+              name={SCREEN_HELPER_NODE_NAME}
+              points={lassoPreviewPoints}
+              stroke="#7C6FE0"
+              strokeWidth={1.5}
+              dash={[6, 4]}
+              listening={false}
+              closed={false}
+            />
+          ) : null}
+          {shapeDragRect !== null ? (() => {
+            const r = shapeDragRect;
+            const x = Math.min(r.x, r.x + r.width);
+            const y = Math.min(r.y, r.y + r.height);
+            const w = Math.max(1, Math.abs(r.width));
+            const h = Math.max(1, Math.abs(r.height));
+            return (
+              <Rect
+                name={SCREEN_HELPER_NODE_NAME}
+                x={x} y={y} width={w} height={h}
+                fill="rgba(124, 111, 224, 0.10)"
+                stroke="#7C6FE0"
+                strokeWidth={1.5}
+                dash={[6, 4]}
+                listening={false}
+              />
+            );
+          })() : null}
           </Group>
 
           {/* ── Product Mode guides overlay (above content, below selection UI) ── */}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent, type ReactElement } from "react";
-import { ImagePlus, RefreshCw } from "lucide-react";
+import { ImagePlus, RefreshCw, Sparkles } from "lucide-react";
 import { generateCollageSuggestions } from "@/core/collage/collageModeEngine";
 import { applySmartCropToAssignment } from "@/core/collage/collageFrameSync";
 import { mmToPx } from "@/core/units/conversion";
@@ -14,6 +14,7 @@ interface CollageLayoutsPanelProps {
 
 export function CollageLayoutsPanel({ rule }: CollageLayoutsPanelProps): ReactElement {
   const [suggestions, setSuggestions] = useState<ScoredLayoutSuggestion[]>([]);
+  const [smartCropProgress, setSmartCropProgress] = useState<{ done: number; total: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const document = useDocumentStore((s) => s.document);
   const setDocument = useDocumentStore((s) => s.setDocument);
@@ -58,21 +59,49 @@ export function CollageLayoutsPanel({ rule }: CollageLayoutsPanelProps): ReactEl
     const page = document.pages.find((p) => p.id === rule.pageId);
     if (!page) return;
     applyCollageLayoutFamily(rule.id, suggestion.family, page.width, page.height);
-    // Smart crop after layout change
+  }
+
+  async function handleSmartCrop(): Promise<void> {
+    if (!document || smartCropProgress !== null) return;
     const freshDoc = useDocumentStore.getState().document;
     if (!freshDoc) return;
     const updatedRule = freshDoc.collageRules.find((r) => r.id === rule.id);
     const freshPage = freshDoc.pages.find((p) => p.id === rule.pageId);
     if (!updatedRule || !freshPage) return;
-    for (const a of updatedRule.imageAssignments) {
-      if (a.hasManualTransform) continue;
-      const asset = freshDoc.assets.find((x) => x.id === a.assetId);
-      if (!asset) continue;
-      const slot = updatedRule.cachedSlots.find((s) => s.id === a.slotId);
-      if (!slot) continue;
-      const newTransform = await applySmartCropToAssignment(a, asset, slot.w * freshPage.width, slot.h * freshPage.height);
-      updateImageTransform(rule.id, a.slotId, newTransform);
+    const workItems = updatedRule.imageAssignments.filter((a) => !a.hasManualTransform);
+    setSmartCropProgress({ done: 0, total: workItems.length });
+    let done = 0;
+    for (const a of workItems) {
+      const latestDoc = useDocumentStore.getState().document;
+      if (!latestDoc) break;
+      const latestRule = latestDoc.collageRules.find((r) => r.id === rule.id);
+      const latestPage = latestDoc.pages.find((p) => p.id === rule.pageId);
+      if (!latestRule || !latestPage) break;
+      const latestAssignment = latestRule.imageAssignments.find((item) => item.slotId === a.slotId);
+      if (!latestAssignment || latestAssignment.hasManualTransform) {
+        done += 1;
+        setSmartCropProgress({ done, total: workItems.length });
+        continue;
+      }
+      const asset = latestDoc.assets.find((x) => x.id === latestAssignment.assetId);
+      const slot = latestRule.cachedSlots.find((s) => s.id === latestAssignment.slotId);
+      if (!asset || !slot) {
+        done += 1;
+        setSmartCropProgress({ done, total: workItems.length });
+        continue;
+      }
+      const newTransform = await applySmartCropToAssignment(
+        latestAssignment,
+        asset,
+        slot.w * latestPage.width,
+        slot.h * latestPage.height
+      );
+      updateImageTransform(rule.id, latestAssignment.slotId, newTransform);
+      done += 1;
+      setSmartCropProgress({ done, total: workItems.length });
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
     }
+    setSmartCropProgress(null);
   }
 
   function handleRegenerate(): void {
@@ -95,6 +124,18 @@ export function CollageLayoutsPanel({ rule }: CollageLayoutsPanelProps): ReactEl
         <ImagePlus size={14} /> הוסף תמונות לקולאז&apos;
       </button>
       <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={(e) => void handleAddImages(e)} />
+      <button
+        type="button"
+        className="btn btn-ghost btn-full"
+        disabled={smartCropProgress !== null}
+        onClick={() => void handleSmartCrop()}
+        title="התאם תמונות לפי זיהוי פנים"
+      >
+        <Sparkles size={14} />
+        {smartCropProgress === null
+          ? "התאם לפי פנים"
+          : `מנתח ${smartCropProgress.done}/${smartCropProgress.total}`}
+      </button>
 
       <div className="collage-panel-row" style={{ marginTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span className="panel-section-label">פריסות ({suggestions.length})</span>

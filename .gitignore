@@ -54,3 +54,14 @@ weights/
 image.editor.engine/gfpgan/weights/
 image.editor.engine/smart_image_editor/models/
 image.editor.engine/smart_image_editor/1/
+
+# large local-only documents (>100MB blocked by GitHub)
+פיתוח תמונות.pdf
+*.pdf
+!src/**/*.pdf
+!public/**/*.pdf
+
+# benchmark / scratch outputs
+tmp/lama-benchmark/
+tmp/lama-smoke/
+tmp/lama-smoke-cached/

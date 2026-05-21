@@ -35,9 +35,11 @@ import {
   Plus,
   Redo2,
   Replace,
+  RotateCcw,
   RotateCw,
   Save,
   Settings,
+  Scissors,
   SlidersHorizontal,
   Sparkles,
   Square,
@@ -55,7 +57,13 @@ import {
   UserRound as UserRoundIcon,
   Smile as SmileIcon,
   Pipette as PipetteIcon,
-  PaintBucket as PaintBucketIcon
+  PaintBucket as PaintBucketIcon,
+  Brush as BrushIcon,
+  Shapes as ShapesIcon,
+  Heart as HeartIcon,
+  Minus as LineIcon,
+  ArrowRight as ArrowIcon,
+  RectangleHorizontal
 } from "lucide-react";
 import {
   Fragment,
@@ -81,16 +89,21 @@ import {
   applyGridFitModeToAll,
   applyMaskFitModeToAll,
   AutosaveManager,
+  AUTOSAVE_TEMPORARILY_DISABLED,
   createGridTextOverlay,
   createFrameLayer,
   createImageLayer,
   createMaskTextOverlay,
   createPage,
   createProjectEnvelope,
+  checkMaskPageOverflow,
+  commitDraftDimension,
   defaultContentTransform,
   deleteGridImageAndCompactFromEnd,
   deleteMaskImageAndCompactFromEnd,
+  formatDimension,
   PAGE_PRESETS,
+  pageSizeForMaskFit,
   pageSetupFromPreset,
   pxToUnit,
   pxToMm,
@@ -101,22 +114,43 @@ import {
   inchToPx,
   regenerateGrid,
   regenerateMaskLayout,
+  resizeMaskPagesToFit,
   resetGridCrops,
   resetMaskCrops,
   clampContentTransformToFillBounds,
   swapGridCellImages,
   unitToPx,
   withProjectMetadata,
-  type AlignmentCommand
+  type AlignmentCommand,
+  type AutosaveResult
 } from "@/core";
+import { MASK_DIMENSION_LABELS, MASK_DIMENSION_UNITS, type MaskDimensionUnit } from "@/core/mask/maskDimensions";
 import { importImageAsset, createMaskAsset, resolveCanvasAssetPath } from "@/core/assets/assetManager";
+import { analyzeScreenshotCrop } from "@/core/image/screenshotCropDetector";
+import {
+  applyScreenshotCropToAsset,
+  getAppliedScreenshotCrop,
+  getEffectiveSourceSize,
+  getScreenshotCropSuggestion,
+  ignoreScreenshotCropForAsset,
+  resetScreenshotCropForAsset,
+  type ScreenshotCropSuggestionMetadata
+} from "@/core/image/screenshotCropMetadata";
 import { measureTextLayerSize } from "@/core/text/measurement";
-import { BUILTIN_TEXT_PRESETS } from "@/core/text/presets";
+import {
+  BUILTIN_TEXT_PRESETS,
+  createTextPresetFromLayer,
+  deleteUserTextPreset,
+  loadUserTextPresets,
+  saveUserTextPreset,
+  updateUserTextPreset
+} from "@/core/text/presets";
 import { useDocumentStore } from "@/state/documentStore";
 import { generateMaskThumbnail, useMaskLibraryStore } from "@/state/maskLibraryStore";
 import { useSelectionStore } from "@/state/selectionStore";
 import { useImageEditStore } from "@/state/imageEditStore";
 import { useDrawingToolsStore } from "@/state/drawingToolsStore";
+import { useColorStore } from "@/state/colorStore";
 import { useMaskContentEditStore } from "@/state/maskContentEditStore";
 import { ImageEditToolbar } from "./ImageEditToolbar";
 import { ImageEditFloatingBar } from "./ImageEditFloatingBar";
@@ -146,6 +180,8 @@ import {
   exportStagePdf,
   exportStagePng,
   exportStagePrintImage,
+  exportRenderedPagesAsPdf,
+  downloadRenderedPagesAsImages,
   loadProject,
   savePortableProject,
   saveProject
@@ -192,9 +228,9 @@ import { openInColorLab, stopColorLabWatch } from "@/integrations/colorLabIntegr
 import { useUtilitiesSettings } from "@/utilities/settingsStore";
 import { isEditableShortcutTarget, matchShortcut, shortcutBindingsToShortcuts } from "@/core/input/inputSystem";
 import { useAppSettings } from "@/settings";
-import { applySmartCropToAssignment } from "@/core/collage/collageFrameSync";
 import { syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import {
+  fontFamilyExists,
   getFontFavorites,
   getGroupedFonts,
   toggleFontFavorite,
@@ -205,6 +241,7 @@ import { getBatchProductionMeta, upsertVariableField, removeVariableFieldForLaye
 import { saveTemplateToStore } from "@/core/batchProduction/batchTemplateStore";
 import { convertImageLayerToVariableFrame } from "@/core/batchProduction/imageToFrameConversion";
 import type { BatchVariableField } from "@/types/batchProduction";
+import { markDebugEvent, setAutosaveDebugStatus, trackDebugMount } from "@/debug/sppDiagnostics";
 
 type ToolId = "move" | "text" | "image" | "layers";
 
@@ -233,6 +270,10 @@ type SelectionClipboard = {
   sourceLayerId: string;
   sourceName: string;
 };
+
+const AUTOSAVE_QUOTA_WARNING =
+  "הפרויקט גדול מדי לשמירה אוטומטית זמנית. מומלץ לשמור כקובץ SPP כדי לא לאבד שינויים.";
+const AUTOSAVE_WARNING_THROTTLE_MS = 60_000;
 
 function canUseLayerEffects(layer: VisualLayer | undefined): layer is Extract<VisualLayer, { type: "image" | "frame" }> {
   return layer?.type === "image" || layer?.type === "frame";
@@ -282,25 +323,6 @@ interface EditorScreenProps {
   onOpenSettings?: () => void;
 }
 
-async function runInitialSmartCrop(
-  rule: import("@/types/collage").CollageRule,
-  page: import("@/types/document").Page,
-  assets: import("@/types/document").Asset[]
-): Promise<void> {
-  const updateTransform = useDocumentStore.getState().updateCollageImageTransform;
-  for (const assignment of rule.imageAssignments) {
-    if (assignment.hasManualTransform) continue;
-    const asset = assets.find((a) => a.id === assignment.assetId);
-    if (!asset) continue;
-    const slot = rule.cachedSlots.find((s) => s.id === assignment.slotId);
-    if (!slot) continue;
-    const newTransform = await applySmartCropToAssignment(
-      assignment, asset, slot.w * page.width, slot.h * page.height
-    );
-    updateTransform(rule.id, assignment.slotId, newTransform);
-  }
-}
-
 export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSettings }: EditorScreenProps): ReactElement {
   const stageRef = useRef<Konva.Stage | null>(null);
   const canvasAreaRef = useRef<HTMLDivElement>(null);
@@ -308,7 +330,6 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const replaceImageInputRef = useRef<HTMLInputElement>(null);
   const classPhotoAddInputRef = useRef<HTMLInputElement>(null);
   const projectInputRef = useRef<HTMLInputElement>(null);
-  const autosaveRef = useRef(new AutosaveManager({ intervalMs: 1000 * 60 * 2, debounceMs: 3000, actionThreshold: 20 }));
   const lastAutosavedRevisionRef = useRef(0);
   const aiFillInFlightRef = useRef(false);
   const [tool, setTool] = useState<ToolId>("move");
@@ -316,6 +337,41 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const [collageSwapSourceSlotId, setCollageSwapSourceSlotId] = useState<string | null>(null);
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [status, setStatus] = useState("שמירה אוטומטית מוכנה");
+  const lastAutosaveWarningRef = useRef(0);
+  const autosaveMetricsRef = useRef({ pagesCount: 0, assetsCount: 0 });
+  const autosaveRef = useRef(
+    new AutosaveManager({
+      intervalMs: 1000 * 60 * 2,
+      debounceMs: 3000,
+      actionThreshold: 20,
+      onResult: (result: AutosaveResult) => {
+        const metrics = autosaveMetricsRef.current;
+        setAutosaveDebugStatus({
+          ok: result.ok,
+          reason: result.ok ? undefined : result.reason,
+          pagesCount: metrics.pagesCount,
+          assetsCount: metrics.assetsCount,
+          estimatedSizeBytes: result.estimatedSizeBytes,
+          estimatedSizeMb: Number((result.estimatedSizeBytes / 1024 / 1024).toFixed(2)),
+          storageTarget: result.storageKey,
+          message: result.ok ? undefined : result.message,
+          savedAt: new Date().toISOString()
+        });
+        if (result.ok) {
+          setStatus("Autosave saved");
+          return;
+        }
+        markDebugEvent("autosave:failed", result);
+        const now = Date.now();
+        if (result.reason === "quota-exceeded" && now - lastAutosaveWarningRef.current > AUTOSAVE_WARNING_THROTTLE_MS) {
+          lastAutosaveWarningRef.current = now;
+          setStatus(AUTOSAVE_QUOTA_WARNING);
+          return;
+        }
+        setStatus(result.reason === "quota-exceeded" ? "Autosave skipped: project is too large" : "Autosave failed");
+      }
+    })
+  );
   const [canvasContextMenu, setCanvasContextMenu] = useState<CanvasContextMenuTarget | null>(null);
   const [layerContextMenu, setLayerContextMenu] = useState<{ layerId: string; screenX: number; screenY: number } | null>(null);
   const [effectsClipboard, setEffectsClipboard] = useState<LayerEffectsClipboard | null>(null);
@@ -330,6 +386,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   const [isPrintBusy, setIsPrintBusy] = useState(false);
   const [saveDropdownOpen, setSaveDropdownOpen] = useState(false);
+  const [exportScope, setExportScope] = useState<"current" | "all">("all");
   const [fileDropActive, setFileDropActive] = useState(false);
   const [dropTargetFrame, setDropTargetFrame] = useState<{
     id: string;
@@ -340,6 +397,9 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     screenWidth: number;
     screenHeight: number;
   } | null>(null);
+  const [dismissedScreenshotCropAssetIds, setDismissedScreenshotCropAssetIds] = useState<Set<string>>(() => new Set());
+  const [projectScreenshotCropMuted, setProjectScreenshotCropMuted] = useState(false);
+  const [screenshotCropReviewOpen, setScreenshotCropReviewOpen] = useState(false);
   const [dynamicGridMode, setDynamicGridMode] = useState(false);
   const utilSettings = useUtilitiesSettings();
   const shortcutSettings = useAppSettings((state) => state.settings.shortcuts.shortcuts);
@@ -368,6 +428,8 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const copyTextStyle = useDocumentStore((state) => state.copyTextStyle);
   const pasteTextStyle = useDocumentStore((state) => state.pasteTextStyle);
   const hasTextStyleClipboard = useDocumentStore((state) => state.textStyleClipboard !== null);
+
+  useEffect(() => trackDebugMount("EditorScreen"), []);
 
   useEffect(() => {
     const unsubscribe = window.spp?.smartSelection?.onProgress?.((progress) => {
@@ -462,6 +524,46 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     return document.photoPrintRules.find((r) => r.id === ruleId) ?? null;
   }, [document, isPhotoPrintMode]);
 
+  function switchPageFromUi(pageId: string, source: string): void {
+    markDebugEvent("page-switch:intent", {
+      source,
+      from: activePageId,
+      to: pageId,
+      selectedLayerIds,
+      imageEditMode,
+      imageEditLayerId,
+      maskContentEditActive,
+      maskContentEditLayerId
+    });
+    clearSelection();
+    exitImageEditMode();
+    exitMaskContentEdit();
+    setActivePage(pageId);
+  }
+
+  useEffect(() => {
+    if (activePage === null) {
+      if (imageEditMode) exitImageEditMode();
+      if (maskContentEditActive) exitMaskContentEdit();
+      return;
+    }
+
+    if (imageEditMode && imageEditLayerId !== null && !activePage.layers.some((layer) => layer.id === imageEditLayerId)) {
+      exitImageEditMode();
+    }
+    if (maskContentEditActive && maskContentEditLayerId !== null && !activePage.layers.some((layer) => layer.id === maskContentEditLayerId)) {
+      exitMaskContentEdit();
+    }
+  }, [
+    activePage,
+    exitImageEditMode,
+    exitMaskContentEdit,
+    imageEditLayerId,
+    imageEditMode,
+    maskContentEditActive,
+    maskContentEditLayerId
+  ]);
+
   // Auto-switch left tab to collage layouts when entering collage mode
   useEffect(() => {
     if (isCollageMode) setLeftTab("collage");
@@ -475,8 +577,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     }
   }, [document?.id]);
 
-  // Initial sync: ensure collage FrameLayers exist when collage document first loads
-  // Also apply smart crop to all initial assignments
+  // Initial sync: ensure collage FrameLayers exist when collage document first loads.
   useEffect(() => {
     if (!isCollageMode || !activeCollageRule || !document) return;
 
@@ -496,12 +597,6 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
       }
     }
 
-    // Run smart crop async for all assignments
-    const rule = activeCollageRule;
-    const page = document.pages.find((p) => p.id === rule.pageId);
-    if (!page) return;
-
-    void runInitialSmartCrop(rule, page, document.assets);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCollageRule?.id]);
 
@@ -638,6 +733,25 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     }
     lastAutosavedRevisionRef.current = revision;
     lifecycle.markDirty();
+    if (AUTOSAVE_TEMPORARILY_DISABLED) {
+      setAutosaveDebugStatus({
+        ok: false,
+        reason: "unknown",
+        pagesCount: document.pages.length,
+        assetsCount: document.assets.length,
+        estimatedSizeBytes: 0,
+        estimatedSizeMb: 0,
+        storageTarget: "disabled",
+        message: "Autosave is temporarily disabled for crash isolation.",
+        savedAt: new Date().toISOString()
+      });
+      setStatus("Autosave disabled");
+      return;
+    }
+    autosaveMetricsRef.current = {
+      pagesCount: document.pages.length,
+      assetsCount: document.assets.length
+    };
     autosaveRef.current.recordMeaningfulChange(createProjectEnvelope({ document: withViewport(document, viewport), linkedGroups: [], batchJobs: [] }), "unsaved");
     setStatus("Autosave queued");
   }, [document, lifecycle, revision, viewport]);
@@ -724,6 +838,9 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
           handleSelectAllLayers();
           break;
         case "deselect":
+          if (useDrawingToolsStore.getState().activeTool !== null) {
+            useDrawingToolsStore.getState().setActiveTool(null);
+          }
           clearSelection();
           setCollageSwapSourceSlotId(null);
           setCanvasContextMenu(null);
@@ -782,15 +899,32 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     onOpenSettings
   ]);
 
-  // Drawing tool shortcut: 'I' toggles the eyedropper (works regardless of selection state)
+  // Drawing tool shortcuts: I/B/G/U/M/L toggle their respective tools
   useEffect(() => {
+    const KEY_TO_TOOL: Record<string, "eyedropper" | "brush" | "bucket" | "shape" | "marquee" | "lasso"> = {
+      i: "eyedropper", I: "eyedropper",
+      b: "brush", B: "brush",
+      g: "bucket", G: "bucket",
+      u: "shape", U: "shape",
+      m: "marquee", M: "marquee",
+      l: "lasso", L: "lasso"
+    };
     function onKey(event: KeyboardEvent): void {
       if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
       if (isEditableShortcutTarget(event.target)) return;
-      if (event.key !== "i" && event.key !== "I") return;
+      if (event.key === "Escape") {
+        const store = useDrawingToolsStore.getState();
+        if (store.activeTool !== null) {
+          event.preventDefault();
+          store.setActiveTool(null);
+        }
+        return;
+      }
+      const tool = KEY_TO_TOOL[event.key];
+      if (tool === undefined) return;
       event.preventDefault();
       const store = useDrawingToolsStore.getState();
-      store.setActiveTool(store.activeTool === "eyedropper" ? null : "eyedropper");
+      store.setActiveTool(store.activeTool === tool ? null : tool);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -806,6 +940,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     [batchProductionMeta]
   );
   const [templateSaveModal, setTemplateSaveModal] = useState<{ name: string } | null>(null);
+  const [maskOverflowPrompt, setMaskOverflowPrompt] = useState<{ rule: MaskLayoutRule; patch: Partial<MaskLayoutRule> } | null>(null);
 
   if (document === null || activePage === null) {
     return (
@@ -820,6 +955,14 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const currentDocument = document;
   const currentPage = activePage;
   const currentPageIndex = Math.max(0, currentDocument.pages.findIndex((page) => page.id === currentPage.id));
+  const suspiciousScreenshotCropAssets = currentDocument.assets.filter((asset) =>
+    asset.kind === "image" &&
+    getScreenshotCropSuggestion(asset) !== null &&
+    getAppliedScreenshotCrop(asset) === null &&
+    asset.metadata["screenshotCropIgnoredAt"] === undefined &&
+    !dismissedScreenshotCropAssetIds.has(asset.id)
+  );
+  const activeScreenshotCropToastAssets = projectScreenshotCropMuted ? [] : suspiciousScreenshotCropAssets;
 
   function handleToggleBatchVariable(layer: VisualLayer): void {
     if (variableLayerIds.has(layer.id)) {
@@ -920,7 +1063,8 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   }
 
   function handleAddText(): void {
-    const layer = createStarterTextLayer(currentPage.width, currentPage.height);
+    const baseLayer = createStarterTextLayer(currentPage.width, currentPage.height);
+    const layer = { ...baseLayer, color: useColorStore.getState().currentColor };
     addLayer(currentPage.id, layer);
     setSelection([layer.id]);
     setTool("text");
@@ -1075,23 +1219,27 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     return fetch(dataUrl).then((r) => r.blob()).then((b) => new File([b], filename, { type: "image/png" }));
   }
 
+  function clampFrameLayerToAssetCrop(layer: FrameLayer, asset: Asset | undefined): FrameLayer {
+    if (asset === undefined || asset.width === undefined || asset.height === undefined) return layer;
+    const sourceSize = getEffectiveSourceSize(asset, asset.width, asset.height);
+    return {
+      ...layer,
+      contentTransform: clampContentTransformToFillBounds(
+        layer.contentTransform,
+        layer.width,
+        layer.height,
+        sourceSize.width,
+        sourceSize.height,
+        layer.fitMode,
+        layer.padding
+      )
+    };
+  }
+
   function handleCanvasLayerChange(layer: VisualLayer): void {
     if (isGridMode && activeGridRule !== null && layer.type === "frame" && layer.metadata["gridCell"] !== undefined) {
       const asset = currentDocument.assets.find((item) => item.id === layer.imageAssetId);
-      const nextLayer = asset === undefined || asset.width === undefined || asset.height === undefined
-        ? layer
-        : {
-            ...layer,
-            contentTransform: clampContentTransformToFillBounds(
-              layer.contentTransform,
-              layer.width,
-              layer.height,
-              asset.width,
-              asset.height,
-              layer.fitMode,
-              layer.padding
-            )
-          };
+      const nextLayer = clampFrameLayerToAssetCrop(layer, asset);
       applyDocumentChange(
         "UpdateGridCellContentCommand",
         (doc) => ({
@@ -1118,28 +1266,42 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
         (layer.metadata["collageFrame"] as { isCollageFrame?: boolean } | undefined)?.isCollageFrame === true) {
       const collageMeta = layer.metadata["collageFrame"] as { slotId?: string } | undefined;
       if (collageMeta?.slotId) {
-        updateCollageImageTransform(activeCollageRule.id, collageMeta.slotId, layer.contentTransform);
-        updateLayer(currentPage.id, layer);
+        const asset = currentDocument.assets.find((item) => item.id === layer.imageAssetId);
+        const nextLayer = clampFrameLayerToAssetCrop(layer, asset);
+        updateCollageImageTransform(activeCollageRule.id, collageMeta.slotId, nextLayer.contentTransform);
+        updateLayer(currentPage.id, nextLayer);
       }
+      return;
+    }
+
+    if (isPhotoPrintMode && activePhotoPrintRule !== null && layer.type === "frame" && layer.metadata["photoPrintSlot"] !== undefined) {
+      const asset = currentDocument.assets.find((item) => item.id === layer.imageAssetId);
+      const nextLayer = clampFrameLayerToAssetCrop(layer, asset);
+      applyDocumentChange(
+        "UpdatePhotoPrintFrameContentCommand",
+        (doc) => ({
+          ...doc,
+          pages: doc.pages.map((page) => page.id === currentPage.id
+            ? { ...page, layers: page.layers.map((item) => (item.id === nextLayer.id ? nextLayer : item)) }
+            : page),
+          photoPrintImageAssignments: doc.photoPrintImageAssignments.map((assignment) => assignment.photoPrintId === activePhotoPrintRule.id && assignment.frameId === nextLayer.id
+            ? {
+                ...assignment,
+                manualContentTransform: nextLayer.contentTransform,
+                manualFitModeOverride: nextLayer.fitMode,
+                hasManualCropOverride: true,
+                hasManualRotationOverride: nextLayer.contentTransform.rotation !== 0
+              }
+            : assignment)
+        }),
+        currentPage.id
+      );
       return;
     }
 
     if (isMaskMode && activeMaskRule !== null && layer.type === "frame" && layer.metadata["maskFrame"] !== undefined) {
       const asset = currentDocument.assets.find((item) => item.id === layer.imageAssetId);
-      const nextLayer = asset === undefined || asset.width === undefined || asset.height === undefined
-        ? layer
-        : {
-            ...layer,
-            contentTransform: clampContentTransformToFillBounds(
-              layer.contentTransform,
-              layer.width,
-              layer.height,
-              asset.width,
-              asset.height,
-              layer.fitMode,
-              layer.padding
-            )
-          };
+      const nextLayer = clampFrameLayerToAssetCrop(layer, asset);
       applyDocumentChange(
         "UpdateMaskFrameContentCommand",
         (doc) => ({
@@ -1163,6 +1325,101 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     }
 
     updateLayer(currentPage.id, layer);
+  }
+
+  function getLayerImageAssetId(layer: VisualLayer | null): string | null {
+    if (layer?.type === "image") return layer.assetId;
+    if (layer?.type === "frame") return layer.imageAssetId ?? null;
+    return null;
+  }
+
+  function updateScreenshotCropAssets(assetIds: string[], mode: "apply" | "ignore" | "reset"): void {
+    const ids = new Set(assetIds);
+    if (ids.size === 0) return;
+    applyDocumentChange(
+      mode === "apply" ? "ApplySmartScreenshotCropCommand" : mode === "ignore" ? "IgnoreSmartScreenshotCropCommand" : "ResetSmartScreenshotCropCommand",
+      (doc) => ({
+        ...doc,
+        assets: doc.assets.map((asset) => {
+          if (!ids.has(asset.id)) return asset;
+          if (mode === "reset") return resetScreenshotCropForAsset(asset);
+          if (mode === "ignore") return ignoreScreenshotCropForAsset(asset);
+          const suggestion = getScreenshotCropSuggestion(asset);
+          return suggestion === null ? asset : applyScreenshotCropToAsset(asset, suggestion);
+        })
+      }),
+      currentPage.id
+    );
+    setDismissedScreenshotCropAssetIds((previous) => {
+      const next = new Set(previous);
+      assetIds.forEach((id) => next.add(id));
+      return next;
+    });
+  }
+
+  async function handleSmartScreenshotCropSelectedImages(): Promise<void> {
+    const assetId = getLayerImageAssetId(selectedLayer);
+    const asset = currentDocument.assets.find((item) => item.id === assetId);
+    const src = resolveCanvasAssetPath(asset);
+    if (asset === undefined || src === undefined) {
+      setStatus("בחר תמונה כדי לחתוך שוליים שחורים");
+      return;
+    }
+    try {
+      const image = await loadHtmlImage(src);
+      const analysis = await analyzeScreenshotCrop(image);
+      markDebugEvent("smart-screenshot-crop:manual-analysis", {
+        assetId: asset.id,
+        name: asset.name,
+        confidence: analysis.confidence,
+        cropRect: analysis.cropRect,
+        removedPixels: analysis.removedPixels,
+        reasons: analysis.reasons
+      });
+      if (!analysis.isSuspicious || analysis.cropRect === null) {
+        setStatus("לא נמצאו שוליים שחורים משמעותיים בתמונה הזו.");
+        return;
+      }
+      const suggestion: ScreenshotCropSuggestionMetadata = {
+        ...analysis,
+        originalWidth: asset.width ?? image.naturalWidth,
+        originalHeight: asset.height ?? image.naturalHeight
+      };
+      applyDocumentChange(
+        "ApplyManualSmartScreenshotCropCommand",
+        (doc) => ({
+          ...doc,
+          assets: doc.assets.map((item) =>
+            item.id === asset.id
+              ? applyScreenshotCropToAsset(
+                  {
+                    ...item,
+                    metadata: {
+                    ...item.metadata,
+                      screenshotCropSuggestion: suggestion as unknown as import("@/types/primitives").JsonValue
+                    }
+                  },
+                  suggestion
+                )
+              : item
+          )
+        }),
+        currentPage.id
+      );
+      setStatus("השוליים השחורים נחתכו בצורה לא הרסנית");
+    } catch {
+      setStatus("לא ניתן לנתח את התמונה לחיתוך שוליים");
+    }
+  }
+
+  function handleResetSmartScreenshotCropSelectedImage(): void {
+    const assetId = getLayerImageAssetId(selectedLayer);
+    if (assetId === null) {
+      setStatus("בחר תמונה כדי לאפס חיתוך שוליים");
+      return;
+    }
+    updateScreenshotCropAssets([assetId], "reset");
+    setStatus("חיתוך השוליים אופס");
   }
 
   /**
@@ -1567,25 +1824,63 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     });
   }
 
-  function handleExportPng(): void {
+  async function renderPagesForExport(mimeType: "image/png" | "image/jpeg"): Promise<PrintableStageImage[]> {
+    const stage = stageRef.current;
+    if (stage === null) return [];
+    const allPages = currentDocument.pages;
+    const originalPageId = currentPage.id;
+    const rendered: PrintableStageImage[] = [];
+    for (const page of allPages) {
+      if (page.id !== useDocumentStore.getState().activePageId) {
+        setActivePage(page.id);
+        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      }
+      rendered.push(exportStagePrintImage(stage, page, mimeType));
+    }
+    if (useDocumentStore.getState().activePageId !== originalPageId) {
+      setActivePage(originalPageId);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    }
+    return rendered;
+  }
+
+  async function handleExportPng(): Promise<void> {
     const stage = stageRef.current;
     if (stage === null) return;
-    exportStagePng(stage, currentDocument.name, currentPage);
-    setStatus("PNG יוצא");
+    if (exportScope === "all" && currentDocument.pages.length > 1) {
+      const pages = await renderPagesForExport("image/png");
+      downloadRenderedPagesAsImages(pages, currentDocument.name);
+      setStatus(`יוצאו ${pages.length} עמודי PNG`);
+    } else {
+      exportStagePng(stage, currentDocument.name, currentPage);
+      setStatus("PNG יוצא");
+    }
   }
 
   async function handleExportPdf(): Promise<void> {
     const stage = stageRef.current;
     if (stage === null) return;
-    await exportStagePdf(stage, currentDocument.name, currentPage);
-    setStatus("PDF יוצא");
+    if (exportScope === "all" && currentDocument.pages.length > 1) {
+      const pages = await renderPagesForExport("image/png");
+      await exportRenderedPagesAsPdf(pages, currentDocument.name);
+      setStatus(`PDF יוצא (${pages.length} עמודים)`);
+    } else {
+      await exportStagePdf(stage, currentDocument.name, currentPage);
+      setStatus("PDF יוצא");
+    }
   }
 
-  function handleExportJpg(): void {
+  async function handleExportJpg(): Promise<void> {
     const stage = stageRef.current;
     if (stage === null) return;
-    exportStageJpg(stage, currentDocument.name, currentPage);
-    setStatus("JPG exported");
+    if (exportScope === "all" && currentDocument.pages.length > 1) {
+      const pages = await renderPagesForExport("image/jpeg");
+      downloadRenderedPagesAsImages(pages, currentDocument.name);
+      setStatus(`יוצאו ${pages.length} עמודי JPEG`);
+    } else {
+      exportStageJpg(stage, currentDocument.name, currentPage);
+      setStatus("JPG exported");
+    }
   }
 
   function handlePrintPreview(): void {
@@ -1611,6 +1906,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     const pageIndices = rangeResult;
     saveLastPrintSettings({ printRangeMode: mode, customPageRange: customRange });
     setIsPrintBusy(true);
+    markDebugEvent("print:prepare", { mode, customRange, pageCount: pageIndices.length });
     setStatus("מכין עמודים להדפסה…");
 
     try {
@@ -1620,11 +1916,14 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
         if (!page) { setStatus("עמוד לא נמצא"); return; }
 
         if (page.id !== currentPage.id) {
+          markDebugEvent("print:page-switch-for-render", { from: currentPage.id, to: page.id });
           setActivePage(page.id);
           await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
         }
 
+        markDebugEvent("print:render-single-start", { pageId: page.id });
         const rendered = exportStagePrintImage(stage, page, "image/png");
+        markDebugEvent("print:render-single-end", { pageId: page.id, dataUrlLength: rendered.dataUrl.length });
         const pageName = typeof page.metadata["name"] === "string" ? page.metadata["name"] : undefined;
 
         setShowPrintDialog(false);
@@ -1649,13 +1948,17 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
         for (const idx of pageIndices) {
           const page = allPages[idx];
           if (!page) continue;
+          markDebugEvent("print:page-switch-for-render", { from: useDocumentStore.getState().activePageId, to: page.id, index: idx });
           setActivePage(page.id);
           await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+          markDebugEvent("print:render-page-start", { pageId: page.id, index: idx });
           renderedPages.push(exportStagePrintImage(stage, page, "image/png"));
+          markDebugEvent("print:render-page-end", { pageId: page.id, index: idx, renderedCount: renderedPages.length });
           const name = typeof page.metadata["name"] === "string" ? page.metadata["name"] : `עמוד ${idx + 1}`;
           renderedPageNames.push(name);
         }
 
+        markDebugEvent("print:restore-original-page", { originalPageId });
         setActivePage(originalPageId);
 
         if (renderedPages.length === 0) {
@@ -1664,6 +1967,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
         }
 
         setShowPrintDialog(false);
+        markDebugEvent("print:open-preview-pages", { pageCount: renderedPages.length });
         const result = await openPrintPreviewForPages(renderedPages, currentDocument.name, renderedPageNames);
 
         if (!result.success) {
@@ -2113,7 +2417,20 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     }
     const selectedRatio = selectedPixels / Math.max(1, selection.width * selection.height);
     if (selectedRatio > 0.5) {
-      const message = "Selection is too large for AI Fill; choose a smaller area";
+      const message = `Selection is too large for AI Fill (${Math.round(selectedRatio * 100)}% of the layer). Choose a smaller area.`;
+      store.setAiFillStatus("error", message);
+      store.setAiFillProgress(null);
+      setStatus(message);
+      return;
+    }
+    const estimatedRoi = estimateAiFillRoi(selection.data, selection.width, selection.height);
+    if (estimatedRoi === null) {
+      setStatus("Select an area first");
+      return;
+    }
+    const maxPatchPixels = 10_000_000;
+    if (estimatedRoi.pixels > maxPatchPixels) {
+      const message = `AI Fill area is too large (${formatMegapixels(estimatedRoi.pixels)} MP ROI). Choose a tighter selection or crop the image first.`;
       store.setAiFillStatus("error", message);
       store.setAiFillProgress(null);
       setStatus(message);
@@ -2124,17 +2441,18 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     store.setAiFillProgress({ operation: "inpaint_remove", phase: "prepare", message: "Preparing AI Fill...", percent: null });
     setStatus(selectedRatio > 0.3 ? "Large selection: preparing ROI fill..." : "Preparing AI Fill...");
     try {
-      const result = await runSmartInpaintRemove(target.asset, target.layer, selection);
+      const rendered = await renderImageLayerToSelectionCanvas(target.layer, target.asset, currentDocument.assets, selection.width, selection.height);
+      if (rendered === null) {
+        throw new Error("Cannot render the selected layer for AI Fill");
+      }
+      const renderedDataUrl = rendered.toDataURL("image/png");
+      const result = await runSmartInpaintRemove(target.asset, target.layer, selection, renderedDataUrl);
       if (result === null) {
         const message = "AI Fill is unavailable";
         store.setAiFillStatus("error", message);
         store.setAiFillProgress(null);
         setStatus(message);
         return;
-      }
-      const rendered = await renderImageLayerToSelectionCanvas(target.layer, target.asset, currentDocument.assets, selection.width, selection.height);
-      if (rendered === null) {
-        throw new Error("Cannot render the selected layer for AI Fill");
       }
       const filledDataUrl = await composeInpaintPatch(rendered, result.patchPngBase64, result.roi);
       const generatedAsset: Asset = {
@@ -2163,6 +2481,12 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
           modelId: result.modelId,
           modelVersion: result.modelVersion,
           fallback: result.fallback,
+          backendAttempted: result.backendAttempted ?? "simple-lama-inpainting",
+          backendUsed: result.backendUsed ?? result.modelId,
+          backendDevice: result.backendDevice ?? null,
+          modelWeightsPath: result.modelWeightsPath ?? null,
+          fallbackReason: result.fallbackReason ?? null,
+          debugDir: result.debugDir ?? null,
           processingMs: result.processingMs,
           createdAt: new Date().toISOString()
         }
@@ -2182,7 +2506,8 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
           ...nextMetadata,
           aiFillSourceAssetId: target.asset.id,
           aiFillModelId: result.modelId,
-          aiFillFallback: result.fallback
+          aiFillFallback: result.fallback,
+          aiFillFallbackReason: result.fallbackReason ?? null
         }
       };
       applyDocumentChange("AiFillRemoveAction", (doc) => ({
@@ -2196,13 +2521,12 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
       store.clearSelection();
       store.setAiFillStatus(result.fallback ? "fallback" : "ready", result.message);
       store.setAiFillProgress(null);
-      setStatus(result.fallback ? "Fast fallback fill applied" : "AI Fill applied");
+      setStatus(result.fallback ? `Fallback: OpenCV${result.fallbackReason ? ` (${result.fallbackReason})` : ""}` : `AI Fill: LaMa${result.backendDevice ? ` (${result.backendDevice})` : ""}`);
     } catch (error) {
-      const message = error instanceof Error && error.message === "selection_too_large"
-        ? "Selection is too large for AI Fill; choose a smaller area"
-        : error instanceof Error
-          ? error.message
-          : "AI Fill failed";
+      const rawMessage = error instanceof Error ? error.message : "AI Fill failed";
+      const message = rawMessage.startsWith("selection_too_large")
+        ? `Selection is too large for AI Fill. ${rawMessage}`
+        : rawMessage;
       store.setAiFillStatus("error", message);
       store.setAiFillProgress(null);
       setStatus(message);
@@ -2486,9 +2810,35 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     applyDocumentChange("DeleteGridImageAndCompactFromEndCommand", (doc) => deleteGridImageAndCompactFromEnd(doc, rule.id, cellIndexGlobal), currentPage.id);
   }
 
-  function handleRegenerateMask(rule: MaskLayoutRule, patch: Partial<MaskLayoutRule>): void {
-    applyDocumentChange("RegenerateMaskLayoutCommand", (doc) => regenerateMaskLayout(doc, rule.id, patch), currentPage.id);
+  function applyMaskRegeneration(rule: MaskLayoutRule, patch: Partial<MaskLayoutRule>, resizePage: boolean): void {
+    applyDocumentChange(
+      resizePage ? "ResizePageAndRegenerateMaskLayoutCommand" : "RegenerateMaskLayoutCommand",
+      (doc) => {
+        const sizedDoc = resizePage
+          ? resizeMaskPagesToFit(doc, rule.id, {
+              maskWidth: patch.maskWidth ?? rule.maskWidth,
+              maskHeight: patch.maskHeight ?? rule.maskHeight
+            })
+          : doc;
+        return regenerateMaskLayout(sizedDoc, rule.id, patch);
+      },
+      currentPage.id
+    );
     setStatus("Mask layout regenerated");
+  }
+
+  function handleRegenerateMask(rule: MaskLayoutRule, patch: Partial<MaskLayoutRule>): void {
+    const nextSize = {
+      maskWidth: patch.maskWidth ?? rule.maskWidth,
+      maskHeight: patch.maskHeight ?? rule.maskHeight
+    };
+    const overflow = checkMaskPageOverflow(currentPage, rule, nextSize);
+    if (overflow.exceeds) {
+      setMaskOverflowPrompt({ rule, patch });
+      setStatus("גודל המסיכה גדול משטח הדף");
+      return;
+    }
+    applyMaskRegeneration(rule, patch, false);
   }
 
   function handleApplyMaskFit(rule: MaskLayoutRule, fitMode: MaskLayoutRule["fitMode"]): void {
@@ -2519,10 +2869,16 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
 
     if (entry.fileDataUrl) {
       try {
-        const blob = await (await fetch(entry.fileDataUrl)).blob();
-        const file = new File([blob], `${entry.name}.${entry.type}`, {
-          type: entry.type === "svg" ? "image/svg+xml" : "image/png"
-        });
+        const processed = await generateMaskThumbnail(
+          entry.fileDataUrl,
+          entry.type as "svg" | "png",
+          entry.thresholdEnabled,
+          entry.thresholdColor,
+          entry.thresholdTolerance,
+          entry.thresholdFeather,
+          2048
+        );
+        const file = await dataUrlToFile(processed, `${entry.name}-mask.png`);
         const { asset } = await importImageAsset(file, currentDocument.assets, { createPreview: false });
         importedAsset = asset;
       } catch {
@@ -2553,7 +2909,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
       return regenerateMaskLayout(
         { ...docWithAsset, maskPresets: [...docWithAsset.maskPresets, newPreset] },
         rule.id,
-        { maskShape: "custom", maskPresetId: newPresetId }
+        { maskShape: "custom", maskPresetId: newPresetId, metadata: { ...rule.metadata, maskAssetId: importedAsset?.id ?? null } }
       );
     }, currentPage.id);
     setStatus("מסיכה הוחלפה");
@@ -2588,6 +2944,35 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
           isBusy={isPrintBusy}
         />
       )}
+      {maskOverflowPrompt !== null && (() => {
+        const nextSize = {
+          maskWidth: maskOverflowPrompt.patch.maskWidth ?? maskOverflowPrompt.rule.maskWidth,
+          maskHeight: maskOverflowPrompt.patch.maskHeight ?? maskOverflowPrompt.rule.maskHeight
+        };
+        const overflow = checkMaskPageOverflow(currentPage, maskOverflowPrompt.rule, nextSize);
+        const fitSize = pageSizeForMaskFit(currentPage, maskOverflowPrompt.rule, nextSize);
+        return (
+          <MaskOverflowPrompt
+            available={`${Math.round(overflow.availableWidth)} × ${Math.round(overflow.availableHeight)} px`}
+            required={`${Math.round(overflow.requiredWidth)} × ${Math.round(overflow.requiredHeight)} px`}
+            resizedTo={`${fitSize.width} × ${fitSize.height} px`}
+            onCancel={() => {
+              setMaskOverflowPrompt(null);
+              setStatus("שינוי גודל המסיכה בוטל");
+            }}
+            onContinue={() => {
+              const pending = maskOverflowPrompt;
+              setMaskOverflowPrompt(null);
+              applyMaskRegeneration(pending.rule, pending.patch, false);
+            }}
+            onResizePage={() => {
+              const pending = maskOverflowPrompt;
+              setMaskOverflowPrompt(null);
+              applyMaskRegeneration(pending.rule, pending.patch, true);
+            }}
+          />
+        );
+      })()}
       {/* Back-home confirmation dialog */}
       {showBackHomeDialog && (
         <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.45)" }}>
@@ -2729,15 +3114,16 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                 />
                 <div className="save-dropdown-menu" style={{
                   position: "absolute", top: "calc(100% + 4px)", right: 0,
-                  background: "var(--color-surface, #fff)", border: "1px solid var(--color-border, #ddd)",
-                  borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.15)", zIndex: 1000,
-                  minWidth: 180, padding: "4px 0"
+                  background: "var(--bg-surface)", border: "1px solid var(--border)",
+                  color: "var(--text-primary)",
+                  borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.45)", zIndex: 1000,
+                  minWidth: 220, padding: "4px 0"
                 }}>
                   <button
                     className="save-dropdown-item"
                     type="button"
                     onClick={() => { handleSaveLifecycle(); setSaveDropdownOpen(false); }}
-                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "var(--text-primary)" }}
                   >
                     <Save size={13} /> שמירה (JSON)
                   </button>
@@ -2745,7 +3131,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                     className="save-dropdown-item"
                     type="button"
                     onClick={() => { void handleSavePortableLifecycle(); setSaveDropdownOpen(false); }}
-                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "var(--text-primary)" }}
                   >
                     <FileDown size={13} /> שמירה SPP
                   </button>
@@ -2757,20 +3143,42 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                   >
                     <Zap size={13} /> שמור כתבנית ייצור
                   </button>
-                  <hr style={{ margin: "4px 0", border: "none", borderTop: "1px solid var(--color-border, #eee)" }} />
+                  <hr style={{ margin: "4px 0", border: "none", borderTop: "1px solid var(--border)" }} />
+                  <div style={{ display: "flex", gap: 4, padding: "4px 10px", fontSize: 11, opacity: 0.85 }}>
+                    <button
+                      type="button"
+                      onClick={() => setExportScope("all")}
+                      style={{
+                        flex: 1, padding: "4px 8px", borderRadius: 4, fontSize: 11, cursor: "pointer",
+                        background: exportScope === "all" ? "var(--accent)" : "var(--bg-elevated)",
+                        color: exportScope === "all" ? "#fff" : "var(--text-primary)",
+                        border: "1px solid var(--border)"
+                      }}
+                    >כל המסמך</button>
+                    <button
+                      type="button"
+                      onClick={() => setExportScope("current")}
+                      style={{
+                        flex: 1, padding: "4px 8px", borderRadius: 4, fontSize: 11, cursor: "pointer",
+                        background: exportScope === "current" ? "var(--accent)" : "var(--bg-elevated)",
+                        color: exportScope === "current" ? "#fff" : "var(--text-primary)",
+                        border: "1px solid var(--border)"
+                      }}
+                    >עמוד נוכחי</button>
+                  </div>
                   <button
                     className="save-dropdown-item"
                     type="button"
-                    onClick={() => { handleExportPng(); setSaveDropdownOpen(false); }}
-                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}
+                    onClick={() => { void handleExportPng(); setSaveDropdownOpen(false); }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "var(--text-primary)" }}
                   >
                     <Download size={13} /> ייצוא PNG
                   </button>
                   <button
                     className="save-dropdown-item"
                     type="button"
-                    onClick={() => { handleExportJpg(); setSaveDropdownOpen(false); }}
-                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}
+                    onClick={() => { void handleExportJpg(); setSaveDropdownOpen(false); }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "var(--text-primary)" }}
                   >
                     <Download size={13} /> ייצוא JPEG
                   </button>
@@ -2778,7 +3186,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                     className="save-dropdown-item"
                     type="button"
                     onClick={() => { void handleExportPdf(); setSaveDropdownOpen(false); }}
-                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "var(--text-primary)" }}
                   >
                     <FileDown size={13} /> ייצוא PDF
                   </button>
@@ -2880,11 +3288,14 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
         onImageEditDeleteSelection={handleDeleteSelection}
         onImageEditResetCrop={handleImageEditResetCrop}
         onImageEditResetMask={handleImageEditResetMask}
+        onSmartScreenshotCrop={() => { void handleSmartScreenshotCropSelectedImages(); }}
+        onResetSmartScreenshotCrop={handleResetSmartScreenshotCropSelectedImage}
         onMoveLayer={(direction) => {
           if (selectedLayer !== null) {
             moveLayer(currentPage.id, selectedLayer.id, direction);
           }
         }}
+        onNotify={setStatus}
         onPasteTextStyle={() => {
           if (selectedLayer?.type === "text") {
             pasteTextStyle(currentPage.id, [selectedLayer.id]);
@@ -3030,8 +3441,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                 onDuplicatePage={() => duplicatePage(currentPage.id)}
                 onRemovePage={() => removePage(currentPage.id)}
                 onSelectPage={(pageId) => {
-                  setActivePage(pageId);
-                  clearSelection();
+                  switchPageFromUi(pageId, "pages-panel");
                 }}
               />
             )}
@@ -3149,6 +3559,40 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
             >
               <span>{dropTargetFrame.hasImage ? "החלף תמונה בפריים" : "שחרר תמונה לפריים"}</span>
             </div>
+          ) : null}
+          {activeScreenshotCropToastAssets.length > 0 ? (
+            <SmartScreenshotCropToast
+              assets={activeScreenshotCropToastAssets}
+              onApplyAll={() => {
+                updateScreenshotCropAssets(activeScreenshotCropToastAssets.map((asset) => asset.id), "apply");
+                setStatus(`נחתכו ${activeScreenshotCropToastAssets.length} תמונות בצורה לא הרסנית`);
+              }}
+              onIgnoreAll={() => {
+                updateScreenshotCropAssets(activeScreenshotCropToastAssets.map((asset) => asset.id), "ignore");
+                setStatus("הצעת חיתוך צילום המסך נדחתה");
+              }}
+              onMuteProject={() => {
+                setProjectScreenshotCropMuted(true);
+                setStatus("לא נשאל שוב בפרויקט הזה על חיתוך צילומי מסך");
+              }}
+              onReview={() => setScreenshotCropReviewOpen(true)}
+            />
+          ) : null}
+          {screenshotCropReviewOpen ? (
+            <ScreenshotCropReviewPanel
+              assets={suspiciousScreenshotCropAssets}
+              onApply={(assetId) => updateScreenshotCropAssets([assetId], "apply")}
+              onApplyAllHighConfidence={() => {
+                const ids = suspiciousScreenshotCropAssets
+                  .filter((asset) => (getScreenshotCropSuggestion(asset)?.confidence ?? 0) >= 0.72)
+                  .map((asset) => asset.id);
+                updateScreenshotCropAssets(ids, "apply");
+              }}
+              onClose={() => setScreenshotCropReviewOpen(false)}
+              onReset={(assetId) => updateScreenshotCropAssets([assetId], "reset")}
+              onSkip={(assetId) => updateScreenshotCropAssets([assetId], "ignore")}
+              onSkipAll={() => updateScreenshotCropAssets(suspiciousScreenshotCropAssets.map((asset) => asset.id), "ignore")}
+            />
           ) : null}
           {canvasContextMenu !== null && (
             <CanvasContextMenu
@@ -3276,7 +3720,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
         </div>
 
         <aside className="right-sidebar">
-          <ColorPanel />
+          <ColorPanel getStageCanvas={() => stageRef.current?.toCanvas({ pixelRatio: 1 }) ?? null} />
           {/* Mode-specific panel at top */}
           {isProductMode ? (
             <div className="rs-mode-section">
@@ -3312,6 +3756,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
               <div className="rs-mode-label"><SlidersHorizontal size={11} />מצב מסכה</div>
               <MaskModePanel
                 assignmentCount={currentDocument.maskImageAssignments.filter((assignment) => assignment.maskId === activeMaskRule.id).length}
+                dpi={currentPage.setup.dpi}
                 rule={activeMaskRule}
                 selectedLayer={selectedLayer}
                 onAddImages={() => imageInputRef.current?.click()}
@@ -3332,6 +3777,13 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                 rule={activePhotoPrintRule}
                 document={currentDocument}
                 onRegenerate={(patch) => {
+                  // regeneratePhotoPrint rebuilds the document with brand-new
+                  // page + frame IDs. Any selection from the previous layout
+                  // points at frame IDs that no longer exist, which makes
+                  // downstream lookups (transformer, ID-based stage.findOne,
+                  // selection-driven panels) operate on stale references. Clear
+                  // selection first so the new document loads cleanly.
+                  clearSelection();
                   const updated = regeneratePhotoPrint(currentDocument, activePhotoPrintRule.id, patch);
                   setDocument(updated);
                 }}
@@ -3370,6 +3822,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                     setStatus("סגנון טקסט הועתק");
                   }}
                   onDelete={handleDeleteSelected}
+                  onNotify={setStatus}
                   onPatch={patchSelectedLayer}
                   onPasteTextStyle={() => {
                     pasteTextStyle(currentPage.id, [selectedLayer.id]);
@@ -3461,6 +3914,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                   onPatch={patchSelectedLayer}
                   onApplyPreset={() => undefined}
                   onCopyTextStyle={() => undefined}
+                  onNotify={setStatus}
                   onPasteTextStyle={() => undefined}
                   onTextChange={updateSelectedText}
                 />
@@ -3482,8 +3936,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
               onClick={() => {
                 const page = currentDocument.pages[currentPageIndex - 1];
                 if (page !== undefined) {
-                  setActivePage(page.id);
-                  clearSelection();
+                  switchPageFromUi(page.id, "bottom-prev");
                 }
               }}
               type="button"
@@ -3496,8 +3949,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                 className={`page-chip ${page.id === currentPage.id ? "active" : ""}`}
                 key={page.id}
                 onClick={() => {
-                  setActivePage(page.id);
-                  clearSelection();
+                  switchPageFromUi(page.id, "bottom-chip");
                 }}
                 type="button"
               >
@@ -3511,8 +3963,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
               onClick={() => {
                 const page = currentDocument.pages[currentPageIndex + 1];
                 if (page !== undefined) {
-                  setActivePage(page.id);
-                  clearSelection();
+                  switchPageFromUi(page.id, "bottom-next");
                 }
               }}
               type="button"
@@ -3577,6 +4028,30 @@ function countSelectedPixels(data: Uint8Array): number {
     if (data[index] > 128) count += 1;
   }
   return count;
+}
+
+function estimateAiFillRoi(data: Uint8Array, width: number, height: number): { width: number; height: number; pixels: number } | null {
+  const bounds = selectionMaskBounds(data, width, height);
+  if (bounds === null) return null;
+  const dilationPx = Math.max(4, Math.min(18, Math.round(Math.min(width, height) * 0.006)));
+  const dilatedWidth = Math.min(width, bounds.width + dilationPx * 2);
+  const dilatedHeight = Math.min(height, bounds.height + dilationPx * 2);
+  const shortSide = Math.max(1, Math.min(dilatedWidth, dilatedHeight));
+  const paddingX = Math.max(96, Math.min(768, Math.round(Math.max(dilatedWidth * 0.75, shortSide * 2, 96))));
+  const paddingY = Math.max(96, Math.min(768, Math.round(Math.max(dilatedHeight * 1.75, shortSide * 2, 96))));
+  let roiWidth = Math.min(width, dilatedWidth + paddingX * 2);
+  let roiHeight = Math.min(height, dilatedHeight + paddingY * 2);
+  roiWidth = Math.min(width, Math.max(roiWidth, Math.min(512, width)));
+  roiHeight = Math.min(height, Math.max(roiHeight, Math.min(512, height)));
+  return {
+    width: roiWidth,
+    height: roiHeight,
+    pixels: roiWidth * roiHeight
+  };
+}
+
+function formatMegapixels(pixels: number): string {
+  return (pixels / 1_000_000).toFixed(1);
 }
 
 async function composeInpaintPatch(
@@ -3660,6 +4135,112 @@ function loadHtmlImage(source: string): Promise<HTMLImageElement> {
 
 // ─── Tool button ──────────────────────────────────────────────────────────────
 
+function SmartScreenshotCropToast({
+  assets,
+  onApplyAll,
+  onIgnoreAll,
+  onMuteProject,
+  onReview
+}: {
+  assets: Asset[];
+  onApplyAll: () => void;
+  onIgnoreAll: () => void;
+  onMuteProject: () => void;
+  onReview: () => void;
+}): ReactElement {
+  const multiple = assets.length > 1;
+  return (
+    <div className="smart-crop-toast" role="status" dir="rtl">
+      <div className="smart-crop-toast-text">
+        {multiple
+          ? `זוהו ${assets.length} תמונות שנראות כמו צילומי מסך עם שוליים שחורים.`
+          : "נראה שהתמונה היא צילום מסך ויש לה שוליים שחורים. האם לחתוך אותם?"}
+      </div>
+      <div className="smart-crop-toast-actions">
+        <button className="btn btn-accent" onClick={onApplyAll} type="button">{multiple ? "חתוך את כולן" : "חתוך אוטומטית"}</button>
+        <button className="btn btn-secondary" onClick={onReview} type="button">{multiple ? "בדוק תמונות" : "הצג לפני/אחרי"}</button>
+        <button className="btn btn-ghost" onClick={onIgnoreAll} type="button">התעלם</button>
+        <button className="btn btn-ghost" onClick={onMuteProject} type="button">אל תשאל שוב בפרויקט הזה</button>
+      </div>
+    </div>
+  );
+}
+
+function ScreenshotCropReviewPanel({
+  assets,
+  onApply,
+  onApplyAllHighConfidence,
+  onClose,
+  onReset,
+  onSkip,
+  onSkipAll
+}: {
+  assets: Asset[];
+  onApply: (assetId: string) => void;
+  onApplyAllHighConfidence: () => void;
+  onClose: () => void;
+  onReset: (assetId: string) => void;
+  onSkip: (assetId: string) => void;
+  onSkipAll: () => void;
+}): ReactElement {
+  return (
+    <div className="smart-crop-review-backdrop" role="dialog" aria-modal="true" dir="rtl">
+      <div className="smart-crop-review">
+        <header className="smart-crop-review-header">
+          <div>
+            <h2>בדיקת חיתוך צילומי מסך</h2>
+            <p>{assets.length} תמונות חשודות</p>
+          </div>
+          <button className="context-icon" onClick={onClose} title="סגור" type="button"><X size={16} /></button>
+        </header>
+        <div className="smart-crop-review-actions">
+          <button className="btn btn-accent" onClick={onApplyAllHighConfidence} type="button">חתוך את כל הביטחון הגבוה</button>
+          <button className="btn btn-ghost" onClick={onSkipAll} type="button">דלג על כולן</button>
+        </div>
+        <div className="smart-crop-review-grid">
+          {assets.map((asset) => {
+            const suggestion = getScreenshotCropSuggestion(asset);
+            const source = resolveCanvasAssetPath(asset);
+            return (
+              <article className="smart-crop-review-item" key={asset.id}>
+                <div className="smart-crop-review-title">
+                  <strong>{asset.name}</strong>
+                  <span>{Math.round((suggestion?.confidence ?? 0) * 100)}%</span>
+                </div>
+                <div className="smart-crop-preview-pair">
+                  <div className="smart-crop-preview-box">{source !== undefined ? <img src={source} alt="" /> : null}<span>לפני</span></div>
+                  <div className="smart-crop-preview-box smart-crop-preview-after">
+                    {source !== undefined && suggestion?.cropRect !== null && suggestion?.cropRect !== undefined ? <img src={source} alt="" style={cropPreviewStyle(asset, suggestion)} /> : null}
+                    <span>אחרי</span>
+                  </div>
+                </div>
+                <div className="smart-crop-review-meta">
+                  {suggestion !== null ? `הוסר: עליון ${suggestion.removedPixels.top}, תחתון ${suggestion.removedPixels.bottom}, שמאל ${suggestion.removedPixels.left}, ימין ${suggestion.removedPixels.right}` : ""}
+                </div>
+                <div className="smart-crop-review-item-actions">
+                  <button className="mini-action success" onClick={() => onApply(asset.id)} type="button">Apply</button>
+                  <button className="mini-action" onClick={() => onSkip(asset.id)} type="button">Skip</button>
+                  <button className="mini-action" onClick={() => onReset(asset.id)} type="button">Reset</button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function cropPreviewStyle(asset: Asset, suggestion: ScreenshotCropSuggestionMetadata): CSSProperties {
+  const crop = suggestion.cropRect;
+  if (crop === null) return {};
+  const width = Math.max(1, asset.width ?? suggestion.originalWidth);
+  const height = Math.max(1, asset.height ?? suggestion.originalHeight);
+  return {
+    clipPath: `inset(${(crop.y / height) * 100}% ${((width - crop.x - crop.width) / width) * 100}% ${((height - crop.y - crop.height) / height) * 100}% ${(crop.x / width) * 100}%)`
+  };
+}
+
 function ContextToolbar({
   canvasWidth,
   canvasHeight,
@@ -3689,7 +4270,10 @@ function ContextToolbar({
   onImageEditDeleteSelection,
   onImageEditResetCrop,
   onImageEditResetMask,
+  onSmartScreenshotCrop,
+  onResetSmartScreenshotCrop,
   onMoveLayer,
+  onNotify,
   onPasteTextStyle,
   onPatch,
   onToggleGrid,
@@ -3723,7 +4307,10 @@ function ContextToolbar({
   onImageEditDeleteSelection: () => void;
   onImageEditResetCrop: () => void;
   onImageEditResetMask: () => void;
+  onSmartScreenshotCrop: () => void;
+  onResetSmartScreenshotCrop: () => void;
   onMoveLayer: (direction: "forward" | "backward" | "front" | "back") => void;
+  onNotify: (message: string) => void;
   onPasteTextStyle: () => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
   onToggleGrid: () => void;
@@ -3758,6 +4345,7 @@ function ContextToolbar({
         onDelete={onDelete}
         onDuplicate={onDuplicate}
         onMoveLayer={onMoveLayer}
+        onNotify={onNotify}
         onPasteTextStyle={onPasteTextStyle}
         onPatch={onPatch}
       />
@@ -3777,6 +4365,8 @@ function ContextToolbar({
         onExitMaskContentEditMode={onExitMaskContentEditMode}
         onMoveLayer={onMoveLayer}
         onPatch={onPatch}
+        onResetSmartScreenshotCrop={onResetSmartScreenshotCrop}
+        onSmartScreenshotCrop={onSmartScreenshotCrop}
       />
     );
   }
@@ -3803,8 +4393,8 @@ function EmptyContextToolbar({
 }): ReactElement {
   const drawingTool = useDrawingToolsStore((s) => s.activeTool);
   const setDrawingTool = useDrawingToolsStore((s) => s.setActiveTool);
-  const bucketMode = useDrawingToolsStore((s) => s.bucketMode);
-  const setBucketMode = useDrawingToolsStore((s) => s.setBucketMode);
+  const shapeKind = useDrawingToolsStore((s) => s.shapeKind);
+  const setShapeKind = useDrawingToolsStore((s) => s.setShapeKind);
   return (
     <section className="context-toolbar" aria-label="Context toolbar" data-testid="context-toolbar">
       <span className="context-toolbar-label">כלים כלליים</span>
@@ -3821,31 +4411,61 @@ function EmptyContextToolbar({
         </button>
       </div>
       <div className="context-group">
+        <details className="context-menu">
+          <summary title="כלי צורה (U)" className={drawingTool === "shape" ? "on" : ""}>
+            <ShapesIcon size={14} /> צורה
+          </summary>
+          <div className="context-popover shape-popover">
+            {([
+              ["rect", "מלבן", RectangleHorizontal],
+              ["circle", "עיגול", Circle],
+              ["ellipse", "אליפסה", Circle],
+              ["heart", "לב", HeartIcon],
+              ["line", "קו", LineIcon],
+              ["arrow", "חץ", ArrowIcon]
+            ] as const).map(([kind, label, Icon]) => (
+              <button
+                key={kind}
+                type="button"
+                className={shapeKind === kind && drawingTool === "shape" ? "shape-pick on" : "shape-pick"}
+                onClick={() => { setShapeKind(kind); setDrawingTool("shape"); }}
+              >
+                <Icon size={14} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+        </details>
+        {drawingTool === "shape" ? (
+          <span className="context-toolbar-label" style={{ fontSize: 11, opacity: 0.7 }}>
+            {shapeKind === "rect" && "מלבן"}
+            {shapeKind === "circle" && "עיגול"}
+            {shapeKind === "ellipse" && "אליפסה"}
+            {shapeKind === "heart" && "לב"}
+            {shapeKind === "line" && "קו"}
+            {shapeKind === "arrow" && "חץ"}
+          </span>
+        ) : null}
+      </div>
+      <div className="context-group">
         <button
           type="button"
-          className={`context-icon${drawingTool === "bucket" ? " on" : ""}`}
-          onClick={() => setDrawingTool(drawingTool === "bucket" ? null : "bucket")}
-          title="דלי צבע — מלא צבע בשכבה מתחת לסמן (G)"
-          data-testid="tool-bucket"
+          className={`context-icon${drawingTool === "marquee" ? " on" : ""}`}
+          onClick={() => setDrawingTool(drawingTool === "marquee" ? null : "marquee")}
+          title="בחירת מלבן (M)"
+          data-testid="tool-marquee"
         >
-          <PaintBucketIcon size={14} />
+          <RectangleHorizontal size={14} />
         </button>
-        {drawingTool === "bucket" ? (
-          <div className="context-bucket-modes">
-            <button
-              type="button"
-              className={bucketMode === "fill" ? "context-toggle on" : "context-toggle"}
-              onClick={() => setBucketMode("fill")}
-              title="מלא את כל השכבה"
-            >Fill</button>
-            <button
-              type="button"
-              className={bucketMode === "contiguous" ? "context-toggle on" : "context-toggle"}
-              onClick={() => setBucketMode("contiguous")}
-              title="מלא רק את האזור הרציף תחת הקליק"
-            >Contig</button>
-          </div>
-        ) : null}
+        <button
+          type="button"
+          className={`context-icon${drawingTool === "lasso" ? " on" : ""}`}
+          onClick={() => setDrawingTool(drawingTool === "lasso" ? null : "lasso")}
+          title="לאסו (L)"
+          data-testid="tool-lasso"
+        >
+          <span style={{ fontSize: 11, fontWeight: 700 }}>⌒</span>
+        </button>
       </div>
       <div className="context-group">
         <ToolbarButton icon={Type} label="הוסף טקסט" onClick={onAddText} />
@@ -3868,6 +4488,7 @@ function TextContextToolbar({
   onDelete,
   onDuplicate,
   onMoveLayer,
+  onNotify,
   onPasteTextStyle,
   onPatch
 }: {
@@ -3879,22 +4500,73 @@ function TextContextToolbar({
   onDelete: () => void;
   onDuplicate: () => void;
   onMoveLayer: (direction: "forward" | "backward" | "front" | "back") => void;
+  onNotify: (message: string) => void;
   onPasteTextStyle: () => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
 }): ReactElement {
   const glow = layer.effects.find((effect) => effect.effectType === "outer_glow");
+  const pattern = layer.effects.find((effect) => effect.effectType === "pattern_overlay");
+  const sparkle = layer.effects.find((effect) => effect.effectType === "sparkle");
+  const bevel = layer.effects.find((effect) => effect.effectType === "bevel_emboss");
+  const extrude = layer.effects.find((effect) => effect.effectType === "extrude_3d");
+  const [userPresets, setUserPresets] = useState<TextPreset[]>(() => loadUserTextPresets());
+  const allPresets = useMemo(() => [...BUILTIN_TEXT_PRESETS, ...userPresets], [userPresets]);
 
   function patchGlow(patch: Record<string, string | number>): void {
-    const existing = glow ?? createTextEffect("outer_glow");
+    patchTextEffect(glow, "outer_glow", patch);
+  }
+
+  function patchTextEffect(existing: TextEffect | undefined, effectType: TextEffect["effectType"], patch: Record<string, unknown>): void {
+    const base = existing ?? createTextEffect(effectType);
     const next = {
-      ...existing,
+      ...base,
       enabled: true,
-      opacity: typeof patch["opacity"] === "number" ? patch["opacity"] : existing.opacity,
-      params: { ...existing.params, ...patch }
+      opacity: typeof patch["opacity"] === "number" ? patch["opacity"] : base.opacity,
+      params: { ...base.params, ...patch }
     };
     onPatch({
-      effects: glow === undefined ? [...layer.effects, next] : layer.effects.map((effect) => (effect.id === glow.id ? next : effect))
+      effects: existing === undefined ? [...layer.effects, next] : layer.effects.map((effect) => (effect.id === existing.id ? next : effect))
     } as Partial<VisualLayer>);
+  }
+
+  function removeTextEffect(effect: TextEffect | undefined): void {
+    if (effect !== undefined) onPatch({ effects: layer.effects.filter((item) => item.id !== effect.id) } as Partial<VisualLayer>);
+  }
+
+  function applyPresetWithFontFallback(preset: TextPreset): void {
+    const family = preset.style.fontFamily;
+    if (family !== undefined && !fontFamilyExists(family)) {
+      onNotify(`הפונט "${family}" לא נמצא, ממשיך עם DM Sans`);
+      onApplyPreset({ ...preset, style: { ...preset.style, fontFamily: "DM Sans" } });
+      return;
+    }
+    onApplyPreset(preset);
+  }
+
+  function saveToolbarPreset(): void {
+    const preset = createTextPresetFromLayer(layer, layer.name || "Custom text preset");
+    setUserPresets(saveUserTextPreset(preset));
+    onNotify(`הפריסט "${preset.name}" נשמר`);
+  }
+
+  function removeToolbarPreset(preset: TextPreset): void {
+    setUserPresets(deleteUserTextPreset(preset.presetId));
+    onNotify(`הפריסט "${preset.name}" נמחק`);
+  }
+
+  function uploadPatternImage(file: File | undefined): void {
+    if (file === undefined || pattern === undefined) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== "string") return;
+      patchTextEffect(pattern, "pattern_overlay", {
+        patternType: "uploaded_image",
+        imageDataUrl: reader.result,
+        imageName: file.name,
+        opacity: Math.max(0.2, Number((pattern.params as Record<string, unknown>)["opacity"] ?? 0.65))
+      });
+    };
+    reader.readAsDataURL(file);
   }
 
   return (
@@ -3930,13 +4602,13 @@ function TextContextToolbar({
       <ToolbarMenu label="Presets" title="פריסטים לטקסט">
         <div className="context-menu-actions">
           <button className="context-menu-button" onClick={onCopyTextStyle} type="button"><Copy size={13} /> Copy FX</button>
-          <button className="context-menu-button" disabled={!hasTextStyleClipboard} onClick={onPasteTextStyle} type="button"><Clipboard size={13} /> Paste FX</button>
+          <button className="context-menu-button" disabled={!hasTextStyleClipboard} onClick={onPasteTextStyle} type="button"><Clipboard size={13} /> Paste FX</button><button className="context-menu-button" onClick={saveToolbarPreset} type="button"><Save size={13} /> Save preset</button>
         </div>
         <div className="context-preset-grid">
-          {BUILTIN_TEXT_PRESETS.map((preset) => (
-            <button className="context-preset-chip" key={preset.presetId} onClick={() => onApplyPreset(preset)} type="button">
+          {allPresets.map((preset) => (
+            <button className="context-preset-chip" key={preset.presetId} onClick={() => applyPresetWithFontFallback(preset)} type="button">
               <span style={presetPreviewStyle(preset)}>{layer.text.trim().slice(0, 2) || "טק"}</span>
-              <strong>{preset.name}</strong>
+              <strong>{preset.name}</strong>{!preset.isBuiltin ? <em onClick={(event) => { event.stopPropagation(); removeToolbarPreset(preset); }}>Delete</em> : null}
             </button>
           ))}
         </div>
@@ -3955,8 +4627,22 @@ function TextContextToolbar({
         {layer.shadow !== undefined ? <><input className="context-color wide" onChange={(event) => onPatch({ shadow: { ...layer.shadow, color: event.target.value } } as Partial<VisualLayer>)} type="color" value={layer.shadow.color} /><SliderField label="שקיפות" min={0} max={1} step={0.01} decimals={2} value={layer.shadow.opacity} onChange={(value) => onPatch({ shadow: { ...layer.shadow, opacity: value } } as Partial<VisualLayer>)} /><SliderField label="טשטוש" min={0} max={80} value={layer.shadow.blur} onChange={(value) => onPatch({ shadow: { ...layer.shadow, blur: value } } as Partial<VisualLayer>)} unit=" px" /><SliderField label="X" min={-80} max={80} value={layer.shadow.offsetX} onChange={(value) => onPatch({ shadow: { ...layer.shadow, offsetX: value } } as Partial<VisualLayer>)} /><SliderField label="Y" min={-80} max={80} value={layer.shadow.offsetY} onChange={(value) => onPatch({ shadow: { ...layer.shadow, offsetY: value } } as Partial<VisualLayer>)} /></> : null}
       </ToolbarMenu>
       <ToolbarMenu label="Glow" title="זוהר חיצוני">
-        <label className="check-line"><input checked={glow?.enabled === true} onChange={(event) => event.target.checked ? patchGlow({ color: "#ffffff", opacity: 0.8, blur: 24, spread: 4 }) : onPatch({ effects: layer.effects.filter((effect) => effect.id !== glow?.id) } as Partial<VisualLayer>)} type="checkbox" /> הפעלה</label>
-        {glow?.enabled === true ? <><input className="context-color wide" onChange={(event) => patchGlow({ color: event.target.value })} type="color" value={String((glow.params as Record<string, unknown>)["color"] ?? "#ffffff")} /><SliderField label="עוצמה" min={4} max={80} value={Number((glow.params as Record<string, unknown>)["blur"] ?? 24)} onChange={(value) => patchGlow({ blur: value })} unit=" px" /><SliderField label="שקיפות" min={0} max={1} step={0.01} decimals={2} value={glow.opacity} onChange={(value) => patchGlow({ opacity: value })} /></> : null}
+        <label className="check-line"><input checked={glow?.enabled === true} onChange={(event) => event.target.checked ? patchGlow({ color: "#ffffff", outerColor: "#7dd3fc", opacity: 0.8, blur: 28, spread: 8, passes: 3 }) : removeTextEffect(glow)} type="checkbox" /> הפעלה</label>
+        {glow?.enabled === true ? <><input className="context-color wide" onChange={(event) => patchGlow({ color: event.target.value })} type="color" value={String((glow.params as Record<string, unknown>)["color"] ?? "#ffffff")} /><SliderField label="טשטוש" min={4} max={90} value={Number((glow.params as Record<string, unknown>)["blur"] ?? 24)} onChange={(value) => patchGlow({ blur: value })} unit=" px" /><SliderField label="Spread" min={0} max={35} value={Number((glow.params as Record<string, unknown>)["spread"] ?? 4)} onChange={(value) => patchGlow({ spread: value })} unit=" px" /><SliderField label="Passes" min={1} max={6} value={Number((glow.params as Record<string, unknown>)["passes"] ?? 3)} onChange={(value) => patchGlow({ passes: value })} /><SliderField label="שקיפות" min={0} max={1} step={0.01} decimals={2} value={glow.opacity} onChange={(value) => patchGlow({ opacity: value })} /></> : null}
+      </ToolbarMenu>
+      <ToolbarMenu label="Pattern" title="תבנית בתוך הטקסט">
+        <label className="check-line"><input checked={pattern?.enabled === true} onChange={(event) => event.target.checked ? patchTextEffect(pattern, "pattern_overlay", { patternType: "diagonal_shine", foreground: "#ffffff", opacity: 0.35, scale: 1, rotation: -18, spacing: 14 }) : removeTextEffect(pattern)} type="checkbox" /> הפעלה</label>
+        {pattern?.enabled === true ? <><select className="context-select full" onChange={(event) => patchTextEffect(pattern, "pattern_overlay", { patternType: event.target.value })} value={String((pattern.params as Record<string, unknown>)["patternType"] ?? "stripes")}><option value="stripes">Stripes</option><option value="dots">Dots</option><option value="checker">Checker</option><option value="diagonal_shine">Shine</option><option value="noise">Noise</option><option value="halftone">Halftone</option><option value="brushed_metal">Brushed metal</option><option value="uploaded_image">Uploaded image</option></select><label className="context-upload-button"><ImagePlus size={13} /> Upload pattern<input accept="image/*" type="file" onChange={(event) => uploadPatternImage(event.target.files?.[0])} /></label>{typeof (pattern.params as Record<string, unknown>)["imageName"] === "string" ? <span className="context-menu-section-label">{String((pattern.params as Record<string, unknown>)["imageName"])}</span> : null}<input className="context-color wide" onChange={(event) => patchTextEffect(pattern, "pattern_overlay", { foreground: event.target.value })} type="color" value={String((pattern.params as Record<string, unknown>)["foreground"] ?? "#ffffff")} /><SliderField label="מרווח" min={4} max={40} value={Number((pattern.params as Record<string, unknown>)["spacing"] ?? 10)} onChange={(value) => patchTextEffect(pattern, "pattern_overlay", { spacing: value })} unit=" px" /><SliderField label="זווית" min={-90} max={90} value={Number((pattern.params as Record<string, unknown>)["rotation"] ?? 0)} onChange={(value) => patchTextEffect(pattern, "pattern_overlay", { rotation: value })} unit="°" /><SliderField label="שקיפות" min={0} max={1} step={0.01} decimals={2} value={Number((pattern.params as Record<string, unknown>)["opacity"] ?? pattern.opacity)} onChange={(value) => patchTextEffect(pattern, "pattern_overlay", { opacity: value })} /></> : null}
+      </ToolbarMenu>
+      <ToolbarMenu label="3D" title="תלת ממד ותבליט">
+        <label className="check-line"><input checked={extrude?.enabled === true} onChange={(event) => event.target.checked ? patchTextEffect(extrude, "extrude_3d", { color: "#333333", depth: 12, offsetX: 1, offsetY: 1, steps: 12, opacity: 0.85 }) : removeTextEffect(extrude)} type="checkbox" /> Extrude</label>
+        {extrude?.enabled === true ? <><input className="context-color wide" onChange={(event) => patchTextEffect(extrude, "extrude_3d", { color: event.target.value })} type="color" value={String((extrude.params as Record<string, unknown>)["color"] ?? "#333333")} /><SliderField label="עומק" min={0} max={32} value={Number((extrude.params as Record<string, unknown>)["depth"] ?? 12)} onChange={(value) => patchTextEffect(extrude, "extrude_3d", { depth: value })} unit=" px" /><SliderField label="X" min={-3} max={3} step={0.1} decimals={1} value={Number((extrude.params as Record<string, unknown>)["offsetX"] ?? 1)} onChange={(value) => patchTextEffect(extrude, "extrude_3d", { offsetX: value })} /><SliderField label="Y" min={-3} max={3} step={0.1} decimals={1} value={Number((extrude.params as Record<string, unknown>)["offsetY"] ?? 1)} onChange={(value) => patchTextEffect(extrude, "extrude_3d", { offsetY: value })} /></> : null}
+        <label className="check-line"><input checked={bevel?.enabled === true} onChange={(event) => event.target.checked ? patchTextEffect(bevel, "bevel_emboss", { style: "inner_bevel", technique: "smooth", depth: 5, size: 5, soften: 1, highlightColor: "#ffffff", shadowColor: "#000000" }) : removeTextEffect(bevel)} type="checkbox" /> Bevel</label>
+        {bevel?.enabled === true ? <><SliderField label="Bevel depth" min={1} max={20} value={Number((bevel.params as Record<string, unknown>)["depth"] ?? 5)} onChange={(value) => patchTextEffect(bevel, "bevel_emboss", { depth: value })} unit=" px" /><SliderField label="Bevel size" min={0} max={20} value={Number((bevel.params as Record<string, unknown>)["size"] ?? 5)} onChange={(value) => patchTextEffect(bevel, "bevel_emboss", { size: value })} unit=" px" /></> : null}
+      </ToolbarMenu>
+      <ToolbarMenu label="Sparkle" title="נצנוץ סטטי להדפסה">
+        <label className="check-line"><input checked={sparkle?.enabled === true} onChange={(event) => event.target.checked ? patchTextEffect(sparkle, "sparkle", { density: 0.24, size: 6, color: "#ffffff", seed: 9, opacity: 0.85, rays: 8, glint: 0.75, halo: 0.7 }) : removeTextEffect(sparkle)} type="checkbox" /> הפעלה</label>
+        {sparkle?.enabled === true ? <><input className="context-color wide" onChange={(event) => patchTextEffect(sparkle, "sparkle", { color: event.target.value })} type="color" value={String((sparkle.params as Record<string, unknown>)["color"] ?? "#ffffff")} /><SliderField label="כמות" min={0.02} max={0.8} step={0.01} decimals={2} value={Number((sparkle.params as Record<string, unknown>)["density"] ?? 0.24)} onChange={(value) => patchTextEffect(sparkle, "sparkle", { density: value })} /><SliderField label="גודל" min={1} max={18} value={Number((sparkle.params as Record<string, unknown>)["size"] ?? 6)} onChange={(value) => patchTextEffect(sparkle, "sparkle", { size: value })} unit=" px" /><SliderField label="Glint" min={0} max={1} step={0.01} decimals={2} value={Number((sparkle.params as Record<string, unknown>)["glint"] ?? 0.75)} onChange={(value) => patchTextEffect(sparkle, "sparkle", { glint: value })} /><SliderField label="Halo" min={0} max={1} step={0.01} decimals={2} value={Number((sparkle.params as Record<string, unknown>)["halo"] ?? 0.7)} onChange={(value) => patchTextEffect(sparkle, "sparkle", { halo: value })} /></> : null}
       </ToolbarMenu>
       <ToolbarMenu label="Warp" title="עיוות טקסט">
         <select className="context-select full" onChange={(event) => onPatch({ warpSettings: { ...layer.warpSettings, enabled: event.target.value !== "none", type: event.target.value as typeof layer.warpSettings.type } } as Partial<VisualLayer>)} value={layer.warpSettings.type}>
@@ -4131,6 +4817,8 @@ function ImageContextToolbar({
   onExitMaskContentEditMode,
   onMoveLayer,
   onPatch,
+  onResetSmartScreenshotCrop,
+  onSmartScreenshotCrop,
 }: {
   canvasWidth: number;
   canvasHeight: number;
@@ -4143,6 +4831,8 @@ function ImageContextToolbar({
   onExitMaskContentEditMode: () => void;
   onMoveLayer: (direction: "forward" | "backward" | "front" | "back") => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
+  onResetSmartScreenshotCrop: () => void;
+  onSmartScreenshotCrop: () => void;
 }): ReactElement {
   const isFrame = layer.type === "frame";
   const isCollageFrameProp = isFrame &&
@@ -4380,6 +5070,16 @@ function ImageContextToolbar({
         <CompactRange label="Opacity" min={0} max={1} step={0.01} value={layer.opacity} onChange={(v) => onPatch({ opacity: v } as Partial<VisualLayer>)} />
         <BlendModeSelect value={layer.blendMode} onChange={(blendMode) => onPatch({ blendMode } as Partial<VisualLayer>)} />
       </div>
+      <ToolbarMenu label="Image" title="Image">
+        <div className="context-menu-actions">
+          <button className="context-menu-button" type="button" onClick={onSmartScreenshotCrop}>
+            <Scissors size={13} /> חתוך שוליים שחורים
+          </button>
+          <button className="context-menu-button" type="button" onClick={onResetSmartScreenshotCrop}>
+            <RotateCcw size={13} /> אפס חיתוך שוליים
+          </button>
+        </div>
+      </ToolbarMenu>
       <div className="context-group">
         <ToolbarButton icon={RotateCw} label="סובב 90°" onClick={() => onPatch({ rotation: ((layer.rotation ?? 0) + 90) % 360 } as Partial<VisualLayer>)} />
         <ToolbarButton active={flipH} icon={FlipHorizontal} label="היפוך אופקי" onClick={() => patchMeta({ flipH: !flipH })} />
@@ -4413,7 +5113,74 @@ function ToolbarButton({ active = false, danger = false, icon: Icon, label, onCl
 }
 
 function ToolbarMenu({ children, label, title }: { children: ReactNode; label: string; title: string }): ReactElement {
-  return <details className="context-menu"><summary title={title}>{label}</summary><div className="context-popover">{children}</div></details>;
+  const [open, setOpen] = useState(false);
+  const [popoverStyle, setPopoverStyle] = useState<CSSProperties>({});
+  const menuRef = useRef<HTMLDivElement>(null);
+  const idRef = useRef(`menu_${Math.random().toString(36).slice(2)}`);
+
+  const positionPopover = useCallback(() => {
+    const node = menuRef.current;
+    if (node === null) return;
+    const button = node.querySelector<HTMLButtonElement>(".context-menu-summary");
+    if (button === null) return;
+    const rect = button.getBoundingClientRect();
+    const width = Math.min(336, Math.max(260, window.innerWidth - 16));
+    const left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.right - width));
+    const top = Math.min(window.innerHeight - 96, rect.bottom + 8);
+    setPopoverStyle({
+      left,
+      top,
+      width,
+      maxHeight: Math.max(180, window.innerHeight - top - 12)
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    positionPopover();
+    const closeOnPointer = (event: MouseEvent): void => {
+      if (menuRef.current?.contains(event.target as Node) !== true) setOpen(false);
+    };
+    const closeOnKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    const closeFromSibling = (event: Event): void => {
+      const detail = (event as CustomEvent<{ id?: string }>).detail;
+      if (detail?.id !== idRef.current) setOpen(false);
+    };
+    document.addEventListener("mousedown", closeOnPointer);
+    document.addEventListener("keydown", closeOnKey);
+    window.addEventListener("resize", positionPopover);
+    window.addEventListener("scroll", positionPopover, true);
+    window.addEventListener("spp2:close-context-menus", closeFromSibling);
+    return () => {
+      document.removeEventListener("mousedown", closeOnPointer);
+      document.removeEventListener("keydown", closeOnKey);
+      window.removeEventListener("resize", positionPopover);
+      window.removeEventListener("scroll", positionPopover, true);
+      window.removeEventListener("spp2:close-context-menus", closeFromSibling);
+    };
+  }, [open, positionPopover]);
+
+  function toggle(): void {
+    setOpen((current) => {
+      const next = !current;
+      if (next) {
+        window.dispatchEvent(new CustomEvent("spp2:close-context-menus", { detail: { id: idRef.current } }));
+        requestAnimationFrame(positionPopover);
+      }
+      return next;
+    });
+  }
+
+  return (
+    <div className={`context-menu${open ? " open" : ""}`} ref={menuRef}>
+      <button className="context-menu-summary" title={title} type="button" aria-expanded={open} onClick={toggle}>
+        {label}
+      </button>
+      {open ? <div className="context-popover" style={popoverStyle}>{children}</div> : null}
+    </div>
+  );
 }
 
 function BlendModeSelect({ value, onChange }: { value: BlendMode; onChange: (value: BlendMode) => void }): ReactElement {
@@ -4545,7 +5312,20 @@ function CompactRange({ label, min, max, step = 1, value, onChange }: { label: s
 }
 
 function createTextEffect(effectType: TextEffect["effectType"]): TextEffect {
-  return { version: 1, id: `${effectType}_${Date.now()}`, effectId: `${effectType}_${Date.now()}`, effectType, enabled: true, opacity: 0.8, blendMode: "normal", params: effectType === "outer_glow" ? { color: "#ffffff", opacity: 0.8, angle: 0, distance: 0, blur: 24, spread: 4 } : {} };
+  const id = `${effectType}_${Date.now()}`;
+  const defaults: TextEffect["params"] =
+    effectType === "outer_glow"
+      ? { color: "#ffffff", outerColor: "#7dd3fc", opacity: 0.8, angle: 0, distance: 0, blur: 24, spread: 6, passes: 3 }
+      : effectType === "pattern_overlay"
+      ? { patternType: "diagonal_shine", foreground: "#ffffff", opacity: 0.35, scale: 1, rotation: -18, spacing: 14 }
+      : effectType === "sparkle"
+      ? { density: 0.24, size: 6, color: "#ffffff", seed: 9, opacity: 0.85, rays: 8, glint: 0.75, halo: 0.7 }
+      : effectType === "extrude_3d"
+      ? { color: "#333333", depth: 12, offsetX: 1, offsetY: 1, steps: 12, opacity: 0.85 }
+      : effectType === "bevel_emboss"
+      ? { style: "inner_bevel", technique: "smooth", depth: 5, size: 5, soften: 1, highlightColor: "#ffffff", shadowColor: "#000000" }
+      : {};
+  return { version: 1, id, effectId: id, effectType, enabled: true, opacity: 0.8, blendMode: "normal", params: defaults };
 }
 
 function ToolButton({
@@ -4858,6 +5638,7 @@ function TextStudio({
   onBatchFieldChange,
   onCopyTextStyle,
   onDelete,
+  onNotify,
   onPatch,
   onPasteTextStyle,
   onTextChange
@@ -4869,6 +5650,7 @@ function TextStudio({
   onBatchFieldChange: (field: BatchVariableField | null) => void;
   onCopyTextStyle: () => void;
   onDelete: () => void;
+  onNotify?: (message: string) => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
   onPasteTextStyle: () => void;
   onTextChange: (text: string) => void;
@@ -4881,6 +5663,7 @@ function TextStudio({
           layer={layer}
           onApplyPreset={onApplyPreset}
           onCopyTextStyle={onCopyTextStyle}
+          onNotify={onNotify}
           onPasteTextStyle={onPasteTextStyle}
           onPatch={onPatch}
           onTextChange={onTextChange}
@@ -5579,6 +6362,36 @@ function ImageStudio({
 
 // ─── Pages panel (left sidebar pages tab) ────────────────────────────────────
 
+function PageThumbButton({
+  active,
+  index,
+  pageId,
+  onSelectPage
+}: {
+  active: boolean;
+  index: number;
+  pageId: string;
+  onSelectPage: (pageId: string) => void;
+}): ReactElement {
+  useEffect(() => trackDebugMount("PageThumb", { pageId, index }), [pageId, index]);
+
+  return (
+    <button
+      className={`page-thumb-btn ${active ? "active" : ""}`}
+      onClick={() => onSelectPage(pageId)}
+      type="button"
+    >
+      <div className="page-thumb-preview">{index + 1}</div>
+      <span>׳¢׳׳•׳“ {index + 1}</span>
+    </button>
+  );
+}
+
+function PageThumbMount({ index, pageId }: { index: number; pageId: string }): null {
+  useEffect(() => trackDebugMount("PageThumb", { pageId, index }), [pageId, index]);
+  return null;
+}
+
 function PagesPanel({
   activePageId,
   document,
@@ -5599,15 +6412,17 @@ function PagesPanel({
       <div className="page-panel-section-title">עמודים</div>
       <div className="page-thumbs-list">
         {document.pages.map((page, index) => (
+          <Fragment key={page.id}>
+          <PageThumbMount index={index} pageId={page.id} />
           <button
             className={`page-thumb-btn ${page.id === activePageId ? "active" : ""}`}
-            key={page.id}
             onClick={() => onSelectPage(page.id)}
             type="button"
           >
             <div className="page-thumb-preview">{index + 1}</div>
             <span>עמוד {index + 1}</span>
           </button>
+          </Fragment>
         ))}
       </div>
       <div className="button-row">
@@ -5868,6 +6683,7 @@ function MaskShapeIcon({ shape, size = 28 }: { shape: string; size?: number }): 
 
 function MaskModePanel({
   assignmentCount,
+  dpi,
   rule,
   selectedLayer,
   onAddFilenameText,
@@ -5880,6 +6696,7 @@ function MaskModePanel({
   onChangePreset
 }: {
   assignmentCount: number;
+  dpi: number;
   rule: MaskLayoutRule;
   selectedLayer: VisualLayer | null;
   onAddFilenameText: () => void;
@@ -5895,6 +6712,9 @@ function MaskModePanel({
   const [maskHeight, setMaskHeight] = useState(rule.maskHeight);
   const [spacingX, setSpacingX] = useState(rule.spacingX);
   const [spacingY, setSpacingY] = useState(rule.spacingY);
+  const [maskUnit, setMaskUnit] = useState<MaskDimensionUnit>("mm");
+  const [widthDraft, setWidthDraft] = useState("");
+  const [heightDraft, setHeightDraft] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const libraryEntries = useMaskLibraryStore((s) => s.entries);
   const selectedIsMaskFrame = selectedLayer?.type === "frame" && selectedLayer.metadata["maskFrame"] !== undefined;
@@ -5914,6 +6734,11 @@ function MaskModePanel({
     setSpacingY(rule.spacingY);
   }, [rule.id, rule.maskWidth, rule.maskHeight, rule.spacingX, rule.spacingY]);
 
+  useEffect(() => {
+    setWidthDraft(formatDimension(pxToUnit(maskWidth, maskUnit, dpi), maskUnit));
+    setHeightDraft(formatDimension(pxToUnit(maskHeight, maskUnit, dpi), maskUnit));
+  }, [dpi, maskUnit, maskWidth, maskHeight]);
+
   function updateWidth(value: number): void {
     setMaskWidth(value);
     if (rule.keepProportions) setMaskHeight(value);
@@ -5925,8 +6750,40 @@ function MaskModePanel({
   }
 
   function selectBuiltIn(shape: string): void {
-    onRegenerate(rule, { maskShape: shape as import("@/types/mask").MaskShape });
+    onRegenerate(rule, { maskShape: shape as import("@/types/mask").MaskShape, metadata: { ...rule.metadata, maskAssetId: null } });
     setPickerOpen(false);
+  }
+
+  function unitBounds(unit: MaskDimensionUnit): { min: number; max: number } {
+    if (unit === "cm") return { min: 0.1, max: 50 };
+    if (unit === "mm") return { min: 1, max: 500 };
+    return { min: 0.05, max: 20 };
+  }
+
+  function commitDimensionDraft(axis: "width" | "height"): void {
+    const { min, max } = unitBounds(maskUnit);
+    const fallbackPx = axis === "width" ? maskWidth : maskHeight;
+    const fallbackUnit = pxToUnit(fallbackPx, maskUnit, dpi);
+    const committedUnit = commitDraftDimension(axis === "width" ? widthDraft : heightDraft, fallbackUnit, min, max);
+    const committedPx = unitToPx(committedUnit, maskUnit, dpi);
+    if (axis === "width") {
+      setMaskWidth(committedPx);
+      if (rule.keepProportions) setMaskHeight(committedPx);
+    } else {
+      setMaskHeight(committedPx);
+      if (rule.keepProportions) setMaskWidth(committedPx);
+    }
+  }
+
+  function commitAndRegenerate(): void {
+    const { min, max } = unitBounds(maskUnit);
+    const widthUnit = commitDraftDimension(widthDraft, pxToUnit(maskWidth, maskUnit, dpi), min, max);
+    const heightUnit = commitDraftDimension(heightDraft, pxToUnit(maskHeight, maskUnit, dpi), min, max);
+    const nextWidth = unitToPx(widthUnit, maskUnit, dpi);
+    const nextHeight = unitToPx(rule.keepProportions ? widthUnit : heightUnit, maskUnit, dpi);
+    setMaskWidth(nextWidth);
+    setMaskHeight(nextHeight);
+    onRegenerate(rule, { maskWidth: nextWidth, maskHeight: nextHeight, spacingX, spacingY });
   }
 
   return (
@@ -5999,13 +6856,23 @@ function MaskModePanel({
         <ImagePlus size={14} />
         הוסף תמונות
       </button>
+      <div className="field">
+        <span className="field-label">יחידות מידה</span>
+        <div className="seg">
+          {MASK_DIMENSION_UNITS.map((unit) => (
+            <button className={maskUnit === unit ? "on" : ""} key={unit} onClick={() => setMaskUnit(unit)} type="button">
+              {MASK_DIMENSION_LABELS[unit]}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="field-grid">
-        <NumberField label="רוחב" min={24} max={2000} value={Math.round(maskWidth)} onChange={updateWidth} />
-        <NumberField label="גובה" min={24} max={2000} value={Math.round(maskHeight)} onChange={updateHeight} />
+        <DraftNumberField label="רוחב" value={widthDraft} onChange={setWidthDraft} onCommit={() => commitDimensionDraft("width")} />
+        <DraftNumberField label="גובה" value={heightDraft} onChange={setHeightDraft} onCommit={() => commitDimensionDraft("height")} />
         <NumberField label="רווח X" min={0} max={400} value={Math.round(spacingX)} onChange={setSpacingX} />
         <NumberField label="רווח Y" min={0} max={400} value={Math.round(spacingY)} onChange={setSpacingY} />
       </div>
-      <button className="mini-action success" onClick={() => onRegenerate(rule, { maskWidth, maskHeight, spacingX, spacingY })} type="button">
+      <button className="mini-action success" onClick={commitAndRegenerate} type="button">
         בנה מחדש
       </button>
       <div className="field">
@@ -6059,6 +6926,68 @@ function NumberField({
     <label className="field">
       <span className="field-label">{label}</span>
       <input className="text-input" max={max} min={min} onChange={(event) => onChange(Math.max(min, Math.min(max, Number(event.target.value) || min)))} type="number" value={value} />
+    </label>
+  );
+}
+
+function MaskOverflowPrompt({
+  available,
+  required,
+  resizedTo,
+  onCancel,
+  onContinue,
+  onResizePage
+}: {
+  available: string;
+  required: string;
+  resizedTo: string;
+  onCancel: () => void;
+  onContinue: () => void;
+  onResizePage: () => void;
+}): ReactElement {
+  return (
+    <div className="mask-overflow-overlay" role="dialog" aria-modal="true" aria-label="אזהרת גודל מסיכה">
+      <div className="mask-overflow-dialog">
+        <div className="mask-overflow-icon">!</div>
+        <div className="mask-overflow-copy">
+          <strong>גודל המסיכה גדול משטח הדף</strong>
+          <span>נדרש: {required}</span>
+          <span>זמין: {available}</span>
+          <span>שינוי גודל דף יעד: {resizedTo}</span>
+        </div>
+        <div className="mask-overflow-actions">
+          <button className="btn btn-ghost" onClick={onCancel} type="button">ביטול</button>
+          <button className="btn btn-ghost" onClick={onContinue} type="button">המשך בכל זאת</button>
+          <button className="btn btn-accent" onClick={onResizePage} type="button">שנה גודל דף</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DraftNumberField({
+  label,
+  onChange,
+  onCommit,
+  value
+}: {
+  label: string;
+  onChange: (value: string) => void;
+  onCommit: () => void;
+  value: string;
+}): ReactElement {
+  return (
+    <label className="field">
+      <span className="field-label">{label}</span>
+      <input
+        className="text-input"
+        inputMode="decimal"
+        onBlur={onCommit}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => { if (event.key === "Enter") onCommit(); }}
+        type="text"
+        value={value}
+      />
     </label>
   );
 }
@@ -6423,6 +7352,7 @@ function LayerInspector({
   onDelete,
   onApplyPreset,
   onCopyTextStyle,
+  onNotify,
   onPatch,
   onPasteTextStyle,
   onTextChange
@@ -6432,6 +7362,7 @@ function LayerInspector({
   onDelete: () => void;
   onApplyPreset: (preset: TextPreset) => void;
   onCopyTextStyle: () => void;
+  onNotify?: (message: string) => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
   onPasteTextStyle: () => void;
   onTextChange: (text: string) => void;
@@ -6490,6 +7421,7 @@ function LayerInspector({
           layer={selectedLayer}
           onApplyPreset={onApplyPreset}
           onCopyTextStyle={onCopyTextStyle}
+          onNotify={onNotify}
           onPasteTextStyle={onPasteTextStyle}
           onPatch={onPatch}
           onTextChange={onTextChange}
@@ -6878,6 +7810,7 @@ function TextControls({
   layer,
   onApplyPreset,
   onCopyTextStyle,
+  onNotify,
   onPasteTextStyle,
   onPatch,
   onTextChange
@@ -6886,11 +7819,58 @@ function TextControls({
   layer: Extract<VisualLayer, { type: "text" }>;
   onApplyPreset: (preset: TextPreset) => void;
   onCopyTextStyle: () => void;
+  onNotify?: (message: string) => void;
   onPasteTextStyle: () => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
   onTextChange: (text: string) => void;
 }): ReactElement {
   const [tab, setTab] = useState<"type" | "effects" | "warp" | "presets">("type");
+  const [userPresets, setUserPresets] = useState<TextPreset[]>(() => loadUserTextPresets());
+  const [presetName, setPresetName] = useState("");
+  const allPresets = useMemo(() => [...BUILTIN_TEXT_PRESETS, ...userPresets], [userPresets]);
+
+  function notify(message: string): void {
+    onNotify?.(message);
+  }
+
+  function applyPresetWithFontFallback(preset: TextPreset): void {
+    const family = preset.style.fontFamily;
+    if (family !== undefined && !fontFamilyExists(family)) {
+      notify(`הפונט "${family}" לא נמצא, ממשיך עם DM Sans`);
+      onApplyPreset({ ...preset, style: { ...preset.style, fontFamily: "DM Sans" } });
+      return;
+    }
+    onApplyPreset(preset);
+  }
+
+  function saveCurrentPreset(): void {
+    const name = presetName.trim() || layer.name || "Custom text preset";
+    const next = saveUserTextPreset(createTextPresetFromLayer(layer, name));
+    setUserPresets(next);
+    setPresetName("");
+    notify(`הפריסט "${name}" נשמר`);
+  }
+
+  function updatePresetFromCurrent(preset: TextPreset): void {
+    const nextPreset = { ...createTextPresetFromLayer(layer, preset.name), presetId: preset.presetId };
+    const next = updateUserTextPreset(nextPreset);
+    setUserPresets(next);
+    notify(`הפריסט "${preset.name}" עודכן`);
+  }
+
+  function renamePreset(preset: TextPreset): void {
+    const name = window.prompt("Preset name", preset.name)?.trim();
+    if (!name) return;
+    const next = updateUserTextPreset({ ...preset, name });
+    setUserPresets(next);
+    notify(`הפריסט שונה ל-"${name}"`);
+  }
+
+  function removeUserPreset(preset: TextPreset): void {
+    const next = deleteUserTextPreset(preset.presetId);
+    setUserPresets(next);
+    notify(`הפריסט "${preset.name}" נמחק`);
+  }
 
   return (
     <div className="text-pro-controls">
@@ -7532,12 +8512,25 @@ function TextControls({
               Paste FX
             </button>
           </div>
+          <div className="preset-save-row">
+            <input className="text-input" onChange={(event) => setPresetName(event.target.value)} placeholder="Preset name" value={presetName} />
+            <button className="toggle on" onClick={saveCurrentPreset} type="button"><Save size={14} /> Save preset</button>
+          </div>
           <div className="preset-grid">
-            {BUILTIN_TEXT_PRESETS.map((preset) => (
-              <button className="preset-chip" key={preset.presetId} onClick={() => onApplyPreset(preset)} type="button">
-                <span style={presetPreviewStyle(preset)}>{layer.text.trim().slice(0, 2) || "טק"}</span>
-                <strong>{preset.name}</strong>
-              </button>
+            {allPresets.map((preset) => (
+              <div className="preset-chip-wrap" key={preset.presetId}>
+                <button className="preset-chip" onClick={() => applyPresetWithFontFallback(preset)} type="button">
+                  <span style={presetPreviewStyle(preset)}>{layer.text.trim().slice(0, 2) || "טק"}</span>
+                  <strong>{preset.name}</strong>
+                </button>
+                {!preset.isBuiltin ? (
+                  <div className="preset-chip-actions">
+                    <button onClick={() => updatePresetFromCurrent(preset)} type="button">Update</button>
+                    <button onClick={() => renamePreset(preset)} type="button">Rename</button>
+                    <button onClick={() => removeUserPreset(preset)} type="button">Delete</button>
+                  </div>
+                ) : null}
+              </div>
             ))}
           </div>
         </div>
@@ -7547,13 +8540,29 @@ function TextControls({
 }
 
 function presetPreviewStyle(preset: TextPreset): CSSProperties {
+  const glow = preset.effects.find((effect) => effect.effectType === "outer_glow");
+  const sparkle = preset.effects.some((effect) => effect.effectType === "sparkle");
+  const gradient = preset.style.gradient;
+  const gradientCss = gradient === undefined
+    ? undefined
+    : gradient.type === "radial"
+    ? `radial-gradient(circle, ${gradient.stops.map((stop) => `${stop.color} ${Math.round(stop.offset * 100)}%`).join(", ")})`
+    : `linear-gradient(${gradient.angle ?? 0}deg, ${gradient.stops.map((stop) => `${stop.color} ${Math.round(stop.offset * 100)}%`).join(", ")})`;
+  const glowParams = glow?.params as Record<string, unknown> | undefined;
+  const glowShadow = glowParams === undefined
+    ? undefined
+    : `0 0 ${Number(glowParams["blur"] ?? 18)}px ${String(glowParams["outerColor"] ?? glowParams["color"] ?? "#ffffff")}`;
   return {
     color: preset.style.color ?? "#ffffff",
     fontFamily: preset.style.fontFamily,
+    background: gradientCss,
+    backgroundClip: gradientCss === undefined ? undefined : "text",
+    WebkitBackgroundClip: gradientCss === undefined ? undefined : "text",
+    WebkitTextFillColor: gradientCss === undefined ? undefined : "transparent",
     textShadow:
-      preset.style.shadow === undefined
-        ? undefined
-        : `${preset.style.shadow.offsetX}px ${preset.style.shadow.offsetY}px ${preset.style.shadow.blur}px ${preset.style.shadow.color}`,
+      [preset.style.shadow === undefined ? undefined : `${preset.style.shadow.offsetX}px ${preset.style.shadow.offsetY}px ${preset.style.shadow.blur}px ${preset.style.shadow.color}`, glowShadow, sparkle ? "0 0 3px #fff" : undefined]
+        .filter(Boolean)
+        .join(", ") || undefined,
     WebkitTextStroke:
       preset.style.stroke === undefined ? undefined : `${preset.style.stroke.width}px ${preset.style.stroke.color}`
   };
@@ -8144,6 +9153,8 @@ function hasAnyImageEffect(effects: ImageLayerEffects): boolean {
 }
 
 function LayerThumbnail({ assets, layer }: { assets: Asset[]; layer: VisualLayer }): ReactElement {
+  useEffect(() => trackDebugMount("LayerThumbnail", { layerId: layer.id, type: layer.type }), [layer.id, layer.type]);
+
   if (layer.type === "image") {
     const asset = assets.find((item) => item.id === layer.assetId);
     const hasFx = hasAnyImageEffect(layer.effects);

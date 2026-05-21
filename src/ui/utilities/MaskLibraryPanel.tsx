@@ -1,5 +1,6 @@
 import { Lock, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent, type ReactElement } from "react";
+import { commitDraftDimension, formatDimension, MASK_DIMENSION_UNITS } from "@/core/mask/maskDimensions";
 import { pxToUnit, unitToPx } from "@/core/units/conversion";
 import { generateMaskThumbnail, useMaskLibraryStore, type MaskLibraryEntry } from "@/state/maskLibraryStore";
 import type { Unit } from "@/types/primitives";
@@ -79,6 +80,8 @@ export function MaskLibraryPanel({ onClose }: MaskLibraryPanelProps): ReactEleme
   const [formMode, setFormMode] = useState<FormMode>("closed");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [widthDraft, setWidthDraft] = useState("");
+  const [heightDraft, setHeightDraft] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -86,6 +89,12 @@ export function MaskLibraryPanel({ onClose }: MaskLibraryPanelProps): ReactEleme
   const displayWidth = pxToDisplay(form.defaultWidthPx, form.sizeUnit);
   const displayHeight = pxToDisplay(form.defaultHeightPx, form.sizeUnit);
   const aspectRatio = form.naturalHeightPx > 0 ? form.naturalWidthPx / form.naturalHeightPx : 1;
+
+  useEffect(() => {
+    const unit = form.sizeUnit === "px" ? "mm" : form.sizeUnit;
+    setWidthDraft(formatDimension(displayWidth, unit));
+    setHeightDraft(formatDimension(displayHeight, unit));
+  }, [displayWidth, displayHeight, form.sizeUnit]);
 
   // Regenerate preview when threshold params change
   useEffect(() => {
@@ -134,6 +143,7 @@ export function MaskLibraryPanel({ onClose }: MaskLibraryPanelProps): ReactEleme
   }
 
   function changeUnit(newUnit: Unit): void {
+    commitSizeDrafts();
     setForm((f) => ({ ...f, sizeUnit: newUnit }));
   }
 
@@ -141,6 +151,16 @@ export function MaskLibraryPanel({ onClose }: MaskLibraryPanelProps): ReactEleme
     const wPx = Math.round(unitToPx(displayVal, form.sizeUnit, LIBRARY_DPI));
     const hPx = aspectRatio > 0 ? Math.round(wPx / aspectRatio) : wPx;
     setForm((f) => ({ ...f, defaultWidthPx: wPx, defaultHeightPx: hPx }));
+  }
+
+  function commitSizeDrafts(): void {
+    const unit = form.sizeUnit === "px" ? "mm" : form.sizeUnit;
+    const max = unit === "cm" ? 50 : unit === "mm" ? 500 : 20;
+    const min = unit === "cm" ? 0.1 : unit === "mm" ? 1 : 0.05;
+    const nextWidth = commitDraftDimension(widthDraft, displayWidth, min, max);
+    patchDisplayWidth(nextWidth);
+    setWidthDraft(formatDimension(nextWidth, unit));
+    setHeightDraft(formatDimension(aspectRatio > 0 ? nextWidth / aspectRatio : nextWidth, unit));
   }
 
   function handleSave(): void {
@@ -295,7 +315,7 @@ export function MaskLibraryPanel({ onClose }: MaskLibraryPanelProps): ReactEleme
             <div className="mask-lib-field">
               <span className="util-field-label">יחידות מידה</span>
               <div className="seg">
-                {(["cm", "mm", "inch", "px"] as Unit[]).map((u) => (
+                {MASK_DIMENSION_UNITS.map((u) => (
                   <button
                     key={u}
                     className={form.sizeUnit === u ? "on" : ""}
@@ -320,11 +340,14 @@ export function MaskLibraryPanel({ onClose }: MaskLibraryPanelProps): ReactEleme
                   <span>רוחב</span>
                   <input
                     className="util-input"
-                    type="number"
                     min={unitStep(form.sizeUnit)}
                     step={unitStep(form.sizeUnit)}
-                    value={displayWidth}
-                    onChange={(e) => patchDisplayWidth(Number(e.target.value))}
+                    inputMode="decimal"
+                    value={widthDraft}
+                    onBlur={commitSizeDrafts}
+                    onChange={(e) => setWidthDraft(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") commitSizeDrafts(); }}
+                    type="text"
                   />
                 </label>
                 <span className="mask-lib-size-x">×</span>
@@ -332,9 +355,10 @@ export function MaskLibraryPanel({ onClose }: MaskLibraryPanelProps): ReactEleme
                   <span>גובה</span>
                   <input
                     className="util-input"
-                    type="number"
-                    value={displayHeight}
+                    inputMode="decimal"
+                    value={heightDraft}
                     readOnly
+                    type="text"
                     style={{ opacity: 0.6 }}
                   />
                 </label>

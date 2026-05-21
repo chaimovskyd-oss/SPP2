@@ -7,6 +7,7 @@ const { pathToFileURL } = require("node:url");
 
 const { ensurePythonEnv, getVenvPythonExe } = require("./pythonBootstrap.cjs");
 const { registerHealthCheckIpc } = require("./healthCheck.cjs");
+const diagnosticsEnabled = !app.isPackaged || process.env.NODE_ENV !== "production";
 
 // ─── Paths ────────────────────────────────────────────────────────────────────
 
@@ -173,7 +174,15 @@ class SmartSelectionSidecar {
     this.proc.stdout.on("data", (chunk) => this.onStdout(chunk));
     this.proc.stderr.on("data", (chunk) => {
       const text = chunk.toString().trim();
-      if (text) console.warn("[smart-selection:error]", text);
+      if (!text) return;
+      const lines = text.split(/\r?\n/).filter(Boolean);
+      for (const line of lines) {
+        const isStructuredError = line.includes('"message": "request failed"') || line.includes('"level": "error"');
+        const isDownloadProgress = line.includes("Downloading:") || /\d+%[|]/.test(line);
+        if (isStructuredError) console.warn("[smart-selection:error]", line);
+        else if (isDownloadProgress) console.log("[smart-selection:download]", line);
+        else console.log("[smart-selection:stderr]", line);
+      }
     });
     this.proc.on("close", (code) => {
       this.rejectAll(new Error(`Smart Selection sidecar exited with code ${code}`));
@@ -259,9 +268,13 @@ ipcMain.handle("spp:write-temp-image", async (_event, dataUrl, ext) => {
   const base64 = dataUrl.replace(/^data:[^;]+;base64,/, "");
   const safeExt = String(ext || "jpg").replace(/[^a-zA-Z0-9]/g, "") || "jpg";
   const tmpPath = path.join(os.tmpdir(), `spp_edit_input_${Date.now()}.${safeExt}`);
+  if (diagnosticsEnabled) console.debug("[spp diagnostics] write-temp-image:start", { ext: safeExt, base64Length: base64.length, tmpPath });
   fs.writeFileSync(tmpPath, Buffer.from(base64, "base64"));
+  if (diagnosticsEnabled) console.debug("[spp diagnostics] write-temp-image:end", { tmpPath });
   return tmpPath;
 });
+
+ipcMain.handle("spp:get-memory-usage", async () => process.memoryUsage());
 
 ipcMain.handle("spp:read-file-base64", async (_event, filePath) => {
   const buf = fs.readFileSync(filePath);
@@ -517,6 +530,7 @@ ipcMain.handle("spp:smart-selection:predict-mask", async (_event, imageId, optio
 ipcMain.handle("spp:smart-selection:refine-mask", async (_event, imageId, options) => smartSelectionCall("refine_mask", { image_id: imageId, options: options || {} }, 120000));
 ipcMain.handle("spp:smart-selection:inpaint-remove", async (_event, imageId, options) => smartSelectionCall("inpaint_remove", { image_id: imageId, options: options || {} }, 120000));
 ipcMain.handle("spp:smart-selection:unload-image", async (_event, imageId) => smartSelectionCall("unload_image", { image_id: imageId }, 8000));
+ipcMain.handle("spp:smart-selection:detect-faces", async (_event, imageId) => smartSelectionCall("detect_faces", { image_id: imageId }, 30000));
 ipcMain.handle("spp:smart-selection:cancel", async (_event, requestId) => smartSelectionCall("cancel", { request_id: requestId }, 8000));
 
 ipcMain.handle("spp:open-print-preview", async (_event, payload) => {

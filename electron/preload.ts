@@ -7,6 +7,10 @@ contextBridge.exposeInMainWorld("spp", {
   writeTempImage: (dataUrl: string, ext: string): Promise<string> =>
     ipcRenderer.invoke("spp:write-temp-image", dataUrl, ext),
 
+  /** Dev diagnostics: renderer-accessible process memory snapshot. */
+  getMemoryUsage: (): Promise<NodeJS.MemoryUsage> =>
+    ipcRenderer.invoke("spp:get-memory-usage"),
+
   /** Read a file from disk as a base64 string. */
   readFileBase64: (filePath: string): Promise<string> =>
     ipcRenderer.invoke("spp:read-file-base64", filePath),
@@ -78,6 +82,7 @@ contextBridge.exposeInMainWorld("spp", {
     refineMask: (imageId: string, options: unknown) => ipcRenderer.invoke("spp:smart-selection:refine-mask", imageId, options),
     inpaintRemove: (imageId: string, options: unknown) => ipcRenderer.invoke("spp:smart-selection:inpaint-remove", imageId, options),
     unloadImage: (imageId: string) => ipcRenderer.invoke("spp:smart-selection:unload-image", imageId),
+    detectFaces: (imageId: string) => ipcRenderer.invoke("spp:smart-selection:detect-faces", imageId),
     cancel: (requestId: string) => ipcRenderer.invoke("spp:smart-selection:cancel", requestId),
     onProgress: (callback: (payload: unknown) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload);

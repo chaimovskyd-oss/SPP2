@@ -1,6 +1,8 @@
 import { createAppError } from "@/core/errors/errors";
+import { analyzeScreenshotCrop } from "@/core/image/screenshotCropDetector";
 import { writeLog } from "@/core/logging/logger";
 import type { Asset } from "@/types/document";
+import type { JsonValue } from "@/types/primitives";
 
 export interface AssetImportOptions {
   createPreview?: boolean;
@@ -81,6 +83,7 @@ export async function importImageAsset(file: File, existingAssets: Asset[] = [],
     const previews = options.createPreview === false
       ? { previewPath: dataUrl, thumbnailPath: dataUrl }
       : await createAssetPreviews(dataUrl, previewMaxSize, thumbnailMaxSize);
+    const screenshotCropSuggestion = await detectScreenshotCropSuggestion(dataUrl, dimensions.width, dimensions.height, file.name);
 
     const asset: Asset = {
       version: 1,
@@ -100,6 +103,7 @@ export async function importImageAsset(file: File, existingAssets: Asset[] = [],
       metadata: {
         importedAt: new Date().toISOString(),
         originalFileName: file.name,
+        ...(screenshotCropSuggestion === null ? {} : { screenshotCropSuggestion: screenshotCropSuggestion as unknown as JsonValue }),
         ...(duplicate === undefined ? {} : { duplicateOf: duplicate.id })
       }
     };
@@ -114,6 +118,39 @@ export async function importImageAsset(file: File, existingAssets: Asset[] = [],
       cause: error,
       context: { fileName: file.name }
     });
+  }
+}
+
+async function detectScreenshotCropSuggestion(
+  dataUrl: string,
+  originalWidth: number,
+  originalHeight: number,
+  name: string
+): Promise<import("@/core/image/screenshotCropMetadata").ScreenshotCropSuggestionMetadata | null> {
+  if (typeof document === "undefined") return null;
+  try {
+    const image = await loadImage(dataUrl);
+    const analysis = await analyzeScreenshotCrop(image);
+    writeLog("import", analysis.isSuspicious ? "info" : "debug", "Smart screenshot crop analysis", {
+      name,
+      confidence: analysis.confidence,
+      cropRect: analysis.cropRect,
+      removedPixels: analysis.removedPixels,
+      reasons: analysis.reasons
+    });
+    return analysis.isSuspicious && analysis.cropRect !== null
+      ? {
+          ...analysis,
+          originalWidth,
+          originalHeight
+        }
+      : null;
+  } catch (error) {
+    writeLog("import", "debug", "Smart screenshot crop analysis skipped", {
+      name,
+      message: error instanceof Error ? error.message : String(error)
+    });
+    return null;
   }
 }
 

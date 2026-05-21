@@ -30,6 +30,18 @@ export interface ClassPhotoPositionResult {
   warningMessage?: string;
 }
 
+export interface ClassPhotoAutoLayoutPlan {
+  childColumns: number;
+  staffColumns: number;
+  childRows: number[];
+  staffRows: number[];
+  childFrameSize: number;
+  staffFrameSize: number;
+  usedContentWidth: number;
+  usedContentHeight: number;
+  utilizationScore: number;
+}
+
 // ─── Balance algorithm ────────────────────────────────────────────────────────
 
 function balanceIntoRows(count: number, itemsPerRow: number): number[] {
@@ -83,6 +95,153 @@ function computeCellHeight(frameH: number, nameH: number, spacing: number, nameP
   return frameH + spacing + nameH;
 }
 
+function rowsForCount(count: number, itemsPerRow: number, balanced: boolean): number[] {
+  if (count <= 0) return [];
+  if (balanced) return balanceIntoRows(count, itemsPerRow);
+  const rows: number[] = [];
+  let remaining = count;
+  while (remaining > 0) {
+    rows.push(Math.min(remaining, itemsPerRow));
+    remaining -= itemsPerRow;
+  }
+  return rows;
+}
+
+function maxRowCount(rows: number[]): number {
+  return Math.max(1, ...rows);
+}
+
+function estimateScaledNameRatio(textStyle: TextStyle, frameSize: number, fallback: number): number {
+  if (frameSize <= 0) return fallback;
+  return Math.max(0, estimateNameHeight(textStyle) / frameSize);
+}
+
+function rowWidth(rowCount: number, frameW: number, spacing: number): number {
+  return rowCount * frameW + Math.max(0, rowCount - 1) * spacing;
+}
+
+export function computeOptimalClassPhotoLayout(
+  pageW: number,
+  pageH: number,
+  rule: ClassPhotoLayoutRule
+): ClassPhotoAutoLayoutPlan | null {
+  const s = rule.layoutSettings;
+  const childCount = rule.personRecords.filter((p) => p.role === "child").length;
+  const staffCount = rule.personRecords.filter((p) => p.role === "staff").length;
+  if (childCount + staffCount === 0) return null;
+
+  const availW = pageW - s.margins.left - s.margins.right;
+  const availH =
+    pageH -
+    s.margins.top -
+    s.margins.bottom -
+    s.topTitleAreaHeight -
+    s.bottomFooterAreaHeight -
+    s.titleToContentSpacing -
+    s.contentToFooterSpacing;
+
+  if (availW <= 0 || availH <= 0) return null;
+
+  const staffEnabled = s.staffRowEnabled && staffCount > 0;
+  const staffScale = s.staffScale || 1.3;
+  const childNameRatio = estimateScaledNameRatio(rule.childNameTextStyle, s.childFrameSize.width, 0.18);
+  const staffNameRatio = estimateScaledNameRatio(rule.staffNameTextStyle, s.staffFrameSize.width, 0.18);
+  const childCellFactor = s.namePosition === "insideBottom" || s.namePosition === "insideTop"
+    ? 1
+    : 1 + childNameRatio;
+  const staffCellFactor = s.namePosition === "insideBottom" || s.namePosition === "insideTop"
+    ? staffScale
+    : staffScale * (1 + staffNameRatio);
+
+  let best: ClassPhotoAutoLayoutPlan | null = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  const childColumnLimit = Math.max(1, childCount);
+  const staffColumnLimit = staffEnabled ? Math.max(1, staffCount) : 0;
+
+  for (let requestedChildCols = 1; requestedChildCols <= childColumnLimit; requestedChildCols++) {
+    const childRows = rowsForCount(childCount, requestedChildCols, rule.visualBalanceSettings.balanceLastRows);
+    const childColumns = childRows.length > 0 ? maxRowCount(childRows) : 0;
+    const childRowsCount = childRows.length;
+    const childWidthLimit = childColumns > 0
+      ? (availW - Math.max(0, childColumns - 1) * s.horizontalSpacing) / childColumns
+      : Number.POSITIVE_INFINITY;
+
+    const staffColStart = staffEnabled ? 1 : 0;
+    const staffColEnd = staffEnabled ? staffColumnLimit : 0;
+    for (let requestedStaffCols = staffColStart; requestedStaffCols <= staffColEnd; requestedStaffCols++) {
+      const staffRows = staffEnabled ? rowsForCount(staffCount, requestedStaffCols, false) : [];
+      const staffColumns = staffRows.length > 0 ? maxRowCount(staffRows) : 0;
+      const staffRowsCount = staffRows.length;
+      const staffWidthLimit = staffColumns > 0
+        ? (availW - Math.max(0, staffColumns - 1) * s.horizontalSpacing) / (staffColumns * staffScale)
+        : Number.POSITIVE_INFINITY;
+
+      const totalRows = childRowsCount + staffRowsCount;
+      const rowGaps = Math.max(0, totalRows - 1) * s.verticalSpacing;
+      const staffToChildrenGap = staffRowsCount > 0 && childRowsCount > 0 ? s.staffToChildrenSpacing : 0;
+      const nameSpacingH =
+        s.namePosition === "insideBottom" || s.namePosition === "insideTop"
+          ? 0
+          : (childRowsCount + staffRowsCount) * s.frameToNameSpacing;
+      const fixedH = rowGaps + staffToChildrenGap + nameSpacingH;
+      const frameFactor = childRowsCount * childCellFactor + staffRowsCount * staffCellFactor;
+      const heightLimit = frameFactor > 0 ? (availH - fixedH) / frameFactor : Number.POSITIVE_INFINITY;
+
+      const fittedChild = Math.floor(Math.min(childWidthLimit, staffWidthLimit, heightLimit));
+      if (!Number.isFinite(fittedChild) || fittedChild <= 0) continue;
+
+      const fittedStaff = Math.round(fittedChild * staffScale);
+      const childNameH = Math.round(fittedChild * childNameRatio);
+      const staffNameH = Math.round(fittedStaff * staffNameRatio);
+      const childCellH = computeCellHeight(fittedChild, childNameH, s.frameToNameSpacing, s.namePosition);
+      const staffCellH = computeCellHeight(fittedStaff, staffNameH, s.frameToNameSpacing, s.namePosition);
+      const usedContentWidth = Math.max(
+        childRows.length > 0 ? Math.max(...childRows.map((count) => rowWidth(count, fittedChild, s.horizontalSpacing))) : 0,
+        staffRows.length > 0 ? Math.max(...staffRows.map((count) => rowWidth(count, fittedStaff, s.horizontalSpacing))) : 0
+      );
+      const usedContentHeight =
+        childRowsCount * childCellH +
+        staffRowsCount * staffCellH +
+        rowGaps +
+        staffToChildrenGap;
+      if (usedContentWidth > availW + 0.01 || usedContentHeight > availH + 0.01) continue;
+
+      const utilization = Math.max(0, Math.min(1, (usedContentWidth * usedContentHeight) / (availW * availH)));
+      const lastChildRow = childRows.at(-1) ?? childColumns;
+      const emptyLastRowRatio = childColumns > 0 ? (childColumns - lastChildRow) / childColumns : 0;
+      const rowBalancePenalty = childRows.length > 1
+        ? (Math.max(...childRows) - Math.min(...childRows)) / Math.max(...childRows)
+        : 0;
+      const tooFewRowsPenalty = childCount >= 12 && childRowsCount < 3 ? 50000 : 0;
+      const score =
+        fittedChild * 1000 +
+        utilization * 100 -
+        tooFewRowsPenalty -
+        emptyLastRowRatio * 30 -
+        rowBalancePenalty * 20 -
+        Math.abs(usedContentWidth - availW) / Math.max(availW, 1);
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = {
+          childColumns,
+          staffColumns,
+          childRows,
+          staffRows,
+          childFrameSize: fittedChild,
+          staffFrameSize: fittedStaff,
+          usedContentWidth,
+          usedContentHeight,
+          utilizationScore: utilization
+        };
+      }
+    }
+  }
+
+  return best;
+}
+
 // ─── Auto-fit: compute largest frame size that fits the page ─────────────────
 
 /**
@@ -98,63 +257,13 @@ export function fitLayoutToPage(
   rule: ClassPhotoLayoutRule
 ): ClassPhotoLayoutRule {
   const s = rule.layoutSettings;
-  const childCount = rule.personRecords.filter((p) => p.role === "child").length;
-  const staffCount = rule.personRecords.filter((p) => p.role === "staff").length;
+  const plan = computeOptimalClassPhotoLayout(pageW, pageH, rule);
+  if (!plan) return rule;
 
-  if (childCount + staffCount === 0) return rule;
-
-  const availW = pageW - s.margins.left - s.margins.right;
-  const availH =
-    pageH -
-    s.margins.top -
-    s.margins.bottom -
-    s.topTitleAreaHeight -
-    s.bottomFooterAreaHeight -
-    s.titleToContentSpacing -
-    s.contentToFooterSpacing;
-
-  const hSpacing = s.horizontalSpacing;
-  const vSpacing = s.verticalSpacing;
-
-  // ── Determine columns from child count (balanced) ──────────────────────────
-  const childPerRow = Math.max(1, Math.min(childCount, Math.ceil(Math.sqrt(childCount * 1.5))));
-
-  // ── Max frame width from horizontal constraint ─────────────────────────────
-  const maxByWidth = Math.floor((availW - (childPerRow - 1) * hSpacing) / childPerRow);
-
-  // ── Max frame size from vertical constraint ────────────────────────────────
-  // Estimate name height as a fraction of frame size (we'll iterate once)
-  // nameH ≈ frameW * 0.14 * lineHeight
-  const nameHRatio = 0.14 * 1.25; // fontSize ratio * lineHeight
-  const nameSpacing = s.frameToNameSpacing;
-
-  const staffRows = s.staffRowEnabled && staffCount > 0 ? Math.ceil(staffCount / Math.max(1, childPerRow)) : 0;
-  const childRows = Math.ceil(childCount / childPerRow);
-  const totalRows = childRows + staffRows;
-
-  // Total height = rows * (frameSize + nameH + nameSpacing) + (rows-1) * vSpacing + staffToChildSpacing
-  // = totalRows * frameW * (1 + staffScale for staff) + totalRows * (frameW * nameHRatio + nameSpacing) + gaps
-  // Simplify: each child cell = frameW * (1 + nameHRatio) + nameSpacing
-  //           each staff cell = frameW * staffScale * (1 + nameHRatio * 0.9) + nameSpacing
-  const staffScale = s.staffScale || 1.3;
-  const staffToChildH = staffRows > 0 ? s.staffToChildrenSpacing : 0;
-  const gapH = (totalRows > 1 ? (totalRows - 1) * vSpacing : 0);
-
-  // cellH(frameW) = frameW * (1 + nameHRatio) + nameSpacing
-  // staffCellH(frameW) = frameW * staffScale * (1 + nameHRatio) + nameSpacing
-  // totalH = childRows * cellH + staffRows * staffCellH + gapH + staffToChildH
-  // Solve for frameW where totalH = availH
-  const cellFactor = 1 + nameHRatio;
-  const staffCellFactor = staffScale * (1 + nameHRatio);
-  const fixedH = childRows * nameSpacing + staffRows * nameSpacing + gapH + staffToChildH;
-  const frameWFactor = childRows * cellFactor + staffRows * staffCellFactor;
-
-  const maxByHeight = frameWFactor > 0 ? Math.floor((availH - fixedH) / frameWFactor) : maxByWidth;
-
-  // ── Final frame size: minimum of both constraints with a safety margin ─────
+  // Apply the selected grid plan as the single source for frame sizing.
   const MIN_FRAME = 40;
-  const fittedChildW = Math.max(MIN_FRAME, Math.min(maxByWidth, maxByHeight, s.childFrameSize.width));
-  const fittedStaffW = Math.max(MIN_FRAME, Math.round(fittedChildW * staffScale));
+  const fittedChildW = Math.max(MIN_FRAME, plan.childFrameSize);
+  const fittedStaffW = Math.max(MIN_FRAME, plan.staffFrameSize);
 
   // ── Fit title/footer font sizes to their areas (light override) ─────────────
   // Cap font size so it never exceeds 70% of the allotted area height (single line comfort)
@@ -166,13 +275,6 @@ export function fitLayoutToPage(
   const fittedFooterStyle = rule.footerTextStyle.fontSize > footerFontMax
     ? { ...rule.footerTextStyle, fontSize: footerFontMax }
     : rule.footerTextStyle;
-  const textStylesChanged =
-    fittedTitleStyle !== rule.titleTextStyle ||
-    fittedFooterStyle !== rule.footerTextStyle;
-
-  // If nothing changed, return rule as-is
-  if (fittedChildW === s.childFrameSize.width && !textStylesChanged) return rule;
-
   // Update name text styles proportionally
   const sizeRatio = s.childFrameSize.width > 0 ? fittedChildW / s.childFrameSize.width : 1;
   const updatedChildNameStyle = {
@@ -189,13 +291,26 @@ export function fitLayoutToPage(
     layoutSettings: {
       ...s,
       childFrameSize: { width: fittedChildW, height: fittedChildW },
-      staffFrameSize: { width: fittedStaffW, height: fittedStaffW },
-      frameToNameSpacing: Math.max(4, Math.round(s.frameToNameSpacing * sizeRatio))
+      staffFrameSize: { width: fittedStaffW, height: fittedStaffW }
     },
     childNameTextStyle: updatedChildNameStyle,
     staffNameTextStyle: updatedStaffNameStyle,
     titleTextStyle: fittedTitleStyle,
-    footerTextStyle: fittedFooterStyle
+    footerTextStyle: fittedFooterStyle,
+    metadata: {
+      ...rule.metadata,
+      classPhotoAutoLayout: {
+        childColumns: plan.childColumns,
+        staffColumns: plan.staffColumns,
+        childRows: plan.childRows,
+        staffRows: plan.staffRows,
+        childFrameSize: fittedChildW,
+        staffFrameSize: fittedStaffW,
+        usedContentWidth: plan.usedContentWidth,
+        usedContentHeight: plan.usedContentHeight,
+        utilizationScore: plan.utilizationScore
+      }
+    }
   };
 }
 
@@ -208,6 +323,7 @@ export function computeClassPhotoPositions(
 ): ClassPhotoPositionResult {
   const s = rule.layoutSettings;
   const v = rule.visualBalanceSettings;
+  const plan = computeOptimalClassPhotoLayout(pageW, pageH, rule);
 
   const staffRecords = rule.personRecords
     .filter((p) => p.role === "staff")
@@ -242,7 +358,7 @@ export function computeClassPhotoPositions(
 
   if (s.staffRowEnabled && staffRecords.length > 0) {
     // How many staff fit per row?
-    const staffPerRow = Math.max(1, Math.floor((availW + s.horizontalSpacing) / (s.staffFrameSize.width + s.horizontalSpacing)));
+    const staffPerRow = Math.max(1, plan?.staffColumns ?? Math.floor((availW + s.horizontalSpacing) / (s.staffFrameSize.width + s.horizontalSpacing)));
     const staffRows = Math.ceil(staffRecords.length / staffPerRow);
 
     for (let row = 0; row < staffRows; row++) {
@@ -282,18 +398,8 @@ export function computeClassPhotoPositions(
   const childPositions: PersonPosition[] = [];
 
   if (childRecords.length > 0) {
-    const childPerRow = Math.max(1, Math.floor((availW + s.horizontalSpacing) / (s.childFrameSize.width + s.horizontalSpacing)));
-    const rowDistribution = v.balanceLastRows
-      ? balanceIntoRows(childRecords.length, childPerRow)
-      : (() => {
-          const rows: number[] = [];
-          let remaining = childRecords.length;
-          while (remaining > 0) {
-            rows.push(Math.min(remaining, childPerRow));
-            remaining -= childPerRow;
-          }
-          return rows;
-        })();
+    const childPerRow = Math.max(1, plan?.childColumns ?? Math.floor((availW + s.horizontalSpacing) / (s.childFrameSize.width + s.horizontalSpacing)));
+    const rowDistribution = plan?.childRows ?? rowsForCount(childRecords.length, childPerRow, v.balanceLastRows);
 
     let childIdx = 0;
     for (const rowCount of rowDistribution) {
@@ -394,12 +500,26 @@ function buildFrameVisualEffects(style: ClassPhotoFrameStyle): import("@/types/v
   return { version: 1, enabled: true, effects };
 }
 
+function shallowEqualVisualEffects(
+  a: import("@/types/visualEffects").VisualEffectStack | undefined,
+  b: import("@/types/visualEffects").VisualEffectStack | undefined,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.enabled !== b.enabled) return false;
+  if (a.effects.length !== b.effects.length) return false;
+  // Cheap structural compare — JSON.stringify is good enough for short stacks
+  // and avoids hand-writing comparators for every effect variant.
+  return JSON.stringify(a.effects) === JSON.stringify(b.effects);
+}
+
 function makePersonFrameLayer(
   pos: PersonPosition,
   style: ClassPhotoFrameStyle,
   ruleId: string,
   zIndex: number,
-  existingId?: string
+  existingId?: string,
+  prevFrame?: FrameLayer,
 ): FrameLayer {
   // Cloud/star shapes need metadata for KonvaLayerNode clipFunc detection
   const shapeMetaKey =
@@ -442,7 +562,7 @@ function makePersonFrameLayer(
     maskId: style.maskPresetId,
     smartCropMode: "face",
     faceAnchor: pos.record.faceData,
-    visualEffects: buildFrameVisualEffects(style),
+    visualEffects: pos.record.visualEffectsOverride ?? prevFrame?.visualEffects ?? buildFrameVisualEffects(style),
     metadata: {
       classPhotoFrame: {
         ruleId,
@@ -655,6 +775,13 @@ export function syncClassPhotoToPage(
   // Build lookup for existing IDs — declare before use to prevent hoisting issues
   const existingFrameIds = new Map(rule.personRecords.map((r) => [r.id, r.frameLayerId]));
   const existingNameIds = new Map(rule.personRecords.map((r) => [r.id, r.nameTextLayerId]));
+
+  // Index existing layers by id so we can preserve visualEffects the user
+  // edited directly on the frame (without going through the wizard).
+  const existingFrameById = new Map<string, import("@/types/layers").FrameLayer>();
+  for (const l of page.layers) {
+    if (l.type === "frame") existingFrameById.set(l.id, l as import("@/types/layers").FrameLayer);
+  }
   const existingTitleId = rule.titleTextLayerId;
   const existingFooterId = rule.footerTextLayerId;
 
@@ -667,19 +794,41 @@ export function syncClassPhotoToPage(
   // Staff frames + names
   const updatedStaffRecords: ClassPhotoPersonRecord[] = [];
   for (const pos of positions.staffPositions) {
-    const frame = makePersonFrameLayer(pos, rule.staffFrameStyle, rule.id, zIdx++, existingFrameIds.get(pos.record.id));
+    const prevFrame = (() => { const id = existingFrameIds.get(pos.record.id); return id ? existingFrameById.get(id) : undefined; })();
+    const frame = makePersonFrameLayer(pos, rule.staffFrameStyle, rule.id, zIdx++, existingFrameIds.get(pos.record.id), prevFrame);
     const name = makePersonNameLayer(pos, rule.staffNameTextStyle, rule.id, zIdx++, existingNameIds.get(pos.record.id));
     newLayers.push(frame, name);
-    updatedStaffRecords.push({ ...pos.record, frameLayerId: frame.id, nameTextLayerId: name.id });
+    // Promote any user-edited visualEffects on the previous frame to the record
+    // so subsequent regenerates can find it (record is the canonical source of truth).
+    const promotedOverride = pos.record.visualEffectsOverride
+      ?? (prevFrame && !shallowEqualVisualEffects(prevFrame.visualEffects, buildFrameVisualEffects(rule.staffFrameStyle))
+        ? prevFrame.visualEffects
+        : undefined);
+    updatedStaffRecords.push({
+      ...pos.record,
+      frameLayerId: frame.id,
+      nameTextLayerId: name.id,
+      visualEffectsOverride: promotedOverride,
+    });
   }
 
   // Child frames + names
   const updatedChildRecords: ClassPhotoPersonRecord[] = [];
   for (const pos of positions.childPositions) {
-    const frame = makePersonFrameLayer(pos, rule.childFrameStyle, rule.id, zIdx++, existingFrameIds.get(pos.record.id));
+    const prevChildFrame = (() => { const id = existingFrameIds.get(pos.record.id); return id ? existingFrameById.get(id) : undefined; })();
+    const frame = makePersonFrameLayer(pos, rule.childFrameStyle, rule.id, zIdx++, existingFrameIds.get(pos.record.id), prevChildFrame);
     const name = makePersonNameLayer(pos, rule.childNameTextStyle, rule.id, zIdx++, existingNameIds.get(pos.record.id));
     newLayers.push(frame, name);
-    updatedChildRecords.push({ ...pos.record, frameLayerId: frame.id, nameTextLayerId: name.id });
+    const promotedOverride = pos.record.visualEffectsOverride
+      ?? (prevChildFrame && !shallowEqualVisualEffects(prevChildFrame.visualEffects, buildFrameVisualEffects(rule.childFrameStyle))
+        ? prevChildFrame.visualEffects
+        : undefined);
+    updatedChildRecords.push({
+      ...pos.record,
+      frameLayerId: frame.id,
+      nameTextLayerId: name.id,
+      visualEffectsOverride: promotedOverride,
+    });
   }
 
   // Add title/footer on top

@@ -5,6 +5,7 @@ import { buildSplitTree } from "./collageSplitTree";
 import { LAYOUT_REGISTRY, computeSlots } from "./collageLayoutEngine";
 import { scoreLayout } from "./collageScoring";
 import { createCollageImageAssignment, createCollageSlot } from "./collageFactory";
+import { adaptContentTransform, IDENTITY_TRANSFORM } from "@/core/reconcile";
 import type {
   CollageComplexityMode,
   CollageImageAssignment,
@@ -92,7 +93,7 @@ export function applyLayoutFamily(
 
   // Port of Python: cell.image_index = i — assign pool[0]→slot[0], pool[1]→slot[1]
   // This is always correct regardless of previous layout's hero/non-hero structure
-  const newAssignments = assignByPoolOrder(rule.imagePool, newSlots, rule.id, rule.imageAssignments);
+  const newAssignments = assignByPoolOrder(rule.imagePool, newSlots, rule.id, rule.imageAssignments, rule.cachedSlots ?? []);
 
   return {
     ...rule,
@@ -117,7 +118,7 @@ export function reflowCollage(
   const params: CollageLayoutParams = { imageCount, canvasW, canvasH, spacingPx, marginPx, splitTree: rule.splitTree };
   const newSlots = computeSlots(rule.activeFamily, params);
   // Reflow keeps same family — just re-assign by pool order to new slots
-  const newAssignments = assignByPoolOrder(rule.imagePool, newSlots, rule.id, rule.imageAssignments);
+  const newAssignments = assignByPoolOrder(rule.imagePool, newSlots, rule.id, rule.imageAssignments, rule.cachedSlots ?? []);
   return { ...rule, cachedSlots: newSlots, imageAssignments: newAssignments };
 }
 
@@ -141,7 +142,7 @@ export function applyNewImagePool(
   const params: CollageLayoutParams = { imageCount, canvasW, canvasH, spacingPx, marginPx, splitTree };
   const newSlots = computeSlots(rule.activeFamily, params);
   // Simple pool-order assignment — always assigns ALL pool images, no gaps
-  const newAssignments = assignByPoolOrder(newPool, newSlots, rule.id, rule.imageAssignments);
+  const newAssignments = assignByPoolOrder(newPool, newSlots, rule.id, rule.imageAssignments, rule.cachedSlots ?? []);
 
   return { ...rule, imagePool: newPool, cachedSlots: newSlots, imageAssignments: newAssignments, splitTree };
 }
@@ -184,30 +185,57 @@ export function applyCollageTemplate(
  * Keeps old contentTransform if the same assetId ends up in a slot with similar
  * aspect ratio (< 0.3 change), so manual crops are preserved when possible.
  */
-const RESET_TRANSFORM = { version: 1 as const, offsetX: 0, offsetY: 0, scale: 1, rotation: 0 };
+const RESET_TRANSFORM = { ...IDENTITY_TRANSFORM };
 
+/**
+ * Pool-order assignment with state preservation.
+ *
+ * For each surviving image, we look up the previous slot it sat in (via
+ * oldSlots) and adapt its ContentTransform to the new slot's geometry via
+ * `adaptContentTransform`:
+ *   - similar aspect ratio → scale offsets, keep manual crop
+ *   - large aspect change  → identity (smart-crop can re-apply via faceAnchor)
+ *
+ * visualEffects, colorAdjustments, imageEditParams, edgeConfig are carried
+ * through verbatim — they are slot-independent user work.
+ */
 export function assignByPoolOrder(
   imagePool: ID[],
   newSlots: CollageSlot[],
   ruleId: ID,
   oldAssignments: CollageImageAssignment[] = [],
+  oldSlots: CollageSlot[] = [],
 ): CollageImageAssignment[] {
   const imageSlots = newSlots.filter(s => s.type === "image");
   const oldByAsset = new Map(oldAssignments.map(a => [a.assetId, a]));
+  const oldSlotById = new Map(oldSlots.map(s => [s.id, s]));
 
   return imagePool.slice(0, imageSlots.length).map((assetId, i) => {
     const slot = imageSlots[i]!;
     const prev = oldByAsset.get(assetId);
 
     if (prev) {
-      // Keep color adjustments and effects, but ALWAYS reset content transform.
-      // The old transform was calibrated for a different slot size — keeping it
-      // causes images to render completely outside their new frames.
+      const oldSlot = oldSlotById.get(prev.slotId);
+      // Normalized slot dims (0..1) — adapter only cares about ratio + scale.
+      const adapted = oldSlot
+        ? adaptContentTransform(
+            prev.contentTransform,
+            { w: oldSlot.w, h: oldSlot.h },
+            { w: slot.w, h: slot.h },
+            { hasManual: prev.hasManualTransform ?? false, faceAnchor: undefined },
+          )
+        : { transform: { ...RESET_TRANSFORM }, hasManual: false };
+
       return {
         ...prev,
         slotId: slot.id,
-        contentTransform: RESET_TRANSFORM,  // reset so smart crop re-applies
-        hasManualTransform: false,           // allow smart crop to recalculate
+        contentTransform: adapted.transform,
+        hasManualTransform: adapted.hasManual,
+        // Explicitly carry user work that is independent of slot geometry.
+        visualEffects: prev.visualEffects,
+        colorAdjustments: prev.colorAdjustments,
+        imageEditParams: prev.imageEditParams,
+        edgeConfig: prev.edgeConfig,
       };
     }
 
@@ -248,6 +276,18 @@ export function syncFrameLayersToPage(
   canvasW: number,
   canvasH: number,
 ): { page: Page; frameIds: ID[] } {
+  // Index existing collage frames by slotId so we can reuse layer IDs +
+  // preserved per-frame state across the sync.
+  const existingBySlotId = new Map<string, FrameLayer>();
+  for (const l of page.layers) {
+    if (l.type !== "frame") continue;
+    const meta = (l.metadata as Record<string, unknown>).collageFrame as
+      | { collageRuleId?: string; slotId?: string }
+      | undefined;
+    if (meta?.collageRuleId !== rule.id || !meta.slotId) continue;
+    existingBySlotId.set(meta.slotId, l as FrameLayer);
+  }
+
   const otherLayers = page.layers.filter(l => {
     const meta = (l.metadata as Record<string, unknown>).collageFrame as { collageRuleId?: string } | undefined;
     return meta?.collageRuleId !== rule.id;
@@ -258,8 +298,10 @@ export function syncFrameLayersToPage(
 
   const newFrameLayers: FrameLayer[] = sortedSlots.map((slot, i) => {
     const assignment = rule.imageAssignments.find(a => a.slotId === slot.id);
+    const existing = existingBySlotId.get(slot.id);
 
-    return createFrameLayer({
+    const fresh = createFrameLayer({
+      id: existing?.id,
       name: slot.label || (slot.type === "empty" ? "תא ריק" : `תא ${i + 1}`),
       rect: {
         x: slot.x * canvasW,
@@ -274,7 +316,7 @@ export function syncFrameLayersToPage(
       contentTransform: assignment?.contentTransform,
       fitMode: assignment?.fitMode ?? "fill",
       cornerRadius: slot.shapeParams.cornerRadius,
-      lockedFrame: true,
+      lockedFrame: false,
       lockedContent: false,
       zIndex: (otherLayers.length + i),
       metadata: {
@@ -307,6 +349,28 @@ export function syncFrameLayersToPage(
           : null
       }
     });
+
+    // Carry user-owned state across the destructive rebuild:
+    //   - visualEffects from the assignment (slot-independent user work)
+    //   - faceAnchor + smartCropMode from the previous frame if not overridden
+    //   - any non-volatile metadata the user attached to the frame
+    const withPreserved: FrameLayer = {
+      ...fresh,
+      visualEffects: assignment?.visualEffects ?? existing?.visualEffects,
+      smartCropMode: existing?.smartCropMode ?? fresh.smartCropMode,
+      faceAnchor: existing?.faceAnchor,
+    };
+    if (existing) {
+      const preservedMeta: Record<string, unknown> = { ...withPreserved.metadata };
+      for (const [k, v] of Object.entries(existing.metadata ?? {})) {
+        if (preservedMeta[k] !== undefined) continue;
+        if (k === "collageFrame" || k === "collageColorAdj"
+          || k === "collageImageEditParams" || k === "collageEdgeConfig") continue;
+        preservedMeta[k] = v;
+      }
+      withPreserved.metadata = preservedMeta as typeof withPreserved.metadata;
+    }
+    return withPreserved;
   });
 
   const frameIds = newFrameLayers.map(f => f.id);

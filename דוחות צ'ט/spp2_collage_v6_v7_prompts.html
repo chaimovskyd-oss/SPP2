@@ -1,0 +1,719 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SPP2 Collage V6/V7 — פרומפטים לפי המבנה הנוכחי</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel2: #172033;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #38bdf8;
+      --accent2: #fbbf24;
+      --ok: #34d399;
+      --danger: #fb7185;
+      --border: rgba(255,255,255,.12);
+      --code: #0b1020;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: radial-gradient(circle at top left, #1e3a8a 0, transparent 32rem), var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+    }
+    header {
+      padding: 34px 28px 22px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(15, 23, 42, .78);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+    h1 { margin: 0 0 10px; font-size: clamp(26px, 4vw, 44px); }
+    .subtitle { margin: 0; color: var(--muted); max-width: 980px; }
+    main { max-width: 1160px; margin: 0 auto; padding: 24px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; margin: 18px 0 28px; }
+    .note, .toc, .phase, .prompt-card {
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.025));
+      box-shadow: 0 18px 50px rgba(0,0,0,.18);
+    }
+    .note { padding: 18px; }
+    .note strong { color: var(--accent2); }
+    .toc { padding: 18px 22px; margin-bottom: 24px; }
+    .toc a { color: var(--accent); text-decoration: none; margin-inline-end: 14px; white-space: nowrap; }
+    .phase { padding: 22px; margin: 26px 0; }
+    .phase h2 { margin-top: 0; color: #fff; }
+    .phase ul { margin: 8px 0; }
+    .phase li { margin: 6px 0; }
+    code, .path {
+      background: rgba(2,6,23,.75);
+      border: 1px solid rgba(255,255,255,.08);
+      padding: .12rem .35rem;
+      border-radius: 6px;
+      direction: ltr;
+      display: inline-block;
+    }
+    .prompt-card { margin: 18px 0; overflow: hidden; }
+    .prompt-head {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,.035);
+    }
+    .prompt-head h3 { margin: 0; font-size: 18px; }
+    .badge {
+      color: #08111f; background: var(--accent2); padding: 4px 9px; border-radius: 999px;
+      font-size: 12px; font-weight: 700;
+    }
+    textarea.prompt {
+      width: 100%; min-height: 330px; resize: vertical; border: 0; outline: 0;
+      background: var(--code); color: #dbeafe; padding: 18px;
+      font-family: Consolas, "Courier New", monospace; font-size: 13px; line-height: 1.55;
+      direction: ltr; text-align: left;
+      white-space: pre;
+    }
+    .prompt-actions {
+      display: flex; align-items: center; justify-content: flex-start; gap: 12px;
+      padding: 12px 18px; border-top: 1px solid var(--border);
+    }
+    button.copy-btn {
+      background: linear-gradient(135deg, #0284c7, #38bdf8);
+      color: white; border: 0; border-radius: 10px; padding: 9px 14px;
+      cursor: pointer; font-weight: 700;
+    }
+    .copy-status { color: var(--ok); font-size: 13px; }
+    .checklist {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 10px; margin-top: 12px;
+    }
+    .check {
+      display: flex; gap: 8px; align-items: flex-start;
+      background: rgba(255,255,255,.035); border: 1px solid var(--border);
+      border-radius: 12px; padding: 10px 12px;
+    }
+    .check input { margin-top: 5px; }
+    .warn { border-color: rgba(251,191,36,.35); background: rgba(251,191,36,.08); }
+    .danger { border-color: rgba(251,113,133,.35); background: rgba(251,113,133,.08); }
+    .small { color: var(--muted); font-size: 13px; }
+    footer { padding: 28px; text-align: center; color: var(--muted); border-top: 1px solid var(--border); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>SPP2 Collage — V6/V7 Prompts</h1>
+    <p class="subtitle">מסמך פרומפטים מסודר לפי המבנה הנוכחי של הפרויקט. המטרה: לבצע את V6 בשלבים, בלי להעתיק patch ישן בצורה עיוורת, ולאחר מכן להמשיך ל־V7.</p>
+  </header>
+
+  <main>
+    <div class="toc">
+      <strong>ניווט מהיר:</strong>
+      <a href="#context">הקשר ומבנה</a>
+      <a href="#v6">V6</a>
+      <a href="#v7">V7</a>
+      <a href="#qa">בדיקות</a>
+    </div>
+
+    <section id="context" class="phase">
+      <h2>הקשר לפי המבנה הנוכחי</h2>
+      <p>הפרויקט הנוכחי כולל את מודול הקולאז׳ במיקומים הבאים. יש להתאים כל שינוי לקבצים הקיימים, לא להחליף אותם מתוך ZIP ישן ללא בדיקה.</p>
+      <div class="grid">
+        <div class="note"><strong>Core:</strong><br><span class="path">src/core/collage/*</span></div>
+        <div class="note"><strong>Types:</strong><br><span class="path">src/types/collage.ts</span></div>
+        <div class="note"><strong>UI:</strong><br><span class="path">src/ui/collage/*</span></div>
+        <div class="note"><strong>Canvas:</strong><br><span class="path">src/ui/editor/KonvaLayerNode.tsx</span></div>
+        <div class="note"><strong>Editor:</strong><br><span class="path">src/ui/editor/EditorScreen.tsx</span></div>
+        <div class="note"><strong>State:</strong><br><span class="path">src/state/documentStore.ts</span></div>
+      </div>
+      <div class="note danger"><strong>לא לגעת בלב:</strong> מנוע ה־Heart עובד טוב כרגע. V6 מתמקד בגיאומטריים, לא ב־Heart.</div>
+    </section>
+
+    
+    <section class="prompt-card">
+      <div class="prompt-head">
+        <h3>פרומפט פתיחה לכל סבב עבודה</h3>
+        <span class="badge">BASE</span>
+      </div>
+      <textarea class="prompt" spellcheck="false">אתה עובד על SPP2 במבנה הנוכחי של הפרויקט, לא על מבנה ישן ולא על קבצים מתוך patch קודם.
+
+לפני כל שינוי:
+1. סרוק את המבנה הנוכחי של src/core/collage, src/types/collage.ts, src/ui/collage, src/ui/editor/KonvaLayerNode.tsx, src/state/documentStore.ts.
+2. אל תעתיק קבצים ישנים “כמו שהם”. התאם את השינוי לקוד הנוכחי.
+3. אל תיגע במנוע הלב/Heart שעובד טוב כרגע, אלא אם יש שגיאת build ישירה.
+4. שמור על העיקרון: layout generation ב-TypeScript, preview ב-Konva/SVG, export עתידי בפייתון.
+5. כל שינוי חייב לעבור:
+   npm run build
+6. בסוף כל שלב דווח:
+   - אילו קבצים שונו
+   - מה נוספו/תוקן
+   - מה לא נגעת בו
+   - בדיקות שבוצעו
+
+מטרת V6:
+לשפר ולייצב layouts גיאומטריים/פוליגוניים בקולאז׳: Diamond, Diagonal, Cross/Plus, Frame, ולהוסיף layouts בטוחים: Trapezoid Split, Stepped Mosaic, Wave Split.</textarea>
+      <div class="prompt-actions">
+        <button class="copy-btn" type="button">העתק פרומפט</button>
+        <span class="copy-status" aria-live="polite"></span>
+      </div>
+    </section>
+    
+
+    <section id="v6" class="phase">
+      <h2>V6 — תיקון גיאומטריים ופוליגונים</h2>
+      <p>היעד של V6: להפוך את הפריסות הגיאומטריות ממראה ניסיוני למנוע יציב, מקצועי ודינמי.</p>
+      <div class="checklist">
+        <label class="check"><input type="checkbox"> Diamond / Center Diamond יציב</label>
+        <label class="check"><input type="checkbox"> Diagonal layouts עם vertices תקינים</label>
+        <label class="check"><input type="checkbox"> Cross / Plus בלי תאים שבורים</label>
+        <label class="check"><input type="checkbox"> Frame / Center focus מקצועי</label>
+        <label class="check"><input type="checkbox"> Trapezoid Split חדש</label>
+        <label class="check"><input type="checkbox"> Stepped Mosaic חדש</label>
+        <label class="check"><input type="checkbox"> Wave Split ראשון עם קווים מעוגלים</label>
+      </div>
+    </section>
+
+    
+    <section class="prompt-card">
+      <div class="prompt-head">
+        <h3>V6A — Foundation: Polygon Geometry Pipeline</h3>
+        <span class="badge">PROMPT</span>
+      </div>
+      <textarea class="prompt" spellcheck="false">V6A — Foundation: Polygon Geometry Pipeline
+
+מטרה:
+לבנות שכבת עזר גיאומטרית יציבה שתשמש את כל ה-layouts הפוליגוניים.
+
+שים לב:
+לא לשנות את מנוע הלב/Heart שעובד טוב.
+לא לשבור grid/hero/layouts רגילים.
+לא להוסיף layout חדש לפני שיש pipeline בטוח.
+
+משימות:
+1. בדוק אם כבר קיימים helpers דומים. אם כן, שפר אותם במקום ליצור כפילות.
+2. אם אין קובץ מתאים, צור:
+   src/core/collage/collageGeometryUtils.ts
+
+הקובץ צריך לכלול:
+- type Pt = { x: number; y: number }
+- חישוב bbox מפוליגון
+- polygon area
+- centroid
+- insetPolygon לכיוון מרכז התא, כדי ליצור spacing פנימי בלי לקרוס
+- clipPolyToRect לפוליגונים convex לגבולות usable canvas/page
+- isReadablePolygon:
+  - דוחה תאים דקים מדי
+  - דוחה תאים קטנים מדי
+  - דוחה יחס רוחב/גובה קיצוני
+  - דוחה שטח גלוי קטן מדי ביחס ל-bbox
+- polygonToCollageSlot:
+  - מקבל polygon בקואורדינטות canvas px
+  - מחשב bbox
+  - שומר vertices יחסיים [0..1] בתוך bbox
+  - מחזיר CollageSlot עם shape: &quot;polygon&quot; או &quot;diagonalPolygon&quot;
+
+כללים חשובים:
+- כל vertices שנכנסים ל-Konva חייבים להיות יחסיים לתא, לא לדף.
+- x/y/w/h של התא הם bbox.
+- אם polygon לא readable — לחזור ל-rect fallback יציב, לא לייצר תא שבור.
+- לא ליצור חפיפות.
+- לא ליצור תאים מחוץ ל-margin.
+
+בדיקות:
+- npm run build
+- בדיקה ידנית: grid/hero/heart עדיין עובדים.
+- בדיקה שה־SVG preview עדיין מציג existing layouts.</textarea>
+      <div class="prompt-actions">
+        <button class="copy-btn" type="button">העתק פרומפט</button>
+        <span class="copy-status" aria-live="polite"></span>
+      </div>
+    </section>
+    
+    
+    <section class="prompt-card">
+      <div class="prompt-head">
+        <h3>V6B — Repair Existing Geometric Layouts</h3>
+        <span class="badge">PROMPT</span>
+      </div>
+      <textarea class="prompt" spellcheck="false">V6B — Repair Existing Geometric Layouts
+
+מטרה:
+לשפר את הגיאומטריות הקיימות בלי לשנות את החוויה הכללית.
+
+קבצים רלוונטיים צפויים:
+- src/core/collage/collageDiagonal.ts
+- src/core/collage/collageShapedLayouts.ts או קובץ layout ייעודי אם קיים
+- src/core/collage/collageLayoutEngine.ts
+- src/core/collage/collageSvgThumb.ts
+- src/types/collage.ts
+- src/ui/editor/KonvaLayerNode.tsx
+
+משימות:
+
+1. Diagonal Bands
+- לתקן את diagonal כך שכל תא שומר vertices יחסיים ל-bbox.
+- ליישם inset לפי spacing.
+- להגביל מספר תמונות מומלץ:
+  - 2–8 לתצוגת diagonal bands נקייה
+  - מעל זה fallback לגריד/מוזאיקה ולא diagonal אגרסיבי
+- להימנע מתאים דקים בקצוות.
+- אם חיתוך יוצר polygon לא readable — להחליף אותו בתא rect בטוח או לא להציע את layout.
+
+2. Center Diamond
+- לא ליצור Diamond שמייצר חפיפות.
+- לבנות אותו כמתכון יציב:
+  - תא מרכזי diamond/ polygon גדול
+  - תאים משלימים מסביב, לא חופפים
+  - מתאים בעיקר ל־5–9 תמונות
+- אם imageCount לא מתאים, לא להציע את ה-layout או להחזיר fallback יציב.
+
+3. Cross / Plus
+- לבנות כמרכז + זרועות, בלי תאים קטנים מדי.
+- מתאים בעיקר ל־5/7/9 תמונות.
+- אם אין התאמה לכמות תמונות, להחזיר layout אחר או לא להציע.
+
+4. Frame Layout
+- תא מרכזי גדול
+- תאי מסגרת מסביב
+- מתאים ל־5–12 תמונות
+- לשמור על margin/spacing תקינים.
+
+5. SVG Thumbnail
+- כל polygon/diagonalPolygon חייב להופיע כ־&lt;polygon&gt; ב-preview.
+- preview לא חייב להיות מושלם, אבל צריך לשקף את המבנה ולא להראות מלבנים בלבד.
+
+6. Konva Rendering
+- ודא ש־KonvaLayerNode קורא metadata.collageFrame.vertices.
+- polygon/diagonalPolygon צריכים להיחתך לפי clipFunc.
+- אל תתבסס על maskFrame בשביל קולאז׳.
+
+בסיום:
+- דווח אילו layouts שופרו.
+- ציין מגבלות image count לכל layout.
+- תן הוראות בדיקה קצרות.</textarea>
+      <div class="prompt-actions">
+        <button class="copy-btn" type="button">העתק פרומפט</button>
+        <span class="copy-status" aria-live="polite"></span>
+      </div>
+    </section>
+    
+    
+    <section class="prompt-card">
+      <div class="prompt-head">
+        <h3>V6C — Add Safe New Layouts</h3>
+        <span class="badge">PROMPT</span>
+      </div>
+      <textarea class="prompt" spellcheck="false">V6C — Add Safe New Layouts
+
+מטרה:
+להוסיף layouts חדשים בטוחים, שמותאמים לכמות תמונות משתנה ולא שוברים spacing/page size.
+
+להוסיף רק אם אפשר ליישם יציב:
+1. trapezoidSplit
+2. steppedMosaic
+3. diagonalBands2 או diagonalEditorial אם יש צורך בשם חדש
+
+עדכון types:
+- אם CollageLayoutFamily לא כולל את השמות החדשים, הוסף אותם ל-src/types/collage.ts.
+- שמור על backward compatibility: פרויקטים ישנים לא צריכים להישבר.
+
+trapezoidSplit:
+- מתאים ל־3–8 תמונות.
+- תאים בטרפזים/מקביליות עדינים.
+- לא זוויות קיצוניות.
+- להשתמש ב-polygon pipeline מ-V6A.
+- אם יש יותר מדי תמונות, לא להציע או fallback.
+
+steppedMosaic:
+- מתאים ל־4–16 תמונות.
+- לא חייב polygon; אפשר orthogonal mixed-size.
+- המטרה: מראה עשיר, יציב, יפה.
+- בלי תאים קטנים מדי.
+- להבטיח שה-layout ממלא את כל usable area.
+
+diagonalEditorial / diagonalBands2:
+- גרסה משופרת של אלכסונים.
+- עד 8 תמונות.
+- angle עדין.
+- cells readable.
+- אם נוצר תא קטן בקצה — לתקן או לא להציע.
+
+Registry:
+- עדכן את LAYOUT_REGISTRY ב-src/core/collage/collageLayoutEngine.ts.
+- הגדר minImages/maxImages אמיתיים.
+- הגדר mode simple/creative בצורה נכונה:
+  - Simple: לא להציג layouts פוליגוניים מורכבים מדי.
+  - Creative: כן להציג geometric.
+
+Scoring:
+- אל תציע layout עם תאים שבורים.
+- הוסף penalty אם יש הרבה תאים עם aspect ratio קיצוני.
+- הוסף penalty אם polygon area נמוך מדי ביחס ל-bbox.</textarea>
+      <div class="prompt-actions">
+        <button class="copy-btn" type="button">העתק פרומפט</button>
+        <span class="copy-status" aria-live="polite"></span>
+      </div>
+    </section>
+    
+    
+    <section class="prompt-card">
+      <div class="prompt-head">
+        <h3>V6D — Wave Split / Curved Layout First Version</h3>
+        <span class="badge">PROMPT</span>
+      </div>
+      <textarea class="prompt" spellcheck="false">V6D — Wave Split / Curved Layout First Version
+
+מטרה:
+להוסיף layout אחד עם קווים לא ישרים, אבל בצורה נשלטת ולא כאוטית.
+
+שם מוצע:
+waveSplit
+
+עיקרון:
+- לא blob generator חופשי.
+- layout מבוסס wave split פשוט ויציב.
+- מתאים ל־2–5 תמונות בשלב ראשון.
+- אם imageCount גדול יותר, לא להציע אותו.
+
+אפשרות מימוש:
+1. שני תאים:
+   - קו גלי אנכי או אופקי בין שני אזורים.
+2. שלושה תאים:
+   - אזור גדול + שני אזורים בצד השני.
+3. ארבעה/חמישה תאים:
+   - split ראשי גלי + חלוקה פנימית רגילה/פוליגונית עדינה.
+
+מימוש טכני:
+- אם המערכת כבר תומכת svgPath ב־CollageSlot/FrameLayer, להשתמש ב-shape: &quot;svgPath&quot; עם pathData.
+- אם svgPath עדיין לא ממומש מלא בקולאז׳, להשתמש ב-polygon approximation של wave:
+  - ליצור 16–32 נקודות על העקומה
+  - לייצר שני פוליגונים משלימים
+  - לשמור vertices יחסיים ל-bbox
+- לא ליצור חפיפות.
+- spacing חייב לעבוד.
+- preview ב-SVG צריך להראות את הצורה בקירוב.
+
+חשוב:
+- waveSplit הוא “וואו” ראשון, לא מערכת organic מלאה.
+- לא להוסיף random blobs עדיין.
+- לא להציע ליותר מ־5 תמונות עד שיש מנוע יציב יותר.</textarea>
+      <div class="prompt-actions">
+        <button class="copy-btn" type="button">העתק פרומפט</button>
+        <span class="copy-status" aria-live="polite"></span>
+      </div>
+    </section>
+    
+    
+    <section class="prompt-card">
+      <div class="prompt-head">
+        <h3>V6E — QA, Regression, and Guardrails</h3>
+        <span class="badge">QA</span>
+      </div>
+      <textarea class="prompt" spellcheck="false">V6E — QA, Regression, and Guardrails
+
+מטרה:
+לוודא ש־V6 לא שובר את הקולאז׳ים הרגילים ולא את הלב.
+
+בדיקות חובה:
+1. npm run build
+2. יצירת קולאז׳ רגיל grid עם 4/8/16 תמונות
+3. יצירת hero עם 3/7 תמונות
+4. לב/heart — לוודא שלא השתנה ושהוא עדיין נראה טוב
+5. Diagonal עם 3/5/8 תמונות
+6. Diamond עם 5/7/9 תמונות
+7. Frame עם 5/8/12 תמונות
+8. Trapezoid עם 3/6/8 תמונות
+9. Stepped Mosaic עם 4/9/16 תמונות
+10. Wave Split עם 2/3/5 תמונות
+11. שינוי page size/orientation אחרי יצירה
+12. שינוי spacing/margin
+13. thumbnails בלשונית layouts
+14. בחירה ועריכת תמונה בתוך תא
+15. החלפת תמונות בין תאים
+
+Guardrails:
+- אם layout לא מתאים לכמות תמונות, אל תציע אותו.
+- אם polygon לא readable, אל תכניס אותו.
+- אם יש ספק, fallback לגריד/hero יציב.
+- לא לגעת בלב.
+- לא לשכפל sync logic; מקור האמת נשאר במנגנון sync הקיים.</textarea>
+      <div class="prompt-actions">
+        <button class="copy-btn" type="button">העתק פרומפט</button>
+        <span class="copy-status" aria-live="polite"></span>
+      </div>
+    </section>
+    
+
+    <section id="v7" class="phase">
+      <h2>V7 — שדרוגים לאחר סיום V6</h2>
+      <p>לא להתחיל V7 לפני ש־V6 עובר build ובדיקות בסיסיות. V7 מתמקד באפקטים, חוכמת תמונות, טיפים ו־UX.</p>
+    </section>
+
+    
+    <section class="prompt-card">
+      <div class="prompt-head">
+        <h3>V7A — Real Soft Fade / Edge Fade</h3>
+        <span class="badge">PROMPT</span>
+      </div>
+      <textarea class="prompt" spellcheck="false">V7A — Real Soft Fade / Edge Fade
+
+מטרה:
+להפוך את FADE מאופציה ב־UI לאפקט אמיתי.
+
+דרישות UI:
+- Edge Style: hard / softEdge / fade / tornPaper / outline
+- Fade amount slider: 0–100 או radius px/mm
+- Fade sides:
+  - all
+  - top
+  - right
+  - bottom
+  - left
+- Curve:
+  - linear
+  - smooth
+  - easeOut
+
+מימוש preview:
+- ב-KonvaLayerNode, עבור collage frame עם edgeConfig.style === &quot;softEdge&quot; או &quot;fade&quot;:
+  - לייצר alpha gradient mask
+  - התמונות צריכות לדעוך בקצוות הנבחרים
+  - לא להסתפק בשינוי opacity כללי
+- לא לשבור tornPaper.
+- לא לשבור heart/global mask.
+
+מימוש state:
+- אם CollageEdgeConfig לא כולל fadeAmount/fadeSides/fadeCurve, להוסיף בצורה backward compatible.
+- לשמור ערכים ב-assignment/slot metadata כך ש-save/load יעבוד.
+
+מטרה לשלב ראשון:
+- preview בקנבס עובד.
+- export full quality יכול להישאר לשלב מאוחר יותר, אבל הנתונים חייבים להיות שמורים.</textarea>
+      <div class="prompt-actions">
+        <button class="copy-btn" type="button">העתק פרומפט</button>
+        <span class="copy-status" aria-live="polite"></span>
+      </div>
+    </section>
+    
+    
+    <section class="prompt-card">
+      <div class="prompt-head">
+        <h3>V7B — Smart Image-to-Cell Assignment</h3>
+        <span class="badge">PROMPT</span>
+      </div>
+      <textarea class="prompt" spellcheck="false">V7B — Smart Image-to-Cell Assignment
+
+מטרה:
+שיפור התאמת תמונות לתאים במקום סידור לפי סדר בלבד.
+
+השראה מהתוכנה הישנה:
+- תמונה רחבה לתא רחב
+- תמונה אנכית לתא גבוה
+- תמונה עם אנשים/קבוצה לתא גדול ובטוח יותר
+- תמונה עם פנים לא לתא צר מדי
+
+מימוש:
+1. הוסף פונקציית scoring:
+   scoreImageToSlot(image, slot, optionalAnalysis)
+2. שקלול:
+   - aspect ratio match
+   - slot area
+   - face/crop safety אם קיים analysis
+   - group photo prefers bigger/wider cells
+   - portrait prefers taller/central cells
+3. Assignment:
+   - greedy matching פשוט בתור התחלה
+   - לא לשנות תמונות שהמשתמש כבר ערך ידנית אלא אם בחר “Optimize assignment”
+4. UI:
+   - כפתור: “סדר תמונות חכם”
+   - כפתור: “שחזר לפי סדר העלאה”
+   - לא לבצע אופטימיזציה אגרסיבית בכל reflow בלי אישור.
+
+חשוב:
+- לא לאבד crop/pan/zoom ידני.
+- אם assignment משתנה, לשמור undo אחד מסודר.</textarea>
+      <div class="prompt-actions">
+        <button class="copy-btn" type="button">העתק פרומפט</button>
+        <span class="copy-status" aria-live="polite"></span>
+      </div>
+    </section>
+    
+    
+    <section class="prompt-card">
+      <div class="prompt-head">
+        <h3>V7C — Smart Crop Tips Panel</h3>
+        <span class="badge">PROMPT</span>
+      </div>
+      <textarea class="prompt" spellcheck="false">V7C — Smart Crop Tips Panel
+
+מטרה:
+לשדרג את לשונית הטיפים כך שתיתן טיפים לתיקון תמונה, לא טיפים כלליים.
+
+כאשר נבחר תא קולאז׳:
+להציג:
+- האם הפנים קרובות לקצה
+- האם התמונה נחתכת חזק מדי
+- האם התא צר מדי לתמונה
+- האם רזולוציה נמוכה ביחס לגודל הדפסה
+- האם זו תמונת קבוצה בתא קטן מדי
+- הצעה: הזז שמאלה/ימינה/למעלה/למטה
+- הצעה: הגדל/הקטן zoom
+- כפתור “תקן אוטומטית” אם ניתן
+
+מימוש:
+- השתמש במה שכבר קיים ב-collageFaceDetect / face analysis אם קיים.
+- לא לחייב Python בשביל הטיפים הבסיסיים.
+- אם Python/advanced analysis זמין, אפשר לשפר.
+- ברירת מחדל חייבת לעבוד גם בלי Python.
+
+UI:
+- לשונית “טיפים”
+- severity:
+  - תקין
+  - שים לב
+  - בעיה
+- הודעות קצרות וברורות בעברית.</textarea>
+      <div class="prompt-actions">
+        <button class="copy-btn" type="button">העתק פרומפט</button>
+        <span class="copy-status" aria-live="polite"></span>
+      </div>
+    </section>
+    
+    
+    <section class="prompt-card">
+      <div class="prompt-head">
+        <h3>V7D — Template Recipes and Layout Quality</h3>
+        <span class="badge">PROMPT</span>
+      </div>
+      <textarea class="prompt" spellcheck="false">V7D — Template Recipes and Layout Quality
+
+מטרה:
+להמשיך לתקן את בעיית “תבנית סטטית” מול “מתכון דינמי”.
+
+לא חובה ליישם הכול מיד, אבל לתכנן ולהתחיל תשתית.
+
+עקרונות:
+1. Layout Instance:
+   - נשמר בפרויקט
+   - כולל slots resolved עם x/y/w/h/vertices
+   - חייב להיפתח בדיוק כמו שנשמר
+
+2. Dynamic Template Recipe:
+   - נשמר בספריית templates
+   - לא שומר רק geometry קבוע
+   - שומר family + variant + recipeParams
+   - יודע לייצר layout מחדש לפי:
+     - page size
+     - orientation
+     - image count
+     - spacing/margin
+     - empty slots
+
+3. Fixed Snapshot:
+   - אופציונלי
+   - רק אם המשתמש מבקש לשמור layout מדויק
+
+משימות:
+- להוסיף templateKind: &quot;dynamicRecipe&quot; | &quot;fixedSnapshot&quot;
+- לא לשבור templates קיימים.
+- להתחיל מ-dynamic recipes עבור:
+  - grid
+  - hero
+  - frame
+  - steppedMosaic
+  - diagonal</textarea>
+      <div class="prompt-actions">
+        <button class="copy-btn" type="button">העתק פרומפט</button>
+        <span class="copy-status" aria-live="polite"></span>
+      </div>
+    </section>
+    
+    
+    <section class="prompt-card">
+      <div class="prompt-head">
+        <h3>V7E — Polish and Workflow</h3>
+        <span class="badge">PROMPT</span>
+      </div>
+      <textarea class="prompt" spellcheck="false">V7E — Polish and Workflow
+
+שדרוגי UX אחרי שמנועי layout יציבים:
+
+1. Layout Filtering:
+- Simple / Creative / Geometric / Shaped / Favorites
+- לא להציג layouts שלא מתאימים לכמות תמונות
+
+2. Preview Quality:
+- thumbnails נאמנים יותר לתוצאה
+- badge שמסביר למה layout מומלץ
+
+3. Swap Images:
+- עוגני החלפה גדולים ונוחים
+- hover area גדול
+- אחרי בחירת מקור, להציג רק targets חוקיים
+- החלפה שומרת fit/transform בצורה הגיונית
+
+4. Right Panel:
+- כשאין בחירה: הגדרות כלליות לקולאז׳
+- כשנבחר תא: image controls + tips
+- לא להציג פריסות כפולות בשני הצדדים
+
+5. Performance:
+- להגביל effects כבדים בפריוויו
+- caching ל-torn paper/polygon paths
+- לא לחשב מחדש layout בכל drag קטן</textarea>
+      <div class="prompt-actions">
+        <button class="copy-btn" type="button">העתק פרומפט</button>
+        <span class="copy-status" aria-live="polite"></span>
+      </div>
+    </section>
+    
+
+    <section id="qa" class="phase">
+      <h2>צ׳ק ליסט בדיקות סופי</h2>
+      <div class="checklist">
+        <label class="check"><input type="checkbox"> npm run build עובר בלי שגיאות</label>
+        <label class="check"><input type="checkbox"> Grid רגיל עדיין עובד</label>
+        <label class="check"><input type="checkbox"> Hero רגיל עדיין עובד</label>
+        <label class="check warn"><input type="checkbox"> Heart עדיין עובד — לא השתנה</label>
+        <label class="check"><input type="checkbox"> Diamond נראה אסתטי בלי חפיפות</label>
+        <label class="check"><input type="checkbox"> Diagonal לא מייצר תאים דקים מדי</label>
+        <label class="check"><input type="checkbox"> Frame ממלא את הדף נכון</label>
+        <label class="check"><input type="checkbox"> Wave Split לא מוצג לכמות תמונות לא מתאימה</label>
+        <label class="check"><input type="checkbox"> Spacing / Margin משפיעים נכון</label>
+        <label class="check"><input type="checkbox"> Thumbnails מייצגים נכון את התוצאה</label>
+        <label class="check"><input type="checkbox"> בחירת תא ועריכת תמונה עדיין עובדות</label>
+        <label class="check"><input type="checkbox"> החלפת תמונות בין תאים עדיין עובדת</label>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    נוצר עבור SPP2 Collage Mode — V6/V7. שמור קובץ זה לצד הפרויקט והשתמש בכל שלב בנפרד.
+  </footer>
+
+  <script>
+    document.querySelectorAll('.prompt-card').forEach((card) => {
+      const btn = card.querySelector('.copy-btn');
+      const ta = card.querySelector('textarea.prompt');
+      const status = card.querySelector('.copy-status');
+      btn.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(ta.value);
+          status.textContent = 'הועתק';
+          setTimeout(() => status.textContent = '', 1500);
+        } catch (e) {
+          ta.select();
+          document.execCommand('copy');
+          status.textContent = 'הועתק';
+          setTimeout(() => status.textContent = '', 1500);
+        }
+      });
+    });
+  </script>
+</body>
+</html>

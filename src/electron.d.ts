@@ -11,12 +11,14 @@ interface SmartSelectionProgressEvent {
 }
 
 interface InpaintRemoveOptions {
+  imagePngBase64?: string;
   maskPngBase64: string;
   targetWidth: number;
   targetHeight: number;
   roiPadding?: number;
   maxPatchPixels?: number;
   forceFallback?: boolean;
+  debug?: boolean;
   blend?: "feather";
 }
 
@@ -29,6 +31,12 @@ interface InpaintRemoveResult {
   modelId: "lama" | "opencv_telea" | string;
   modelVersion: string;
   fallback: boolean;
+  backendAttempted?: string;
+  backendUsed?: string;
+  backendDevice?: string | null;
+  modelWeightsPath?: string | null;
+  fallbackReason?: string | null;
+  debugDir?: string | null;
   message: string;
   processingMs: number;
 }
@@ -36,6 +44,13 @@ interface InpaintRemoveResult {
 interface SppElectronAPI {
   platform: string;
   writeTempImage: (dataUrl: string, ext: string) => Promise<string>;
+  getMemoryUsage?: () => Promise<{
+    rss: number;
+    heapTotal: number;
+    heapUsed: number;
+    external: number;
+    arrayBuffers: number;
+  }>;
   readFileBase64: (filePath: string) => Promise<string>;
   savePdfDialog?: (pdfBase64: string, suggestedName?: string) => Promise<{ success: boolean; filePath?: string; error?: string }>;
   convertOfficeToPdf?: (inputPath: string) => Promise<{ success: boolean; pdfBase64?: string; outputPath?: string; outputName?: string; error?: string }>;
@@ -130,6 +145,14 @@ interface SppElectronAPI {
     }>;
     inpaintRemove(imageId: string, options: InpaintRemoveOptions): Promise<InpaintRemoveResult | { ok?: false; error?: string; message?: string; fallback?: boolean }>;
     unloadImage(imageId: string): Promise<{ ok: boolean }>;
+    detectFaces(imageId: string): Promise<{
+      ok: boolean;
+      imageId: string;
+      width: number;
+      height: number;
+      backend: "mediapipe" | "haar" | "none";
+      faces: { x: number; y: number; width: number; height: number; score: number }[];
+    }>;
     cancel(requestId: string): Promise<{ ok: boolean }>;
     onProgress(callback: (progress: SmartSelectionProgressEvent) => void): () => void;
   };
@@ -166,6 +189,23 @@ interface SppElectronAPI {
     saveOne(product: import("./services/python_bridge/productBridge").PythonProduct): Promise<void>;
     uploadMask(productId: string, maskDataBase64: string, fileName: string): Promise<string>;
     reloadOne(productId: string): Promise<import("./services/python_bridge/productBridge").PythonProduct | null>;
+  };
+  debug?: {
+    getReport: () => unknown;
+    logPageSwitch: (
+      fromPageId: string | null,
+      toPageId: string,
+      summary?: {
+        documentPageCount: number;
+        activePageLayerCount: number;
+        totalLayerCount: number;
+        assetCount: number;
+        historyUndoCount: number;
+        historyRedoCount: number;
+      }
+    ) => void;
+    runStressTest: (options?: { pages?: number; images?: number; switches?: number }) => Promise<unknown>;
+    reset: () => void;
   };
 }
 

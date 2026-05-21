@@ -32,6 +32,7 @@ export interface DrawingToolsState {
   setBucketMode: (mode: BucketMode) => void;
   setBucketTolerance: (v: number) => void;
   setShapeKind: (kind: ShapeKind) => void;
+  resetTools: () => void;
 }
 
 export const useDrawingToolsStore = create<DrawingToolsState>((set) => ({
@@ -49,5 +50,6 @@ export const useDrawingToolsStore = create<DrawingToolsState>((set) => ({
   setBrushOpacity: (v) => set({ brushOpacity: Math.max(0, Math.min(100, Math.round(v))) }),
   setBucketMode: (mode) => set({ bucketMode: mode }),
   setBucketTolerance: (v) => set({ bucketTolerance: Math.max(0, Math.min(255, Math.round(v))) }),
-  setShapeKind: (kind) => set({ shapeKind: kind })
+  setShapeKind: (kind) => set({ shapeKind: kind }),
+  resetTools: () => set({ activeTool: null })
 }));

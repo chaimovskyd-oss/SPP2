@@ -5,6 +5,7 @@ export interface BatchState {
   jobs: BatchJob[];
   upsertJob: (job: BatchJob) => void;
   removeJob: (jobId: string) => void;
+  clearJobs: () => void;
 }
 
 export const useBatchStore = create<BatchState>((set) => ({
@@ -18,5 +19,6 @@ export const useBatchStore = create<BatchState>((set) => ({
           : [...state.jobs, job]
       };
     }),
-  removeJob: (jobId) => set((state) => ({ jobs: state.jobs.filter((job) => job.id !== jobId) }))
+  removeJob: (jobId) => set((state) => ({ jobs: state.jobs.filter((job) => job.id !== jobId) })),
+  clearJobs: () => set({ jobs: [] })
 }));

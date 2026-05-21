@@ -3,6 +3,7 @@
  * Called after wizard completion and after any layout reflow.
  */
 import { createId } from "@/core/ids";
+import { clampContentTransformToFillBounds } from "@/core/rendering/frameFitEngine";
 import { detectFocalPoint, focalPointToContentTransform } from "./collageFaceDetect";
 import type { Document, Page } from "@/types/document";
 import type { Asset } from "@/types/document";
@@ -141,11 +142,26 @@ export async function applySmartCropToAssignment(
   const src = asset.previewPath ?? asset.originalPath ?? "";
   try {
     const img = await loadImage(src);
-    const focal = await detectFocalPoint(img);
+    const focal = await detectFocalPoint(img, src);
     const { offsetX, offsetY, scale } = focalPointToContentTransform(
       focal, img.naturalWidth, img.naturalHeight, frameW, frameH
     );
-    return { version: 1, offsetX, offsetY, scale, rotation: assignment.contentTransform.rotation ?? 0 };
+    const nextTransform: ContentTransform = {
+      version: 1,
+      offsetX,
+      offsetY,
+      scale,
+      rotation: assignment.contentTransform.rotation ?? 0
+    };
+    return clampContentTransformToFillBounds(
+      nextTransform,
+      frameW,
+      frameH,
+      img.naturalWidth,
+      img.naturalHeight,
+      assignment.fitMode,
+      0
+    );
   } catch {
     return assignment.contentTransform;
   }

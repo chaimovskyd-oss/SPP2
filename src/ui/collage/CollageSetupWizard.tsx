@@ -5,6 +5,7 @@ import { unitToPx } from "@/core/units/conversion";
 import { generateCollageSuggestions } from "@/core/collage/collageModeEngine";
 import { CollageMiniPreview } from "./CollageMiniPreview";
 import { useProductStore } from "@/state/productStore";
+import { GlobalWizardDropTarget, isImageDropFile } from "@/ui/wizard/GlobalWizardDropTarget";
 import type { CollageComplexityMode, CollageLayoutFamily, CollageSlot, ScoredLayoutSuggestion } from "@/types/collage";
 import type { PageSetup, Unit } from "@/types/primitives";
 import type { ProjectCustomerInfo } from "@/types/project";
@@ -52,6 +53,14 @@ export function CollageSetupWizard({ onComplete, onCancel }: CollageSetupWizardP
   const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
+  useEffect(() => () => {
+    for (const entry of imagesRef.current) {
+      try { URL.revokeObjectURL(entry.url); } catch { /* ignore */ }
+    }
+  }, []);
+
   // Step 1b — customer info
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
@@ -98,7 +107,7 @@ export function CollageSetupWizard({ onComplete, onCancel }: CollageSetupWizardP
   // ─── Image upload ─────────────────────────────────────────────────────────
 
   function addFiles(files: FileList | File[]): void {
-    const todo = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    const todo = Array.from(files).filter(isImageDropFile);
     let pending = todo.length;
     if (pending === 0) return;
     const toAdd: ImageEntry[] = [];
@@ -198,6 +207,10 @@ export function CollageSetupWizard({ onComplete, onCancel }: CollageSetupWizardP
 
   return (
     <div className="collage-wizard-overlay">
+      <GlobalWizardDropTarget
+        acceptFile={isImageDropFile}
+        onFiles={addFiles}
+      />
       <div className="collage-wizard">
         <button type="button" className="collage-wizard-close" onClick={onCancel}><X size={20} /></button>
 

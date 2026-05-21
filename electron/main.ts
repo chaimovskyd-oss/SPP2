@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.VITE_DEV_SERVER_URL !== undefined;
+const diagnosticsEnabled = isDev || process.env.NODE_ENV !== "production";
 
 function getAppRoot(): string {
   if (app.isPackaged) {
@@ -32,9 +33,13 @@ function getPythonCommand(): string {
 ipcMain.handle("spp:write-temp-image", async (_event, dataUrl: string, ext: string): Promise<string> => {
   const base64 = dataUrl.replace(/^data:[^;]+;base64,/, "");
   const tmpPath = path.join(os.tmpdir(), `spp_edit_input_${Date.now()}.${ext}`);
+  if (diagnosticsEnabled) console.debug("[spp diagnostics] write-temp-image:start", { ext, base64Length: base64.length, tmpPath });
   fs.writeFileSync(tmpPath, Buffer.from(base64, "base64"));
+  if (diagnosticsEnabled) console.debug("[spp diagnostics] write-temp-image:end", { tmpPath });
   return tmpPath;
 });
+
+ipcMain.handle("spp:get-memory-usage", async (): Promise<NodeJS.MemoryUsage> => process.memoryUsage());
 
 /**
  * Read a file from disk and return it as a base64 string.

@@ -18,6 +18,7 @@ import {
 import type { Asset, Document, Page } from "@/types/document";
 import type { FrameLayer, LinkedGroup, TextLayer, VisualLayer } from "@/types/layers";
 import type { ProductDefinition } from "@/types/product";
+import { mmToPx } from "@/core/units/conversion";
 
 const now = "2026-05-11T00:00:00.000Z";
 
@@ -283,7 +284,9 @@ describe("Phase 0 model scenarios", () => {
 
     expect(document.dpi).toBe(300);
     expect(document.colorProfile).toBe("FOGRA39");
-    expect(page.width).toBe(product.canvasSize.width);
+    // page.width is in px and includes bleed; product.canvasSize is the trim size in mm.
+    expect(page.width).toBe(mmToPx(product.canvasSize.width + product.bleed.left + product.bleed.right, document.dpi));
+    expect(page.height).toBe(mmToPx(product.canvasSize.height + product.bleed.top + product.bleed.bottom, document.dpi));
     expect(page.bleed).toEqual(product.bleed);
     expect(safeAreaLayer?.locked).toBe(true);
     expect(editableZone?.type).toBe("frame");

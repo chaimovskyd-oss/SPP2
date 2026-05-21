@@ -76,6 +76,13 @@ export interface ClassPhotoPersonRecord extends VersionedEntity {
   hasManualCropOverride?: boolean;
   hasManualRotationOverride?: boolean;
 
+  /**
+   * Per-person override for the frame's VisualEffectStack. When present, the
+   * class-photo sync uses this instead of the rule-level frameStyle effects,
+   * so user-customized effects survive frame-style changes / regenerate.
+   */
+  visualEffectsOverride?: import("./visualEffects").VisualEffectStack;
+
   metadata: Metadata;
 }
 

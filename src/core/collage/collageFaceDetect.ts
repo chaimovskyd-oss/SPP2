@@ -1,12 +1,17 @@
 /**
- * Browser-side face/content detection for collage smart crop.
+ * Face/content focal-point detection for collage + photo-print smart crop.
  *
- * Priority:
- * 1. FaceDetector Web API (Chrome 74+, Edge, experimental)
- * 2. Canvas pixel saliency heuristic (fast, works everywhere)
- * 3. Center fallback
+ * Priority (first available wins):
+ * 1. Python sidecar (MediaPipe BlazeFace → OpenCV Haar). Real face detection,
+ *    requires Electron with the smart-selection sidecar running.
+ * 2. window.FaceDetector — experimental Web API (Chrome flag only). Inactive
+ *    in stock Electron.
+ * 3. Canvas pixel saliency heuristic — samples skin-tone/saturation/brightness.
+ *    Not real face detection; bright/colorful objects can outscore faces.
+ * 4. Image center (0.5, 0.5) — last resort.
  *
- * Returns a focal point [0..1, 0..1] within the image — used to compute contentTransform.
+ * Returns a focal point [0..1, 0..1] within the image — used to compute
+ * contentTransform so the focal area is centered inside the frame.
  */
 
 export interface FocalPoint {
@@ -15,11 +20,50 @@ export interface FocalPoint {
   confidence: "face" | "saliency" | "center";
 }
 
-/** Detect face/content focal point from an image element */
+const FOCAL_CACHE_LIMIT = 256;
+const focalPointCache = new Map<string, FocalPoint>();
+
+function rememberFocalPoint(key: string, value: FocalPoint): FocalPoint {
+  if (focalPointCache.size >= FOCAL_CACHE_LIMIT) {
+    const firstKey = focalPointCache.keys().next().value;
+    if (firstKey !== undefined) focalPointCache.delete(firstKey);
+  }
+  focalPointCache.set(key, value);
+  return value;
+}
+
+export function clearFocalPointCache(): void {
+  focalPointCache.clear();
+}
+
+/**
+ * Detect face/content focal point from an image element.
+ *
+ * @param img   The loaded image (used for dimensions and Web-API fallback).
+ * @param src   Optional source path or data URL. If provided AND the Electron
+ *              sidecar is reachable, real face detection runs in Python.
+ */
 export async function detectFocalPoint(
-  img: HTMLImageElement
+  img: HTMLImageElement,
+  src?: string
 ): Promise<FocalPoint> {
-  // 1. Try Face Detection API
+  const cacheKey = src !== undefined && src.length > 0
+    ? `${src}|${img.naturalWidth}x${img.naturalHeight}`
+    : null;
+  if (cacheKey !== null) {
+    const cached = focalPointCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+  }
+
+  // 1. Try the Python sidecar via Electron IPC (real face detection).
+  if (src) {
+    const sidecarFocal = await tryDetectViaSidecar(src, img.naturalWidth, img.naturalHeight);
+    if (sidecarFocal !== null) {
+      return cacheKey !== null ? rememberFocalPoint(cacheKey, sidecarFocal) : sidecarFocal;
+    }
+  }
+
+  // 2. Try Face Detection API
   if ("FaceDetector" in window) {
     try {
       // @ts-ignore — FaceDetector is not in standard TS lib yet
@@ -38,14 +82,108 @@ export async function detectFocalPoint(
           totalArea += area;
         }
         if (totalArea > 0) {
-          return { x: cx / totalArea, y: cy / totalArea, confidence: "face" };
+          const focal: FocalPoint = { x: cx / totalArea, y: cy / totalArea, confidence: "face" };
+          return cacheKey !== null ? rememberFocalPoint(cacheKey, focal) : focal;
         }
       }
     } catch { /* FaceDetector not available or failed */ }
   }
 
-  // 2. Canvas saliency: find brightest/most-saturated region
-  return computeSaliencyFocalPoint(img);
+  // 3. Canvas saliency: find brightest/most-saturated region
+  const saliencyFocal = computeSaliencyFocalPoint(img);
+  return cacheKey !== null ? rememberFocalPoint(cacheKey, saliencyFocal) : saliencyFocal;
+}
+
+/**
+ * Attempt face detection via the Python sidecar (MediaPipe). Returns null if
+ * the sidecar is unreachable, the image cannot be loaded, or no faces are
+ * found — caller falls back to the next strategy.
+ */
+async function tryDetectViaSidecar(
+  src: string,
+  imgWidth: number,
+  imgHeight: number
+): Promise<FocalPoint | null> {
+  const spp = (typeof window !== "undefined"
+    ? (window as unknown as { spp?: SppFaceBridge }).spp
+    : undefined);
+  if (!spp?.smartSelection?.detectFaces || !spp.smartSelection.loadImage) return null;
+
+  try {
+    const imagePath = await resolveImagePathForSidecar(src, spp);
+    if (imagePath === null) return null;
+
+    const imageId = `face-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const loaded = await spp.smartSelection.loadImage(imageId, imagePath, imageId);
+    if (!loaded?.ok) return null;
+
+    try {
+      const result = await spp.smartSelection.detectFaces(imageId);
+      if (!result?.ok || !result.faces || result.faces.length === 0) return null;
+
+      // Area-weighted centroid of all detected faces, normalized to [0..1].
+      const w = result.width || imgWidth;
+      const h = result.height || imgHeight;
+      let totalArea = 0;
+      let cx = 0;
+      let cy = 0;
+      for (const face of result.faces) {
+        const area = face.width * face.height;
+        cx += ((face.x + face.width / 2) / w) * area;
+        cy += ((face.y + face.height / 2) / h) * area;
+        totalArea += area;
+      }
+      if (totalArea <= 0) return null;
+      return { x: cx / totalArea, y: cy / totalArea, confidence: "face" };
+    } finally {
+      // Best-effort unload — ignore failures.
+      spp.smartSelection.unloadImage?.(imageId).catch(() => undefined);
+    }
+  } catch {
+    return null;
+  }
+}
+
+async function resolveImagePathForSidecar(
+  src: string,
+  spp: SppFaceBridge
+): Promise<string | null> {
+  // file:// URL → strip the protocol.
+  if (src.startsWith("file://")) {
+    return decodeURIComponent(src.replace(/^file:\/\//, ""));
+  }
+  // Absolute filesystem path (Windows drive or POSIX root).
+  if (/^[a-zA-Z]:[\\/]/.test(src) || src.startsWith("/")) {
+    return src;
+  }
+  // Data URL → write to temp file via Electron.
+  if (src.startsWith("data:")) {
+    if (!spp.writeTempImage) return null;
+    const match = /^data:image\/(png|jpeg|jpg|webp|bmp);/i.exec(src);
+    const ext = match ? match[1].toLowerCase().replace("jpeg", "jpg") : "png";
+    try {
+      return await spp.writeTempImage(src, ext);
+    } catch {
+      return null;
+    }
+  }
+  // Unknown source (e.g., http(s)) — sidecar can't reach it; skip.
+  return null;
+}
+
+interface SppFaceBridge {
+  writeTempImage?: (dataUrl: string, ext: string) => Promise<string>;
+  smartSelection?: {
+    loadImage: (imageId: string, path: string, sourceHash: string) => Promise<{ ok?: boolean }>;
+    unloadImage?: (imageId: string) => Promise<{ ok: boolean }>;
+    detectFaces: (imageId: string) => Promise<{
+      ok: boolean;
+      width: number;
+      height: number;
+      backend: string;
+      faces: { x: number; y: number; width: number; height: number; score: number }[];
+    }>;
+  };
 }
 
 function computeSaliencyFocalPoint(img: HTMLImageElement): FocalPoint {
@@ -112,7 +250,8 @@ function computeSaliencyFocalPoint(img: HTMLImageElement): FocalPoint {
 
 /**
  * Compute a ContentTransform that centers the focal point within the frame.
- * The image is scaled to fill the frame (fill mode), then offset so the focal point is centered.
+ * The renderer already computes the natural fill scale. The returned transform
+ * therefore uses scale=1 and offsets only the delta from that centered fill.
  */
 export function focalPointToContentTransform(
   focal: FocalPoint,
@@ -121,20 +260,13 @@ export function focalPointToContentTransform(
   frameW: number,
   frameH: number
 ): { offsetX: number; offsetY: number; scale: number } {
-  // Fill scale
-  const scale = Math.max(frameW / imgW, frameH / imgH);
-  const scaledW = imgW * scale;
-  const scaledH = imgH * scale;
+  const fillScale = Math.max(frameW / imgW, frameH / imgH);
+  const scaledW = imgW * fillScale;
+  const scaledH = imgH * fillScale;
 
-  // Position so focal point lands at frame center
-  const offsetX = frameW / 2 - focal.x * scaledW;
-  const offsetY = frameH / 2 - focal.y * scaledH;
-
-  // Clamp so image covers the frame entirely
-  const minOffX = frameW - scaledW;
-  const minOffY = frameH - scaledH;
-  const clampedX = Math.max(minOffX, Math.min(0, offsetX));
-  const clampedY = Math.max(minOffY, Math.min(0, offsetY));
-
-  return { offsetX: clampedX, offsetY: clampedY, scale };
+  return {
+    offsetX: (0.5 - focal.x) * scaledW,
+    offsetY: (0.5 - focal.y) * scaledH,
+    scale: 1
+  };
 }

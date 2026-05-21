@@ -19,6 +19,7 @@ import type { BatchRecord, BatchTextVariableField, BatchWizardResult } from "@/t
 import type { BatchTemplateIndexItem } from "@/core/batchProduction/batchTemplateStore";
 import { loadTemplateDocument } from "@/core/batchProduction/batchTemplateStore";
 import { getBatchProductionMeta } from "@/core/batchProduction/batchProductionMeta";
+import { GlobalWizardDropTarget } from "@/ui/wizard/GlobalWizardDropTarget";
 import "./batchProduction.css";
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -70,6 +71,10 @@ function validateRecord(
 }
 
 const ACCEPTED = "image/jpeg,image/png,image/webp";
+
+function isBatchImageFile(file: File): boolean {
+  return ["image/jpeg", "image/png", "image/webp"].includes(file.type) || /\.(jpe?g|png|webp)$/i.test(file.name);
+}
 
 // ─── Step dots ────────────────────────────────────────────────────────────────
 
@@ -389,7 +394,7 @@ export function BatchProductionWizard({
 
   function addFiles(files: File[]): void {
     const images = files.filter((f) =>
-      ["image/jpeg", "image/png", "image/webp"].includes(f.type),
+      isBatchImageFile(f),
     );
     if (images.length === 0) return;
     setRecords((prev) =>
@@ -448,6 +453,11 @@ export function BatchProductionWizard({
 
   return (
     <div className="bpw-overlay" dir="rtl">
+      <GlobalWizardDropTarget
+        acceptFile={isBatchImageFile}
+        onFiles={addFiles}
+        invalidSubtitle="גרור קבצי JPEG, PNG או WEBP בלבד"
+      />
       <div className="bpw-card">
         <div className="bpw-header">
           <div className="bpw-title">ייצור סדרתי — {template.templateName}</div>

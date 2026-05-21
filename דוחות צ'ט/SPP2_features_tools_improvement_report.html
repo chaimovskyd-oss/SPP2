@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPP2 — סקירת פונקציות, כלים ושיפורים מומלצים</title>
+<style>
+:root { --bg:#10131b; --card:#171b25; --card2:#1f2431; --text:#edf2ff; --muted:#aeb7cc; --blue:#4aa3ff; --green:#37d67a; --yellow:#ffd166; --red:#ff6b6b; --purple:#b388ff; --border:#2b3244; }
+* { box-sizing:border-box; }
+body { margin:0; font-family: Arial, 'Segoe UI', sans-serif; background:radial-gradient(circle at top right,#26304a 0,#10131b 38%,#0b0d13 100%); color:var(--text); line-height:1.65; }
+.wrap { max-width:1180px; margin:0 auto; padding:32px 22px 70px; }
+.hero { background:linear-gradient(135deg,rgba(74,163,255,.18),rgba(179,136,255,.13)); border:1px solid var(--border); border-radius:24px; padding:30px; box-shadow:0 20px 60px rgba(0,0,0,.28); }
+h1 { margin:0 0 10px; font-size:34px; }
+.subtitle { color:var(--muted); font-size:17px; margin:0; }
+.meta { margin-top:18px; display:flex; gap:10px; flex-wrap:wrap; }
+.pill { border:1px solid var(--border); background:rgba(255,255,255,.06); padding:7px 12px; border-radius:999px; color:#dbe6ff; font-size:13px; }
+.toc { margin:22px 0; display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; }
+.toc a { text-decoration:none; color:var(--text); background:rgba(255,255,255,.06); border:1px solid var(--border); padding:12px 14px; border-radius:14px; }
+section { margin-top:34px; }
+h2 { font-size:26px; margin:0 0 14px; border-right:5px solid var(--blue); padding-right:12px; }
+h3 { margin:0; font-size:19px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px; }
+.mode { background:var(--card); border:1px solid var(--border); border-radius:18px; padding:16px; }
+.mode b { color:#fff; display:block; margin-bottom:4px; }
+.mode code { color:#b8d9ff; direction:ltr; unicode-bidi:embed; }
+.card { background:linear-gradient(180deg,var(--card),#121721); border:1px solid var(--border); border-radius:20px; padding:18px; margin:14px 0; box-shadow:0 10px 32px rgba(0,0,0,.18); }
+.card.high { border-color:rgba(255,107,107,.5); } .card.med { border-color:rgba(255,209,102,.42); } .card.low { border-color:rgba(74,163,255,.35); } .card.op { border-color:rgba(55,214,122,.35); }
+.card-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; }
+.badge { white-space:nowrap; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:bold; }
+.badge.high { background:rgba(255,107,107,.15); color:#ffb0b0; } .badge.med { background:rgba(255,209,102,.13); color:#ffe29a; } .badge.low { background:rgba(74,163,255,.13); color:#b8d9ff; } .badge.op { background:rgba(55,214,122,.13); color:#a9f5c9; }
+ul,ol { margin-top:8px; }
+.files { margin-top:14px; padding:12px; background:rgba(255,255,255,.045); border:1px solid var(--border); border-radius:14px; }
+.files ul { margin:6px 0 0; }
+code { direction:ltr; unicode-bidi:embed; background:rgba(0,0,0,.24); border:1px solid rgba(255,255,255,.08); padding:1px 5px; border-radius:6px; color:#c9e2ff; }
+.prompt { margin-top:14px; }
+.prompt summary { cursor:pointer; color:#d7e7ff; font-weight:bold; }
+pre { white-space:pre-wrap; direction:ltr; text-align:left; background:#080a0f; color:#d7e7ff; border:1px solid var(--border); padding:14px; border-radius:14px; overflow:auto; }
+.table { width:100%; border-collapse:collapse; background:var(--card); border-radius:16px; overflow:hidden; }
+th,td { border-bottom:1px solid var(--border); padding:11px; vertical-align:top; }
+th { background:var(--card2); color:#fff; }
+.note { background:rgba(255,209,102,.1); border:1px solid rgba(255,209,102,.35); padding:14px; border-radius:16px; color:#ffe9ae; }
+.roadmap { display:grid; gap:12px; }
+.step { background:var(--card); border:1px solid var(--border); padding:14px 16px; border-radius:16px; }
+.footer { margin-top:40px; color:var(--muted); font-size:13px; }
+@media print { body { background:#fff; color:#111; } .card,.mode,.hero,.step { box-shadow:none; background:#fff; color:#111; } pre { color:#111; background:#f4f4f4; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <h1>SPP2 — סקירת פונקציות קיימות ושיפורים מומלצים</h1>
+    <p class="subtitle">סקירה סטטית של ה־ZIP שנשלח. המטרה: להבין מה כבר קיים, איפה יש פוטנציאל לא מנוצל, ומה כדאי להוסיף כדי להפוך את SPP2 לכלי ייצור/עיצוב יציב וגמיש יותר.</p>
+    <div class="meta">
+      <span class="pill">קובץ: SPP2(2).zip</span>
+      <span class="pill">נוצר: 2026-05-21 23:19</span>
+      <span class="pill">סגנון: דוח מוצר + פרומפטים לפיתוח</span>
+    </div>
+  </header>
+
+  <nav class="toc">
+    <a href="#existing">מה כבר קיים</a>
+    <a href="#insights">תובנות עיקריות</a>
+    <a href="#recommendations">שיפורים מומלצים</a>
+    <a href="#roadmap">תוכנית עבודה</a>
+    <a href="#masterprompt">פרומפט מאסטר</a>
+  </nav>
+
+  <section id="existing">
+    <h2>מפת פונקציות קיימות</h2>
+    <div class="grid">
+      <div class="mode"><b>מצבי עבודה ראשיים</b><code>free, grid, mask, collage, pdf_tools, class_photo, photo_print, product, batch_production</code><p>מופיעים ברשימת homeModes. זה בסיס יפה ורחב, אבל כרגע כל מצב עדיין מרגיש קצת כאי נפרד ולא כחלק ממערכת עבודה אחידה.</p></div><div class="mode"><b>עורך חופשי / קנבס</b><code>תמונה, טקסט, צורות, שכבות, יישור, גרירה, שכפול, מחיקה, נעילה, visibility</code><p>העורך המרכזי כבר חזק מאוד, אבל עמוס מדי בקובץ אחד ולכן קשה לשפר אותו בלי לשבור משהו.</p></div><div class="mode"><b>גריד ופיתוח תמונות</b><code>סידור אוטומטי, דפים מרובים, תאים, התאמת תמונות, טקסט filename, החלפת fit</code><p>היכולת קיימת, אבל חייבת חיזוק של FILL clamp, autosave קל, print all pages, ובקרת עומס.</p></div><div class="mode"><b>מסיכות</b><code>צורות, SVG/PNG, ספריית מסיכות, טקסטים על מסיכות, regenerate</code><p>כיוון טוב מאוד למוצרים כמו מחזיקים/צורות. כדאי להוסיף ניהול mask slots ברור יותר ושמירת presets לפי מוצר.</p></div><div class="mode"><b>קולאז׳</b><code>פריסות, scoring, shaped layouts, torn paper, puzzle, smart crop, drag dividers</code><p>יש מנוע עשיר, אבל צריך להפוך את בחירת הפריסות למובנת יותר למשתמש: דירוג, סינון, preview מהיר, וסיבות למה פריסה נבחרה.</p></div><div class="mode"><b>תמונת מחזור</b><code>אשף, שמות מקובץ, פנים, פריסת ילדים/צוות, כותרת ופוטר</code><p>מצב בעל ערך מסחרי ברור. כדאי להוסיף בקרת שמות חסרים, זיהוי כפולים, בדיקת תמונות בעייתיות, וסידור קבוצות.</p></div><div class="mode"><b>PDF Studio</b><code>ייבוא/סידור עמודים, שינוי גודל, התאמות בסיסיות, תצוגת thumbnails, הדפסה/preview</code><p>המודול קיים אבל עדיין נפרד יחסית מהעורך הראשי. הפיצ׳ר הגדול הבא: עריכת overlay על עמוד PDF כאילו הוא קנבס.</p></div><div class="mode"><b>ספריית מוצרים</b><code>מוצרים, אזורי הדפסה, bleed, safe area, הוראות, מסיכות מוצר</code><p>פוטנציאל גדול מאוד לחנות. צריך להפוך אותה למרכז עבודה אמיתי לפי סוג מוצר/מידות/מדפסת/הוראות ייצור.</p></div><div class="mode"><b>ייצור סדרתי</b><code>תבניות, שדות משתנים, תמונה משתנה, generate pages</code><p>רעיון חזק מאוד. כדאי לחזק עם data preview, בדיקת שדות חסרים, מיפוי CSV/Excel, וטבלת תוצאות לפני יצירה.</p></div><div class="mode"><b>כלי עזר</b><code>QR, קישורים מהירים, חיפוש, כלי לקוח, אפליקציות חיצוניות, ספריית מסיכות</code><p>קיימים אבל יושבים כ־overlay. כדאי להפוך אותם ל־Window/Panel manager כמו בפוטושופ.</p></div><div class="mode"><b>עריכת תמונה</b><code>Crop, eraser, white-bg, smart select, magic wand, rect select, brush select, AI Fill, adjustments, visual effects</code><p>יש בסיס חזק, אבל אין עדיין מודל אחיד של non-destructive image studio / adjustment layers / presets production.</p></div><div class="mode"><b>הגדרות וקיצורי דרך</b><code>workspace, performance, files/autosave, export/print, shortcuts, appearance</code><p>יש תשתית יפה. צריך לוודא שכל ההגדרות באמת משפיעות בזמן אמת על כל המודולים ולא נשארות רק UI.</p></div>
+    </div>
+  </section>
+
+  <section id="insights">
+    <h2>תובנות עיקריות לפני שמוסיפים עוד כלים</h2>
+    <div class="note"><b>הכיוון הכללי טוב מאוד:</b> יש כבר הרבה מנועים חזקים — קולאז׳, פיתוח, מסיכות, PDF, ייצור סדרתי, ספריית מוצרים, כלי תמונה. הבעיה העיקרית היא לא מחסור ברעיונות אלא חוסר בשכבת ארגון: מנהל פאנלים, רישום פקודות, Asset Manager, Image Studio אחיד ו־Print Center.</div>
+    <table class="table">
+      <tr><th>אזור</th><th>מה קיים</th><th>מה חסר כדי שזה ירגיש מקצועי</th></tr>
+      <tr><td>ממשק</td><td>Topbar, sidebar, right inspector, context toolbar, overlays</td><td>Window menu, dockable/collapsible panels, workspace presets</td></tr>
+      <tr><td>כלים</td><td>כפתורים ופעולות מפוזרות בקבצים שונים</td><td>Command registry אחד שממנו נבנים תפריטים, קיצורים ו־command palette</td></tr>
+      <tr><td>תמונות</td><td>effects, selections, AI fill, magic wand, crop</td><td>Image Studio אחד, presets, adjustment layers, laser prep, non-destructive workflow</td></tr>
+      <tr><td>ייצור</td><td>Print range, PDF preview, batch, product zones</td><td>Print Center, Preflight, printer presets, production presets</td></tr>
+      <tr><td>נכסים</td><td>assetManager, relink, package save</td><td>פאנל ניהול נכסים, משקל פרויקט, assets חסרים, replace/relink חזותי</td></tr>
+    </table>
+  </section>
+
+  <section id="recommendations">
+    <h2>המלצות מפורטות לפי נושאים</h2>
+    
+    <article class="card high">
+      <div class="card-head"><h3>1. להכניס Window / Panels Manager כמו בפוטושופ</h3><span class="badge high">גבוה</span></div>
+      <div class="body">
+<p>כרגע יש פאנלים קבועים בצדדים ועוד overlays קופצים. זה עובד, אבל ככל שהתוכנה גדלה זה יהפוך לעומס. הכיוון הנכון הוא תפריט <b>Window</b> מרכזי שממנו אפשר לפתוח/לסגור פאנלים: Layers, Pages, Properties, Color, Image Adjustments, Print, Assets, History, Product, Batch, QR, Masks ועוד.</p>
+<p>כל פאנל צריך להיות ישות רשומה במערכת: שם, אייקון, מיקום ברירת מחדל, האם פתוח, האם מוצמד, גודל, וקיצור דרך. כך אפשר ליצור סביבת עבודה מודולרית שמתאימה לחנות: מצב פיתוח תמונות עם פאנלים אחרים ממצב PDF או קולאז׳.</p>
+<ul><li>להוסיף תפריט Window עליון.</li><li>לאפשר פתיחה/סגירה של פאנלים ספציפיים.</li><li>לאפשר collapse לימין/שמאל.</li><li>לשמור workspace layout ב־localStorage/settings.</li><li>להוסיף presets: Photo Print, Design, PDF Studio, Product Setup, Batch.</li></ul>
+</div>
+      <div class="files"><b>קבצים/אזור רלוונטי:</b><ul><li><code>src/ui/editor/EditorScreen.tsx: left-sidebar/right-sidebar/context-toolbar</code></li><li><code>src/ui/utilities/UtilitiesMenu.tsx</code></li><li><code>src/settings/defaults.ts</code></li></ul></div>
+      <details class="prompt"><summary>פרומפט מוכן לקלוד/קודקס</summary><pre>Implement a Photoshop-like Window/Panel Manager for SPP2.
+Create a central panel registry with id, title, icon, default placement, visibility, dockable/collapsible state and shortcut.
+Add a top Window menu that can toggle panels: Layers, Pages, Properties, Color, Image Adjustments, Assets, Print, Product, Batch, Utilities, QR, Masks, History.
+Persist panel layout in app settings/localStorage.
+Add workspace presets: Photo Print, Design, PDF Studio, Product, Batch.
+Do not rewrite existing panels; wrap current left/right/overlay panels into the new registry gradually.</pre></details>
+    </article>
+    <article class="card high">
+      <div class="card-head"><h3>2. לפצל את EditorScreen — כרגע הוא נהיה &#x27;אלוהים אחד גדול&#x27;</h3><span class="badge high">גבוה</span></div>
+      <div class="body">
+<p>העורך המרכזי מכיל המון אחריות: קיצורי דרך, שכבות, עמודים, פיתוח תמונות, מסיכות, קולאז׳, תמונת מחזור, ייצוא, הדפסה, עריכת תמונה, AI, פאנלים, Batch ועוד. זה מסביר למה קלוד/קודקס מתקשים: כל שינוי קטן נוגע במפלצת אחת.</p>
+<p>הפתרון הוא לא rewrite. צריך חילוץ הדרגתי:</p>
+<ol><li><b>ToolbarController</b> — כל הכפתורים והפעולות העליונות.</li><li><b>PanelHost</b> — מארח פאנלים לפי registry.</li><li><b>LayerInspector</b> — כל מאפייני שכבה.</li><li><b>ImageStudioPanel</b> — כל כלי עריכת תמונה.</li><li><b>ModePanelHost</b> — פאנלים מיוחדים לגריד/מסיכה/קולאז׳/פיתוח.</li><li><b>ExportPrintController</b> — שמירה, ייצוא, הדפסה.</li></ol>
+</div>
+      <div class="files"><b>קבצים/אזור רלוונטי:</b><ul><li><code>src/ui/editor/EditorScreen.tsx</code></li><li><code>src/ui/editor/CanvasStage.tsx</code></li><li><code>src/ui/editor/ImageEditToolbar.tsx</code></li></ul></div>
+      <details class="prompt"><summary>פרומפט מוכן לקלוד/קודקס</summary><pre>Refactor EditorScreen.tsx gradually without changing behavior.
+Extract these components/services one by one:
+1. EditorTopBar
+2. LeftPanelHost
+3. RightInspectorHost
+4. ContextToolbarHost
+5. ImageStudioPanel
+6. ExportPrintController hooks
+7. ModePanelHost for grid/mask/collage/photo_print/class_photo/product
+Keep props explicit. Do not move logic unless tests pass. After each extraction run typecheck and smoke test.</pre></details>
+    </article>
+    <article class="card high">
+      <div class="card-head"><h3>3. להפוך את כלי עריכת התמונה ל־Image Studio אמיתי</h3><span class="badge high">גבוה</span></div>
+      <div class="body">
+<p>יש כבר Crop, Eraser, Remove white background, Magic Wand, Smart Select, Brush Select, AI Fill, וגם סליידרים כמו exposure/brightness/contrast/saturation/hue/sepia. זה מצוין, אבל כרגע זה מפוזר בין toolbar, inspector, Konva filters, sidecar AI וחלקים בקנבס.</p>
+<p>המלצה: ליצור פאנל אחד בשם <b>Image Studio</b> עם לשוניות:</p>
+<ul><li><b>Adjust</b>: חשיפה, בהירות, קונטרסט, רוויה, טמפרטורה, HSL, שחור־לבן, ספיה.</li><li><b>Select</b>: Magic Wand, Brush, Rect, Smart Select, refine edge.</li><li><b>Remove/Fill</b>: מחיקה חכמה, AI Fill, הסרת רקע לבן, הסרת רקע מלאה.</li><li><b>Prep</b>: הכנה ללייזר, threshold, posterize, line-art, sharpen, upscale/downscale.</li><li><b>Presets</b>: שמירת סטים כמו “ספיה עדין”, “תמונה לחריטה”, “הדפסה כהה יותר”.</li></ul>
+<p>הכי חשוב: כל העריכה צריכה להיות לא הרסנית ככל האפשר, כלומר נשמרת כ־effects/adjustments ולא כפיקסלים שרופים, אלא אם המשתמש לוחץ Apply Rasterize.</p>
+</div>
+      <div class="files"><b>קבצים/אזור רלוונטי:</b><ul><li><code>src/ui/editor/ImageEditToolbar.tsx</code></li><li><code>src/ui/editor/EditorScreen.tsx: Image Studio / Fast React-Konva Quick Adjustments</code></li><li><code>src/core/rendering/colorAdjustUtils.ts</code></li><li><code>src/types/layers.ts</code></li></ul></div>
+      <details class="prompt"><summary>פרומפט מוכן לקלוד/קודקס</summary><pre>Create a unified Image Studio panel.
+It should gather existing crop, selection, AI fill, magic wand, eraser, white-bg removal, quick adjustments and visual effects into one tabbed panel.
+Tabs: Adjust, Select, Remove/Fill, Laser Prep, Presets.
+Keep effects non-destructive on the layer effects object. Only rasterize when the user explicitly clicks Apply/Rasterize.
+Add preset save/load for common production presets: sepia, laser engraving, high contrast print, remove white background.</pre></details>
+    </article>
+    <article class="card high">
+      <div class="card-head"><h3>4. להוסיף Adjustment Layers אמיתיות</h3><span class="badge high">גבוה</span></div>
+      <div class="body">
+<p>כיום יש effects לכל שכבת תמונה, אבל אין שכבה מסוג Adjustment שמונחת מעל שכבות אחרות ומשפיעה עליהן כמו בפוטושופ.</p>
+<p>זה פיצ׳ר מאוד חזק: למשל לשים שכבת Sepia מעל כל עיצוב, שכבת Brightness על כל עמוד, או Black & White על קבוצת תמונות בלי לשנות כל תמונה בנפרד.</p>
+<p>הגרסה הראשונה יכולה להיות פשוטה: AdjustmentLayer עם סוג effect, עוצמה, blendMode, opacity, targetScope: page / below / selectedGroup.</p>
+</div>
+      <div class="files"><b>קבצים/אזור רלוונטי:</b><ul><li><code>src/types/layers.ts</code></li><li><code>src/core/rendering/renderModel.ts</code></li><li><code>src/ui/editor/EditorScreen.tsx</code></li><li><code>src/core/rendering/colorAdjustUtils.ts</code></li></ul></div>
+      <details class="prompt"><summary>פרומפט מוכן לקלוד/קודקס</summary><pre>Add AdjustmentLayer support to SPP2.
+Define a new layer type adjustment with adjustmentKind: brightnessContrast, hueSaturation, blackWhite, sepia, colorOverlay, curvesLite.
+Fields: opacity, blendMode, enabled, targetScope: page | below | group, params.
+Update renderModel/Konva rendering to apply adjustment to layers below or group scope.
+Add UI in Layers panel: New Adjustment Layer.
+V1 can support only page-wide or below-all behavior if group scope is too complex.</pre></details>
+    </article>
+    <article class="card med">
+      <div class="card-head"><h3>5. לשפר את Layers Panel שיהיה באמת בסגנון פוטושופ</h3><span class="badge med">בינוני</span></div>
+      <div class="body">
+<p>יש רשימת שכבות עם visibility, lock, drag reorder, badges ל־blend/effects. זה בסיס טוב. אפשר לשדרג משמעותית:</p>
+<ul><li>פילטרים לפי סוג: תמונה / טקסט / תא / מסיכה / Adjustment / מוצר.</li><li>קבוצות שכבות.</li><li>צבע סימון לשכבה.</li><li>חיפוש שכבות.</li><li>כפתור “בחר כל התמונות” / “בחר כל הטקסטים”.</li><li>כפתור “נעילת כל תאי הגריד, עריכת תוכן בלבד”.</li><li>אייקון שמראה אם שכבה כבדה או חסרה asset.</li><li>העתק/הדבק effects משכבה לשכבה.</li></ul>
+</div>
+      <div class="files"><b>קבצים/אזור רלוונטי:</b><ul><li><code>src/ui/editor/EditorScreen.tsx: LayerList</code></li><li><code>src/types/layers.ts</code></li></ul></div>
+      <details class="prompt"><summary>פרומפט מוכן לקלוד/קודקס</summary><pre>Upgrade the Layers panel.
+Add tabs/filters: All, Images, Text, Frames, Masks, Adjustments, Hidden, Locked.
+Add search by layer name.
+Add layer color labels and group support.
+Add bulk actions for selected layer type.
+Show badges for missing asset, effects, blend mode, variable field, frame/mask relation.
+Keep current drag reorder and visibility/lock behavior.</pre></details>
+    </article>
+    <article class="card med">
+      <div class="card-head"><h3>6. Multi-selection צריך להפוך לכלי עבודה מלא</h3><span class="badge med">בינוני</span></div>
+      <div class="body">
+<p>כבר יש תמיכה מסוימת בבחירה מרובה, אבל ה־toolbar עדיין כותב שערכים מעורבים “יוצגו בהמשך”. זה מקום עם ערך גבוה: כשבוחרים כמה תמונות צריך לשנות בהירות לכולן, fit mode לכולן, opacity, blend, scale, align, distribute.</p>
+<p>זה במיוחד חשוב לחנות, כי הרבה עבודה היא סדרתית: הרבה תמונות, הרבה תאים, הרבה עיצובים דומים.</p>
+</div>
+      <div class="files"><b>קבצים/אזור רלוונטי:</b><ul><li><code>src/ui/editor/EditorScreen.tsx: MixedSelectionToolbar</code></li><li><code>src/state/documentStore.ts</code></li></ul></div>
+      <details class="prompt"><summary>פרומפט מוכן לקלוד/קודקס</summary><pre>Improve multi-selection editing.
+When multiple image layers are selected, show shared controls: brightness, contrast, saturation, fit mode, opacity, blend mode, reset crop, copy effects, paste effects.
+When multiple text layers are selected, show font, size, color, alignment, effects.
+Show mixed values as &#x27;mixed&#x27; and apply changes only to compatible layers.
+Implement updates as one history transaction.</pre></details>
+    </article>
+    <article class="card med">
+      <div class="card-head"><h3>7. לבנות Command Palette — Ctrl+K</h3><span class="badge med">בינוני</span></div>
+      <div class="body">
+<p>ככל שיש יותר כלים, אי אפשר שהכול יהיה רק כפתורים. Command Palette תחפש פעולות: “הוסף טקסט”, “ייצוא PDF”, “פתח Layers”, “החל ספיה”, “הדפס כל העמודים”, “פתח Photoshop”.</p>
+<p>זה גם נותן בסיס לקיצורי דרך טובים יותר, כי כל פעולה נרשמת כפקודה.</p>
+</div>
+      <div class="files"><b>קבצים/אזור רלוונטי:</b><ul><li><code>src/core/input/inputSystem.ts</code></li><li><code>src/settings/defaults.ts</code></li><li><code>src/ui/editor/EditorScreen.tsx</code></li></ul></div>
+      <details class="prompt"><summary>פרומפט מוכן לקלוד/קודקס</summary><pre>Add a command palette (Ctrl+K) to SPP2.
+Create command registry with id, title, category, shortcut, enabled predicate and run handler.
+Register editor actions: add text, add image, save, export, print, toggle panels, open Image Studio, apply presets, open Photoshop, open PDF Studio.
+Allow fuzzy search. Use the same registry for shortcuts and menu items.</pre></details>
+    </article>
+    <article class="card high">
+      <div class="card-head"><h3>8. לחבר הגדרות כמקור אמת אמיתי ולא רק מסך הגדרות</h3><span class="badge high">גבוה</span></div>
+      <div class="body">
+<p>יש תשתית הגדרות יפה מאוד: workspace, performance, autosave, export, shortcuts, appearance. אבל חובה לוודא שכל ערך באמת משפיע על המנועים. לדוגמה: defaultImageFillMode, lowResWhileDragging, maxPreviewSizePx, undoHistoryLimit, autosave settings — אלה צריכים להיקרא במקומות שמבצעים פעולה, לא רק להישמר.</p>
+<p>כל פיצ׳ר חדש צריך לשאול: האם יש לו default בהגדרות? האם הוא נשמר? האם הוא משפיע בזמן אמת?</p>
+</div>
+      <div class="files"><b>קבצים/אזור רלוונטי:</b><ul><li><code>src/settings/defaults.ts</code></li><li><code>src/settings/types.ts</code></li><li><code>src/settings/store.ts</code></li><li><code>src/ui/settings/*</code></li><li><code>src/ui/editor/EditorScreen.tsx</code></li></ul></div>
+      <details class="prompt"><summary>פרומפט מוכן לקלוד/קודקס</summary><pre>Audit settings connectivity.
+For every setting in DEFAULT_APP_SETTINGS, find where it is read and where it affects behavior.
+Create a report of unused settings.
+Connect high-priority settings: default image fill mode, low-res while dragging, undo history limit, autosave interval/actions, backup count, default export format/DPI, theme/density, guides/rulers/grid.
+Add tests or debug logs confirming each setting is used.</pre></details>
+    </article>
+    <article class="card high">
+      <div class="card-head"><h3>9. Asset Manager חזותי — נכסים, קבצים חסרים, relink, משקל פרויקט</h3><span class="badge high">גבוה</span></div>
+      <div class="body">
+<p>אחרי בעיית autosave ברור שה־assets הם לב המערכת. צריך פאנל נכסים ייעודי: כל התמונות בפרויקט, איפה הן בשימוש, משקל, האם הן embedded או linked, האם חסרות, כפתור relink, כפתור replace, כפתור optimize preview.</p>
+<p>זה יפתור הרבה תקלות עתידיות: קובץ לא נטען, תמונה חסרה, פרויקט כבד מדי, שמירה איטית, PDF כבד.</p>
+</div>
+      <div class="files"><b>קבצים/אזור רלוונטי:</b><ul><li><code>src/core/assets/assetManager.ts</code></li><li><code>src/core/assets/relink.ts</code></li><li><code>src/core/save/sppPackage.ts</code></li><li><code>src/types/document.ts</code></li></ul></div>
+      <details class="prompt"><summary>פרומפט מוכן לקלוד/קודקס</summary><pre>Create an Asset Manager panel.
+List all project assets with thumbnail, file name, dimensions, usage count, embedded/linked status, missing status and estimated size.
+Add actions: relink asset, relink folder, replace asset everywhere, optimize preview, remove unused assets.
+Show project weight summary and warnings for huge base64/dataUrl assets.
+Use existing assetManager and relink helpers as the base.</pre></details>
+    </article>
+    <article class="card med">
+      <div class="card-head"><h3>10. PDF Studio צריך להתחבר לעורך כ־PDF Canvas Mode</h3><span class="badge med">בינוני</span></div>
+      <div class="body">
+<p>PDF Studio קיים, אבל החזון הנכון הוא: כל עמוד PDF יכול להיפתח כעמוד קנבס, עם שכבת רקע PDF נעולה ומעליה טקסטים/תמונות/חתימות/QR/מסיכות. כך אפשר לערוך PDF בלי להרגיש שזה מודול אחר.</p>
+<p>שלב ראשון: Open page in editor overlay. שלב שני: apply overlays back to PDF. שלב שלישי: batch operations על כל העמודים.</p>
+</div>
+      <div class="files"><b>קבצים/אזור רלוונטי:</b><ul><li><code>src/ui/pdf/PdfStudioScreen.tsx</code></li><li><code>src/ui/pdf/PdfOverlayEditor.tsx</code></li><li><code>src/ui/pdf/pdfStudioExportService.ts</code></li><li><code>src/ui/editor/EditorScreen.tsx</code></li></ul></div>
+      <details class="prompt"><summary>פרומפט מוכן לקלוד/קודקס</summary><pre>Integrate PDF Studio with the main editor as PDF Canvas Mode.
+Represent each PDF page as a locked background asset/page layer.
+Allow adding regular SPP2 layers above it: text, image, QR, shapes, signatures.
+Export should flatten overlays back into a PDF.
+Start with &#x27;Edit selected PDF page in editor&#x27; and return edited overlay to PDF Studio.</pre></details>
+    </article>
+    <article class="card high">
+      <div class="card-head"><h3>11. Export / Print Center במקום כפתורי הדפסה מפוזרים</h3><span class="badge high">גבוה</span></div>
+      <div class="body">
+<p>לתוכנה שלך הדפסה היא לא תוספת — זו הליבה. לכן צריך מרכז הדפסה ברור:</p>
+<ul><li>הדפס עמוד נוכחי.</li><li>הדפס כל העמודים.</li><li>הדפס טווח.</li><li>Print one copy עם הגדרות אחרונות.</li><li>בחירת מדפסת ופרופיל.</li><li>שמירת presets למדפסות: D80, סובלימציה, לייזר, PDF.</li><li>preflight לפני הדפסה: DPI נמוך, חריגה מ־safe area, תמונה חסרה, עמודים ריקים.</li></ul>
+</div>
+      <div class="files"><b>קבצים/אזור רלוונטי:</b><ul><li><code>src/ui/print/PrintRangeDialog.tsx</code></li><li><code>src/ui/print/lastPrintSettings.ts</code></li><li><code>src/services/printPreviewService.ts</code></li><li><code>print.preview.engine/</code></li></ul></div>
+      <details class="prompt"><summary>פרומפט מוכן לקלוד/קודקס</summary><pre>Build a unified Export/Print Center.
+Support current page, all pages, selected pages/range and Print One Copy using last settings.
+Add printer/profile presets with DPI, bleed, crop marks, color compensation and page range behavior.
+Add preflight warnings before printing: missing assets, low DPI, white margins, safe area violations, empty pages.
+Use existing PrintRangeDialog and print.preview.engine as the base.</pre></details>
+    </article>
+    <article class="card high">
+      <div class="card-head"><h3>12. Photo Print Mode — להפוך לכלי יומי יציב ומהיר</h3><span class="badge high">גבוה</span></div>
+      <div class="body">
+<p>פיתוח תמונות הוא כנראה אחד המצבים הכי שימושיים אצלך. מעבר ל־autosave ו־FILL clamp, כדאי להוסיף:</p>
+<ul><li>סרגל “תמונות שלא שובצו”.</li><li>זיהוי כפילויות.</li><li>החל fit/crop על כל התמונות באותו גודל.</li><li>סידור מחדש לפי שם/תאריך/יחס תמונה.</li><li>אזהרה על תמונות באיכות נמוכה לגודל ההדפסה.</li><li>הוספת מספור קטן מאחורי הקלעים / שם קובץ להדפסה.</li><li>החל תיקון צבע קל על כל התמונות.</li></ul>
+</div>
+      <div class="files"><b>קבצים/אזור רלוונטי:</b><ul><li><code>src/core/photoPrint/photoPrintModeEngine.ts</code></li><li><code>src/ui/photoPrint/PhotoPrintModePanel.tsx</code></li><li><code>src/ui/photoPrint/PhotoPrintSetupWizard.tsx</code></li></ul></div>
+      <details class="prompt"><summary>פרומפט מוכן לקלוד/קודקס</summary><pre>Improve Photo Print Mode as a production workflow.
+Add an unplaced images tray, duplicate detection, sort by filename/date/aspect ratio, apply crop/fit to all same-size prints, quality/DPI warnings, and bulk color adjustment preset.
+Ensure FILL always clamps during drag and transform.
+Ensure autosave is lightweight and safe for many images.</pre></details>
+    </article>
+    <article class="card med">
+      <div class="card-head"><h3>13. Collage — להפוך את ההצעות להסבריות ולא רק אוטומטיות</h3><span class="badge med">בינוני</span></div>
+      <div class="body">
+<p>יש מנוע הצעות חכם, scoring, פריסות צורה, puzzle/torn. אבל המשתמש צריך להבין “למה זו פריסה טובה”.</p>
+<ul><li>להציג ציון: איזון, ניצול שטח, התאמת יחסי תמונה, פנים לא חתוכות.</li><li>סינון: יותר סימטרי / יותר אקראי / תמונה מרכזית גדולה / מקום לטקסט.</li><li>נעילת תא ואז regenerate סביבו.</li><li>החלפה מהירה בין תמונות עם drag.</li></ul>
+</div>
+      <div class="files"><b>קבצים/אזור רלוונטי:</b><ul><li><code>src/core/collage/*</code></li><li><code>src/ui/collage/CollageLayoutsPanel.tsx</code></li><li><code>src/ui/collage/CollageModePanel.tsx</code></li></ul></div>
+      <details class="prompt"><summary>פרומפט מוכן לקלוד/קודקס</summary><pre>Improve collage suggestions UX.
+Show why each layout was suggested: balance score, crop risk, face safety, empty space, large hero image.
+Add filters: symmetric, playful/random, center hero, text-safe, product-safe.
+Allow locking selected slots and regenerating the rest.
+Keep current scoring engine but expose its reasoning in the UI.</pre></details>
+    </article>
+    <article class="card high">
+      <div class="card-head"><h3>14. Batch Production — להפוך למערכת ייצור רצינית</h3><span class="badge high">גבוה</span></div>
+      <div class="body">
+<p>הבסיס כבר קיים: תבניות ושדות משתנים. כדי שזה יהיה כלי חזק צריך להוסיף workflow מלא:</p>
+<ul><li>ייבוא CSV/Excel.</li><li>מסך מיפוי עמודות לשדות.</li><li>Preview של 5 שורות ראשונות.</li><li>בדיקת תמונות חסרות.</li><li>דו״ח לפני יצירה: כמה ייווצר, אילו שגיאות יש.</li><li>יצירה לקבצים נפרדים או PDF אחד.</li><li>ייצוא לפי שם לקוח/מוצר.</li></ul>
+</div>
+      <div class="files"><b>קבצים/אזור רלוונטי:</b><ul><li><code>src/core/batchProduction/*</code></li><li><code>src/ui/batchProduction/*</code></li></ul></div>
+      <details class="prompt"><summary>פרומפט מוכן לקלוד/קודקס</summary><pre>Upgrade Batch Production workflow.
+Add CSV/Excel import, column-to-variable mapping UI, validation preview, missing image detection, first 5 generated previews, and error report before final generation.
+Allow export as separate files or one multi-page PDF.
+Allow output file naming pattern using variables.</pre></details>
+    </article>
+    <article class="card med">
+      <div class="card-head"><h3>15. Product Library — להפוך למוח של החנות</h3><span class="badge med">בינוני</span></div>
+      <div class="body">
+<p>ספריית המוצרים יכולה להיות הרבה יותר מרשימת מוצרים. היא יכולה לנהל production presets: בלוק, קנבס, מחזיק מפתחות, מגבת, כוס, בקבוק, זכוכית, בזלת.</p>
+<p>לכל מוצר כדאי לשמור: אזורי הדפסה, DPI מומלץ, bleed/safe area, הוראות חיתוך/לייזר/סובלימציה, פרופיל צבע, תבניות מומלצות, מחיר בסיס, זמן ייצור, ספק.</p>
+</div>
+      <div class="files"><b>קבצים/אזור רלוונטי:</b><ul><li><code>src/core/product/productDocument.ts</code></li><li><code>src/ui/productLibrary/*</code></li><li><code>src/types/product.ts</code></li></ul></div>
+      <details class="prompt"><summary>פרומפט מוכן לקלוד/קודקס</summary><pre>Expand Product Library into a production knowledge base.
+For each product store: print zones, safe area, bleed, recommended DPI, production type, printer/profile, color compensation preset, instructions, supplier, cost, sell price, estimated production time and template recommendations.
+Add search/filter by category, production type and price.
+Add one-click create standard design / collage design / batch template.</pre></details>
+    </article>
+    <article class="card op">
+      <div class="card-head"><h3>16. Laser Prep / Line Art Prep — כלי ייחודי שייתן לך יתרון</h3><span class="badge op">הזדמנות</span></div>
+      <div class="body">
+<p>מכיוון שאתה עובד עם חריטה/לייזר ומתנות, שווה לבנות מצב הכנה ללייזר:</p>
+<ul><li>המרה לשחור־לבן.</li><li>threshold חכם.</li><li>line art מתמונה.</li><li>הורדת רקע.</li><li>ניקוי פרטים קטנים.</li><li>הפחתת צפיפות קווים.</li><li>preview על חומר: עץ/זכוכית/בזלת.</li><li>ייצוא SVG/PNG חד צבעי.</li></ul>
+</div>
+      <div class="files"><b>קבצים/אזור רלוונטי:</b><ul><li><code>src/core/rendering/colorAdjustUtils.ts</code></li><li><code>src/ui/editor/ImageEditToolbar.tsx</code></li><li><code>image.editor.engine/ אם קיים בפרויקט המלא</code></li></ul></div>
+      <details class="prompt"><summary>פרומפט מוכן לקלוד/קודקס</summary><pre>Add Laser Prep tools to Image Studio.
+Implement black/white threshold, edge/line-art extraction, background removal, detail reduction, despeckle, invert, and preview on materials.
+Allow exporting a laser-ready PNG/SVG mask.
+Add presets: clean portrait engraving, logo engraving, low-density line art, stamp style.</pre></details>
+    </article>
+    <article class="card med">
+      <div class="card-head"><h3>17. תפריטי Context חכמים לפי מה שנבחר</h3><span class="badge med">בינוני</span></div>
+      <div class="body">
+<p>כבר יש context toolbar לפי בחירה. כדאי לשדרג אותו כך שבלחיצה ימנית או toolbar קטן יוצגו פעולות שמתאימות בדיוק לאובייקט:</p>
+<ul><li>תמונה: crop, replace, edit, open in Photoshop, remove bg, copy effects.</li><li>תא/Frame: fit all, lock frame, edit content only, swap image.</li><li>טקסט: save preset, warp, outline, shadow, auto contrast.</li><li>PDF page: rotate, crop, duplicate, split, overlay edit.</li><li>מוצר: show safe area, export production file.</li></ul>
+</div>
+      <div class="files"><b>קבצים/אזור רלוונטי:</b><ul><li><code>src/ui/editor/CanvasStage.tsx</code></li><li><code>src/ui/editor/KonvaLayerNode.tsx</code></li><li><code>src/ui/editor/EditorScreen.tsx</code></li></ul></div>
+      <details class="prompt"><summary>פרומפט מוכן לקלוד/קודקס</summary><pre>Create a context action registry.
+Each selected object type exposes context actions with id, label, icon, enabled predicate and run handler.
+Use it for right-click menu and context toolbar.
+Start with image, text, frame/mask, PDF page, product print zone and multi-selection actions.</pre></details>
+    </article>
+    <article class="card high">
+      <div class="card-head"><h3>18. Preflight Panel — בדיקת בעיות לפני שמירה/הדפסה</h3><span class="badge high">גבוה</span></div>
+      <div class="body">
+<p>זה פיצ׳ר קריטי לתוכנת ייצור. לפני הדפסה/ייצוא התוכנה צריכה לסרוק ולתת רשימת אזהרות:</p>
+<ul><li>תמונה חסרה.</li><li>DPI נמוך.</li><li>תמונה לא ממלאת FILL ויש לבן.</li><li>טקסט מחוץ ל־safe area.</li><li>עמוד ריק.</li><li>asset כבד מדי.</li><li>מסיכה בלי תמונה.</li><li>שדות batch חסרים.</li><li>PDF עם עמודים בגדלים שונים.</li></ul>
+</div>
+      <div class="files"><b>קבצים/אזור רלוונטי:</b><ul><li><code>src/core/export/exportPreparation.ts</code></li><li><code>src/core/save/projectLifecycle.ts</code></li><li><code>src/ui/print/PrintRangeDialog.tsx</code></li></ul></div>
+      <details class="prompt"><summary>פרומפט מוכן לקלוד/קודקס</summary><pre>Add a Preflight panel and pre-export validation.
+Scan document before print/export/save package.
+Detect missing assets, low DPI, empty pages, fill coverage violations, text outside safe area, oversized assets, empty frames, missing batch variables and inconsistent PDF page sizes.
+Show warnings with &#x27;Fix&#x27; buttons when possible.</pre></details>
+    </article>
+    <article class="card med">
+      <div class="card-head"><h3>19. Performance Dashboard קטן למפתחים ולך</h3><span class="badge med">בינוני</span></div>
+      <div class="body">
+<p>כבר יש diagnostics. כדאי להפוך את זה לחלון נוח: memory usage, asset count, page count, render time, autosave payload size, undo history size, heavy layers.</p>
+<p>זה יעזור לתפוס תקלות לפני שהן הופכות לקריסה.</p>
+</div>
+      <div class="files"><b>קבצים/אזור רלוונטי:</b><ul><li><code>src/debug/sppDiagnostics.ts</code></li><li><code>electron/preload.ts: getMemoryUsage</code></li><li><code>src/settings/defaults.ts: advanced.enableDiagnostics</code></li></ul></div>
+      <details class="prompt"><summary>פרומפט מוכן לקלוד/קודקס</summary><pre>Create a Diagnostics/Performance panel.
+Show memory usage, document size estimate, asset count, page count, layer count, undo history size, autosave size, render time and last errors.
+Add a &#x27;copy diagnostic report&#x27; button.
+Enable it only when advanced.enableDiagnostics is true.</pre></details>
+    </article>
+    <article class="card op">
+      <div class="card-head"><h3>20. מערכת Presets כללית</h3><span class="badge op">הזדמנות</span></div>
+      <div class="body">
+<p>יש presets בכמה מקומות, אבל כדאי לבנות מערכת אחידה: Text presets, Image presets, Export presets, Product presets, Print presets, Workspace presets, Laser presets.</p>
+<p>המשמעות: המשתמש לא צריך לבנות כל פעם מחדש. זה קריטי לעבודה בחנות.</p>
+</div>
+      <div class="files"><b>קבצים/אזור רלוונטי:</b><ul><li><code>src/core/text/presets.ts</code></li><li><code>print.preview.engine/print_preview/profiles</code></li><li><code>src/settings/defaults.ts</code></li></ul></div>
+      <details class="prompt"><summary>פרומפט מוכן לקלוד/קודקס</summary><pre>Create a general Preset system.
+Support preset types: textStyle, imageAdjustments, visualEffects, exportPrint, workspaceLayout, productProduction, laserPrep.
+Each preset has id, name, type, params, tags, createdAt, updatedAt.
+Add import/export presets and UI for saving current settings as preset.</pre></details>
+    </article>
+  </section>
+
+  <section id="roadmap">
+    <h2>תוכנית עבודה מומלצת</h2>
+    <div class="roadmap">
+      <div class="step"><b>שלב 1 — יציבות בסיס</b><br>Autosave קל, FILL clamp, Print all pages, preflight בסיסי, הסרת כפילויות קבצים ישנים.</div><div class="step"><b>שלב 2 — סדר בממשק</b><br>Window menu, Panel Manager, collapsible/resizable sidebars, workspace presets.</div><div class="step"><b>שלב 3 — Image Studio</b><br>איחוד כלי עריכת תמונה, presets, laser prep, adjustment layers בסיסיות.</div><div class="step"><b>שלב 4 — ייצור</b><br>Print Center, Product Library production presets, Batch CSV/Excel workflow, Asset Manager.</div><div class="step"><b>שלב 5 — חכמה ואוטומציה</b><br>Command Palette, explainable collage suggestions, face-aware crops, preflight fixes, diagnostics dashboard.</div>
+    </div>
+  </section>
+
+  <section id="masterprompt">
+    <h2>פרומפט מאסטר לקלוד/קודקס</h2>
+    <pre>I need a product-level improvement plan for SPP2 based on the current codebase.
+Do not rewrite the app. Work incrementally.
+Main goals:
+1. Add a Photoshop-like Window menu and panel manager.
+2. Extract EditorScreen responsibilities gradually without changing behavior.
+3. Build a unified Image Studio from existing image tools.
+4. Add lightweight Adjustment Layers.
+5. Improve Layers Panel, multi-selection and context actions.
+6. Add Command Palette and command registry.
+7. Connect settings as real source of truth.
+8. Add Asset Manager, Preflight Panel and Print Center.
+9. Improve Photo Print, Collage, PDF Studio, Product Library and Batch Production workflows.
+
+Rules:
+- Preserve existing behavior.
+- One feature/refactor per commit.
+- After each step run npm run typecheck/build.
+- Prefer registries and small reusable components over more giant conditions in EditorScreen.
+- Add acceptance tests/smoke tests for each change.
+- Focus first on stability and workflow clarity before adding flashy features.
+
+Suggested order:
+Phase 1: Panel registry + Window menu + workspace layout persistence.
+Phase 2: Image Studio panel wrapping existing tools.
+Phase 3: Asset Manager + Preflight basic checks.
+Phase 4: Print Center with page ranges and last settings.
+Phase 5: Adjustment Layers and production presets.
+</pre>
+  </section>
+
+  <p class="footer">הערה: הדוח מבוסס על קריאת קוד סטטית ולא על הרצה מלאה של התוכנה. לכן חלק מההמלצות הן “כיווני מוצר” ולא אבחון באגים ודאי. המקומות המסומנים בקבצים הם נקודות התחלה טובות לקלוד/קודקס.</p>
+</div>
+</body>
+</html>

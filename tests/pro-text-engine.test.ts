@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { BUILTIN_TEXT_PRESETS, createDocument, createPage, createProjectEnvelope, createTextLayer, parseProject, serializeProject } from "@/core";
+import { BUILTIN_TEXT_PRESETS, createDocument, createPage, createProjectEnvelope, createTextLayer, createTextPresetFromLayer, parseProject, serializeProject } from "@/core";
 import { useDocumentStore } from "@/state/documentStore";
 import type { TextLayer } from "@/types/layers";
 
@@ -112,9 +112,82 @@ describe("Pro text engine foundation", () => {
     useDocumentStore.getState().applyTextPreset(page.id, layer.id, BUILTIN_TEXT_PRESETS[0]);
     const updated = useDocumentStore.getState().document?.pages[0]?.layers[0] as TextLayer | undefined;
 
-    expect(BUILTIN_TEXT_PRESETS).toHaveLength(12);
+    expect(BUILTIN_TEXT_PRESETS).toHaveLength(24);
     expect(updated?.effects.length).toBeGreaterThan(0);
     expect(updated?.gradient).toBeDefined();
     expect(updated?.stroke).toBeDefined();
+  });
+
+  it("includes advanced printable text presets with complex effect params", () => {
+    const silver = BUILTIN_TEXT_PRESETS.find((preset) => preset.presetId === "true_silver_sparkle");
+    const balloon = BUILTIN_TEXT_PRESETS.find((preset) => preset.presetId === "balloon_burnt_inside");
+    const gold3d = BUILTIN_TEXT_PRESETS.find((preset) => preset.presetId === "real_3d_gold");
+
+    expect(silver?.category).toBe("sparkle");
+    expect(silver?.effects.some((effect) => effect.effectType === "pattern_overlay")).toBe(true);
+    expect(silver?.effects.some((effect) => effect.effectType === "sparkle")).toBe(true);
+    expect(balloon?.effects.some((effect) => effect.effectType === "outer_glow")).toBe(true);
+    expect(gold3d?.effects.some((effect) => effect.effectType === "extrude_3d")).toBe(true);
+  });
+
+  it("deep-clones complex preset effect params when applying presets", () => {
+    const layer = createTextLayer({ text: "Silver", rect: { x: 0, y: 0, width: 180, height: 80 } });
+    const page = createPage({ name: "Preset clone", layers: [layer] });
+    const document = { ...createDocument({ name: "Preset clone test" }), pages: [page] };
+    const preset = BUILTIN_TEXT_PRESETS.find((item) => item.presetId === "true_silver_sparkle");
+    expect(preset).toBeDefined();
+
+    useDocumentStore.getState().setDocument(document);
+    useDocumentStore.getState().applyTextPreset(page.id, layer.id, preset!);
+    const updated = useDocumentStore.getState().document?.pages[0]?.layers[0] as TextLayer | undefined;
+    const presetPattern = preset!.effects.find((effect) => effect.effectType === "pattern_overlay");
+    const layerPattern = updated?.effects.find((effect) => effect.effectType === "pattern_overlay");
+
+    expect(layerPattern).toBeDefined();
+    expect(layerPattern).not.toBe(presetPattern);
+    expect(layerPattern?.params).not.toBe(presetPattern?.params);
+    expect(layerPattern?.params).toEqual(presetPattern?.params);
+  });
+
+  it("captures complete user text presets from the current layer state", () => {
+    const layer = createTextLayer({ text: "Spark", rect: { x: 0, y: 0, width: 220, height: 90 } });
+    const styled: TextLayer = {
+      ...layer,
+      fontFamily: "Missing Fancy Font",
+      fontWeight: 900,
+      letterSpacing: 6,
+      effects: [
+        {
+          version: 1,
+          id: "sparkle_user",
+          effectId: "sparkle_user",
+          effectType: "sparkle",
+          enabled: true,
+          opacity: 1,
+          blendMode: "normal",
+          params: { density: 0.4, size: 9, color: "#ffffff", seed: 12, opacity: 0.9, glint: 0.8, halo: 0.7 }
+        },
+        {
+          version: 1,
+          id: "pattern_user",
+          effectId: "pattern_user",
+          effectType: "pattern_overlay",
+          enabled: true,
+          opacity: 1,
+          blendMode: "normal",
+          params: { patternType: "uploaded_image", foreground: "#ffffff", opacity: 0.65, scale: 1, rotation: 0, spacing: 22, imageDataUrl: "data:image/png;base64,abc", imageName: "fabric.png" }
+        }
+      ]
+    };
+
+    const preset = createTextPresetFromLayer(styled, "Saved sparkle");
+
+    expect(preset.isBuiltin).toBe(false);
+    expect(preset.includesTypography).toBe(true);
+    expect(preset.style.fontFamily).toBe("Missing Fancy Font");
+    expect(preset.style.letterSpacing).toBe(6);
+    expect(preset.effects).toHaveLength(2);
+    expect(preset.effects[1]?.params).toEqual(styled.effects[1]?.params);
+    expect(preset.effects[1]?.params).not.toBe(styled.effects[1]?.params);
   });
 });

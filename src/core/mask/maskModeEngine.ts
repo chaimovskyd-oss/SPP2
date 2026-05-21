@@ -23,6 +23,28 @@ export const DEFAULT_MASK_SIZE = 220;
 export const DEFAULT_MASK_SPACING = 24;
 export const MIN_MASK_CANVAS_INSET = 8;
 
+export interface MaskAvailableArea {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  width: number;
+  height: number;
+}
+
+export interface MaskOverflowCheck {
+  exceeds: boolean;
+  availableWidth: number;
+  availableHeight: number;
+  requiredWidth: number;
+  requiredHeight: number;
+}
+
+export interface MaskFitPageSize {
+  width: number;
+  height: number;
+}
+
 export function createMaskModeDocument(name: string, setup: PageSetup, options: Partial<MaskCreateOptions> = {}, projectMetadata: ProjectMetadataInput = {}): Document {
   const maskOptions = normalizeMaskCreateOptions(options);
   const page = createPage({ name: "Mask 1", setup });
@@ -53,12 +75,11 @@ export function createMaskModeDocument(name: string, setup: PageSetup, options: 
 }
 
 export function computeMaskFrameRects(page: Pick<Page, "width" | "height" | "setup">, rule: Pick<MaskLayoutRule, "maskWidth" | "maskHeight" | "margins" | "safeArea" | "spacingX" | "spacingY">): MaskFrameRect[] {
-  const left = Math.max(MIN_MASK_CANVAS_INSET, rule.margins.left, rule.safeArea.left);
-  const right = Math.max(MIN_MASK_CANVAS_INSET, rule.margins.right, rule.safeArea.right);
-  const top = Math.max(MIN_MASK_CANVAS_INSET, rule.margins.top, rule.safeArea.top);
-  const bottom = Math.max(MIN_MASK_CANVAS_INSET, rule.margins.bottom, rule.safeArea.bottom);
-  const availableWidth = page.width - left - right;
-  const availableHeight = page.height - top - bottom;
+  const area = getMaskAvailableArea(page, rule);
+  const left = area.left;
+  const top = area.top;
+  const availableWidth = area.width;
+  const availableHeight = area.height;
   const width = Math.max(1, rule.maskWidth);
   const height = Math.max(1, rule.maskHeight);
   const columns = Math.max(1, Math.floor((availableWidth + rule.spacingX) / (width + rule.spacingX)));
@@ -84,6 +105,78 @@ export function computeMaskFrameRects(page: Pick<Page, "width" | "height" | "set
   }
 
   return rects;
+}
+
+export function getMaskAvailableArea(
+  page: Pick<Page, "width" | "height">,
+  rule: Pick<MaskLayoutRule, "margins" | "safeArea">
+): MaskAvailableArea {
+  const left = Math.max(MIN_MASK_CANVAS_INSET, rule.margins.left, rule.safeArea.left);
+  const right = Math.max(MIN_MASK_CANVAS_INSET, rule.margins.right, rule.safeArea.right);
+  const top = Math.max(MIN_MASK_CANVAS_INSET, rule.margins.top, rule.safeArea.top);
+  const bottom = Math.max(MIN_MASK_CANVAS_INSET, rule.margins.bottom, rule.safeArea.bottom);
+  return {
+    left,
+    right,
+    top,
+    bottom,
+    width: page.width - left - right,
+    height: page.height - top - bottom
+  };
+}
+
+export function checkMaskPageOverflow(
+  page: Pick<Page, "width" | "height">,
+  rule: Pick<MaskLayoutRule, "margins" | "safeArea">,
+  size: Pick<MaskLayoutRule, "maskWidth" | "maskHeight">
+): MaskOverflowCheck {
+  const area = getMaskAvailableArea(page, rule);
+  const requiredWidth = Math.max(1, size.maskWidth);
+  const requiredHeight = Math.max(1, size.maskHeight);
+  return {
+    exceeds: requiredWidth > area.width || requiredHeight > area.height,
+    availableWidth: area.width,
+    availableHeight: area.height,
+    requiredWidth,
+    requiredHeight
+  };
+}
+
+export function pageSizeForMaskFit(
+  page: Pick<Page, "width" | "height">,
+  rule: Pick<MaskLayoutRule, "margins" | "safeArea">,
+  size: Pick<MaskLayoutRule, "maskWidth" | "maskHeight">
+): MaskFitPageSize {
+  const area = getMaskAvailableArea(page, rule);
+  return {
+    width: Math.max(page.width, Math.ceil(size.maskWidth + area.left + area.right)),
+    height: Math.max(page.height, Math.ceil(size.maskHeight + area.top + area.bottom))
+  };
+}
+
+export function resizeMaskPagesToFit(document: Document, maskId: string, size: Pick<MaskLayoutRule, "maskWidth" | "maskHeight">): Document {
+  const rule = getMaskRule(document, maskId);
+  if (rule === undefined) return document;
+  const pageIds = new Set(rule.pageIds);
+  return {
+    ...document,
+    pages: document.pages.map((page) => {
+      if (!pageIds.has(page.id)) return page;
+      const nextSize = pageSizeForMaskFit(page, rule, size);
+      if (nextSize.width === page.width && nextSize.height === page.height) return page;
+      return {
+        ...page,
+        width: nextSize.width,
+        height: nextSize.height,
+        orientation: nextSize.width > nextSize.height ? "landscape" : "portrait",
+        setup: {
+          ...page.setup,
+          orientation: nextSize.width > nextSize.height ? "landscape" : "portrait",
+          size: nextSize
+        }
+      };
+    })
+  };
 }
 
 export function fillMaskWithImages(document: Document, maskId: string, inputs: MaskImageInput[]): Document {
@@ -433,6 +526,7 @@ function createMaskPage(page: Page, rule: MaskLayoutRule, pageIndex: number, max
 }
 
 function createMaskFrame(rule: MaskLayoutRule, rect: MaskFrameRect, pageIndex: number, globalIndex: number): FrameLayer {
+  const maskAssetId = typeof rule.metadata["maskAssetId"] === "string" ? rule.metadata["maskAssetId"] : undefined;
   const metadata: MaskFrameMetadata = {
     maskId: rule.id,
     maskPageIndex: pageIndex,
@@ -455,6 +549,9 @@ function createMaskFrame(rule: MaskLayoutRule, rect: MaskFrameRect, pageIndex: n
     batchIndex: globalIndex,
     lockedFrame: true,
     cornerRadius: rule.maskShape === "roundedRect" ? Math.min(rect.width, rect.height) * 0.18 : undefined,
+    maskSource: rule.maskShape === "custom" && maskAssetId !== undefined
+      ? { version: 1, type: "alphaAsset", assetId: maskAssetId, width: rect.width, height: rect.height }
+      : undefined,
     smartCropMode: rule.smartCropEnabled ? "face" : "center",
     zIndex: globalIndex,
     metadata: { maskFrame: metadata }

@@ -47,9 +47,11 @@ export type TextEffectType =
   | "outer_glow"
   | "inner_glow"
   | "bevel_emboss"
+  | "extrude_3d"
   | "gradient_map"
   | "pattern_overlay"
   | "color_overlay"
+  | "sparkle"
   | "satin";
 
 export interface FillEffectParams {
@@ -73,6 +75,9 @@ export interface ShadowEffectParams {
   distance: number;
   blur: number;
   spread?: number;
+  passes?: number;
+  innerColor?: string;
+  outerColor?: string;
 }
 
 export interface BevelEmbossParams {
@@ -83,6 +88,43 @@ export interface BevelEmbossParams {
   soften: number;
   highlightColor: string;
   shadowColor: string;
+  offsetX?: number;
+  offsetY?: number;
+  steps?: number;
+}
+
+export type TextPatternType = "stripes" | "dots" | "checker" | "diagonal_shine" | "noise" | "halftone" | "brushed_metal" | "uploaded_image";
+
+export interface PatternOverlayParams {
+  patternType: TextPatternType;
+  foreground: string;
+  background?: string;
+  opacity: number;
+  scale: number;
+  rotation: number;
+  spacing: number;
+  imageDataUrl?: string;
+  imageName?: string;
+}
+
+export interface SparkleParams {
+  density: number;
+  size: number;
+  color: string;
+  seed: number;
+  opacity: number;
+  rays?: number;
+  glint?: number;
+  halo?: number;
+}
+
+export interface Extrude3DParams {
+  color: string;
+  depth: number;
+  offsetX: number;
+  offsetY: number;
+  steps: number;
+  opacity: number;
 }
 
 export type TextEffectParams =
@@ -90,6 +132,9 @@ export type TextEffectParams =
   | StrokeEffectParams
   | ShadowEffectParams
   | BevelEmbossParams
+  | PatternOverlayParams
+  | SparkleParams
+  | Extrude3DParams
   | Record<string, string | number | boolean | GradientStyle | undefined>;
 
 export interface TextEffect extends VersionedEntity {
@@ -126,6 +171,9 @@ export type TextPresetCategory =
   | "retro"
   | "minimal"
   | "hebrew"
+  | "sparkle"
+  | "sticker"
+  | "comic"
   | "user";
 
 export interface TextPreset extends VersionedEntity {

@@ -24,6 +24,7 @@ import { applyTextPresetToLayer, applyTextStylePatch, extractTextStylePatch } fr
 import { measureTextLayerSize } from "@/core/text/measurement";
 import { createCollageImageAssignment, createCollageRule as collageRuleFactory } from "@/core/collage/collageFactory";
 import { applyLayoutFamily, applyNewImagePool, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
+import { drainOverflow, pushOverflow, readOverflow, writeOverflow } from "@/core/reconcile";
 import { syncClassPhotoToPage } from "@/core/classPhoto/classPhotoLayoutEngine";
 import type { ClassPhotoPersonRecord, ClassPhotoFrameStyle, ClassPhotoLayoutSettings, ClassPhotoVisualBalanceSettings } from "@/types/classPhoto";
 import type { TextStyle } from "@/types/template";
@@ -42,6 +43,7 @@ import type {
 } from "@/types/collage";
 import type { ID } from "@/types/primitives";
 import type { VisualEffectStack } from "@/types/visualEffects";
+import { getDocumentDebugSummary, logPageSwitch } from "@/debug/sppDiagnostics";
 
 export interface DocumentState {
   document: Document | null;
@@ -175,7 +177,14 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       textStyleClipboard: null,
       linkedGroups: []
     }),
-  setActivePage: (pageId) => set({ activePageId: pageId }),
+  setActivePage: (pageId) =>
+    set((state) => {
+      if (state.activePageId !== pageId) {
+        const activePage = state.document?.pages.find((page) => page.id === pageId) ?? null;
+        logPageSwitch(state.activePageId, pageId, getDocumentDebugSummary(state.document, activePage, state.history));
+      }
+      return { activePageId: pageId };
+    }),
   addPage: (page) =>
     set((state) => {
       if (state.document === null) {
@@ -239,7 +248,45 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         return state;
       }
       const previous = state.document.pages.find((existing) => existing.id === page.id);
-      return previous === undefined ? state : commitDocumentAction(state, changePageAction(previous, page), page.id);
+      if (previous === undefined) return state;
+
+      // If page geometry changed, re-sync any mode rules attached to this page
+      // so collage/class-photo frames adapt to the new canvas size (instead of
+      // staying stranded at the old absolute positions).
+      const sizeChanged = previous.width !== page.width || previous.height !== page.height;
+      let resolvedPage = page;
+      let extraDocChange: ((doc: Document) => Document) | null = null;
+
+      if (sizeChanged) {
+        const collageRule = state.document.collageRules.find(r => r.pageId === page.id);
+        if (collageRule) {
+          const { page: synced } = syncFrameLayersToPage(page, collageRule, page.width, page.height);
+          resolvedPage = synced;
+        }
+        const classPhotoRule = state.document.classPhotoRules?.find(r => r.pageId === page.id);
+        if (classPhotoRule) {
+          const synced = syncClassPhotoToPage(resolvedPage, classPhotoRule);
+          resolvedPage = synced.page;
+          const updatedRule = synced.rule;
+          extraDocChange = (doc) => ({
+            ...doc,
+            classPhotoRules: (doc.classPhotoRules ?? []).map(r =>
+              r.id === updatedRule.id ? updatedRule : r,
+            ),
+          });
+        }
+      }
+
+      const baseAction = changePageAction(previous, resolvedPage);
+      const composed = extraDocChange;
+      const action = composed
+        ? createInlineAction(
+            "UpdatePageWithReflowAction",
+            (doc) => composed(baseAction.apply(doc)),
+            (doc) => baseAction.undo(doc),
+          )
+        : baseAction;
+      return commitDocumentAction(state, action, page.id);
     }),
   addAsset: (asset) =>
     set((state) => {
@@ -415,7 +462,26 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       if (!page) return state;
 
       const dpi = page.setup?.dpi ?? 300;
-      const newRule = applyLayoutFamily(rule, family, canvasW, canvasH, dpi);
+
+      // If the new family supports more images than the old, drain any
+      // hidden overflow back into the pool before computing the layout.
+      const prevOverflow = readOverflow(rule.metadata);
+      let workingRule = rule;
+      let nextOverflow = prevOverflow;
+      if (prevOverflow.hidden.length > 0) {
+        const probe = applyLayoutFamily(rule, family, canvasW, canvasH, dpi);
+        const capacity = probe.cachedSlots.filter(s => s.type === "image").length;
+        const drained = drainOverflow(rule.imagePool, prevOverflow, capacity);
+        if (drained.drained.length > 0) {
+          workingRule = { ...rule, imagePool: drained.pool };
+          nextOverflow = drained.newOverflow;
+        }
+      }
+
+      const computed = applyLayoutFamily(workingRule, family, canvasW, canvasH, dpi);
+      const newRule = nextOverflow !== prevOverflow
+        ? { ...computed, metadata: writeOverflow(computed.metadata, nextOverflow) }
+        : computed;
       const { page: newPage, frameIds } = syncFrameLayersToPage(page, newRule, canvasW, canvasH);
       const finalRule = { ...newRule, frameIds };
 
@@ -545,9 +611,14 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
       const dpi = page.setup?.dpi ?? 300;
       const newPool = rule.imagePool.filter((id) => id !== assetId);
+      // Push the removed assetId to the rule's overflow pool. The asset isn't
+      // deleted from the document — it stays available for re-drain when the
+      // pool grows (e.g. layout family switch to a larger grid).
+      const prevOverflow = readOverflow(rule.metadata);
+      const { newOverflow } = pushOverflow(rule.imagePool, newPool, prevOverflow);
       const newRule = applyNewImagePool(rule, newPool, page.width, page.height, dpi);
       const { page: newPage, frameIds } = syncFrameLayersToPage(page, newRule, page.width, page.height);
-      const finalRule = { ...newRule, frameIds };
+      const finalRule = { ...newRule, frameIds, metadata: writeOverflow(newRule.metadata, newOverflow) };
 
       return commitDocumentAction(
         state,
@@ -832,6 +903,8 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   updateCollageImageTransform: (ruleId, slotId, transform) =>
     set((state) => {
       if (state.document === null) return state;
+      const rule = state.document.collageRules.find((r) => r.id === ruleId);
+      const previousTransform = rule?.imageAssignments.find((a) => a.slotId === slotId)?.contentTransform;
       return commitDocumentAction(
         state,
         createInlineAction(
@@ -847,7 +920,16 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
                     )
                   }
                 : r
-            )
+            ),
+            pages: doc.pages.map((p) => ({
+              ...p,
+              layers: p.layers.map((layer) => {
+                if (layer.type !== "frame") return layer;
+                const meta = layer.metadata["collageFrame"] as { collageRuleId?: string; slotId?: string } | undefined;
+                if (meta?.collageRuleId !== ruleId || meta.slotId !== slotId) return layer;
+                return { ...layer, contentTransform: transform };
+              })
+            }))
           }),
           (doc) => {
             const prev = state.document!.collageRules.find((r) => r.id === ruleId);
@@ -855,7 +937,16 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
               ...doc,
               collageRules: doc.collageRules.map((r) =>
                 r.id === ruleId ? { ...r, imageAssignments: prev?.imageAssignments ?? r.imageAssignments } : r
-              )
+              ),
+              pages: doc.pages.map((p) => ({
+                ...p,
+                layers: p.layers.map((layer) => {
+                  if (layer.type !== "frame" || previousTransform === undefined) return layer;
+                  const meta = layer.metadata["collageFrame"] as { collageRuleId?: string; slotId?: string } | undefined;
+                  if (meta?.collageRuleId !== ruleId || meta.slotId !== slotId) return layer;
+                  return { ...layer, contentTransform: previousTransform };
+                })
+              }))
             };
           }
         )

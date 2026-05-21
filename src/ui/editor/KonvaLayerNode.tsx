@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useImageEditStore } from "@/state/imageEditStore";
 import { useMaskContentEditStore } from "@/state/maskContentEditStore";
-import { Circle, Group, Image as KonvaImage, Line, Rect, Text } from "react-konva";
+import { Circle, Ellipse, Group, Image as KonvaImage, Line, Path, Rect, Text } from "react-konva";
 import { drawPuzzlePath } from "@/core/collage/collagePuzzle";
 import { generateTornEdgePoints } from "@/core/collage/collageTornPaper";
 import type { CollageEdgeConfig } from "@/types/collage";
 import Konva from "konva";
 import { resolveCanvasAssetPath } from "@/core/assets/assetManager";
-import { clampContentTransformToFillBounds, computeContentRect, type ContentRect } from "@/core/rendering/frameFitEngine";
+import { combineAssetAndLayerCrop, getEffectiveAssetCrop, getEffectiveSourceSize } from "@/core/image/screenshotCropMetadata";
+import { clampContentTransform, clampContentTransformToFillBounds, computeContentRect, computeFillPanBounds, type ContentRect } from "@/core/rendering/frameFitEngine";
 import { measureTextLayerSize } from "@/core/text/measurement";
 import type { Asset } from "@/types/document";
-import type { FrameLayer, ImageLayer, TextLayer, VisualLayer } from "@/types/layers";
+import type { ContentTransform, FrameLayer, ImageLayer, ShapeLayer, TextLayer, VisualLayer } from "@/types/layers";
 import type { BlendMode } from "@/types/layers";
 import type {
   ColorOverlayEffect,
@@ -23,6 +24,7 @@ import type {
 import { useKonvaImage } from "./useKonvaImage";
 import { collageAdjToKonva, EMPTY_EXTRA_QUICK_EFFECTS, extractExtraQuickEffects, imageEffectsToKonva, imageLayerAdjToKonva, type CollageColorAdj, type ExtraQuickEffects } from "@/core/rendering/colorAdjustUtils";
 import { renderTextToCanvas } from "./warpText";
+import { markDebugEvent, trackDebugMount } from "@/debug/sppDiagnostics";
 
 export interface CanvasContextMenuTarget {
   layerId: string;
@@ -53,6 +55,8 @@ export function KonvaLayerNode({
   onBeginTextEdit,
   onContextMenu
 }: KonvaLayerNodeProps): React.ReactElement | null {
+  useEffect(() => trackDebugMount("KonvaLayerNode", { layerId: layer.id, type: layer.type }), [layer.id, layer.type]);
+
   if (layer.type === "text") {
     return <TextNode layer={layer} selected={selected} onBeginTextEdit={onBeginTextEdit} onChange={onChange} onSelect={onSelect} />;
   }
@@ -65,6 +69,109 @@ export function KonvaLayerNode({
     return <FrameNode layer={layer} assets={assets} selected={selected} layoutEditMode={layoutEditMode} onChange={onChange} onSelect={onSelect} onContextMenu={onContextMenu} />;
   }
 
+  if (layer.type === "shape") {
+    return <ShapeNode layer={layer} selected={selected} onChange={onChange} onSelect={onSelect} />;
+  }
+
+  return null;
+}
+
+function ShapeNode({
+  layer,
+  selected,
+  onChange,
+  onSelect
+}: {
+  layer: ShapeLayer;
+  selected: boolean;
+  onChange: (layer: VisualLayer) => void;
+  onSelect: (layerId: string) => void;
+}): React.ReactElement | null {
+  const fillColor = layer.fill?.color;
+  const fillOpacity = layer.fill?.opacity ?? 1;
+  const strokeColor = layer.stroke?.color;
+  const strokeWidth = layer.stroke?.width;
+
+  const common = {
+    id: layer.id,
+    name: "shape-layer",
+    x: layer.x,
+    y: layer.y,
+    rotation: layer.rotation,
+    opacity: layer.opacity * fillOpacity,
+    listening: layer.locked !== true,
+    draggable: !layer.locked,
+    onMouseDown: (e: Konva.KonvaEventObject<MouseEvent>) => { e.cancelBubble = true; onSelect(layer.id); },
+    onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
+      onChange({ ...layer, x: e.target.x(), y: e.target.y() });
+    }
+  };
+
+  if (layer.shape === "rect") {
+    return (
+      <Rect
+        {...common}
+        width={layer.width}
+        height={layer.height}
+        fill={fillColor}
+        stroke={selected ? "#7C6FE0" : strokeColor}
+        strokeWidth={selected ? Math.max(1.5, strokeWidth ?? 0) : strokeWidth}
+      />
+    );
+  }
+  if (layer.shape === "circle") {
+    const r = Math.min(layer.width, layer.height) / 2;
+    return (
+      <Circle
+        {...common}
+        x={layer.x + layer.width / 2}
+        y={layer.y + layer.height / 2}
+        radius={r}
+        fill={fillColor}
+        stroke={selected ? "#7C6FE0" : strokeColor}
+        strokeWidth={selected ? Math.max(1.5, strokeWidth ?? 0) : strokeWidth}
+      />
+    );
+  }
+  if (layer.shape === "ellipse") {
+    return (
+      <Ellipse
+        {...common}
+        x={layer.x + layer.width / 2}
+        y={layer.y + layer.height / 2}
+        radiusX={layer.width / 2}
+        radiusY={layer.height / 2}
+        fill={fillColor}
+        stroke={selected ? "#7C6FE0" : strokeColor}
+        strokeWidth={selected ? Math.max(1.5, strokeWidth ?? 0) : strokeWidth}
+      />
+    );
+  }
+  if (layer.shape === "line" && layer.pathData !== undefined) {
+    // pathData encodes "x1,y1 x2,y2" in local coords
+    const pts = layer.pathData.split(/\s+/).flatMap((p) => p.split(",").map(Number));
+    if (pts.length === 4) {
+      return (
+        <Line
+          {...common}
+          points={pts}
+          stroke={strokeColor ?? fillColor ?? "#000"}
+          strokeWidth={strokeWidth ?? 2}
+        />
+      );
+    }
+  }
+  if (layer.shape === "svgPath" && layer.pathData !== undefined) {
+    return (
+      <Path
+        {...common}
+        data={layer.pathData}
+        fill={fillColor}
+        stroke={selected ? "#7C6FE0" : strokeColor}
+        strokeWidth={strokeWidth}
+      />
+    );
+  }
   return null;
 }
 
@@ -296,6 +403,14 @@ function TextNode({
   onChange: (layer: VisualLayer) => void;
   onBeginTextEdit: (layerId: string) => void;
 }): React.ReactElement {
+  const [patternVersion, setPatternVersion] = useState(0);
+
+  useEffect(() => {
+    const update = (): void => setPatternVersion((version) => version + 1);
+    window.addEventListener("spp2:text-pattern-ready", update);
+    return () => window.removeEventListener("spp2:text-pattern-ready", update);
+  }, []);
+
   const warpCanvas = useMemo(
     () => renderTextToCanvas(layer),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -317,9 +432,15 @@ function TextNode({
       layer.warpSettings.amount,
       layer.warpSettings.horizontalDistortion,
       layer.warpSettings.verticalDistortion,
+      patternVersion,
       JSON.stringify(layer.effects)
     ]
   );
+
+  const isClassPhotoText =
+    layer.metadata?.["classPhotoName"] !== undefined ||
+    layer.metadata?.["classPhotoTitle"] !== undefined ||
+    layer.metadata?.["classPhotoFooter"] !== undefined;
 
   const commonDrag = {
     draggable: !layer.locked,
@@ -330,20 +451,35 @@ function TextNode({
   };
 
   if (warpCanvas !== null) {
+    const canvasMeta = warpCanvas as HTMLCanvasElement & { sppTextOffsetX?: number; sppTextOffsetY?: number };
+    const textOffsetX = canvasMeta.sppTextOffsetX ?? 0;
+    const textOffsetY = canvasMeta.sppTextOffsetY ?? 0;
+    const alignmentOffsetX = isClassPhotoText
+      ? layer.alignment === "right"
+        ? Math.max(0, layer.width - warpCanvas.width)
+        : layer.alignment === "center"
+        ? Math.max(0, (layer.width - warpCanvas.width) / 2)
+        : 0
+      : -textOffsetX;
+    const alignmentOffsetY = -textOffsetY;
     return (
       <KonvaImage
         id={layer.id}
         name={selected ? "selected-layer" : undefined}
         image={warpCanvas}
-        x={layer.x}
-        y={layer.y}
+        x={layer.x + alignmentOffsetX}
+        y={layer.y + alignmentOffsetY}
         width={warpCanvas.width}
         height={warpCanvas.height}
         rotation={layer.rotation}
         opacity={layer.opacity}
         visible={layer.visible}
         globalCompositeOperation={mapBlendMode(layer.blendMode) as "source-over"}
-        {...commonDrag}
+        draggable={!layer.locked}
+        listening={!layer.locked}
+        onDragEnd={(event) => {
+          onChange({ ...layer, x: event.target.x() - alignmentOffsetX, y: event.target.y() - alignmentOffsetY });
+        }}
         onClick={() => onSelect(layer.id)}
         onDblClick={() => onBeginTextEdit(layer.id)}
         onTap={() => onSelect(layer.id)}
@@ -351,7 +487,7 @@ function TextNode({
           const node = event.target;
           node.scaleX(1);
           node.scaleY(1);
-          onChange({ ...layer, x: node.x(), y: node.y(), rotation: node.rotation() });
+          onChange({ ...layer, x: node.x() - alignmentOffsetX, y: node.y() - alignmentOffsetY, rotation: node.rotation() });
         }}
       />
     );
@@ -384,10 +520,6 @@ function TextNode({
   // When this is a class-photo managed text layer (name/title/footer), use the stored
   // layer.width/height so align="center" centers within the frame or title container.
   // For all other text layers, always use measuredSize (natural fit).
-  const isClassPhotoText =
-    layer.metadata?.["classPhotoName"] !== undefined ||
-    layer.metadata?.["classPhotoTitle"] !== undefined ||
-    layer.metadata?.["classPhotoFooter"] !== undefined;
   const renderWidth = isClassPhotoText && layer.width > measuredSize.width ? layer.width : measuredSize.width;
   const renderHeight = isClassPhotoText && layer.height > measuredSize.height ? layer.height : measuredSize.height;
 
@@ -444,8 +576,18 @@ function clampContentNodeToFrame(node: Konva.Node, rect: ContentRect, layer: Fra
   const innerY = pad;
   const innerW = Math.max(1, layer.width - pad * 2);
   const innerH = Math.max(1, layer.height - pad * 2);
-  node.x(clampNodeAxis(node.x(), rect.width, innerX, innerW));
-  node.y(clampNodeAxis(node.y(), rect.height, innerY, innerH));
+  // node.x()/y() is the rotation pivot (= unrotated image's top-left). The
+  // *visible* rotated bounding box top-left is offset from the pivot by ox/oy.
+  // bbox dimensions are rect.width / rect.height (computed in computeContentRect).
+  const { ox, oy } = imageRotationOffsets(
+    layer.contentTransform.rotation,
+    rect.renderWidth,
+    rect.renderHeight
+  );
+  const visibleX = node.x() - ox;
+  const visibleY = node.y() - oy;
+  node.x(clampNodeAxis(visibleX, rect.width, innerX, innerW) + ox);
+  node.y(clampNodeAxis(visibleY, rect.height, innerY, innerH) + oy);
 }
 
 function clampNodeAxis(start: number, size: number, innerStart: number, innerSize: number): number {
@@ -455,6 +597,35 @@ function clampNodeAxis(start: number, size: number, innerStart: number, innerSiz
   const minStart = innerStart + innerSize - size;
   const maxStart = innerStart;
   return Math.min(maxStart, Math.max(minStart, start));
+}
+
+/**
+ * For any rotation angle, returns the offset from the rotation pivot
+ * (unrotated top-left of the image) to the rotated bounding box's top-left,
+ * plus the dimensions of that rotated bounding box.
+ *
+ * Konva rotates a node around (x, y). To make the *visible* rotated bounding
+ * box land at a desired (X, Y), set node.x() = X + ox, node.y() = Y + oy.
+ * Moving the pivot by (dx, dy) shifts the visible image by the same (dx, dy),
+ * so drag math stays in screen-space coordinates regardless of rotation.
+ */
+function imageRotationOffsets(
+  rotation: number | undefined,
+  width: number,
+  height: number
+): { ox: number; oy: number; boxW: number; boxH: number } {
+  const rad = (((rotation ?? 0) % 360) * Math.PI) / 180;
+  if (Math.abs(rad) < 1e-6) return { ox: 0, oy: 0, boxW: width, boxH: height };
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  // Corners of the unrotated rect relative to pivot at (0, 0).
+  const xs = [0, width * cos, width * cos - height * sin, -height * sin];
+  const ys = [0, width * sin, width * sin + height * cos, height * cos];
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  return { ox: -minX, oy: -minY, boxW: maxX - minX, boxH: maxY - minY };
 }
 
 function konvaFontStyle(layer: TextLayer): string {
@@ -749,6 +920,20 @@ function ImageNode({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [needsCache, filterCount, image, layer.width, layer.height]);
 
+  // Release Konva node bitmap caches on unmount so GPU memory does not
+  // accumulate across multi-page documents (e.g. 50-page class photo / photo
+  // development) where pages mount/unmount during navigation.
+  useEffect(() => {
+    return () => {
+      const refs = [imageRef.current, maskedGroupRef.current];
+      for (const node of refs) {
+        if (node !== null) {
+          try { node.clearCache(); } catch { /* node may already be destroyed */ }
+        }
+      }
+    };
+  }, []);
+
   // Shadow on the outer Group — effects.shadow takes precedence over visualEffects dropShadow
   const shadowProps =
     colorAdj.shadow !== null
@@ -975,14 +1160,17 @@ function ImageNode({
 
   // Non-destructive crop: use live preview during edit mode, else stored crop
   const effectiveCrop = cropPreviewFromStore ?? layer.crop;
+  const assetCrop = getEffectiveAssetCrop(asset);
   const hasCrop = effectiveCrop.x > 0.001 || effectiveCrop.y > 0.001
-    || effectiveCrop.width < 0.999 || effectiveCrop.height < 0.999;
-  const cropProp = hasCrop && image !== null ? {
+    || effectiveCrop.width < 0.999 || effectiveCrop.height < 0.999
+    || assetCrop !== null;
+  const combinedCrop = image !== null ? combineAssetAndLayerCrop(assetCrop, effectiveCrop, image.naturalWidth, image.naturalHeight) : null;
+  const cropProp = hasCrop && combinedCrop !== null ? {
     crop: {
-      x: effectiveCrop.x * image.naturalWidth,
-      y: effectiveCrop.y * image.naturalHeight,
-      width: effectiveCrop.width * image.naturalWidth,
-      height: effectiveCrop.height * image.naturalHeight
+      x: combinedCrop.x,
+      y: combinedCrop.y,
+      width: combinedCrop.width,
+      height: combinedCrop.height
     }
   } : {};
 
@@ -1124,6 +1312,7 @@ function FrameNode({
 }): React.ReactElement {
   const asset = assets.find((item) => item.id === layer.imageAssetId);
   const image = useKonvaImage(resolveCanvasAssetPath(asset));
+  const assetCrop = getEffectiveAssetCrop(asset);
   const blurRef = useRef<Konva.Image | null>(null);
   const frameMaskAsset = layer.maskSource?.type === "alphaAsset"
     ? assets.find((item) => item.id === layer.maskSource?.assetId)
@@ -1140,6 +1329,7 @@ function FrameNode({
   const softEdgeBlurRadius = fx.softEdge?.radius ?? 0;
   const isGridCell = layer.metadata["gridCell"] !== undefined;
   const isMaskFrame = layer.metadata["maskFrame"] !== undefined;
+  const isPhotoPrintFrame = layer.metadata["photoPrintSlot"] !== undefined;
   const collageFrameMeta = layer.metadata["collageFrame"] as { isCollageFrame?: boolean; layoutManaged?: boolean; slotType?: string; slotId?: string; slotShape?: string; vertices?: Array<{ x: number; y: number }>; edgeConfig?: CollageEdgeConfig; globalMask?: CollageGlobalMaskMeta } | undefined;
   const isCollageFrame = collageFrameMeta?.isCollageFrame === true;
   const isCollageEmpty = isCollageFrame && collageFrameMeta?.slotType === "empty";
@@ -1186,26 +1376,70 @@ function FrameNode({
   useEffect(() => {
     const node = blurRef.current;
     if (node === null || image === null) return;
-    if (frameNeedsCache) { node.cache(); } else { node.clearCache(); }
-    node.getLayer()?.batchDraw();
+    try {
+      const wasCached = node.isCached();
+      if (frameNeedsCache) { node.cache(); } else if (node.isCached()) { node.clearCache(); }
+      const isCached = node.isCached();
+      if (wasCached !== isCached || frameNeedsCache) {
+        markDebugEvent("konva-frame-image-cache", {
+          layerId: layer.id,
+          kind: layer.metadata["photoPrintSlot"] !== undefined ? "photoPrint" : layer.metadata["collageFrame"] !== undefined ? "collage" : layer.metadata["maskFrame"] !== undefined ? "mask" : "frame",
+          frameNeedsCache,
+          wasCached,
+          isCached,
+          filterCount: frameFilterCount,
+          imageAssetId: layer.imageAssetId
+        });
+      }
+      node.getLayer()?.batchDraw();
+    } catch (error) {
+      markDebugEvent("konva-frame-image-cache:error", {
+        layerId: layer.id,
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frameNeedsCache, frameFilterCount, image, layer.width, layer.height]);
 
   useEffect(() => {
     const group = frameMaskGroupRef.current;
     if (group === null) return;
-    if (frameMaskImage !== null) {
-      group.cache();
-    } else {
-      group.clearCache();
+    // The mask cache only matters when an actual frame-mask image is in play
+    // (collage / mask mode). For frames without a mask (e.g. photo-print) the
+    // group has no cache to maintain, so we skip — calling clearCache + an
+    // unconditional batchDraw on every contentTransform change adds up to many
+    // wasted redraws across pages and has been observed to wedge Konva after
+    // repeated drags.
+    try {
+      if (frameMaskImage !== null) {
+        group.cache();
+        group.getLayer()?.batchDraw();
+      } else if (group.isCached()) {
+        group.clearCache();
+        group.getLayer()?.batchDraw();
+      }
+    } catch {
+      // node may be in a transitional state — safe to ignore.
     }
-    group.getLayer()?.batchDraw();
   }, [frameMaskImage, image, layer.width, layer.height, layer.contentType, layer.imageAssetId, layer.contentTransform]);
+
+  // Release Konva node bitmap caches on unmount (FrameNode) — see comment in ImageNode.
+  useEffect(() => {
+    return () => {
+      const refs = [blurRef.current, frameMaskGroupRef.current];
+      for (const node of refs) {
+        if (node !== null) {
+          try { node.clearCache(); } catch { /* node may already be destroyed */ }
+        }
+      }
+    };
+  }, []);
 
   // האם הפריים עצמו ניתן לגרירה
   const frameIsDraggable =
     !isGridCell &&
     !isMaskFrame &&
+    !isPhotoPrintFrame &&
     !isCollageFrame &&
     !layer.locked &&
     !layer.lockedFrame &&
@@ -1213,20 +1447,84 @@ function FrameNode({
     (layer.behaviorMode === "freeform" || layoutEditMode);
 
   // האם התמונה ניתנת לגרירה (הזזת תוכן בתוך הפריים)
-  const contentIsDraggable = !layer.lockedContent && image !== null && !layoutEditMode && layer.fitMode !== "stretch";
-
   const contentRect = useMemo(() => {
     if (image === null) return null;
+    const sourceSize = getEffectiveSourceSize(asset, image.naturalWidth, image.naturalHeight);
     return computeContentRect(
       layer.width,
       layer.height,
-      image.naturalWidth,
-      image.naturalHeight,
+      sourceSize.width,
+      sourceSize.height,
       layer.fitMode,
       layer.contentTransform,
       layer.padding
     );
-  }, [image, layer.width, layer.height, layer.fitMode, layer.contentTransform, layer.padding]);
+  }, [asset, image, layer.width, layer.height, layer.fitMode, layer.contentTransform, layer.padding]);
+
+  const isFillLike = layer.fitMode === "fill" || layer.fitMode === "smartCrop";
+  const innerW = Math.max(1, layer.width - layer.padding * 2);
+  const innerH = Math.max(1, layer.height - layer.padding * 2);
+  const hasPanRoom =
+    contentRect !== null &&
+    (contentRect.width > innerW + 0.5 || contentRect.height > innerH + 0.5);
+
+  const contentIsDraggable =
+    !layer.lockedContent &&
+    image !== null &&
+    !layoutEditMode &&
+    layer.fitMode !== "stretch" &&
+    (!isFillLike || hasPanRoom);
+
+  const contentRotationOffsets = useMemo(() => {
+    if (contentRect === null) return { ox: 0, oy: 0, boxW: 0, boxH: 0 };
+    return imageRotationOffsets(
+      layer.contentTransform.rotation,
+      contentRect.renderWidth,
+      contentRect.renderHeight
+    );
+  }, [layer.contentTransform.rotation, contentRect]);
+
+  // dragBoundFunc enforces the fill-cover invariant DURING the drag. Konva
+  // calls this with the proposed absolute pivot position and uses the
+  // returned value, so the image never visually leaves the cell while the
+  // user is dragging. We must convert between absolute (stage) coords and
+  // local (frame-group) coords via the parent's full absolute transform —
+  // not a plain position subtract — because the stage may be scaled (zoom).
+  const contentDragBoundFunc = useMemo(() => {
+    if (contentRect === null) return undefined;
+    if (!isFillLike) return undefined;
+    const { ox, oy, boxW, boxH } = contentRotationOffsets;
+    const innerX = layer.padding;
+    const innerY = layer.padding;
+    return function dragBound(this: Konva.Node, pos: { x: number; y: number }): { x: number; y: number } {
+      try {
+        const parent = this.getParent();
+        if (parent === null) return pos;
+        // Convert absolute → local using the parent's full transform (handles
+        // any stage zoom / pan correctly; a plain subtract does not).
+        const inverse = parent.getAbsoluteTransform().copy().invert();
+        const local = inverse.point({ x: pos.x, y: pos.y });
+        const bboxX = local.x - ox;
+        const bboxY = local.y - oy;
+        const bounds = computeFillPanBounds(bboxX, bboxY, boxW, boxH, innerX, innerY, innerW, innerH);
+        const clampedBboxX = bounds.canPanX
+          ? Math.min(bounds.maxX, Math.max(bounds.minX, bboxX))
+          : bounds.lockedX;
+        const clampedBboxY = bounds.canPanY
+          ? Math.min(bounds.maxY, Math.max(bounds.minY, bboxY))
+          : bounds.lockedY;
+        // Convert local back to absolute using parent's forward transform.
+        const forward = parent.getAbsoluteTransform();
+        const absolute = forward.point({ x: clampedBboxX + ox, y: clampedBboxY + oy });
+        // Defensive: never return non-finite numbers (would set node off-screen
+        // and can wedge Konva's drag tracking).
+        if (!Number.isFinite(absolute.x) || !Number.isFinite(absolute.y)) return pos;
+        return { x: absolute.x, y: absolute.y };
+      } catch {
+        return pos;
+      }
+    };
+  }, [contentRect, contentRotationOffsets, innerH, innerW, isFillLike, layer.padding]);
 
   const cornerRadius = layer.shape === "circle"
     ? Math.min(layer.width, layer.height) / 2
@@ -1370,28 +1668,59 @@ function FrameNode({
     event.cancelBubble = true;
     if (contentRect === null) return;
     const node = event.target;
-    clampContentNodeToFrame(node, contentRect, layer);
-    const dx = node.x() - contentRect.x;
-    const dy = node.y() - contentRect.y;
-    const nextTransform = {
+    // node.x()/y() is the rotation pivot. The pivot moves 1:1 with the
+    // rendered image regardless of rotation, so node.x()-originalPivotX is the
+    // screen-space delta of the user's drag.
+    //
+    // IMPORTANT: do NOT call clampContentNodeToFrame here. When the image
+    // exactly fills the cell (the default after auto-rotate), the fill-bounds
+    // clamp would force node.x() back to the centered position before we
+    // compute dx — making every drag a no-op (the "snap back" / "freeze"
+    // the user was reporting).
+    const { ox: rotOx, oy: rotOy } = imageRotationOffsets(
+      layer.contentTransform.rotation,
+      contentRect.renderWidth,
+      contentRect.renderHeight
+    );
+    const originalPivotX = contentRect.x + rotOx;
+    const originalPivotY = contentRect.y + rotOy;
+    const rawDx = node.x() - originalPivotX;
+    const rawDy = node.y() - originalPivotY;
+    // Defensive: if Konva ever hands us NaN/Infinity (seen when a node was
+    // destroyed mid-drag because of a concurrent document rebuild), zero the
+    // delta instead of poisoning contentTransform with non-finite numbers —
+    // the latter cascades into NaN positions and ultimately blanks the canvas.
+    const dx = Number.isFinite(rawDx) ? rawDx : 0;
+    const dy = Number.isFinite(rawDy) ? rawDy : 0;
+    const nextTransform: ContentTransform = {
       ...layer.contentTransform,
       offsetX: layer.contentTransform.offsetX + dx,
       offsetY: layer.contentTransform.offsetY + dy
     };
-    onChange({
-      ...layer,
-      contentTransform: image === null
-        ? nextTransform
-        : clampContentTransformToFillBounds(
-            nextTransform,
-            layer.width,
-            layer.height,
-            image.naturalWidth,
-            image.naturalHeight,
-            layer.fitMode,
-            layer.padding
-          )
-    });
+    const isFillLike = layer.fitMode === "fill" || layer.fitMode === "smartCrop";
+    const sourceSize = image === null ? null : getEffectiveSourceSize(asset, image.naturalWidth, image.naturalHeight);
+    const clamped = image === null
+      ? nextTransform
+      : isFillLike
+      ? clampContentTransformToFillBounds(
+          nextTransform,
+          layer.width,
+          layer.height,
+          sourceSize?.width ?? image.naturalWidth,
+          sourceSize?.height ?? image.naturalHeight,
+          layer.fitMode,
+          layer.padding
+        )
+      : clampContentTransform(
+          nextTransform,
+          layer.width,
+          layer.height,
+          sourceSize?.width ?? image.naturalWidth,
+          sourceSize?.height ?? image.naturalHeight,
+          layer.fitMode,
+          layer.padding
+        );
+    onChange({ ...layer, contentTransform: clamped });
   };
 
   const handleFrameContextMenu = (event: Konva.KonvaEventObject<PointerEvent>): void => {
@@ -1481,12 +1810,15 @@ function FrameNode({
         {image !== null && contentRect !== null && (
           <KonvaImage
             ref={blurRef}
-            x={contentRect.x}
-            y={contentRect.y}
-            width={contentRect.width}
-            height={contentRect.height}
+            x={contentRect.x + contentRotationOffsets.ox}
+            y={contentRect.y + contentRotationOffsets.oy}
+            width={contentRect.renderWidth}
+            height={contentRect.renderHeight}
+            rotation={layer.contentTransform.rotation ?? 0}
             image={image}
+            {...(assetCrop === null ? {} : { crop: assetCrop })}
             draggable={contentIsDraggable}
+            dragBoundFunc={contentDragBoundFunc}
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             filters={frameFilters as any}
             blurRadius={blurRadius}
@@ -1503,7 +1835,8 @@ function FrameNode({
             colorPopBackground={frameExtras.colorPop?.background}
             onDragMove={(event) => {
               event.cancelBubble = true;
-              clampContentNodeToFrame(event.target, contentRect, layer);
+              // Live fill clamping is handled by dragBoundFunc, which lets Konva
+              // keep its pointer bookkeeping while still preventing exposed gaps.
             }}
             onDragEnd={handleContentDragEnd}
           />
@@ -1598,7 +1931,7 @@ function FrameNode({
       {(isCollageFrame || isGridCell || isMaskFrame) && selected && image !== null && (
         <ContentZoomHandles
           layer={layer}
-          image={image}
+          sourceSize={getEffectiveSourceSize(asset, image.naturalWidth, image.naturalHeight)}
           collageSelectColor={collageSelectColor}
           cornerRadius={cornerRadius}
           onChange={onChange}
@@ -1621,7 +1954,7 @@ const HANDLE_HALF = HANDLE_SIZE / 2;
 
 interface ContentZoomHandlesProps {
   layer: FrameLayer;
-  image: HTMLImageElement;
+  sourceSize: { width: number; height: number };
   collageSelectColor: string;
   cornerRadius: number;
   onChange: (layer: VisualLayer) => void;
@@ -1633,7 +1966,7 @@ interface ContentZoomHandlesProps {
 //   BL → (-SIZE, h)       BR → (w,  h)
 const HANDLE_OUTSIDE = HANDLE_SIZE; // how far outside the frame the handle sits
 
-function ContentZoomHandles({ layer, image, collageSelectColor, cornerRadius, onChange }: ContentZoomHandlesProps): React.ReactElement {
+function ContentZoomHandles({ layer, sourceSize, collageSelectColor, cornerRadius, onChange }: ContentZoomHandlesProps): React.ReactElement {
   const dragStartRef = useRef<{ scale: number } | null>(null);
 
   // Anchor = frame corner; handle placed fully outside
@@ -1669,7 +2002,7 @@ function ContentZoomHandles({ layer, image, collageSelectColor, cornerRadius, on
     const clamped = clampContentTransformToFillBounds(
       { ...layer.contentTransform, scale: newScale },
       layer.width, layer.height,
-      image.naturalWidth, image.naturalHeight,
+      sourceSize.width, sourceSize.height,
       layer.fitMode, layer.padding
     );
     onChange({ ...layer, contentTransform: clamped });

@@ -2,11 +2,13 @@ import { useRef, useState, type ReactElement } from "react";
 import { Stage, Layer, Line as KonvaLine } from "react-konva";
 import type Konva from "konva";
 import { CanvasStage } from "@/ui/editor/CanvasStage";
+import { applyLayoutFamily, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import { collectDividers, updateSplitRatio } from "@/core/collage/collageSplitTree";
 import { useDocumentStore } from "@/state/documentStore";
 import { useViewportStore } from "@/state/viewportStore";
 import type { CollageRule } from "@/types/collage";
 import type { Asset, Page } from "@/types/document";
+import type { VisualLayer } from "@/types/layers";
 import type { ID } from "@/types/primitives";
 
 interface CollageCanvasViewProps {
@@ -28,6 +30,7 @@ export function CollageCanvasView({
   onSelectSlot
 }: CollageCanvasViewProps): ReactElement {
   const applyChange = useDocumentStore((s) => s.applyDocumentChange);
+  const updateImageTransform = useDocumentStore((s) => s.updateCollageImageTransform);
   const viewport = useViewportStore();
   const stageRef = useRef<Konva.Stage | null>(null);
   const [draggingDivider, setDraggingDivider] = useState<string | null>(null);
@@ -63,10 +66,33 @@ export function CollageCanvasView({
 
     applyChange("AdjustCollageDividerAction", (doc) => ({
       ...doc,
-      collageRules: doc.collageRules.map((r) =>
-        r.id === rule.id ? { ...r, splitTree: newTree } : r
-      )
-    }));
+      ...(() => {
+        const currentRule = doc.collageRules.find((r) => r.id === rule.id);
+        const currentPage = currentRule ? doc.pages.find((p) => p.id === currentRule.pageId) : undefined;
+        if (!currentRule || !currentPage) return {};
+        const dpi = currentPage.setup?.dpi ?? 300;
+        const relaidRule = applyLayoutFamily(
+          { ...currentRule, splitTree: newTree },
+          "splitTree",
+          currentPage.width,
+          currentPage.height,
+          dpi
+        );
+        const { page: syncedPage, frameIds } = syncFrameLayersToPage(currentPage, relaidRule, currentPage.width, currentPage.height);
+        const finalRule = { ...relaidRule, frameIds };
+        return {
+          collageRules: doc.collageRules.map((r) => r.id === rule.id ? finalRule : r),
+          pages: doc.pages.map((p) => p.id === currentRule.pageId ? syncedPage : p)
+        };
+      })()
+    }), rule.pageId);
+  }
+
+  function handleLayerChange(layer: VisualLayer): void {
+    if (layer.type !== "frame") return;
+    const meta = layer.metadata["collageFrame"] as { slotId?: string; collageRuleId?: string } | undefined;
+    if (meta?.collageRuleId !== rule.id || !meta.slotId) return;
+    updateImageTransform(rule.id, meta.slotId, layer.contentTransform);
   }
 
 
@@ -96,7 +122,7 @@ export function CollageCanvasView({
           onSelectSlot(meta?.slotId ?? null);
         }}
         onSelectLayers={() => {}}
-        onLayerChange={() => {}}
+        onLayerChange={handleLayerChange}
         editingLayerId={null}
         onBeginTextEdit={() => {}}
         onEndTextEdit={() => {}}

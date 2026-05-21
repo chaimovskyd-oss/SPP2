@@ -117,7 +117,10 @@ describe("Phase 1C core infrastructure", () => {
   it("autosaves and restores recovery records without blocking the document store", async () => {
     const document = createFreeModeDocument("Recovery");
     const envelope = createProjectEnvelope({ document, linkedGroups: [], batchJobs: [] });
-    const record = await saveRecoveryRecord(envelope, "unsaved", { storageKey: "test.recovery" });
+    const result = await saveRecoveryRecord(envelope, "unsaved", { storageKey: "test.recovery" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.message);
+    const record = result.record;
     const restored = restoreRecoveryRecord(record);
 
     expect(restored.document.id).toBe(document.id);
@@ -165,7 +168,10 @@ describe("Phase 1C core infrastructure", () => {
       projectType: "Grid"
     });
     const envelope = createProjectEnvelope({ document, linkedGroups: [], batchJobs: [] });
-    const record = await saveRecoveryRecord(envelope, "unsaved", { storageKey: "test.recovery" });
+    const result = await saveRecoveryRecord(envelope, "unsaved", { storageKey: "test.recovery" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.message);
+    const record = result.record;
     const entries = getRecoveryEntries("test.recovery");
 
     expect(entries[0]?.projectUuid).toBe(envelope.metadata.projectUuid);

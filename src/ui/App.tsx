@@ -1,13 +1,17 @@
 import { Suspense, lazy, useEffect, useMemo, useState, type ReactElement } from "react";
-import { cleanupRecovery, createGridModeDocument, createMaskModeDocument, createPhotoPrintModeDocument, createProjectEnvelope, discardRecoveryRecord, getLatestRecoveryRecord, restoreRecoveryRecord, withProjectMetadata, type AutosaveRecord } from "@/core";
+import { AUTOSAVE_TEMPORARILY_DISABLED, cleanupRecovery, createGridModeDocument, createMaskModeDocument, createPhotoPrintModeDocument, createProjectEnvelope, discardRecoveryRecord, getLatestRecoveryRecord, restoreRecoveryRecord, withProjectMetadata, type AutosaveRecord } from "@/core";
+import { applyFaceDetectionToPhotoPrint } from "@/core/photoPrint/photoPrintModeEngine";
+import { captureError, writeLog } from "@/core/logging/logger";
 import { createPage } from "@/core/document/factory";
 import { applyOrientationToProduct, createDocumentFromProduct } from "@/core/product/productDocument";
 import { useProductStore } from "@/state/productStore";
+import { resetWorkspaceForHome } from "@/state/workspaceReset";
 import { ProductLibraryScreen } from "./productLibrary/ProductLibraryScreen";
 import type { ProductDefinition } from "@/types/product";
 import { createCollageModeDocument } from "@/core/collage/collageFactory";
 import { syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import { importImageAsset } from "@/core/assets/assetManager";
+import { generateMaskThumbnail } from "@/state/maskLibraryStore";
 import { createClassPhotoModeDocument, defaultLayoutSettings } from "@/core/classPhoto/classPhotoFactory";
 import { syncClassPhotoToPage } from "@/core/classPhoto/classPhotoLayoutEngine";
 import { defaultGridSettings, defaultSnapSettings, mmToPx } from "@/core";
@@ -68,6 +72,15 @@ interface ModeWindowInfo {
 interface ModeWindowSnapshot {
   document?: SppDocument;
   pdfStudioDocument?: PdfStudioDocument;
+}
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("Cannot read image file"));
+    reader.readAsDataURL(file);
+  });
 }
 
 const MODE_WINDOW_TITLES: Record<string, string> = {
@@ -136,6 +149,9 @@ export function App(): ReactElement {
   const [classPhotoWizardInitialState, setClassPhotoWizardInitialState] = useState<ClassPhotoWizardInitialState | undefined>(undefined);
   const [pendingMode, setPendingMode] = useState<ModeType>("free");
   const [recoveryRecord, setRecoveryRecord] = useState<AutosaveRecord | null>(() => {
+    if (AUTOSAVE_TEMPORARILY_DISABLED) {
+      return null;
+    }
     cleanupRecovery();
     return getLatestRecoveryRecord();
   });
@@ -209,6 +225,17 @@ export function App(): ReactElement {
     }
     globalThis.document.title = modeWindow.title;
   }, [modeWindow]);
+
+  useEffect(() => {
+    function openDebugEditor(): void {
+      resetViewport();
+      clearSelection();
+      setScreen("editor");
+    }
+
+    window.addEventListener("spp2:debug-open-editor", openDebugEditor);
+    return () => window.removeEventListener("spp2:debug-open-editor", openDebugEditor);
+  }, [clearSelection, resetViewport]);
 
   useEffect(() => {
     const snapshotId = modeWindow?.snapshotId;
@@ -363,22 +390,31 @@ export function App(): ReactElement {
       try {
         const { asset } = await importImageAsset(imgEntry.file, [], { createPreview: true });
         importedAssets.push(asset);
-      } catch {
-        // If import fails, create a minimal asset with the blob URL so canvas can still render
+      } catch (error) {
+        writeLog("import", "warn", "Collage image import fallback used", {
+          fileName: imgEntry.file.name,
+          message: error instanceof Error ? error.message : String(error)
+        });
+        const dataUrl = await fileToDataUrl(imgEntry.file);
+        // If import fails, keep a stable data URL instead of persisting a temporary object URL.
         importedAssets.push({
           version: 1,
           id: crypto.randomUUID(),
           name: imgEntry.file.name,
           kind: "image",
           status: "ready",
-          originalPath: imgEntry.url,
-          previewPath: imgEntry.url,
-          thumbnailPath: imgEntry.url,
+          originalPath: dataUrl,
+          previewPath: dataUrl,
+          thumbnailPath: dataUrl,
           mimeType: imgEntry.file.type || "image/jpeg",
           width: imgEntry.width,
           height: imgEntry.height,
           fileSize: imgEntry.file.size,
-          metadata: {}
+          metadata: {
+            importedAt: new Date().toISOString(),
+            originalFileName: imgEntry.file.name,
+            fallbackReason: "collage-file-reader"
+          }
         });
       }
     }
@@ -453,32 +489,46 @@ export function App(): ReactElement {
     setIsCreatingPhotoPrint(true);
     setCreatingProgress(`מייבא תמונות (0/${images.length})...`);
 
-    // Import all assets in parallel for speed
-    const importedAssets: Asset[] = await Promise.all(
-      images.map(async (imgEntry, i): Promise<Asset> => {
-        try {
-          const { asset } = await importImageAsset(imgEntry.file, [], { createPreview: false });
-          setCreatingProgress(`מייבא תמונות (${i + 1}/${images.length})...`);
-          return asset;
-        } catch {
-          return {
-            version: 1,
-            id: crypto.randomUUID(),
-            name: imgEntry.file.name,
-            kind: "image",
-            status: "ready",
-            originalPath: imgEntry.url,
-            previewPath: imgEntry.url,
-            thumbnailPath: imgEntry.url,
-            mimeType: imgEntry.file.type || "image/jpeg",
-            width: imgEntry.width,
-            height: imgEntry.height,
-            fileSize: imgEntry.file.size,
-            metadata: {}
-          };
-        }
-      })
-    );
+    // Import assets sequentially to avoid decoder and memory spikes.
+    const importedAssets: Asset[] = [];
+    for (let i = 0; i < images.length; i += 1) {
+      const imgEntry = images[i];
+      if (imgEntry === undefined) continue;
+      try {
+        const { asset } = await importImageAsset(imgEntry.file, importedAssets, {
+          createPreview: true,
+          previewMaxSize: 2400,
+          thumbnailMaxSize: 320
+        });
+        importedAssets.push(asset);
+      } catch (error) {
+        writeLog("import", "warn", "Photo print image import fallback used", {
+          fileName: imgEntry.file.name,
+          message: error instanceof Error ? error.message : String(error)
+        });
+        const dataUrl = await fileToDataUrl(imgEntry.file);
+        importedAssets.push({
+          version: 1,
+          id: crypto.randomUUID(),
+          name: imgEntry.file.name,
+          kind: "image",
+          status: "ready",
+          originalPath: dataUrl,
+          previewPath: dataUrl,
+          thumbnailPath: dataUrl,
+          mimeType: imgEntry.file.type || "image/jpeg",
+          width: imgEntry.width,
+          height: imgEntry.height,
+          fileSize: imgEntry.file.size,
+          metadata: {
+            importedAt: new Date().toISOString(),
+            originalFileName: imgEntry.file.name,
+            fallbackReason: "photo-print-file-reader"
+          }
+        });
+      }
+      setCreatingProgress(`מייבא תמונות (${i + 1}/${images.length})...`);
+    }
 
     setCreatingProgress("מייצר דפי הדפסה...");
 
@@ -524,6 +574,21 @@ export function App(): ReactElement {
     setIsCreatingPhotoPrint(false);
     setCreatingProgress("");
     setScreen("editor");
+
+    // Run face detection asynchronously after the editor opens. The wizard's
+    // engine sets smartCropMode="face" on every frame when the user enabled
+    // it; this pass shifts each frame's contentTransform.offsetX/Y so faces
+    // land at the cell center. Skipped silently if the sidecar is unreachable.
+    if (printOptions.faceDetectionEnabled) {
+      const ruleId = envelope.document.photoPrintRules[0]?.id;
+      if (ruleId !== undefined) {
+        void applyFaceDetectionToPhotoPrint(envelope.document, ruleId).then((updated) => {
+          if (updated !== envelope.document) {
+            setDocument(withProjectMetadata(updated, envelope.metadata));
+          }
+        }).catch(() => undefined);
+      }
+    }
   }
 
   async function handleClassPhotoWizardComplete(result: ClassPhotoWizardResult): Promise<void> {
@@ -747,15 +812,27 @@ export function App(): ReactElement {
 
     if (libraryEntry !== undefined && libraryEntry.fileDataUrl) {
       try {
-        const blob = await (await fetch(libraryEntry.fileDataUrl)).blob();
-        const file = new File([blob], `${libraryEntry.name}.${libraryEntry.type}`, {
-          type: libraryEntry.type === "svg" ? "image/svg+xml" : "image/png"
-        });
+        const processed = await generateMaskThumbnail(
+          libraryEntry.fileDataUrl,
+          libraryEntry.type as "svg" | "png",
+          libraryEntry.thresholdEnabled,
+          libraryEntry.thresholdColor,
+          libraryEntry.thresholdTolerance,
+          libraryEntry.thresholdFeather,
+          2048
+        );
+        const blob = await (await fetch(processed)).blob();
+        const file = new File([blob], `${libraryEntry.name}-mask.png`, { type: "image/png" });
         const { asset } = await importImageAsset(file, nextDocument.assets, { createPreview: false });
         nextDocument.assets = [...nextDocument.assets, asset];
         if (extraPreset !== undefined) {
           nextDocument.maskPresets = nextDocument.maskPresets.map((p) =>
             p.id === extraPreset!.id ? { ...p, assetId: asset.id } : p
+          );
+          nextDocument.maskRules = nextDocument.maskRules.map((rule) =>
+            rule.maskPresetId === extraPreset!.id
+              ? { ...rule, metadata: { ...rule.metadata, maskAssetId: asset.id } }
+              : rule
           );
         }
       } catch {
@@ -790,11 +867,20 @@ export function App(): ReactElement {
   }
 
   function backHome(): void {
-    clearSelection();
     if (isModeWindow) {
       window.close();
       return;
     }
+    resetWorkspaceForHome();
+    setPendingMode("free");
+    setClassPhotoWizardInitialState(undefined);
+    setOrientationPicking(null);
+    setIsCreatingPhotoPrint(false);
+    setCreatingProgress("");
+    setIsCreatingBatch(false);
+    setCreatingBatchProgress("");
+    setBatchWizardTemplate(null);
+    setModeWindowSnapshot(null);
     setScreen("home");
   }
 
@@ -959,13 +1045,19 @@ export function App(): ReactElement {
 
   function restoreRecovery(): void {
     if (recoveryRecord === null) return;
-    const envelope = restoreRecoveryRecord(recoveryRecord);
-    const opened = beginProject(envelope, envelope.metadata.currentFilePath);
-    setDocument(withProjectMetadata(opened.document, opened.metadata));
-    resetViewport();
-    clearSelection();
-    setRecoveryRecord(null);
-    setScreen("editor");
+    try {
+      const envelope = restoreRecoveryRecord(recoveryRecord);
+      const opened = beginProject(envelope, envelope.metadata.currentFilePath);
+      setDocument(withProjectMetadata(opened.document, opened.metadata));
+      resetViewport();
+      clearSelection();
+      setRecoveryRecord(null);
+      setScreen("editor");
+    } catch (error) {
+      captureError("recovery", error, { recordId: recoveryRecord.id });
+      discardRecoveryRecord(recoveryRecord.id);
+      setRecoveryRecord(getLatestRecoveryRecord());
+    }
   }
 
   async function openProjectFile(file: File): Promise<void> {

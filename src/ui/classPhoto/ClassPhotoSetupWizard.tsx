@@ -9,6 +9,7 @@ import {
   X
 } from "lucide-react";
 import React, {
+  useEffect,
   useRef,
   useState,
   type ChangeEvent,
@@ -19,13 +20,19 @@ import { PAGE_PRESETS, pageSetupFromPreset, getPagePreset } from "@/core/pageSet
 import { unitToPx } from "@/core/units/conversion";
 import {
   createClassPhotoPersonRecord,
+  defaultChildNameTextStyle,
   defaultChildFrameStyle,
   defaultStaffFrameStyle,
+  defaultStaffNameTextStyle,
+  defaultTitleTextStyle,
+  defaultFooterTextStyle,
   defaultLayoutSettings,
   defaultVisualBalanceSettings
 } from "@/core/classPhoto/classPhotoFactory";
+import { computeOptimalClassPhotoLayout } from "@/core/classPhoto/classPhotoLayoutEngine";
 import { BUILTIN_TEXT_PRESETS } from "@/core/text/presets";
 import { FONT_LIST } from "@/ui/editor/fonts";
+import { GlobalWizardDropTarget, isImageDropFile } from "@/ui/wizard/GlobalWizardDropTarget";
 import type {
   ClassPhotoFrameStyle,
   ClassPhotoLayoutSettings,
@@ -168,6 +175,19 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
   const [backgroundFile, setBackgroundFile] = useState<File | undefined>();
   const [backgroundUrl, setBackgroundUrl] = useState<string | undefined>();
 
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
+  const backgroundUrlRef = useRef(backgroundUrl);
+  backgroundUrlRef.current = backgroundUrl;
+  useEffect(() => () => {
+    for (const entry of imagesRef.current) {
+      try { URL.revokeObjectURL(entry.url); } catch { /* ignore */ }
+    }
+    if (backgroundUrlRef.current !== undefined && backgroundUrlRef.current.length > 0) {
+      try { URL.revokeObjectURL(backgroundUrlRef.current); } catch { /* ignore */ }
+    }
+  }, []);
+
   // ─── Page setup ──────────────────────────────────────────────────────────
 
   function buildPageSetup(): PageSetup {
@@ -205,19 +225,49 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
     const childCount = personRecords.filter((r) => r.role === "child").length;
     const staffCount = personRecords.filter((r) => r.role === "staff").length;
     const ls = defaultLayoutSettings(pageSetup.size.width, pageSetup.size.height, childCount, staffCount);
-    return {
+    return optimizeLayoutSettings(pageSetup, {
       ...ls,
       horizontalSpacing: hSpacingOverride ?? ls.horizontalSpacing,
       verticalSpacing: vSpacingOverride ?? ls.verticalSpacing,
       frameToNameSpacing: frameToNameOverride ?? ls.frameToNameSpacing,
       staffToChildrenSpacing: staffSpacingOverride ?? ls.staffToChildrenSpacing
+    });
+  }
+
+  function optimizeLayoutSettings(pageSetup: PageSetup, settings: ClassPhotoLayoutSettings): ClassPhotoLayoutSettings {
+    const childFrameSize = settings.childFrameSize.width;
+    const staffFrameSize = settings.staffFrameSize.width;
+    const plan = computeOptimalClassPhotoLayout(pageSetup.size.width, pageSetup.size.height, {
+      version: 1,
+      id: "preview-class-photo-rule",
+      pageId: "preview-page",
+      personRecords,
+      childFrameStyle,
+      staffFrameStyle,
+      childNameTextStyle: defaultChildNameTextStyle(childFrameSize),
+      staffNameTextStyle: defaultStaffNameTextStyle(staffFrameSize),
+      titleTextStyle: defaultTitleTextStyle(pageSetup.size.width, titleFontFamily),
+      footerTextStyle: defaultFooterTextStyle(pageSetup.size.width, footerFontFamily),
+      layoutSettings: settings,
+      visualBalanceSettings: visualBalance,
+      titleText,
+      footerText,
+      titleTextEffects: [],
+      footerTextEffects: [],
+      metadata: {}
+    });
+    if (!plan) return settings;
+    return {
+      ...settings,
+      childFrameSize: { width: plan.childFrameSize, height: plan.childFrameSize },
+      staffFrameSize: { width: plan.staffFrameSize, height: plan.staffFrameSize }
     };
   }
 
   // ─── Image upload ────────────────────────────────────────────────────────
 
   function addFiles(files: FileList | File[]): void {
-    const todo = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    const todo = Array.from(files).filter(isImageDropFile);
     if (todo.length === 0) return;
     let pending = todo.length;
     const toAddImages: ClassPhotoWizardImageEntry[] = [];
@@ -257,7 +307,12 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
     const file = e.target.files?.[0];
     if (!file) return;
     setBackgroundFile(file);
-    setBackgroundUrl(URL.createObjectURL(file));
+    setBackgroundUrl((prev) => {
+      if (prev !== undefined && prev.length > 0) {
+        try { URL.revokeObjectURL(prev); } catch { /* ignore */ }
+      }
+      return URL.createObjectURL(file);
+    });
     e.target.value = "";
   }
 
@@ -338,12 +393,19 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
 
   // Compute auto-layout settings preview for step 8 sliders
   const previewPageSetup = buildPageSetup();
-  const autoLS = defaultLayoutSettings(
+  const autoLSBase = defaultLayoutSettings(
     previewPageSetup.size.width,
     previewPageSetup.size.height,
     Math.max(1, personRecords.filter((r) => r.role === "child").length),
     Math.max(0, personRecords.filter((r) => r.role === "staff").length)
   );
+  const autoLS = optimizeLayoutSettings(previewPageSetup, {
+    ...autoLSBase,
+    horizontalSpacing: hSpacingOverride ?? autoLSBase.horizontalSpacing,
+    verticalSpacing: vSpacingOverride ?? autoLSBase.verticalSpacing,
+    frameToNameSpacing: frameToNameOverride ?? autoLSBase.frameToNameSpacing,
+    staffToChildrenSpacing: staffSpacingOverride ?? autoLSBase.staffToChildrenSpacing
+  });
   const effectiveH = hSpacingOverride ?? autoLS.horizontalSpacing;
   const effectiveV = vSpacingOverride ?? autoLS.verticalSpacing;
   const effectiveFN = frameToNameOverride ?? autoLS.frameToNameSpacing;
@@ -357,6 +419,10 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
 
   return (
     <div className="cp-wizard-overlay">
+      <GlobalWizardDropTarget
+        acceptFile={isImageDropFile}
+        onFiles={addFiles}
+      />
       <div className="cp-wizard">
         {/* Header */}
         <div className="cp-wizard-header">

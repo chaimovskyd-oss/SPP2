@@ -23,6 +23,7 @@ import type { ProjectEnvelope, ProjectMetadataInput } from "@/types/project";
 import { measureTextLayerSize } from "@/core/text/measurement";
 import { SCREEN_HELPER_NODE_NAME } from "./editor/canvasNodeNames";
 import { downloadBytes, downloadDataUrl, downloadTextFile } from "./file";
+import { markDebugEvent } from "@/debug/sppDiagnostics";
 
 export interface ProjectSaveOptions {
   filename?: string;
@@ -288,8 +289,10 @@ export function exportStagePrintImage(
   page: Page,
   mimeType: "image/png" | "image/jpeg" = "image/png"
 ): PrintableStageImage {
+  markDebugEvent("export:print-image-start", { pageId: page.id, width: page.width, height: page.height, mimeType });
   const dataUrl = renderPrintableStage(stage, mimeType, page);
   const dpi = page.setup.dpi || 300;
+  markDebugEvent("export:print-image-end", { pageId: page.id, dataUrlLength: dataUrl.length });
   return {
     dataUrl,
     mimeType,
@@ -336,6 +339,27 @@ export async function buildMultiPagePdf(pages: PrintableStageImage[]): Promise<U
   }
 
   return pdf.save();
+}
+
+export function downloadRenderedPagesAsImages(
+  pages: PrintableStageImage[],
+  documentName: string
+): void {
+  const base = safeFilename(documentName);
+  const pad = String(pages.length).length;
+  pages.forEach((page, index) => {
+    const ext = page.mimeType === "image/jpeg" ? "jpg" : "png";
+    const num = String(index + 1).padStart(pad, "0");
+    downloadDataUrl(`${base}-page-${num}.${ext}`, page.dataUrl);
+  });
+}
+
+export async function exportRenderedPagesAsPdf(
+  pages: PrintableStageImage[],
+  documentName: string
+): Promise<void> {
+  const bytes = await buildMultiPagePdf(pages);
+  downloadBytes(`${safeFilename(documentName)}.pdf`, bytes, "application/pdf");
 }
 
 export async function exportStagePdf(stage: Konva.Stage, documentName: string, sourcePage: Page): Promise<void> {
@@ -418,6 +442,7 @@ export function exportStagePreviewPng(stage: Konva.Stage, documentName: string):
 }
 
 export function captureProjectThumbnail(stage: Konva.Stage, page: Page): string {
+  markDebugEvent("thumbnail:capture-start", { pageId: page.id, width: page.width, height: page.height });
   const original = {
     width: stage.width(),
     height: stage.height(),
@@ -435,10 +460,12 @@ export function captureProjectThumbnail(stage: Konva.Stage, page: Page): string 
   stage.scale({ x: 1, y: 1 });
   stage.batchDraw();
   try {
-    return stage.toDataURL({
+    const dataUrl = stage.toDataURL({
       mimeType: "image/png",
       pixelRatio: ratio
     });
+    markDebugEvent("thumbnail:capture-end", { pageId: page.id, dataUrlLength: dataUrl.length, ratio });
+    return dataUrl;
   } finally {
     stage.width(original.width);
     stage.height(original.height);

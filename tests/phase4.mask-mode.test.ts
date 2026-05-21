@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   addImagesToMask,
   applyMaskFitModeToAll,
+  checkMaskPageOverflow,
   applyTextLayerToAllMaskFrames,
   cleanFilenameForMaskText,
+  commitDraftDimension,
   createMaskModeDocument,
   createMaskTextOverlay,
   computeMaskFrameRects,
@@ -13,12 +15,14 @@ import {
   fillMaskWithImages,
   getPagePreset,
   pageSetupFromPreset,
+  pageSizeForMaskFit,
   parseProject,
   regenerateMaskLayout,
   resetMaskCrops,
   serializeProject,
   swapMaskFrameImages
 } from "@/core";
+import { cmToPx, inchToPx, mmToPx, pxToCm, pxToInch, pxToMm } from "@/core/units/conversion";
 import type { Asset, Document } from "@/types/document";
 
 describe("Phase 4 Mask Mode", () => {
@@ -148,6 +152,73 @@ describe("Phase 4 Mask Mode", () => {
     expect(envelope.metadata.customerName).toBe("Mask Customer");
     expect(envelope.metadata.phoneNumber).toBe("050-111-2222");
     expect(envelope.metadata.email).toBe("mask@example.com");
+  });
+
+  it("preserves precision across mm, cm, and inch mask unit conversions", () => {
+    const dpi = 300;
+    const mm = 37.25;
+    const cm = 3.725;
+    const inch = mm / 25.4;
+
+    expect(pxToMm(mmToPx(mm, dpi), dpi)).toBeCloseTo(mm, 10);
+    expect(pxToCm(cmToPx(cm, dpi), dpi)).toBeCloseTo(cm, 10);
+    expect(pxToInch(inchToPx(inch, dpi), dpi)).toBeCloseTo(inch, 10);
+  });
+
+  it("commits draft numeric dimensions only when parseable", () => {
+    expect(commitDraftDimension("", 12, 1, 20)).toBe(12);
+    expect(commitDraftDimension("1.", 12, 1, 20)).toBe(1);
+    expect(commitDraftDimension("1.5", 12, 1, 20)).toBe(1.5);
+    expect(commitDraftDimension("12,75", 12, 1, 20)).toBe(12.75);
+    expect(commitDraftDimension("abc", 12, 1, 20)).toBe(12);
+    expect(commitDraftDimension("999", 12, 1, 20)).toBe(20);
+  });
+
+  it("detects oversized masks and calculates the minimum page resize", () => {
+    const document = createMaskModeDocument("Oversized", pageSetupFromPreset(getPagePreset("letter")), {
+      maskShape: "circle",
+      maskWidth: 300,
+      maskHeight: 300,
+      keepProportions: true,
+      margins: { top: 20, right: 30, bottom: 40, left: 50 },
+      spacingX: 0,
+      spacingY: 0
+    });
+    const page = { ...document.pages[0], width: 500, height: 460 };
+    const rule = document.maskRules[0];
+    const size = { maskWidth: 450, maskHeight: 440 };
+    const overflow = checkMaskPageOverflow(page, rule, size);
+    const fit = pageSizeForMaskFit(page, rule, size);
+
+    expect(overflow.exceeds).toBe(true);
+    expect(overflow.availableWidth).toBe(420);
+    expect(overflow.availableHeight).toBe(400);
+    expect(fit.width).toBe(530);
+    expect(fit.height).toBe(500);
+  });
+
+  it("creates custom library mask frames with alpha mask sources", () => {
+    const base = createMaskModeDocument("Custom mask", pageSetupFromPreset(getPagePreset("letter")), {
+      maskShape: "custom",
+      maskWidth: 180,
+      maskHeight: 160,
+      keepProportions: true,
+      margins: { top: 20, right: 20, bottom: 20, left: 20 },
+      spacingX: 10,
+      spacingY: 10
+    });
+    const withCustomAsset = {
+      ...base,
+      maskRules: base.maskRules.map((rule) => ({
+        ...rule,
+        metadata: { ...rule.metadata, maskAssetId: "asset-mask" }
+      }))
+    };
+    const filled = fillMaskWithImages(withCustomAsset, maskId(withCustomAsset), imageInputs(1));
+    const frame = filled.pages[0].layers.find((layer) => layer.type === "frame");
+
+    expect(frame?.type === "frame" ? frame.maskSource?.type : undefined).toBe("alphaAsset");
+    expect(frame?.type === "frame" ? frame.maskSource?.assetId : undefined).toBe("asset-mask");
   });
 });
 
