@@ -138,7 +138,7 @@ export function createTextLayer(options: CreateTextLayerOptions): TextLayer {
     fontFamily: "DM Sans",
     fontWeight: 600,
     fontStyle: "normal",
-    fontSize: 42,
+    fontSize: 90,
     lineHeight: 1.2,
     letterSpacing: 0,
     color: "#111111",

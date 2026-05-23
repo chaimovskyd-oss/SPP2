@@ -28,7 +28,7 @@ import { markDebugEvent, trackDebugMount } from "@/debug/sppDiagnostics";
 
 export interface CanvasContextMenuTarget {
   layerId: string;
-  layerType: "image" | "frame";
+  layerType: "image" | "frame" | "text";
   hasImage: boolean;
   screenX: number;
   screenY: number;
@@ -43,6 +43,7 @@ interface KonvaLayerNodeProps {
   onChange: (layer: VisualLayer) => void;
   onBeginTextEdit: (layerId: string) => void;
   onContextMenu?: (target: CanvasContextMenuTarget) => void;
+  reduceImageEffects?: boolean;
 }
 
 export function KonvaLayerNode({
@@ -53,20 +54,21 @@ export function KonvaLayerNode({
   onSelect,
   onChange,
   onBeginTextEdit,
-  onContextMenu
+  onContextMenu,
+  reduceImageEffects = false
 }: KonvaLayerNodeProps): React.ReactElement | null {
   useEffect(() => trackDebugMount("KonvaLayerNode", { layerId: layer.id, type: layer.type }), [layer.id, layer.type]);
 
   if (layer.type === "text") {
-    return <TextNode layer={layer} selected={selected} onBeginTextEdit={onBeginTextEdit} onChange={onChange} onSelect={onSelect} />;
+    return <TextNode layer={layer} selected={selected} onBeginTextEdit={onBeginTextEdit} onChange={onChange} onSelect={onSelect} onContextMenu={onContextMenu} />;
   }
 
   if (layer.type === "image") {
-    return <ImageNode layer={layer} assets={assets} selected={selected} onChange={onChange} onSelect={onSelect} onContextMenu={onContextMenu} />;
+    return <ImageNode layer={layer} assets={assets} selected={selected} reduceImageEffects={reduceImageEffects} onChange={onChange} onSelect={onSelect} onContextMenu={onContextMenu} />;
   }
 
   if (layer.type === "frame") {
-    return <FrameNode layer={layer} assets={assets} selected={selected} layoutEditMode={layoutEditMode} onChange={onChange} onSelect={onSelect} onContextMenu={onContextMenu} />;
+    return <FrameNode layer={layer} assets={assets} selected={selected} layoutEditMode={layoutEditMode} reduceImageEffects={reduceImageEffects} onChange={onChange} onSelect={onSelect} onContextMenu={onContextMenu} />;
   }
 
   if (layer.type === "shape") {
@@ -376,6 +378,15 @@ function resolveOuterGlow(layer: TextLayer): { color: string; blur: number; opac
   const glowEffect = layer.effects.find((e) => e.enabled && e.effectType === "outer_glow");
   if (glowEffect !== undefined) {
     const p = glowEffect.params as Record<string, unknown>;
+    // eslint-disable-next-line no-console
+    console.log("[outer_glow] native-Konva text path", {
+      layerId: layer.id,
+      fontFamily: layer.fontFamily,
+      fontSize: layer.fontSize,
+      color: layer.color,
+      params: p,
+      opacity: glowEffect.opacity
+    });
     return {
       color: typeof p["color"] === "string" ? p["color"] : "#ffffff",
       blur: typeof p["blur"] === "number" ? p["blur"] : 20,
@@ -395,13 +406,15 @@ function TextNode({
   selected,
   onSelect,
   onChange,
-  onBeginTextEdit
+  onBeginTextEdit,
+  onContextMenu
 }: {
   layer: TextLayer;
   selected: boolean;
   onSelect: (layerId: string) => void;
   onChange: (layer: VisualLayer) => void;
   onBeginTextEdit: (layerId: string) => void;
+  onContextMenu?: (target: CanvasContextMenuTarget) => void;
 }): React.ReactElement {
   const [patternVersion, setPatternVersion] = useState(0);
 
@@ -450,6 +463,19 @@ function TextNode({
     }
   };
 
+  const handleTextContextMenu = (event: Konva.KonvaEventObject<PointerEvent>): void => {
+    event.evt.preventDefault();
+    event.cancelBubble = true;
+    onSelect(layer.id);
+    onContextMenu?.({
+      layerId: layer.id,
+      layerType: "text",
+      hasImage: false,
+      screenX: event.evt.clientX,
+      screenY: event.evt.clientY
+    });
+  };
+
   if (warpCanvas !== null) {
     const canvasMeta = warpCanvas as HTMLCanvasElement & { sppTextOffsetX?: number; sppTextOffsetY?: number };
     const textOffsetX = canvasMeta.sppTextOffsetX ?? 0;
@@ -481,6 +507,7 @@ function TextNode({
           onChange({ ...layer, x: event.target.x() - alignmentOffsetX, y: event.target.y() - alignmentOffsetY });
         }}
         onClick={() => onSelect(layer.id)}
+        onContextMenu={handleTextContextMenu}
         onDblClick={() => onBeginTextEdit(layer.id)}
         onTap={() => onSelect(layer.id)}
         onTransformEnd={(event) => {
@@ -539,8 +566,9 @@ function TextNode({
       fill={rgba(layer.color, layer.fillOpacity)}
       {...gradientProps}
       stroke={stroke?.color}
-      strokeWidth={stroke?.width ?? 0}
+      strokeWidth={stroke !== undefined && (stroke.position ?? "outside") === "outside" ? (stroke.width ?? 0) * 2 : (stroke?.width ?? 0)}
       strokeEnabled={stroke !== undefined && stroke.width > 0 && stroke.opacity > 0}
+      fillAfterStrokeEnabled={stroke !== undefined && (stroke.position ?? "outside") === "outside"}
       {...shadowProps}
       lineHeight={layer.lineHeight}
       letterSpacing={layer.letterSpacing}
@@ -552,6 +580,7 @@ function TextNode({
       visible={layer.visible}
       globalCompositeOperation={mapBlendMode(layer.blendMode) as "source-over"}
       onClick={() => onSelect(layer.id)}
+      onContextMenu={handleTextContextMenu}
       onDblClick={() => onBeginTextEdit(layer.id)}
       onTap={() => onSelect(layer.id)}
       onTransformEnd={(event) => {
@@ -803,7 +832,8 @@ function ImageNode({
   selected,
   onSelect,
   onChange,
-  onContextMenu
+  onContextMenu,
+  reduceImageEffects
 }: {
   layer: ImageLayer;
   assets: Asset[];
@@ -811,6 +841,7 @@ function ImageNode({
   onSelect: (layerId: string) => void;
   onChange: (layer: VisualLayer) => void;
   onContextMenu?: (target: CanvasContextMenuTarget) => void;
+  reduceImageEffects: boolean;
 }): React.ReactElement {
   // Lock layer & use live crop preview during image-edit mode
   const isBeingEdited = useImageEditStore((s) => s.imageEditMode && s.editingLayerId === layer.id);
@@ -883,6 +914,7 @@ function ImageNode({
 
   // Build the active filter list for this node.
   const activeFilters = useMemo(() => {
+    if (reduceImageEffects) return [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const list: any[] = [];
     if (blurRadius > 0) list.push(Konva.Filters.Blur);
@@ -898,7 +930,7 @@ function ImageNode({
     if (extras.colorPop !== null) list.push(ColorPopFilter);
     return list;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blurRadius, colorAdj.brightness, colorAdj.contrast, colorAdj.saturation, colorAdj.hue, colorAdj.grayscale, extras.luminance, extras.sepia, extras.invert, extras.threshold, extras.posterize, extras.removeWhite !== null, extras.colorPop !== null]);
+  }, [reduceImageEffects, blurRadius, colorAdj.brightness, colorAdj.contrast, colorAdj.saturation, colorAdj.hue, colorAdj.grayscale, extras.luminance, extras.sepia, extras.invert, extras.threshold, extras.posterize, extras.removeWhite !== null, extras.colorPop !== null]);
 
   const needsCache = activeFilters.length > 0;
   const filterCount = activeFilters.length;
@@ -1300,7 +1332,8 @@ function FrameNode({
   layoutEditMode,
   onSelect,
   onChange,
-  onContextMenu
+  onContextMenu,
+  reduceImageEffects
 }: {
   layer: FrameLayer;
   assets: Asset[];
@@ -1309,6 +1342,7 @@ function FrameNode({
   onSelect: (layerId: string) => void;
   onChange: (layer: VisualLayer) => void;
   onContextMenu?: (target: CanvasContextMenuTarget) => void;
+  reduceImageEffects: boolean;
 }): React.ReactElement {
   const asset = assets.find((item) => item.id === layer.imageAssetId);
   const image = useKonvaImage(resolveCanvasAssetPath(asset));
@@ -1348,12 +1382,13 @@ function FrameNode({
   // Edge config mirrored from collage assignment
   const collageEdgeConfig = layer.metadata["collageEdgeConfig"] as CollageEdgeConfig | null | undefined;
 
-  const frameNeedsCache = blurRadius > 0 || frameColorAdj.hasAny;
+  const frameNeedsCache = !reduceImageEffects && (blurRadius > 0 || frameColorAdj.hasAny);
 
   const frameExtras = frameColorAdj.extras ?? EMPTY_EXTRA_QUICK_EFFECTS;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const frameFilters = useMemo((): any[] => {
+    if (reduceImageEffects) return [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const list: any[] = [];
     if (blurRadius > 0) list.push(Konva.Filters.Blur);
@@ -1369,7 +1404,7 @@ function FrameNode({
     if (frameExtras.colorPop !== null) list.push(ColorPopFilter);
     return list;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blurRadius, frameColorAdj.brightness, frameColorAdj.contrast, frameColorAdj.saturation, frameColorAdj.hue, frameColorAdj.grayscale, frameExtras.luminance, frameExtras.sepia, frameExtras.invert, frameExtras.threshold, frameExtras.posterize, frameExtras.removeWhite !== null, frameExtras.colorPop !== null]);
+  }, [reduceImageEffects, blurRadius, frameColorAdj.brightness, frameColorAdj.contrast, frameColorAdj.saturation, frameColorAdj.hue, frameColorAdj.grayscale, frameExtras.luminance, frameExtras.sepia, frameExtras.invert, frameExtras.threshold, frameExtras.posterize, frameExtras.removeWhite !== null, frameExtras.colorPop !== null]);
 
   const frameFilterCount = frameFilters.length;
 
@@ -1552,6 +1587,10 @@ function FrameNode({
 
   function handleCollageSwapAnchor(event: Konva.KonvaEventObject<MouseEvent>): void {
     event.cancelBubble = true;
+    if (!selected) {
+      onSelect(layer.id);
+      return;
+    }
     if (!slotId) return;
     window.dispatchEvent(new CustomEvent("spp2:collage-slot-anchor-click", { detail: { slotId } }));
   }
@@ -1949,7 +1988,7 @@ function FrameNode({
 // --- Content Zoom Handles ---
 // Shows a boundary box with corner handles that zoom the image within a cell.
 
-const HANDLE_SIZE = 10;
+const HANDLE_SIZE = 16;
 const HANDLE_HALF = HANDLE_SIZE / 2;
 
 interface ContentZoomHandlesProps {
@@ -1960,11 +1999,11 @@ interface ContentZoomHandlesProps {
   onChange: (layer: VisualLayer) => void;
 }
 
-// Handles are placed OUTSIDE the frame so image content drag is never blocked.
+// Handles straddle the frame so they stay visible near neighboring cells.
 // Each handle sits fully outside its corner:
 //   TL → (-SIZE, -SIZE)   TR → (w, -SIZE)
 //   BL → (-SIZE, h)       BR → (w,  h)
-const HANDLE_OUTSIDE = HANDLE_SIZE; // how far outside the frame the handle sits
+const HANDLE_OUTSIDE = HANDLE_HALF; // straddles frame corner for visibility
 
 function ContentZoomHandles({ layer, sourceSize, collageSelectColor, cornerRadius, onChange }: ContentZoomHandlesProps): React.ReactElement {
   const dragStartRef = useRef<{ scale: number } | null>(null);
@@ -2026,9 +2065,12 @@ function ContentZoomHandles({ layer, sourceSize, collageSelectColor, cornerRadiu
         width={layer.width} height={layer.height}
         fill="transparent"
         stroke={collageSelectColor}
-        strokeWidth={2}
-        dash={[5, 3]}
+        strokeWidth={3}
+        dash={[6, 4]}
         cornerRadius={cornerRadius}
+        shadowColor="rgba(0,0,0,0.45)"
+        shadowBlur={8}
+        shadowOpacity={0.45}
         listening={false}
       />
       {/* Zoom handles — fully OUTSIDE the frame, never overlap image area */}
@@ -2041,9 +2083,16 @@ function ContentZoomHandles({ layer, sourceSize, collageSelectColor, cornerRadiu
           height={HANDLE_SIZE}
           fill="#fff"
           stroke={collageSelectColor}
-          strokeWidth={2}
-          cornerRadius={2}
+          strokeWidth={3}
+          cornerRadius={4}
+          shadowColor="rgba(0,0,0,0.55)"
+          shadowBlur={10}
+          shadowOpacity={0.65}
+          shadowOffsetX={0}
+          shadowOffsetY={1}
           draggable
+          onMouseEnter={(event) => { const container = event.target.getStage()?.container(); if (container) container.style.cursor = "nwse-resize"; }}
+          onMouseLeave={(event) => { const container = event.target.getStage()?.container(); if (container) container.style.cursor = "default"; }}
           onDragStart={onDragStart}
           onDragMove={(e) => onDragMove(e, ax, ay, hx, hy)}
           onDragEnd={(e) => onDragEnd(e, hx, hy)}

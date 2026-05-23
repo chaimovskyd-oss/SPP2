@@ -39,10 +39,13 @@ export interface Transform {
 
 export interface CropRect extends Rect {}
 
+export type StrokePosition = "inside" | "center" | "outside";
+
 export interface StrokeStyle extends VersionedEntity {
   color: string;
   width: number;
   opacity: number;
+  position?: StrokePosition;
   dash?: number[];
 }
 

@@ -3,6 +3,8 @@ import { computeSplitTreeSlots, buildSplitTree } from "./collageSplitTree";
 import { buildDiagonalBands } from "./collageDiagonal";
 import { buildShapedCollageSlots, buildDiamondCenterSlots, buildFrameCollageSlots, buildPlusCrossSlots } from "./collageShapedLayouts";
 import { buildPuzzleSlots } from "./collagePuzzle";
+import { buildSteppedMosaicSlots, buildTrapezoidSplitSlots, buildWaveSplitSlots } from "./collageV6Layouts";
+import { buildDynamicCollageSlots } from "./collageDynamicLayouts";
 import type { CollageLayoutFamily, CollageLayoutParams, CollageSlot } from "@/types/collage";
 
 // ─── Core building block (port of Python _make_grid_cells) ──────────────────
@@ -319,6 +321,58 @@ function generatePuzzleSlots(p: CollageLayoutParams): CollageSlot[] {
   return buildPuzzleSlots({ ...p, seed: 42 });
 }
 
+function generateTrapezoidSplitSlots(p: CollageLayoutParams): CollageSlot[] {
+  return buildTrapezoidSplitSlots(p.imageCount, p.canvasW, p.canvasH, p.spacingPx, p.marginPx);
+}
+
+function generateSteppedMosaicSlots(p: CollageLayoutParams): CollageSlot[] {
+  return buildSteppedMosaicSlots(p.imageCount, p.canvasW, p.canvasH, p.spacingPx, p.marginPx);
+}
+
+function generateWaveSplitSlots(p: CollageLayoutParams): CollageSlot[] {
+  return buildWaveSplitSlots(p.imageCount, p.canvasW, p.canvasH, p.spacingPx, p.marginPx);
+}
+
+function generateModularIrregularSlots(p: CollageLayoutParams): CollageSlot[] {
+  return buildDynamicCollageSlots("modular-irregular-grid", { ...p, seed: `modular-${p.imageCount}-${p.canvasW}x${p.canvasH}` });
+}
+
+function generateHeroSupportSlots(p: CollageLayoutParams): CollageSlot[] {
+  return buildDynamicCollageSlots("hero-support", { ...p, seed: `hero-support-${p.imageCount}-${p.canvasW}x${p.canvasH}` });
+}
+
+function generateOrganicFlowSlots(p: CollageLayoutParams): CollageSlot[] {
+  return buildDynamicCollageSlots("organic-flow", { ...p, seed: `organic-flow-${p.imageCount}-${p.canvasW}x${p.canvasH}` });
+}
+
+function generateWaveRibbonsSlots(p: CollageLayoutParams): CollageSlot[] {
+  return buildDynamicCollageSlots("wave-ribbons", { ...p, seed: `wave-ribbons-${p.imageCount}-${p.canvasW}x${p.canvasH}` });
+}
+
+function generateDynamicStripsSlots(p: CollageLayoutParams): CollageSlot[] {
+  return buildDynamicCollageSlots("dynamic-strips", { ...p, seed: `dynamic-strips-${p.imageCount}-${p.canvasW}x${p.canvasH}` });
+}
+
+function generateSoftPolygonsSlots(p: CollageLayoutParams): CollageSlot[] {
+  return buildDynamicCollageSlots("soft-polygons", { ...p, seed: `soft-polygons-${p.imageCount}-${p.canvasW}x${p.canvasH}` });
+}
+
+function generateAmoebaPackSlots(p: CollageLayoutParams): CollageSlot[] {
+  return buildDynamicCollageSlots("amoeba-pack", { ...p, seed: `amoeba-pack-${p.imageCount}-${p.canvasW}x${p.canvasH}` });
+}
+
+function generateRadialHeroSlots(p: CollageLayoutParams): CollageSlot[] {
+  return buildDynamicCollageSlots("radial-hero", { ...p, seed: `radial-hero-${p.imageCount}-${p.canvasW}x${p.canvasH}` });
+}
+
+function generateFreeformClustersSlots(p: CollageLayoutParams): CollageSlot[] {
+  return buildDynamicCollageSlots("freeform-clusters", { ...p, seed: `freeform-clusters-${p.imageCount}-${p.canvasW}x${p.canvasH}` });
+}
+
+function generateSoftVoronoiSlots(p: CollageLayoutParams): CollageSlot[] {
+  return buildDynamicCollageSlots("soft-voronoi", { ...p, seed: `soft-voronoi-${p.imageCount}-${p.canvasW}x${p.canvasH}` });
+}
+
 function generateRingCollageSlots(p: CollageLayoutParams): CollageSlot[] {
   // Ring segments arranged in a donut
   const { imageCount: n, canvasW, canvasH } = p;
@@ -370,22 +424,44 @@ export const LAYOUT_REGISTRY: CollageLayoutFamilyDef[] = [
   { family: "staircase",       name: "Staircase",       nameHe: "מדרגות",         minImages: 4,  maxImages: 15,  mode: "creative", generate: generateStaircaseSlots },
   { family: "ringFocus",       name: "Ring Focus",      nameHe: "מוקד מרכזי",     minImages: 4,  maxImages: 20,  mode: "creative", generate: generateRingFocusSlots },
   { family: "splitTree",       name: "Split Tree",      nameHe: "עץ חלוקה",       minImages: 2,  maxImages: 8,   mode: "creative", generate: generateSplitTreeSlots },
-  { family: "diagonal",        name: "Diagonal",        nameHe: "אלכסון",         minImages: 2,  maxImages: 6,   mode: "creative", generate: generateDiagonalBandSlots },
+  { family: "diagonal",        name: "Diagonal",        nameHe: "אלכסון",         minImages: 2,  maxImages: 8,   mode: "creative", generate: generateDiagonalBandSlots },
   { family: "diagonalHero",    name: "Diagonal Hero",   nameHe: "גיבור אלכסוני",  minImages: 3,  maxImages: 8,   mode: "creative", generate: generateDiagonalHeroSlots },
   { family: "shapedCircle",    name: "Circle",          nameHe: "⬤ עיגול",       minImages: 4,  maxImages: 24,  mode: "creative", generate: generateShapedCircleSlots },
   { family: "shapedHeart",     name: "Heart",           nameHe: "♥ לב",           minImages: 4,  maxImages: 24,  mode: "creative", generate: generateShapedHeartSlots },
   { family: "ringCollage",     name: "Ring",            nameHe: "טבעת",           minImages: 4,  maxImages: 16,  mode: "creative", generate: generateRingCollageSlots },
   { family: "artisticLayered", name: "Artistic",        nameHe: "אמנותי",         minImages: 3,  maxImages: 10,  mode: "creative", generate: generateArtisticLayeredSlots },
-  { family: "diamondCenter",   name: "Diamond",         nameHe: "יהלום",          minImages: 2,  maxImages: 20,  mode: "creative", generate: generateDiamondCenterSlots },
-  { family: "frameCollage",    name: "Frame",           nameHe: "מסגרת",          minImages: 4,  maxImages: 24,  mode: "creative", generate: generateFrameCollageSlots },
-  { family: "plusCross",       name: "Plus / Cross",    nameHe: "צלב",            minImages: 5,  maxImages: 20,  mode: "creative", generate: generatePlusCrossSlots },
+  { family: "diamondCenter",   name: "Diamond",         nameHe: "יהלום",          minImages: 3,  maxImages: 30,  mode: "creative", generate: generateDiamondCenterSlots },
+  { family: "frameCollage",    name: "Frame",           nameHe: "מסגרת",          minImages: 5,  maxImages: 12,  mode: "creative", generate: generateFrameCollageSlots },
+  { family: "plusCross",       name: "Plus / Cross",    nameHe: "צלב",            minImages: 5,  maxImages: 9,   mode: "creative", generate: generatePlusCrossSlots },
+  { family: "trapezoidSplit",  name: "Trapezoid Split", nameHe: "טרפזים",         minImages: 3,  maxImages: 8,   mode: "creative", generate: generateTrapezoidSplitSlots },
+  { family: "steppedMosaic",   name: "Stepped Mosaic",  nameHe: "פסיפס מדורג",    minImages: 4,  maxImages: 16,  mode: "creative", generate: generateSteppedMosaicSlots },
+  { family: "waveSplit",       name: "Wave Split",      nameHe: "גל",             minImages: 2,  maxImages: 30,  mode: "creative", generate: generateWaveSplitSlots },
   { family: "puzzle",          name: "Puzzle",          nameHe: "פאזל",            minImages: 1,  maxImages: 50,  mode: "both",     generate: generatePuzzleSlots },
+  { family: "modularIrregular", name: "Modular Irregular", nameHe: "מודולרי דינמי", minImages: 2,  maxImages: 80,  mode: "creative", generate: generateModularIrregularSlots },
+  { family: "heroSupport",     name: "Hero + Support",  nameHe: "גיבור ותמיכות",   minImages: 3,  maxImages: 40,  mode: "creative", generate: generateHeroSupportSlots },
+  { family: "organicFlow",     name: "Organic Flow",    nameHe: "זרימה אורגנית",   minImages: 4,  maxImages: 24,  mode: "creative", generate: generateOrganicFlowSlots },
+  { family: "waveRibbons",     name: "Wave Ribbons",    nameHe: "רצועות גל",       minImages: 4,  maxImages: 30,  mode: "creative", generate: generateWaveRibbonsSlots },
+  { family: "dynamicStrips",   name: "Dynamic Strips",  nameHe: "סטריפים דינמיים", minImages: 3,  maxImages: 40,  mode: "creative", generate: generateDynamicStripsSlots },
+  { family: "softPolygons",    name: "Soft Polygons",   nameHe: "פוליגונים רכים",  minImages: 5,  maxImages: 24,  mode: "creative", generate: generateSoftPolygonsSlots },
+  { family: "amoebaPack",      name: "Amoeba Pack",     nameHe: "אמבה",            minImages: 4,  maxImages: 18,  mode: "creative", generate: generateAmoebaPackSlots },
+  { family: "radialHero",      name: "Radial Hero",     nameHe: "גיבור רדיאלי",       minImages: 4,  maxImages: 20,  mode: "creative", generate: generateRadialHeroSlots },
+  { family: "freeformClusters", name: "Freeform Clusters", nameHe: "קבוצות חופשיות",   minImages: 8,  maxImages: 60,  mode: "creative", generate: generateFreeformClustersSlots },
+  { family: "softVoronoi",     name: "Soft Voronoi",    nameHe: "וורונוי רך",         minImages: 5,  maxImages: 28,  mode: "creative", generate: generateSoftVoronoiSlots },
 ];
 
 export function computeSlots(family: CollageLayoutFamily, params: CollageLayoutParams): CollageSlot[] {
   const def = LAYOUT_REGISTRY.find(d => d.family === family);
   if (!def) return generateGridSlots(params);
-  return def.generate(params);
+  if (params.imageCount < def.minImages || params.imageCount > def.maxImages) {
+    return generateGridSlots(params);
+  }
+
+  const slots = def.generate(params);
+  if (slots.filter((slot) => slot.type === "image").length < params.imageCount) {
+    return generateGridSlots(params);
+  }
+
+  return slots;
 }
 
 export { generateSplitTreeSlots };

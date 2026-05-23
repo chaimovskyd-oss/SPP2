@@ -1085,6 +1085,15 @@ textarea {
   min-height: 0;
   overflow-y: auto;
   padding: 14px;
+  /* Flip to LTR so the vertical scrollbar appears on the outer (screen-edge)
+     side of the panel instead of facing the canvas. Inner content is restored
+     to RTL below. */
+  direction: ltr;
+  scrollbar-gutter: stable;
+}
+
+.ls-content > * {
+  direction: rtl;
 }
 
 .left-rail {
@@ -1151,9 +1160,12 @@ textarea {
   position: relative;
   display: grid;
   min-width: 0;
-  place-items: center;
-  overflow: hidden;
+  /* `safe center` keeps the canvas centered when it fits, but falls back to
+     `start` once it overflows so the top/left edges stay reachable via scroll. */
+  place-items: safe center;
+  overflow: auto;
   background: var(--bg-canvas);
+  scrollbar-gutter: stable both-edges;
 }
 
 .canvas-area::before {
@@ -1306,6 +1318,7 @@ textarea {
   overflow-y: auto;
   padding: 18px 18px 24px;
   border-right: 1px solid var(--border);
+  scrollbar-gutter: stable;
 }
 
 /* ─── Right Sidebar (contextual inspector) ──────────────────────────────────── */
@@ -1317,6 +1330,7 @@ textarea {
   min-width: 0;
   border-right: 1px solid var(--border);
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .rs-inspector-header {
@@ -1404,6 +1418,7 @@ textarea {
 .rs-body {
   flex: 1;
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 /* Empty inspector state */
@@ -2382,6 +2397,182 @@ textarea {
   font-size: 11.5px;
 }
 
+/* === Editor Status Bar (Status + Quick Inspector) === */
+.editor-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 30px;
+  padding: 0 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  user-select: none;
+}
+
+.editor-status-bar .esb-section {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.editor-status-bar .esb-right {
+  margin-inline-start: auto;
+}
+
+.editor-status-bar .esb-canvas {
+  white-space: nowrap;
+}
+
+.editor-status-bar .esb-empty {
+  opacity: 0.65;
+  font-style: italic;
+}
+
+.editor-status-bar .esb-unit-select,
+.editor-status-bar .esb-zoom-select {
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  background: var(--bg-elevated, var(--bg-surface));
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.editor-status-bar .esb-zoom-select {
+  min-width: 64px;
+  text-align: center;
+}
+
+.editor-status-bar .esb-size-editor {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.editor-status-bar .esb-layer-type {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.editor-status-bar .esb-size-label {
+  opacity: 0.75;
+}
+
+.editor-status-bar .esb-num-input {
+  width: 56px;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  background: var(--bg-elevated, var(--bg-surface));
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 11px;
+  text-align: center;
+}
+
+.editor-status-bar .esb-num-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.editor-status-bar .esb-input-error {
+  border-color: var(--danger, #d33);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--danger, #d33) 25%, transparent);
+}
+
+.editor-status-bar .esb-times {
+  opacity: 0.6;
+}
+
+.editor-status-bar .esb-unit-suffix {
+  opacity: 0.7;
+  margin-inline-start: 1px;
+}
+
+.editor-status-bar .esb-lock-btn,
+.editor-status-bar .esb-apply-btn,
+.editor-status-bar .esb-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  background: var(--bg-elevated, var(--bg-surface));
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+
+.editor-status-bar .esb-icon-btn {
+  width: 22px;
+  padding: 0;
+}
+
+.editor-status-bar .esb-lock-on {
+  border-color: color-mix(in oklab, var(--accent) 60%, transparent);
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+.editor-status-bar .esb-apply-btn {
+  gap: 4px;
+  color: var(--text-primary);
+}
+
+.editor-status-bar .esb-apply-btn:hover,
+.editor-status-bar .esb-lock-btn:hover,
+.editor-status-bar .esb-icon-btn:hover {
+  border-color: var(--accent);
+}
+
+.editor-status-bar .esb-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.editor-status-bar .esb-autosave {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.editor-status-bar .esb-autosave-ok {
+  border-color: color-mix(in oklab, var(--success, #2a8f3f) 25%, transparent);
+  background: color-mix(in oklab, var(--success, #2a8f3f) 12%, transparent);
+  color: var(--success, #2a8f3f);
+}
+
+.editor-status-bar .esb-autosave-busy {
+  border-color: color-mix(in oklab, var(--text-secondary) 25%, transparent);
+  background: color-mix(in oklab, var(--text-secondary) 10%, transparent);
+  color: var(--text-secondary);
+}
+
+.editor-status-bar .esb-autosave-warn {
+  border-color: color-mix(in oklab, var(--danger, #d33) 30%, transparent);
+  background: color-mix(in oklab, var(--danger, #d33) 14%, transparent);
+  color: var(--danger, #d33);
+}
+
 .bottom-side {
   display: inline-flex;
   align-items: center;
@@ -3235,6 +3426,42 @@ input[type="range"]::-webkit-slider-runnable-track {
 .ctx-icon {
   font-size: 15px;
   flex-shrink: 0;
+}
+
+.ctx-submenu {
+  margin: 2px 0;
+}
+.ctx-submenu > summary {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  color: var(--text, #e8e5e1);
+  cursor: pointer;
+  direction: rtl;
+  font-size: 12.5px;
+  list-style: none;
+  text-align: right;
+}
+.ctx-submenu > summary::-webkit-details-marker {
+  display: none;
+}
+.ctx-submenu > summary::before {
+  content: ">";
+  margin-inline-end: 8px;
+  color: var(--text-tertiary, #8a8496);
+}
+.ctx-submenu[open] > summary::before {
+  transform: rotate(90deg);
+}
+.ctx-submenu > summary:hover {
+  background: color-mix(in oklab, var(--accent, #7C6FE0) 16%, transparent);
+  color: var(--text-primary, #fff);
+}
+.ctx-submenu .ctx-item {
+  min-height: 28px;
+  padding-inline-start: 22px;
 }
 
 /* ─── Image Studio adjustment reset button ───────────────────────────────── */

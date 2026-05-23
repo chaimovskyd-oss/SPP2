@@ -9,7 +9,7 @@ import { resetWorkspaceForHome } from "@/state/workspaceReset";
 import { ProductLibraryScreen } from "./productLibrary/ProductLibraryScreen";
 import type { ProductDefinition } from "@/types/product";
 import { createCollageModeDocument } from "@/core/collage/collageFactory";
-import { syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
+import { assignByPoolOrder, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import { importImageAsset } from "@/core/assets/assetManager";
 import { generateMaskThumbnail } from "@/state/maskLibraryStore";
 import { createClassPhotoModeDocument, defaultLayoutSettings } from "@/core/classPhoto/classPhotoFactory";
@@ -454,10 +454,20 @@ export function App(): ReactElement {
     // Sync CollageSlots → real FrameLayers with correct imageAssetIds
     const rule = doc.collageRules[0];
     if (rule) {
+      const imageInputs = importedAssets.map((asset) => ({
+        assetId: asset.id,
+        width: asset.width ?? 800,
+        height: asset.height ?? 600,
+      }));
+      const smartRule = {
+        ...rule,
+        imageAssignments: assignByPoolOrder(rule.imagePool, rule.cachedSlots, rule.id, rule.imageAssignments, rule.cachedSlots, imageInputs)
+      };
+      doc = { ...doc, collageRules: doc.collageRules.map((r) => r.id === rule.id ? smartRule : r) };
       const page = doc.pages.find((p) => p.id === rule.pageId);
       if (page) {
-        const { page: updatedPage, frameIds } = syncFrameLayersToPage(page, rule, page.width, page.height);
-        const updatedRule = { ...rule, frameIds };
+        const { page: updatedPage, frameIds } = syncFrameLayersToPage(page, smartRule, page.width, page.height);
+        const updatedRule = { ...smartRule, frameIds };
         doc = {
           ...doc,
           collageRules: doc.collageRules.map((r) => r.id === rule.id ? updatedRule : r),

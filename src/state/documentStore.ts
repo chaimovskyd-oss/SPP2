@@ -12,6 +12,7 @@ import {
   deletePageAction,
   redoDocumentAction,
   reorderLayersAction,
+  resizeHistoryLimit,
   setFrameImageAction,
   undoDocumentAction,
   updateFrameContentAction,
@@ -23,7 +24,7 @@ import { touchProjectMetadata } from "@/core/projectMetadata";
 import { applyTextPresetToLayer, applyTextStylePatch, extractTextStylePatch } from "@/core/text/presets";
 import { measureTextLayerSize } from "@/core/text/measurement";
 import { createCollageImageAssignment, createCollageRule as collageRuleFactory } from "@/core/collage/collageFactory";
-import { applyLayoutFamily, applyNewImagePool, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
+import { applyLayoutFamily, applyNewImagePool, mergeLiveFrameEditsIntoCollageRule, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import { drainOverflow, pushOverflow, readOverflow, writeOverflow } from "@/core/reconcile";
 import { syncClassPhotoToPage } from "@/core/classPhoto/classPhotoLayoutEngine";
 import type { ClassPhotoPersonRecord, ClassPhotoFrameStyle, ClassPhotoLayoutSettings, ClassPhotoVisualBalanceSettings } from "@/types/classPhoto";
@@ -37,6 +38,7 @@ import type {
   CollageCanvasSettings,
   CollageEdgeConfig,
   CollageImageAssignment,
+  CollageImageInput,
   CollageLayout,
   CollageLayoutFamily,
   CollageRule
@@ -84,6 +86,7 @@ export interface DocumentState {
   removeGroupMember: (groupId: string, memberId: string) => void;
   addLinkedGroup: (group: LinkedGroup) => void;
   applyDocumentChange: (type: string, updater: (document: Document) => Document, activePageId?: string | null) => void;
+  setHistoryLimit: (limit: number) => void;
   undo: () => void;
   redo: () => void;
   // ─── Collage actions ─────────────────────────────────────────────────────
@@ -139,6 +142,25 @@ export interface DocumentState {
     pageId: ID,
     target: "child" | "staff" | "all_names" | "title" | "footer" | "all"
   ) => void;
+}
+
+function collageImageInputsFromAssets(assets: Asset[], assetIds: ID[]): CollageImageInput[] {
+  const byId = new Map(assets.map((asset) => [asset.id, asset]));
+  return assetIds.flatMap((assetId) => {
+    const asset = byId.get(assetId);
+    if (!asset) return [];
+    const faceRegions = Array.isArray(asset.metadata.faceRegions)
+      ? asset.metadata.faceRegions as CollageImageInput["faceRegions"]
+      : undefined;
+    const analysisScore = typeof asset.metadata.analysisScore === "number" ? asset.metadata.analysisScore : undefined;
+    return [{
+      assetId,
+      width: asset.width ?? 800,
+      height: asset.height ?? 600,
+      faceRegions,
+      analysisScore,
+    }];
+  });
 }
 
 export const useDocumentStore = create<DocumentState>((set, get) => ({
@@ -427,6 +449,15 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       const action = createInlineAction(type, updater, () => before);
       return commitDocumentAction(state, action, activePageId ?? state.activePageId);
     }),
+  setHistoryLimit: (limit) =>
+    set((state) => {
+      const history = resizeHistoryLimit(state.history, limit);
+      return {
+        history,
+        canUndo: history.undoStack.length > 0,
+        canRedo: history.redoStack.length > 0
+      };
+    }),
   applyLinkedGroupPatch: (pageId, groupId, patch) =>
     set((state) => {
       if (state.document === null) return state;
@@ -465,20 +496,21 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
       // If the new family supports more images than the old, drain any
       // hidden overflow back into the pool before computing the layout.
-      const prevOverflow = readOverflow(rule.metadata);
-      let workingRule = rule;
+      const baseRule = mergeLiveFrameEditsIntoCollageRule(rule, page);
+      const prevOverflow = readOverflow(baseRule.metadata);
+      let workingRule = baseRule;
       let nextOverflow = prevOverflow;
       if (prevOverflow.hidden.length > 0) {
-        const probe = applyLayoutFamily(rule, family, canvasW, canvasH, dpi);
+        const probe = applyLayoutFamily(baseRule, family, canvasW, canvasH, dpi, collageImageInputsFromAssets(state.document.assets, baseRule.imagePool));
         const capacity = probe.cachedSlots.filter(s => s.type === "image").length;
-        const drained = drainOverflow(rule.imagePool, prevOverflow, capacity);
+        const drained = drainOverflow(baseRule.imagePool, prevOverflow, capacity);
         if (drained.drained.length > 0) {
-          workingRule = { ...rule, imagePool: drained.pool };
+          workingRule = { ...baseRule, imagePool: drained.pool };
           nextOverflow = drained.newOverflow;
         }
       }
 
-      const computed = applyLayoutFamily(workingRule, family, canvasW, canvasH, dpi);
+      const computed = applyLayoutFamily(workingRule, family, canvasW, canvasH, dpi, collageImageInputsFromAssets(state.document.assets, workingRule.imagePool));
       const newRule = nextOverflow !== prevOverflow
         ? { ...computed, metadata: writeOverflow(computed.metadata, nextOverflow) }
         : computed;
@@ -498,13 +530,13 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
             // undo: restore original rule and re-sync frames
             const { page: origPage } = syncFrameLayersToPage(
               doc.pages.find((p) => p.id === rule.pageId) ?? page,
-              rule,
+              baseRule,
               canvasW,
               canvasH
             );
             return {
               ...doc,
-              collageRules: doc.collageRules.map((r) => r.id === ruleId ? rule : r),
+              collageRules: doc.collageRules.map((r) => r.id === ruleId ? baseRule : r),
               pages: doc.pages.map((p) => p.id === rule.pageId ? origPage : p),
             };
           }
@@ -572,8 +604,9 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       if (!page) return state;
 
       const dpi = page.setup?.dpi ?? 300;
-      const newPool = [...rule.imagePool, ...assetIds.filter((id) => !rule.imagePool.includes(id))];
-      const newRule = applyNewImagePool(rule, newPool, page.width, page.height, dpi);
+      const baseRule = mergeLiveFrameEditsIntoCollageRule(rule, page);
+      const newPool = [...baseRule.imagePool, ...assetIds.filter((id) => !baseRule.imagePool.includes(id))];
+      const newRule = applyNewImagePool(baseRule, newPool, page.width, page.height, dpi, collageImageInputsFromAssets(state.document.assets, newPool));
       const { page: newPage, frameIds } = syncFrameLayersToPage(page, newRule, page.width, page.height);
       const finalRule = { ...newRule, frameIds };
 
@@ -589,11 +622,11 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
           (doc) => {
             const { page: origPage } = syncFrameLayersToPage(
               doc.pages.find((p) => p.id === rule.pageId) ?? page,
-              rule, page.width, page.height
+              baseRule, page.width, page.height
             );
             return {
               ...doc,
-              collageRules: doc.collageRules.map((r) => r.id === ruleId ? rule : r),
+              collageRules: doc.collageRules.map((r) => r.id === ruleId ? baseRule : r),
               pages: doc.pages.map((p) => p.id === rule.pageId ? origPage : p),
             };
           }
@@ -610,13 +643,14 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       if (!page) return state;
 
       const dpi = page.setup?.dpi ?? 300;
-      const newPool = rule.imagePool.filter((id) => id !== assetId);
+      const baseRule = mergeLiveFrameEditsIntoCollageRule(rule, page);
+      const newPool = baseRule.imagePool.filter((id) => id !== assetId);
       // Push the removed assetId to the rule's overflow pool. The asset isn't
       // deleted from the document — it stays available for re-drain when the
       // pool grows (e.g. layout family switch to a larger grid).
-      const prevOverflow = readOverflow(rule.metadata);
-      const { newOverflow } = pushOverflow(rule.imagePool, newPool, prevOverflow);
-      const newRule = applyNewImagePool(rule, newPool, page.width, page.height, dpi);
+      const prevOverflow = readOverflow(baseRule.metadata);
+      const { newOverflow } = pushOverflow(baseRule.imagePool, newPool, prevOverflow);
+      const newRule = applyNewImagePool(baseRule, newPool, page.width, page.height, dpi, collageImageInputsFromAssets(state.document.assets, newPool));
       const { page: newPage, frameIds } = syncFrameLayersToPage(page, newRule, page.width, page.height);
       const finalRule = { ...newRule, frameIds, metadata: writeOverflow(newRule.metadata, newOverflow) };
 
@@ -632,11 +666,11 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
           (doc) => {
             const { page: origPage } = syncFrameLayersToPage(
               doc.pages.find((p) => p.id === rule.pageId) ?? page,
-              rule, page.width, page.height
+              baseRule, page.width, page.height
             );
             return {
               ...doc,
-              collageRules: doc.collageRules.map((r) => r.id === ruleId ? rule : r),
+              collageRules: doc.collageRules.map((r) => r.id === ruleId ? baseRule : r),
               pages: doc.pages.map((p) => p.id === rule.pageId ? origPage : p),
             };
           }

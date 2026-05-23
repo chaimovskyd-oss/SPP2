@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { useDocumentStore } from "@/state/documentStore";
-import { applyLayoutFamily, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
+import { applyLayoutFamily, mergeLiveFrameEditsIntoCollageRule, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import type {
   CollageEdgeStyle,
   CollageLayoutFamily,
@@ -102,8 +102,14 @@ export function CollageRightPanel({ rule, selectedSlotId, selectedLayer, onRepla
     if (!currentPage) return;
 
     const dpi = currentPage.setup?.dpi ?? 300;
-    const patchedRule: CollageRule = { ...currentRule, ...patch };
-    const relaidRule = applyLayoutFamily(patchedRule, patchedRule.activeFamily, currentPage.width, currentPage.height, dpi);
+    const liveRule = mergeLiveFrameEditsIntoCollageRule(currentRule, currentPage);
+    const patchedRule: CollageRule = { ...liveRule, ...patch };
+    const imageInputs = patchedRule.imagePool.flatMap((assetId) => {
+      const imageAsset = doc.assets.find((item) => item.id === assetId);
+      if (!imageAsset) return [];
+      return [{ assetId, width: imageAsset.width ?? 800, height: imageAsset.height ?? 600 }];
+    });
+    const relaidRule = applyLayoutFamily(patchedRule, patchedRule.activeFamily, currentPage.width, currentPage.height, dpi, imageInputs);
     const { page: syncedPage, frameIds } = syncFrameLayersToPage(currentPage, relaidRule, currentPage.width, currentPage.height);
     const finalRule = { ...relaidRule, frameIds };
 
@@ -128,6 +134,10 @@ export function CollageRightPanel({ rule, selectedSlotId, selectedLayer, onRepla
     const value = Math.max(0, Math.min(80, Number(marginDraft)));
     if (!Number.isFinite(value) || value === rule.marginMM) return;
     reflowWithPatch({ marginMM: value });
+  }
+
+  function updateStructureColors(settings: Pick<CollageRule["canvasSettings"], "spacingColor" | "marginColor">): void {
+    reflowWithPatch({ canvasSettings: { ...rule.canvasSettings, ...settings } });
   }
 
   function applyShapeToAll(shape: CollageSlotShape): void {
@@ -214,6 +224,8 @@ export function CollageRightPanel({ rule, selectedSlotId, selectedLayer, onRepla
     const dpi = page.setup?.dpi ?? 300;
     return Math.round(Math.min(asset.width / slotW, asset.height / slotH) * dpi);
   }, [page, selectedSlot, asset]);
+  const spacingColor = rule.canvasSettings.spacingColor ?? rule.canvasSettings.backgroundColor ?? "#ffffff";
+  const marginColor = rule.canvasSettings.marginColor ?? rule.canvasSettings.backgroundColor ?? "#ffffff";
 
   if (isImageSelected && assignment && resolvedSlotId) {
     return (
@@ -319,8 +331,16 @@ export function CollageRightPanel({ rule, selectedSlotId, selectedLayer, onRepla
             <input type="number" min={0} max={50} step={0.5} value={spacingDraft} onChange={(e) => setSpacingDraft(e.target.value)} onBlur={commitSpacing} onKeyDown={(e) => { if (e.key === "Enter") commitSpacing(); }} />
           </div>
           <div className="panel-field">
+            <label>Spacing color / ׳¦׳‘׳¢ ׳׳¨׳•׳•׳—׳™׳</label>
+            <input type="color" value={spacingColor} onChange={(e) => updateStructureColors({ spacingColor: e.target.value })} />
+          </div>
+          <div className="panel-field">
             <label>Margin / שוליים במ״מ</label>
             <input type="number" min={0} max={80} step={0.5} value={marginDraft} onChange={(e) => setMarginDraft(e.target.value)} onBlur={commitMargin} onKeyDown={(e) => { if (e.key === "Enter") commitMargin(); }} />
+          </div>
+          <div className="panel-field">
+            <label>Margin color / ׳¦׳‘׳¢ ׳©׳•׳׳™׳™׳</label>
+            <input type="color" value={marginColor} onChange={(e) => updateStructureColors({ marginColor: e.target.value })} />
           </div>
           <button type="button" className="btn btn-ghost btn-full" onClick={() => reflowWithPatch({})}>רענן מבנה לפי ההגדרות</button>
           <p className="panel-hint">פריסות עצמן נמצאות בצד שמאל בלשונית פריסות/שכבות. כאן משנים את מאפייני הקולאז׳.</p>

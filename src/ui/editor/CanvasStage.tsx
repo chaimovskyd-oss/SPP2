@@ -18,6 +18,8 @@ import { normalizeRect } from "@/core/bounds/bounds";
 import { isGridCellLayer } from "@/core/grid/gridModeEngine";
 import { isMaskFrameLayer } from "@/core/mask/maskModeEngine";
 import { isPhotoPrintSlotLayer } from "@/core/photoPrint/photoPrintModeEngine";
+import { getEffectiveSourceSize } from "@/core/image/screenshotCropMetadata";
+import { clampContentTransformToFillBounds } from "@/core/rendering/frameFitEngine";
 import { marqueeSelect } from "@/core/selection/selectionEngine";
 import { snapLayerBounds, snapLayerPosition, type SnapLine, type SnapLineKind, type SnapSourceRole } from "@/core/snap/snapEngine";
 import { measureTextLayerSize } from "@/core/text/measurement";
@@ -26,10 +28,11 @@ import { useImageEditStore, type SmartSelectionPrompt } from "@/state/imageEditS
 import { useDrawingToolsStore } from "@/state/drawingToolsStore";
 import { useColorStore, rgbaToHex } from "@/state/colorStore";
 import { useDocumentStore } from "@/state/documentStore";
+import { resolveEffectivePerformanceSettings, useAppSettings } from "@/settings";
 import { createShapeLayer } from "@/core/layers/factory";
 import type { Asset, Page } from "@/types/document";
 import type { Rect as RectType } from "@/types/primitives";
-import type { ImageLayer, ShapeLayer, TextLayer, VisualLayer } from "@/types/layers";
+import type { FrameLayer, ImageLayer, ShapeLayer, TextLayer, VisualLayer } from "@/types/layers";
 import { SCREEN_HELPER_NODE_NAME } from "./canvasNodeNames";
 import { KonvaLayerNode, type CanvasContextMenuTarget } from "./KonvaLayerNode";
 import { markDebugEvent, registerKonvaStage, trackDebugMount } from "@/debug/sppDiagnostics";
@@ -68,6 +71,11 @@ function findTopmostLayerAtPoint(layers: Page["layers"], pt: { x: number; y: num
     }
   }
   return null;
+}
+
+function isWheelZoomableFrame(layer: FrameLayer): boolean {
+  const collageMeta = layer.metadata["collageFrame"] as { slotType?: string } | undefined;
+  return collageMeta?.slotType !== "empty" && layer.imageAssetId !== undefined && layer.lockedContent !== true;
 }
 
 // ─── Guide color palette ──────────────────────────────────────────────────────
@@ -416,6 +424,12 @@ export function CanvasStage({
   // maps to Stage pixel (OVERFLOW_PAD, OVERFLOW_PAD), not (0,0).
   const layerOffset = OVERFLOW_PAD / scale;
   const gridLines = useMemo(() => buildGridLines(page, viewport.showGrid), [page, viewport.showGrid]);
+  const performanceSettings = useAppSettings((state) => state.settings.performance);
+  const effectivePerformance = useMemo(
+    () => resolveEffectivePerformanceSettings(performanceSettings),
+    [performanceSettings]
+  );
+  const reduceImageEffects = effectivePerformance.reduceEffectsDuringInteraction;
   const editingLayer = useMemo(
     () => page.layers.find((layer): layer is TextLayer => layer.type === "text" && layer.id === editingLayerId) ?? null,
     [editingLayerId, page.layers]
@@ -673,6 +687,39 @@ export function CanvasStage({
       return;
     }
     onLayerChange(layer);
+  }
+
+  function handleCanvasWheel(event: React.WheelEvent<HTMLDivElement>): void {
+    // Selected image/frame → wheel zooms the image content (unchanged behavior).
+    const selected = selectedLayerId !== null ? page.layers.find((layer) => layer.id === selectedLayerId) : undefined;
+    if (selected?.type === "frame" && isWheelZoomableFrame(selected)) {
+      event.preventDefault();
+      const asset = assets.find((item) => item.id === selected.imageAssetId);
+      const sourceSize = getEffectiveSourceSize(asset, asset?.width ?? selected.width, asset?.height ?? selected.height);
+      const factor = event.deltaY < 0 ? 1.08 : 1 / 1.08;
+      const nextScale = Math.max(0.5, Math.min(8, selected.contentTransform.scale * factor));
+      const contentTransform = clampContentTransformToFillBounds(
+        { ...selected.contentTransform, scale: nextScale },
+        selected.width,
+        selected.height,
+        sourceSize.width,
+        sourceSize.height,
+        selected.fitMode,
+        selected.padding
+      );
+      handleLayerChange({ ...selected, contentTransform });
+      return;
+    }
+
+    // Ctrl/⌘ + wheel → zoom the canvas viewport.
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      const direction = event.deltaY > 0 ? 1 / 1.08 : 1.08;
+      viewport.setZoom(viewport.zoom * direction);
+      return;
+    }
+
+    // Plain wheel → fall through; the browser scrolls the .canvas-area ancestor.
   }
 
   // ── Eraser brush painting ────────────────────────────────────────────────────
@@ -1035,11 +1082,7 @@ export function CanvasStage({
           : drawingTool === "lasso" ? "crosshair"
           : undefined
       }}
-      onWheel={(event) => {
-        event.preventDefault();
-        const direction = event.deltaY > 0 ? 1 / 1.08 : 1.08;
-        viewport.setZoom(viewport.zoom * direction);
-      }}
+      onWheel={handleCanvasWheel}
     >
       {viewport.showRulers ? <RulerOverlay page={page} scale={scale} /> : null}
       {/* Wrapper: keeps canvas-frame sized at the true canvas dimensions while
@@ -1494,6 +1537,7 @@ export function CanvasStage({
                 layer={layer}
                 selected={selectedLayerIds.includes(layer.id)}
                 layoutEditMode={layoutEditMode}
+                reduceImageEffects={reduceImageEffects}
                 onBeginTextEdit={onBeginTextEdit}
                 onChange={handleLayerChange}
                 onSelect={(layerId) => onSelectLayer(layerId)}

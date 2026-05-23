@@ -117,9 +117,8 @@ function normalizeEffects(value: unknown): TextEffect[] {
 }
 
 function legacyEffectType(type: string | undefined): TextEffect["effectType"] {
-  if (type === "stroke") {
-    return "stroke";
-  }
+  // Legacy "stroke" TextEffect was never wired up — text strokes live on layer.stroke.
+  // Treat it as a no-op "fill" effect during migration.
   if (type === "gradient") {
     return "fill";
   }

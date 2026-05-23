@@ -2,7 +2,7 @@ import { useRef, useState, type ReactElement } from "react";
 import { Stage, Layer, Line as KonvaLine } from "react-konva";
 import type Konva from "konva";
 import { CanvasStage } from "@/ui/editor/CanvasStage";
-import { applyLayoutFamily, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
+import { applyLayoutFamily, mergeLiveFrameEditsIntoCollageRule, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import { collectDividers, updateSplitRatio } from "@/core/collage/collageSplitTree";
 import { useDocumentStore } from "@/state/documentStore";
 import { useViewportStore } from "@/state/viewportStore";
@@ -71,12 +71,18 @@ export function CollageCanvasView({
         const currentPage = currentRule ? doc.pages.find((p) => p.id === currentRule.pageId) : undefined;
         if (!currentRule || !currentPage) return {};
         const dpi = currentPage.setup?.dpi ?? 300;
+        const imageInputs = currentRule.imagePool.flatMap((assetId) => {
+          const asset = doc.assets.find((item) => item.id === assetId);
+          return asset ? [{ assetId, width: asset.width ?? 800, height: asset.height ?? 600 }] : [];
+        });
+        const liveRule = mergeLiveFrameEditsIntoCollageRule(currentRule, currentPage);
         const relaidRule = applyLayoutFamily(
-          { ...currentRule, splitTree: newTree },
+          { ...liveRule, splitTree: newTree },
           "splitTree",
           currentPage.width,
           currentPage.height,
-          dpi
+          dpi,
+          imageInputs
         );
         const { page: syncedPage, frameIds } = syncFrameLayersToPage(currentPage, relaidRule, currentPage.width, currentPage.height);
         const finalRule = { ...relaidRule, frameIds };

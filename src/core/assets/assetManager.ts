@@ -103,6 +103,8 @@ export async function importImageAsset(file: File, existingAssets: Asset[] = [],
       metadata: {
         importedAt: new Date().toISOString(),
         originalFileName: file.name,
+        previewMaxSize,
+        thumbnailMaxSize,
         ...(screenshotCropSuggestion === null ? {} : { screenshotCropSuggestion: screenshotCropSuggestion as unknown as JsonValue }),
         ...(duplicate === undefined ? {} : { duplicateOf: duplicate.id })
       }

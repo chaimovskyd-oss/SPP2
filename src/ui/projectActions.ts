@@ -24,6 +24,7 @@ import { measureTextLayerSize } from "@/core/text/measurement";
 import { SCREEN_HELPER_NODE_NAME } from "./editor/canvasNodeNames";
 import { downloadBytes, downloadDataUrl, downloadTextFile } from "./file";
 import { markDebugEvent } from "@/debug/sppDiagnostics";
+import { getExportPixelRatio, getJpegQuality, type ExportRenderOptions } from "@/settings";
 
 export interface ProjectSaveOptions {
   filename?: string;
@@ -257,13 +258,13 @@ export async function loadProject(file: File): Promise<ProjectEnvelope> {
   return envelope;
 }
 
-export function exportStagePng(stage: Konva.Stage, documentName: string, page: Page): void {
-  const dataUrl = renderPrintableStage(stage, "image/png", page);
+export function exportStagePng(stage: Konva.Stage, documentName: string, page: Page, options?: ExportRenderOptions): void {
+  const dataUrl = renderPrintableStage(stage, "image/png", page, options);
   downloadDataUrl(`${safeFilename(documentName)}.png`, dataUrl);
 }
 
-export function exportStageJpg(stage: Konva.Stage, documentName: string, page: Page): void {
-  const dataUrl = renderPrintableStage(stage, "image/jpeg", page);
+export function exportStageJpg(stage: Konva.Stage, documentName: string, page: Page, options?: ExportRenderOptions): void {
+  const dataUrl = renderPrintableStage(stage, "image/jpeg", page, options);
   downloadDataUrl(`${safeFilename(documentName)}.jpg`, dataUrl);
 }
 
@@ -287,10 +288,11 @@ export interface PrintableStageImage {
 export function exportStagePrintImage(
   stage: Konva.Stage,
   page: Page,
-  mimeType: "image/png" | "image/jpeg" = "image/png"
+  mimeType: "image/png" | "image/jpeg" = "image/png",
+  options?: ExportRenderOptions
 ): PrintableStageImage {
   markDebugEvent("export:print-image-start", { pageId: page.id, width: page.width, height: page.height, mimeType });
-  const dataUrl = renderPrintableStage(stage, mimeType, page);
+  const dataUrl = renderPrintableStage(stage, mimeType, page, options);
   const dpi = page.setup.dpi || 300;
   markDebugEvent("export:print-image-end", { pageId: page.id, dataUrlLength: dataUrl.length });
   return {
@@ -314,9 +316,10 @@ export function exportStagePrintImage(
 export function renderCurrentPageAsPrintImage(
   stage: Konva.Stage,
   page: Page,
-  mimeType: "image/png" | "image/jpeg" = "image/png"
+  mimeType: "image/png" | "image/jpeg" = "image/png",
+  options?: ExportRenderOptions
 ): PrintableStageImage {
-  return exportStagePrintImage(stage, page, mimeType);
+  return exportStagePrintImage(stage, page, mimeType, options);
 }
 
 /**
@@ -362,9 +365,9 @@ export async function exportRenderedPagesAsPdf(
   downloadBytes(`${safeFilename(documentName)}.pdf`, bytes, "application/pdf");
 }
 
-export async function exportStagePdf(stage: Konva.Stage, documentName: string, sourcePage: Page): Promise<void> {
+export async function exportStagePdf(stage: Konva.Stage, documentName: string, sourcePage: Page, options?: ExportRenderOptions): Promise<void> {
   const { PDFDocument } = await import("pdf-lib");
-  const dataUrl = renderPrintableStage(stage, "image/png", sourcePage);
+  const dataUrl = renderPrintableStage(stage, "image/png", sourcePage, options);
   const imageBytes = await fetch(dataUrl).then((response) => response.arrayBuffer());
   const pdf = await PDFDocument.create();
   const image = await pdf.embedPng(imageBytes);
@@ -381,7 +384,7 @@ export async function exportStagePdf(stage: Konva.Stage, documentName: string, s
   downloadBytes(`${safeFilename(documentName)}.pdf`, bytes, "application/pdf");
 }
 
-function renderPrintableStage(stage: Konva.Stage, mimeType: "image/png" | "image/jpeg", page: Page): string {
+function renderPrintableStage(stage: Konva.Stage, mimeType: "image/png" | "image/jpeg", page: Page, options?: ExportRenderOptions): string {
   const helperNodes = stage.find(`.${SCREEN_HELPER_NODE_NAME}`);
   const visibility = helperNodes.map((node) => ({
     node,
@@ -407,9 +410,22 @@ function renderPrintableStage(stage: Konva.Stage, mimeType: "image/png" | "image
   stage.batchDraw();
 
   try {
+    const performanceSettings = options === undefined
+      ? undefined
+      : {
+          previewQuality: "high" as const,
+          renderQuality: options.renderQuality,
+          enableGpuAcceleration: true,
+          maxPreviewSizePx: 4096,
+          undoHistoryLimit: 100,
+          warnLargeFileMb: 50,
+          performanceMode: false,
+          lowResWhileDragging: false
+        };
     return stage.toDataURL({
       mimeType,
-      pixelRatio: 1
+      pixelRatio: performanceSettings === undefined ? 1 : getExportPixelRatio(page, performanceSettings),
+      quality: mimeType === "image/jpeg" ? getJpegQuality(options?.jpgQuality === undefined ? undefined : options.jpgQuality * 100) : undefined
     });
   } finally {
     stage.width(original.width);

@@ -83,7 +83,6 @@ export const BUILTIN_TEXT_PRESETS: TextPreset[] = [
     },
     effects: [
       effect("gold_fill", "fill", { fillType: "gradient", gradient: gradient(["#fff4a8", "#d69a25", "#fff1a0"], 90) }),
-      effect("gold_stroke", "stroke", { color: "#4d3105", width: 2, position: "center", opacity: 0.95 }),
       effect("gold_shadow", "drop_shadow", { color: "#2c1b04", opacity: 0.42, angle: 54, distance: 9, blur: 8 })
     ]
   }),
@@ -192,7 +191,7 @@ export const BUILTIN_TEXT_PRESETS: TextPreset[] = [
       stroke: stroke("#15131a", 3, 1),
       shadow: shadow("#000000", 4, 2, 2, 0.24)
     },
-    effects: [effect("outlined_white_stroke", "stroke", { color: "#15131a", width: 3, position: "center", opacity: 1 })]
+    effects: []
   }),
   preset({
     presetId: "minimal_white",

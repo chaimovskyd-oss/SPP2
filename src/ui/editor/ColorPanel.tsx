@@ -2,6 +2,8 @@ import { Brush, ChevronDown, ChevronUp, Copy, PaintBucket, Pipette, RefreshCw, T
 import { useMemo, useState, type ChangeEvent, type ReactElement } from "react";
 import { useColorStore } from "@/state/colorStore";
 import { useDrawingToolsStore } from "@/state/drawingToolsStore";
+import { useSelectionStore } from "@/state/selectionStore";
+import { useDocumentStore } from "@/state/documentStore";
 import { computeHarmony, type HarmonyScheme } from "@/core/color/harmonies";
 import { extractDominantColors } from "@/core/color/dominantColors";
 
@@ -39,6 +41,27 @@ export function ColorPanel({ getStageCanvas }: ColorPanelProps): ReactElement {
   const setDominantColors = useColorStore((s) => s.setDominantColors);
   const setHarmonyScheme = useColorStore((s) => s.setHarmonyScheme);
 
+  const applyColorToSelectedText = (hex: string): void => {
+    const { selectedLayerIds } = useSelectionStore.getState();
+    if (selectedLayerIds.length === 0) return;
+    const docState = useDocumentStore.getState();
+    const { document, activePageId, updateTextLayer } = docState;
+    if (document === null || activePageId === null) return;
+    const page = document.pages.find((p) => p.id === activePageId);
+    if (page === undefined) return;
+    const selected = new Set(selectedLayerIds);
+    for (const layer of page.layers) {
+      if (selected.has(layer.id) && layer.type === "text") {
+        updateTextLayer(activePageId, layer.id, { color: hex, autoContrastOverridden: true });
+      }
+    }
+  };
+
+  const pickColor = (hex: string): void => {
+    setCurrentColor(hex);
+    applyColorToSelectedText(hex);
+  };
+
   const activeTool = useDrawingToolsStore((s) => s.activeTool);
   const setActiveTool = useDrawingToolsStore((s) => s.setActiveTool);
   const brushSize = useDrawingToolsStore((s) => s.brushSize);
@@ -59,7 +82,7 @@ export function ColorPanel({ getStageCanvas }: ColorPanelProps): ReactElement {
     const value = event.target.value;
     if (/^#?[0-9A-Fa-f]{0,6}$/.test(value)) {
       if (value.length === 7 || (value.length === 6 && !value.startsWith("#"))) {
-        setCurrentColor(value);
+        pickColor(value);
       }
     }
   }
@@ -164,7 +187,7 @@ export function ColorPanel({ getStageCanvas }: ColorPanelProps): ReactElement {
                 type="color"
                 className="cp-color-picker"
                 value={currentColor}
-                onChange={(e) => setCurrentColor(e.target.value)}
+                onChange={(e) => pickColor(e.target.value)}
                 title="בחר צבע"
               />
               <input
@@ -247,7 +270,7 @@ export function ColorPanel({ getStageCanvas }: ColorPanelProps): ReactElement {
                     type="button"
                     className="cp-swatch-small"
                     style={{ background: hex }}
-                    onClick={() => setCurrentColor(hex)}
+                    onClick={() => pickColor(hex)}
                     title={hex}
                   />
                 ))
@@ -280,7 +303,7 @@ export function ColorPanel({ getStageCanvas }: ColorPanelProps): ReactElement {
                     type="button"
                     className={isAnchor ? "cp-swatch-small cp-anchor-swatch" : "cp-swatch-small"}
                     style={{ background: hex }}
-                    onClick={() => setCurrentColor(hex)}
+                    onClick={() => pickColor(hex)}
                     title={hex}
                   />
                 );
@@ -311,7 +334,7 @@ export function ColorPanel({ getStageCanvas }: ColorPanelProps): ReactElement {
                     type="button"
                     className="cp-swatch-small"
                     style={{ background: hex }}
-                    onClick={() => setCurrentColor(hex)}
+                    onClick={() => pickColor(hex)}
                     title={hex}
                   />
                   <button

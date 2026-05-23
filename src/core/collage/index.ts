@@ -4,3 +4,7 @@ export * from "./collageLayoutEngine";
 export * from "./collageScoring";
 export * from "./collageModeEngine";
 export * from "./collageSvgThumb";
+export * from "./collageGeometryUtils";
+export * from "./collageV6Layouts";
+export * from "./collageDynamicEngine";
+export * from "./collageDynamicLayouts";

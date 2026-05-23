@@ -21,7 +21,7 @@ import {
 import { useState, type ReactElement } from "react";
 import { applyOrientationToProduct, createDocumentFromProduct } from "@/core/product/productDocument";
 import { createProjectEnvelope, withProjectMetadata } from "@/core";
-import { reflowCollage, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
+import { mergeLiveFrameEditsIntoCollageRule, reflowCollage, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import { useProductStore } from "@/state/productStore";
 import { useDocumentStore } from "@/state/documentStore";
 import { useProjectLifecycleStore } from "@/state/projectLifecycleStore";
@@ -90,9 +90,11 @@ export function ProductDefinitionPanel(): ReactElement | null {
       // Reflow each collage rule to the new canvas size, then sync frame layers
       const newW = newPage.width;
       const newH = newPage.height;
-      const updatedRules = currentDoc.collageRules.map((rule) =>
-        reflowCollage(rule, newW, newH, dpi)
-      );
+      const updatedRules = currentDoc.collageRules.map((rule) => {
+        const currentPageForRule = currentDoc.pages.find((page) => page.id === rule.pageId);
+        const liveRule = currentPageForRule ? mergeLiveFrameEditsIntoCollageRule(rule, currentPageForRule) : rule;
+        return reflowCollage(liveRule, newW, newH, dpi);
+      });
       const updatedPages = currentDoc.pages.map((oldPage) => {
         const rule = updatedRules.find((r) => r.pageId === oldPage.id);
         if (!rule) {

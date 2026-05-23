@@ -52,6 +52,7 @@ export function CollageSetupWizard({ onComplete, onCancel }: CollageSetupWizardP
   const [images, setImages] = useState<ImageEntry[]>([]);
   const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pendingFileKeysRef = useRef<Set<string>>(new Set());
 
   const imagesRef = useRef(images);
   imagesRef.current = images;
@@ -67,16 +68,16 @@ export function CollageSetupWizard({ onComplete, onCancel }: CollageSetupWizardP
   const [customerEmail, setCustomerEmail] = useState("");
 
   // Step 2 — page size (skipped in product collage mode)
-  const [presetId, setPresetId] = useState("custom");
+  const [presetId, setPresetId] = useState("a4");
   const [orientation, setOrientation] = useState<"portrait" | "landscape">("portrait");
   const [customW, setCustomW] = useState("20");
   const [customH, setCustomH] = useState("20");
-  const [customUnit, setCustomUnit] = useState<Unit>("mm");
+  const [customUnit, setCustomUnit] = useState<Unit>("cm");
   const [customDpi, setCustomDpi] = useState(300);
 
   // Step 3 — settings
-  const [spacingMm, setSpacingMm] = useState(3);
-  const [marginMm, setMarginMm] = useState(4);
+  const [spacingMm, setSpacingMm] = useState(0.5);
+  const [marginMm, setMarginMm] = useState(0);
 
   // Pre-fill canvas size from product when in product collage mode
   useEffect(() => {
@@ -107,17 +108,38 @@ export function CollageSetupWizard({ onComplete, onCancel }: CollageSetupWizardP
   // ─── Image upload ─────────────────────────────────────────────────────────
 
   function addFiles(files: FileList | File[]): void {
-    const todo = Array.from(files).filter(isImageDropFile);
+    const loadedKeys = new Set(imagesRef.current.map((entry) => fileKey(entry.file)));
+    const batchKeys = new Set<string>();
+    const todo = Array.from(files).filter((file) => {
+      if (!isImageDropFile(file)) return false;
+      const key = fileKey(file);
+      if (loadedKeys.has(key) || pendingFileKeysRef.current.has(key) || batchKeys.has(key)) return false;
+      batchKeys.add(key);
+      pendingFileKeysRef.current.add(key);
+      return true;
+    });
     let pending = todo.length;
     if (pending === 0) return;
     const toAdd: ImageEntry[] = [];
+
+    function finishOne(file: File, url?: string, entry?: ImageEntry): void {
+      pendingFileKeysRef.current.delete(fileKey(file));
+      if (entry) toAdd.push(entry);
+      if (!entry && url) URL.revokeObjectURL(url);
+      pending--;
+      if (pending === 0 && toAdd.length > 0) {
+        setImages((prev) => [...prev, ...toAdd].slice(0, 100));
+      }
+    }
+
     for (const file of todo) {
       const url = URL.createObjectURL(file);
       const img = new window.Image();
       img.onload = () => {
-        toAdd.push({ file, url, width: img.naturalWidth, height: img.naturalHeight });
-        pending--;
-        if (pending === 0) setImages((prev) => [...prev, ...toAdd].slice(0, 100));
+        finishOne(file, url, { file, url, width: img.naturalWidth, height: img.naturalHeight });
+      };
+      img.onerror = () => {
+        finishOne(file, url);
       };
       img.src = url;
     }
@@ -135,6 +157,10 @@ export function CollageSetupWizard({ onComplete, onCancel }: CollageSetupWizardP
 
   function removeImage(i: number): void {
     setImages((prev) => { URL.revokeObjectURL(prev[i]?.url ?? ""); return prev.filter((_, j) => j !== i); });
+  }
+
+  function fileKey(file: File): string {
+    return `${file.name}:${file.size}:${file.lastModified}:${file.type}`;
   }
 
   // ─── Page setup ───────────────────────────────────────────────────────────

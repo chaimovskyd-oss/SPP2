@@ -33,7 +33,7 @@ export function CollageLayoutsPanel({ rule }: CollageLayoutsPanelProps): ReactEl
       const asset = document.assets.find((a) => a.id === assetId);
       return { assetId, width: asset?.width ?? 800, height: asset?.height ?? 600 };
     });
-    setSuggestions(generateCollageSuggestions(imageInputs, page.width, page.height, spacingPx, marginPx, "simple"));
+    setSuggestions(generateCollageSuggestions(imageInputs, page.width, page.height, spacingPx, marginPx, "creative"));
   }, [rule.id, rule.imagePool.length, rule.spacingMM, rule.marginMM, document]);
 
   async function handleAddImages(e: ChangeEvent<HTMLInputElement>): Promise<void> {
@@ -120,6 +120,7 @@ export function CollageLayoutsPanel({ rule }: CollageLayoutsPanelProps): ReactEl
 
   return (
     <div className="collage-layouts-panel">
+      <div className="collage-layouts-sticky">
       <button type="button" className="btn btn-primary btn-full" onClick={() => fileInputRef.current?.click()}>
         <ImagePlus size={14} /> הוסף תמונות לקולאז&apos;
       </button>
@@ -142,6 +143,7 @@ export function CollageLayoutsPanel({ rule }: CollageLayoutsPanelProps): ReactEl
         <button type="button" className="btn btn-ghost btn-xs" onClick={handleRegenerate} title="ייצר מחדש">
           <RefreshCw size={12} />
         </button>
+      </div>
       </div>
 
       <div className="collage-layouts-scroll">

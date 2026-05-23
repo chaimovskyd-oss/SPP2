@@ -22,6 +22,15 @@ export type {
 
 export { DEFAULT_APP_SETTINGS } from "./defaults";
 export { migrateSettings, SETTINGS_MIGRATIONS, CURRENT_SETTINGS_VERSION } from "./migrations";
+export {
+  createExportRenderOptions,
+  getExportPixelRatio,
+  getImportPreviewMaxSide,
+  getJpegQuality,
+  getPreviewMaxSide,
+  resolveEffectivePerformanceSettings
+} from "./performancePolicy";
+export type { EffectivePerformanceSettings, ExportRenderOptions } from "./performancePolicy";
 export { useAppSettings } from "./store";
 export type { AppSettingsState } from "./store";
 

@@ -41,7 +41,6 @@ export interface AutoContrastConfig extends VersionedEntity {
 
 export type TextEffectType =
   | "fill"
-  | "stroke"
   | "drop_shadow"
   | "inner_shadow"
   | "outer_glow"
@@ -54,18 +53,13 @@ export type TextEffectType =
   | "sparkle"
   | "satin";
 
+export type EffectApplyTo = "fill_only" | "stroke_only" | "all";
+
 export interface FillEffectParams {
   fillType: "solid" | "gradient" | "pattern" | "image";
   color?: string;
   gradient?: GradientStyle;
   opacity?: number;
-}
-
-export interface StrokeEffectParams {
-  color: string;
-  width: number;
-  position: "inside" | "center" | "outside";
-  opacity: number;
 }
 
 export interface ShadowEffectParams {
@@ -105,6 +99,7 @@ export interface PatternOverlayParams {
   spacing: number;
   imageDataUrl?: string;
   imageName?: string;
+  applyTo?: EffectApplyTo;
 }
 
 export interface SparkleParams {
@@ -116,6 +111,7 @@ export interface SparkleParams {
   rays?: number;
   glint?: number;
   halo?: number;
+  applyTo?: EffectApplyTo;
 }
 
 export interface Extrude3DParams {
@@ -129,7 +125,6 @@ export interface Extrude3DParams {
 
 export type TextEffectParams =
   | FillEffectParams
-  | StrokeEffectParams
   | ShadowEffectParams
   | BevelEmbossParams
   | PatternOverlayParams

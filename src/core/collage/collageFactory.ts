@@ -40,6 +40,8 @@ export function defaultCanvasSettings(): CollageCanvasSettings {
     version: 1,
     backgroundType: "solid",
     backgroundColor: "#ffffff",
+    spacingColor: "#ffffff",
+    marginColor: "#ffffff",
     globalCornerRadius: 0,
     globalBorderWidth: 0,
     globalBorderColor: "#000000",

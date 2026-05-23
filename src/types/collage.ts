@@ -101,7 +101,20 @@ export type CollageLayoutFamily =
   | "diamondCenter"  // central diamond (rotated 45°) + surrounding
   | "frameCollage"   // images arranged as border frame
   | "plusCross"      // images in + / cross pattern
+  | "trapezoidSplit" // safe trapezoid/parallelogram split
+  | "steppedMosaic"  // orthogonal stepped mixed-size mosaic
+  | "waveSplit"      // first curved split approximation
   | "puzzle"         // jigsaw puzzle pieces (interlocking tabs + sockets)
+  | "modularIrregular"
+  | "heroSupport"
+  | "organicFlow"
+  | "waveRibbons"
+  | "dynamicStrips"
+  | "softPolygons"
+  | "amoebaPack"
+  | "radialHero"
+  | "freeformClusters"
+  | "softVoronoi"
   | "custom";        // template-applied
 
 // ─── Layout params (used when regenerating slots) ─────────────────────────────
@@ -196,6 +209,8 @@ export interface CollageImageAssignment extends VersionedEntity {
 export interface CollageCanvasSettings extends VersionedEntity {
   backgroundType: "solid" | "gradient" | "image" | "transparent";
   backgroundColor: string;
+  spacingColor?: string;
+  marginColor?: string;
   backgroundGradient?: { startColor: string; endColor: string; angle: number };
   backgroundAssetId?: ID;
   globalCornerRadius: number;

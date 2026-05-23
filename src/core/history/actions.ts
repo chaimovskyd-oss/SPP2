@@ -28,6 +28,17 @@ export function createHistoryState(limit = 100): HistoryState {
   };
 }
 
+export function resizeHistoryLimit(history: HistoryState, limit: number): HistoryState {
+  const resolvedLimit = Math.max(1, Math.floor(limit));
+  return {
+    ...history,
+    limit: resolvedLimit,
+    undoStack: compressStack(history.undoStack, resolvedLimit),
+    redoStack: compressStack(history.redoStack, resolvedLimit),
+    transaction: history.transaction === null ? null : compressStack(history.transaction, resolvedLimit)
+  };
+}
+
 export function applyDocumentAction(document: Document, history: HistoryState, action: DocumentAction): { document: Document; history: HistoryState } {
   const nextDocument = action.apply(document);
   if (history.transaction !== null) {

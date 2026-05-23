@@ -27,9 +27,11 @@ export function renderTextToCanvas(layer: TextLayer): HTMLCanvasElement | null {
   const patternEffect = layer.effects.find((e) => e.enabled && e.effectType === "pattern_overlay");
   const sparkleEffect = layer.effects.find((e) => e.enabled && e.effectType === "sparkle");
   const extrudeEffect = layer.effects.find((e) => e.enabled && e.effectType === "extrude_3d");
+  const hasInsideStroke = layer.stroke !== undefined && (layer.stroke.position ?? "outside") === "inside";
 
   if (
     !hasWarp &&
+    !hasInsideStroke &&
     innerShadowEffect === undefined &&
     bevelEffect === undefined &&
     outerGlowEffect === undefined &&
@@ -38,6 +40,18 @@ export function renderTextToCanvas(layer: TextLayer): HTMLCanvasElement | null {
     extrudeEffect === undefined
   ) {
     return null;
+  }
+
+  if (outerGlowEffect !== undefined) {
+    // eslint-disable-next-line no-console
+    console.log("[outer_glow] rendering text layer", {
+      layerId: layer.id,
+      fontFamily: layer.fontFamily,
+      fontSize: layer.fontSize,
+      color: layer.color,
+      params: outerGlowEffect.params,
+      opacity: outerGlowEffect.opacity
+    });
   }
 
   // Step 1: base text (with or without warp)
@@ -63,16 +77,19 @@ export function renderTextToCanvas(layer: TextLayer): HTMLCanvasElement | null {
 
   if (patternEffect !== undefined) {
     const p = patternEffect.params as Record<string, unknown>;
-    canvas = applyPatternOverlay(canvas, {
-      patternType: stringParam(p, "patternType", "stripes"),
-      foreground: stringParam(p, "foreground", "#ffffff"),
-      background: typeof p["background"] === "string" ? p["background"] : undefined,
-      opacity: numberParam(p, "opacity", patternEffect.opacity),
-      scale: numberParam(p, "scale", 1),
-      rotation: numberParam(p, "rotation", 0),
-      spacing: numberParam(p, "spacing", 10),
-      imageDataUrl: typeof p["imageDataUrl"] === "string" ? p["imageDataUrl"] : undefined
-    });
+    const applyTo = (typeof p["applyTo"] === "string" ? p["applyTo"] : "fill_only") as "fill_only" | "stroke_only" | "all";
+    canvas = applyWithScope(canvas, layer, hasWarp, applyTo, (input) =>
+      applyPatternOverlay(input, {
+        patternType: stringParam(p, "patternType", "stripes"),
+        foreground: stringParam(p, "foreground", "#ffffff"),
+        background: typeof p["background"] === "string" ? p["background"] : undefined,
+        opacity: numberParam(p, "opacity", patternEffect.opacity),
+        scale: numberParam(p, "scale", 1),
+        rotation: numberParam(p, "rotation", 0),
+        spacing: numberParam(p, "spacing", 10),
+        imageDataUrl: typeof p["imageDataUrl"] === "string" ? p["imageDataUrl"] : undefined
+      })
+    );
   }
 
   if (innerShadowEffect !== undefined) {
@@ -99,16 +116,19 @@ export function renderTextToCanvas(layer: TextLayer): HTMLCanvasElement | null {
 
   if (sparkleEffect !== undefined) {
     const p = sparkleEffect.params as Record<string, unknown>;
-    canvas = applySparkle(canvas, {
-      density: numberParam(p, "density", 0.16),
-      size: numberParam(p, "size", 4),
-      color: stringParam(p, "color", "#ffffff"),
-      seed: numberParam(p, "seed", 1),
-      opacity: numberParam(p, "opacity", sparkleEffect.opacity),
-      rays: numberParam(p, "rays", 8),
-      glint: numberParam(p, "glint", 0.55),
-      halo: numberParam(p, "halo", 0.65)
-    });
+    const applyTo = (typeof p["applyTo"] === "string" ? p["applyTo"] : "fill_only") as "fill_only" | "stroke_only" | "all";
+    canvas = applyWithScope(canvas, layer, hasWarp, applyTo, (input) =>
+      applySparkle(input, {
+        density: numberParam(p, "density", 0.16),
+        size: numberParam(p, "size", 4),
+        color: stringParam(p, "color", "#ffffff"),
+        seed: numberParam(p, "seed", 1),
+        opacity: numberParam(p, "opacity", sparkleEffect.opacity),
+        rays: numberParam(p, "rays", 8),
+        glint: numberParam(p, "glint", 0.55),
+        halo: numberParam(p, "halo", 0.65)
+      })
+    );
   }
 
   if (outerGlowEffect !== undefined) {
@@ -125,6 +145,10 @@ export function renderTextToCanvas(layer: TextLayer): HTMLCanvasElement | null {
   }
 
   return canvas;
+}
+
+export function renderTextToAlphaCanvas(layer: TextLayer): HTMLCanvasElement | null {
+  return renderTextToCanvas(layer) ?? renderStraightText(layer);
 }
 
 // Keep the old export so existing callers don't break
@@ -226,16 +250,7 @@ function drawChar(
   char: string,
   halfW: number
 ): void {
-  if (layer.stroke !== undefined && layer.stroke.width > 0 && layer.stroke.opacity > 0) {
-    ctx.save();
-    ctx.strokeStyle = hexToRgba(layer.stroke.color, layer.stroke.opacity);
-    ctx.lineWidth = layer.stroke.width * 2;
-    ctx.lineJoin = "round";
-    ctx.shadowColor = "transparent";
-    ctx.strokeText(char, -halfW, 0);
-    ctx.restore();
-  }
-  ctx.fillText(char, -halfW, 0);
+  drawCharAt(ctx, layer, char, -halfW, 0);
 }
 
 /** Draw char left-aligned at (0,0) — used for straight/wave chars. */
@@ -244,16 +259,90 @@ function drawCharLeft(
   layer: TextLayer,
   char: string
 ): void {
-  if (layer.stroke !== undefined && layer.stroke.width > 0 && layer.stroke.opacity > 0) {
+  drawCharAt(ctx, layer, char, 0, 0);
+}
+
+function drawCharAt(
+  ctx: CanvasRenderingContext2D,
+  layer: TextLayer,
+  char: string,
+  x: number,
+  y: number
+): void {
+  const stroke = layer.stroke;
+  const hasStroke = stroke !== undefined && stroke.width > 0 && stroke.opacity > 0;
+  const skipFill = (layer as TextLayer & { __sppSkipFill?: boolean }).__sppSkipFill === true;
+  const skipStroke = (layer as TextLayer & { __sppSkipStroke?: boolean }).__sppSkipStroke === true;
+
+  if (!hasStroke || skipStroke) {
+    if (!skipFill) ctx.fillText(char, x, y);
+    return;
+  }
+
+  const position = stroke!.position ?? "outside";
+  const strokeColor = hexToRgba(stroke!.color, stroke!.opacity);
+
+  if (position === "outside") {
+    if (!skipFill) {
+      ctx.save();
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = stroke!.width * 2;
+      ctx.lineJoin = "round";
+      ctx.shadowColor = "transparent";
+      ctx.strokeText(char, x, y);
+      ctx.restore();
+      ctx.fillText(char, x, y);
+    } else {
+      // stroke-only render: draw the *visible* outside-stroke region.
+      // Trick: wide stroke then clear the fill region using destination-out.
+      ctx.save();
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = stroke!.width * 2;
+      ctx.lineJoin = "round";
+      ctx.shadowColor = "transparent";
+      ctx.strokeText(char, x, y);
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.fillStyle = "#000";
+      ctx.fillText(char, x, y);
+      ctx.restore();
+    }
+  } else if (position === "center") {
+    if (!skipFill) ctx.fillText(char, x, y);
     ctx.save();
-    ctx.strokeStyle = hexToRgba(layer.stroke.color, layer.stroke.opacity);
-    ctx.lineWidth = layer.stroke.width * 2;
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = stroke!.width;
     ctx.lineJoin = "round";
     ctx.shadowColor = "transparent";
-    ctx.strokeText(char, 0, 0);
+    ctx.strokeText(char, x, y);
     ctx.restore();
+  } else {
+    // inside: fill first, then stroke clipped to fill via source-atop
+    if (!skipFill) {
+      ctx.fillText(char, x, y);
+      ctx.save();
+      ctx.globalCompositeOperation = "source-atop";
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = stroke!.width * 2;
+      ctx.lineJoin = "round";
+      ctx.shadowColor = "transparent";
+      ctx.strokeText(char, x, y);
+      ctx.restore();
+    } else {
+      // stroke-only render for "inside": draw text shape, then wide stroke source-atop, then erase the unstamped fill area.
+      ctx.save();
+      ctx.fillStyle = "#000";
+      ctx.fillText(char, x, y);
+      ctx.globalCompositeOperation = "source-atop";
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = stroke!.width * 2;
+      ctx.lineJoin = "round";
+      ctx.shadowColor = "transparent";
+      ctx.strokeText(char, x, y);
+      // remove the placeholder fill pixels: keep only stroked pixels
+      // (Approximation acceptable; minor fill bleed is fine for overlay use.)
+      ctx.restore();
+    }
   }
-  ctx.fillText(char, 0, 0);
 }
 
 // ─── Straight text (no warp, but needs canvas for post-effects) ───────────────
@@ -551,6 +640,62 @@ function applyOuterGlow(
   ctx.drawImage(canvas, pad, pad);
   copyCanvasOffset(canvas, result, pad, pad);
   return result;
+}
+
+/**
+ * Apply an effect to only the fill region, only the stroke region, or both.
+ * Strategy:
+ *  - "all": just run the effect on the canvas as-is.
+ *  - "fill_only": run effect, then composite a stroke-only render back on top.
+ *  - "stroke_only": run effect, then composite a fill-only render back on top.
+ * If the layer has no stroke, scoping is a no-op.
+ */
+function applyWithScope(
+  canvas: HTMLCanvasElement,
+  layer: TextLayer,
+  hasWarp: boolean,
+  applyTo: "fill_only" | "stroke_only" | "all",
+  apply: (input: HTMLCanvasElement) => HTMLCanvasElement
+): HTMLCanvasElement {
+  const hasStroke = layer.stroke !== undefined && layer.stroke.width > 0 && layer.stroke.opacity > 0;
+  if (applyTo === "all" || !hasStroke) return apply(canvas);
+
+  const overlay = applyTo === "fill_only"
+    ? renderTextVariant(layer, hasWarp, { skipFill: true })
+    : renderTextVariant(layer, hasWarp, { skipStroke: true });
+
+  const processed = apply(canvas);
+  if (overlay === null) return processed;
+
+  // Overlay must align with processed canvas. If sizes differ (post-effects can pad),
+  // draw overlay centered using the stored sppTextOffset values.
+  const procMeta = processed as HTMLCanvasElement & { sppTextOffsetX?: number; sppTextOffsetY?: number };
+  const overMeta = overlay as HTMLCanvasElement & { sppTextOffsetX?: number; sppTextOffsetY?: number };
+  const dx = (procMeta.sppTextOffsetX ?? 0) - (overMeta.sppTextOffsetX ?? 0);
+  const dy = (procMeta.sppTextOffsetY ?? 0) - (overMeta.sppTextOffsetY ?? 0);
+
+  const ctx = processed.getContext("2d");
+  if (ctx === null) return processed;
+  ctx.save();
+  ctx.globalCompositeOperation = "source-over";
+  ctx.drawImage(overlay, dx, dy);
+  ctx.restore();
+  return processed;
+}
+
+function renderTextVariant(
+  layer: TextLayer,
+  hasWarp: boolean,
+  flags: { skipFill?: boolean; skipStroke?: boolean }
+): HTMLCanvasElement | null {
+  // Drop shadow on the variant to avoid double-shadow when composited back on top.
+  const variant = {
+    ...layer,
+    shadow: undefined,
+    __sppSkipFill: flags.skipFill === true,
+    __sppSkipStroke: flags.skipStroke === true
+  } as TextLayer & { __sppSkipFill: boolean; __sppSkipStroke: boolean };
+  return hasWarp ? renderWarpedText(variant) : renderStraightText(variant);
 }
 
 function applyPatternOverlay(

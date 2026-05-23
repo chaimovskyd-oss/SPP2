@@ -1,5 +1,5 @@
 import { createId } from "@/core/ids";
-import { createFrameLayer, defaultContentTransform } from "@/core/layers/factory";
+import { createFrameLayer, createShapeLayer, defaultContentTransform } from "@/core/layers/factory";
 import { mmToPx } from "@/core/units/conversion";
 import { buildSplitTree } from "./collageSplitTree";
 import { LAYOUT_REGISTRY, computeSlots } from "./collageLayoutEngine";
@@ -19,7 +19,7 @@ import type {
   CollageSplitNode,
 } from "@/types/collage";
 import type { Page } from "@/types/document";
-import type { FrameLayer } from "@/types/layers";
+import type { FrameLayer, ShapeLayer } from "@/types/layers";
 import type { ID } from "@/types/primitives";
 
 // ─── 1. Generate scored suggestions (in-memory only, never stored) ────────────
@@ -46,6 +46,7 @@ export function generateCollageSuggestions(
     if (mode === "simple" && def.mode === "creative") continue;
 
     const slots = def.generate(params);
+    if (slots.filter((slot) => slot.type === "image").length < imageCount) continue;
     const key = slots.map(s => `${s.x.toFixed(3)},${s.y.toFixed(3)},${s.w.toFixed(3)},${s.h.toFixed(3)}`).join("|");
     if (seen.has(key)) continue;
     seen.add(key);
@@ -77,6 +78,7 @@ export function applyLayoutFamily(
   canvasW: number,
   canvasH: number,
   dpi = 300,
+  imageInputs: CollageImageInput[] = [],
 ): CollageRule {
   const spacingPx = mmToPx(rule.spacingMM, dpi);
   const marginPx = mmToPx(rule.marginMM, dpi);
@@ -93,7 +95,7 @@ export function applyLayoutFamily(
 
   // Port of Python: cell.image_index = i — assign pool[0]→slot[0], pool[1]→slot[1]
   // This is always correct regardless of previous layout's hero/non-hero structure
-  const newAssignments = assignByPoolOrder(rule.imagePool, newSlots, rule.id, rule.imageAssignments, rule.cachedSlots ?? []);
+  const newAssignments = assignByPoolOrder(rule.imagePool, newSlots, rule.id, rule.imageAssignments, rule.cachedSlots ?? [], imageInputs);
 
   return {
     ...rule,
@@ -111,6 +113,7 @@ export function reflowCollage(
   canvasW: number,
   canvasH: number,
   dpi = 300,
+  imageInputs: CollageImageInput[] = [],
 ): CollageRule {
   const spacingPx = mmToPx(rule.spacingMM, dpi);
   const marginPx = mmToPx(rule.marginMM, dpi);
@@ -118,7 +121,7 @@ export function reflowCollage(
   const params: CollageLayoutParams = { imageCount, canvasW, canvasH, spacingPx, marginPx, splitTree: rule.splitTree };
   const newSlots = computeSlots(rule.activeFamily, params);
   // Reflow keeps same family — just re-assign by pool order to new slots
-  const newAssignments = assignByPoolOrder(rule.imagePool, newSlots, rule.id, rule.imageAssignments, rule.cachedSlots ?? []);
+  const newAssignments = assignByPoolOrder(rule.imagePool, newSlots, rule.id, rule.imageAssignments, rule.cachedSlots ?? [], imageInputs);
   return { ...rule, cachedSlots: newSlots, imageAssignments: newAssignments };
 }
 
@@ -130,6 +133,7 @@ export function applyNewImagePool(
   canvasW: number,
   canvasH: number,
   dpi = 300,
+  imageInputs: CollageImageInput[] = [],
 ): CollageRule {
   const spacingPx = mmToPx(rule.spacingMM, dpi);
   const marginPx = mmToPx(rule.marginMM, dpi);
@@ -142,7 +146,7 @@ export function applyNewImagePool(
   const params: CollageLayoutParams = { imageCount, canvasW, canvasH, spacingPx, marginPx, splitTree };
   const newSlots = computeSlots(rule.activeFamily, params);
   // Simple pool-order assignment — always assigns ALL pool images, no gaps
-  const newAssignments = assignByPoolOrder(newPool, newSlots, rule.id, rule.imageAssignments, rule.cachedSlots ?? []);
+  const newAssignments = assignByPoolOrder(newPool, newSlots, rule.id, rule.imageAssignments, rule.cachedSlots ?? [], imageInputs);
 
   return { ...rule, imagePool: newPool, cachedSlots: newSlots, imageAssignments: newAssignments, splitTree };
 }
@@ -205,13 +209,14 @@ export function assignByPoolOrder(
   ruleId: ID,
   oldAssignments: CollageImageAssignment[] = [],
   oldSlots: CollageSlot[] = [],
+  imageInputs: CollageImageInput[] = [],
 ): CollageImageAssignment[] {
   const imageSlots = newSlots.filter(s => s.type === "image");
   const oldByAsset = new Map(oldAssignments.map(a => [a.assetId, a]));
   const oldSlotById = new Map(oldSlots.map(s => [s.id, s]));
+  const slotAssetPairs = pairImagesToSlots(imagePool, imageSlots, imageInputs);
 
-  return imagePool.slice(0, imageSlots.length).map((assetId, i) => {
-    const slot = imageSlots[i]!;
+  return slotAssetPairs.map(({ assetId, slot }) => {
     const prev = oldByAsset.get(assetId);
 
     if (prev) {
@@ -243,6 +248,72 @@ export function assignByPoolOrder(
   });
 }
 
+function pairImagesToSlots(
+  imagePool: ID[],
+  imageSlots: CollageSlot[],
+  imageInputs: CollageImageInput[]
+): Array<{ assetId: ID; slot: CollageSlot }> {
+  const pool = imagePool.slice(0, imageSlots.length);
+  if (imageInputs.length === 0 || pool.length <= 1) {
+    return pool.map((assetId, index) => ({ assetId, slot: imageSlots[index]! }));
+  }
+
+  const inputById = new Map(imageInputs.map((input) => [input.assetId, input]));
+  const maxArea = Math.max(0.0001, ...imageSlots.map((slot) => slot.w * slot.h));
+  const sortedSlots = [...imageSlots].sort((a, b) => {
+    const roleA = slotRoleWeight(a);
+    const roleB = slotRoleWeight(b);
+    if (roleA !== roleB) return roleB - roleA;
+    return b.w * b.h - a.w * a.h;
+  });
+  const unused = new Set(pool);
+  const result = new Map<ID, ID>();
+
+  for (const slot of sortedSlots) {
+    let bestAsset: ID | null = null;
+    let bestScore = -Infinity;
+    for (const assetId of unused) {
+      const input = inputById.get(assetId);
+      const score = scoreImageSlotPair(input, slot, maxArea);
+      if (score > bestScore) {
+        bestScore = score;
+        bestAsset = assetId;
+      }
+    }
+    if (bestAsset === null) break;
+    unused.delete(bestAsset);
+    result.set(slot.id, bestAsset);
+  }
+
+  return imageSlots.flatMap((slot, index) => {
+    const assetId = result.get(slot.id) ?? pool[index];
+    return assetId ? [{ assetId, slot }] : [];
+  });
+}
+
+function scoreImageSlotPair(input: CollageImageInput | undefined, slot: CollageSlot, maxSlotArea: number): number {
+  if (!input || input.width <= 0 || input.height <= 0) return 0;
+  const imageAspect = input.width / input.height;
+  const slotAspect = slot.w / Math.max(0.0001, slot.h);
+  const aspectScore = Math.min(imageAspect, slotAspect) / Math.max(imageAspect, slotAspect);
+  const slotAreaNorm = Math.min(1, (slot.w * slot.h) / maxSlotArea);
+  const faceCount = input.faceRegions?.length ?? 0;
+  const faceImportance = Math.min(1, faceCount / 3);
+  const imagePixels = Math.max(1, input.width * input.height);
+  const resolutionImportance = Math.min(1, Math.log10(imagePixels) / 7);
+  const importance = Math.max(input.analysisScore ?? 0, faceImportance, resolutionImportance * 0.35);
+  const roleBoost = slot.role === "hero" ? 0.12 : slot.role === "standard" ? 0.04 : 0;
+  const largeSlotFit = importance * slotAreaNorm;
+  const smallSlotPenalty = faceImportance * Math.max(0, 1 - slotAreaNorm) * 0.28;
+  return aspectScore * 0.7 + largeSlotFit * 0.22 + roleBoost - smallSlotPenalty;
+}
+
+function slotRoleWeight(slot: CollageSlot): number {
+  if (slot.role === "hero") return 3;
+  if (slot.role === "standard") return 2;
+  return 1;
+}
+
 /**
  * @deprecated Use assignByPoolOrder directly.
  * Kept for compatibility — now delegates to pool-order assignment.
@@ -268,6 +339,94 @@ function collageGlobalMaskForRule(rule: CollageRule, canvasW: number, canvasH: n
   return null;
 }
 
+function isManagedCollageLayer(layer: { metadata?: Record<string, unknown> }, ruleId: ID): boolean {
+  const frameMeta = layer.metadata?.collageFrame as { collageRuleId?: string } | undefined;
+  const backgroundMeta = layer.metadata?.collageBackground as { collageRuleId?: string } | undefined;
+  return frameMeta?.collageRuleId === ruleId || backgroundMeta?.collageRuleId === ruleId;
+}
+
+function asNumberRecord(value: unknown): Record<string, number> | undefined {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, v]) => typeof v === "number" && Number.isFinite(v));
+  if (entries.length === 0) return undefined;
+  return Object.fromEntries(entries) as Record<string, number>;
+}
+
+function sameContentTransform(a: CollageImageAssignment["contentTransform"], b: CollageImageAssignment["contentTransform"]): boolean {
+  return a.offsetX === b.offsetX && a.offsetY === b.offsetY && a.scale === b.scale && a.rotation === b.rotation;
+}
+
+export function mergeLiveFrameEditsIntoCollageRule(rule: CollageRule, page: Page): CollageRule {
+  const framesBySlot = new Map<ID, FrameLayer>();
+  for (const layer of page.layers) {
+    if (layer.type !== "frame") continue;
+    const meta = layer.metadata["collageFrame"] as { collageRuleId?: string; slotId?: ID } | undefined;
+    if (meta?.collageRuleId === rule.id && meta.slotId) {
+      framesBySlot.set(meta.slotId, layer);
+    }
+  }
+  if (framesBySlot.size === 0) return rule;
+
+  let changed = false;
+  const imageAssignments = rule.imageAssignments.map((assignment) => {
+    const frame = framesBySlot.get(assignment.slotId);
+    if (!frame) return assignment;
+
+    const quickEditParams =
+      asNumberRecord(frame.metadata["imageEditParams"]) ??
+      asNumberRecord(frame.metadata["collageImageEditParams"]);
+    const collageColorAdj = frame.metadata["collageColorAdj"] as CollageImageAssignment["colorAdjustments"] | null | undefined;
+    const edgeConfig = frame.metadata["collageEdgeConfig"] as CollageImageAssignment["edgeConfig"] | null | undefined;
+
+    const next: CollageImageAssignment = {
+      ...assignment,
+      contentTransform: frame.contentTransform ?? assignment.contentTransform,
+      fitMode: frame.fitMode ?? assignment.fitMode,
+      visualEffects: frame.visualEffects ?? assignment.visualEffects,
+      colorAdjustments: collageColorAdj ?? assignment.colorAdjustments,
+      imageEditParams: quickEditParams ?? assignment.imageEditParams,
+      edgeConfig: edgeConfig ?? assignment.edgeConfig
+    };
+    next.hasManualTransform = assignment.hasManualTransform || !sameContentTransform(assignment.contentTransform, next.contentTransform);
+
+    if (next !== assignment) changed = true;
+    return next;
+  });
+
+  return changed ? { ...rule, imageAssignments } : rule;
+}
+
+function createCollageSpacingBackgroundLayer(
+  rule: CollageRule,
+  canvasW: number,
+  canvasH: number,
+  marginPx: number,
+  zIndex: number
+): ShapeLayer | null {
+  const w = Math.max(0, canvasW - marginPx * 2);
+  const h = Math.max(0, canvasH - marginPx * 2);
+  if (w <= 0 || h <= 0) return null;
+  const spacingColor = rule.canvasSettings.spacingColor ?? rule.canvasSettings.backgroundColor ?? "#ffffff";
+  return {
+    ...createShapeLayer({
+      name: "Collage spacing background",
+      rect: { x: marginPx, y: marginPx, width: w, height: h },
+      shape: "rect",
+      locked: true,
+      zIndex,
+      metadata: {
+        collageBackground: {
+          collageRuleId: rule.id,
+          kind: "spacing",
+          layoutManaged: true
+        } as unknown as import("@/types/primitives").JsonValue
+      }
+    }),
+    fill: { version: 1, color: spacingColor, opacity: 1 }
+  };
+}
+
 // ─── Frame sync ───────────────────────────────────────────────────────────────
 
 export function syncFrameLayersToPage(
@@ -288,13 +447,13 @@ export function syncFrameLayersToPage(
     existingBySlotId.set(meta.slotId, l as FrameLayer);
   }
 
-  const otherLayers = page.layers.filter(l => {
-    const meta = (l.metadata as Record<string, unknown>).collageFrame as { collageRuleId?: string } | undefined;
-    return meta?.collageRuleId !== rule.id;
-  });
+  const otherLayers = page.layers.filter((layer) => !isManagedCollageLayer(layer, rule.id));
 
   const sortedSlots = [...rule.cachedSlots].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
   const globalMask = collageGlobalMaskForRule(rule, canvasW, canvasH);
+  const dpi = page.setup?.dpi ?? 300;
+  const marginPx = mmToPx(rule.marginMM, dpi);
+  const spacingBackground = createCollageSpacingBackgroundLayer(rule, canvasW, canvasH, marginPx, otherLayers.length);
 
   const newFrameLayers: FrameLayer[] = sortedSlots.map((slot, i) => {
     const assignment = rule.imageAssignments.find(a => a.slotId === slot.id);
@@ -318,7 +477,7 @@ export function syncFrameLayersToPage(
       cornerRadius: slot.shapeParams.cornerRadius,
       lockedFrame: false,
       lockedContent: false,
-      zIndex: (otherLayers.length + i),
+      zIndex: (otherLayers.length + (spacingBackground ? 1 : 0) + i),
       metadata: {
         collageFrame: {
           collageRuleId: rule.id,
@@ -374,8 +533,13 @@ export function syncFrameLayersToPage(
   });
 
   const frameIds = newFrameLayers.map(f => f.id);
+  const marginColor = rule.canvasSettings.marginColor ?? rule.canvasSettings.backgroundColor ?? page.background.color ?? "#ffffff";
   return {
-    page: { ...page, layers: [...otherLayers, ...newFrameLayers] },
+    page: {
+      ...page,
+      background: { ...page.background, type: "color", color: marginColor },
+      layers: spacingBackground ? [...otherLayers, spacingBackground, ...newFrameLayers] : [...otherLayers, ...newFrameLayers]
+    },
     frameIds,
   };
 }

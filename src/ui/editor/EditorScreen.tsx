@@ -196,9 +196,11 @@ import {
   moveImageLayerIntoFrame as moveImageLayerIntoFrameDoc
 } from "@/core/layers/frameMask";
 import { CanvasStage } from "./CanvasStage";
+import { EditorStatusBar } from "./EditorStatusBar";
 import { ColorPanel } from "./ColorPanel";
 import { CanvasErrorBoundary } from "./CanvasErrorBoundary";
 import { CollageGridOverlay } from "./CollageGridOverlay";
+import { renderTextToAlphaCanvas } from "./warpText";
 import type { CanvasContextMenuTarget } from "./KonvaLayerNode";
 import { isImageEditorAvailable, openImageEditorForAsset } from "@/services/imageEditorService";
 import { isPrintPreviewAvailable, openPrintPreviewForRenderedPage, openPrintPreviewForPages } from "@/services/printPreviewService";
@@ -227,7 +229,7 @@ import { openInPhotoshop, stopPhotoshopWatch } from "@/integrations/photoshopInt
 import { openInColorLab, stopColorLabWatch } from "@/integrations/colorLabIntegration";
 import { useUtilitiesSettings } from "@/utilities/settingsStore";
 import { isEditableShortcutTarget, matchShortcut, shortcutBindingsToShortcuts } from "@/core/input/inputSystem";
-import { useAppSettings } from "@/settings";
+import { createExportRenderOptions, getImportPreviewMaxSide, useAppSettings } from "@/settings";
 import { syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import {
   fontFamilyExists,
@@ -337,6 +339,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const [collageSwapSourceSlotId, setCollageSwapSourceSlotId] = useState<string | null>(null);
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [status, setStatus] = useState("שמירה אוטומטית מוכנה");
+  const [statusBarUnit, setStatusBarUnit] = useState<Unit>("cm");
   const lastAutosaveWarningRef = useRef(0);
   const autosaveMetricsRef = useRef({ pagesCount: 0, assetsCount: 0 });
   const autosaveRef = useRef(
@@ -403,9 +406,16 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const [dynamicGridMode, setDynamicGridMode] = useState(false);
   const utilSettings = useUtilitiesSettings();
   const shortcutSettings = useAppSettings((state) => state.settings.shortcuts.shortcuts);
+  const performanceSettings = useAppSettings((state) => state.settings.performance);
+  const exportPrintSettings = useAppSettings((state) => state.settings.exportPrint);
+  const exportRenderOptions = useMemo(
+    () => createExportRenderOptions(performanceSettings, exportPrintSettings.jpgQuality),
+    [exportPrintSettings.jpgQuality, performanceSettings]
+  );
   const document = useDocumentStore((state) => state.document);
   const activePageId = useDocumentStore((state) => state.activePageId);
   const setDocument = useDocumentStore((state) => state.setDocument);
+  const setHistoryLimit = useDocumentStore((state) => state.setHistoryLimit);
   const addLayer = useDocumentStore((state) => state.addLayer);
   const addAssetAndLayer = useDocumentStore((state) => state.addAssetAndLayer);
   const updateLayer = useDocumentStore((state) => state.updateLayer);
@@ -755,6 +765,10 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     autosaveRef.current.recordMeaningfulChange(createProjectEnvelope({ document: withViewport(document, viewport), linkedGroups: [], batchJobs: [] }), "unsaved");
     setStatus("Autosave queued");
   }, [document, lifecycle, revision, viewport]);
+
+  useEffect(() => {
+    setHistoryLimit(performanceSettings.undoHistoryLimit);
+  }, [performanceSettings.undoHistoryLimit, setHistoryLimit]);
 
   useEffect(() => {
     function handleBeforeUnload(event: BeforeUnloadEvent): void {
@@ -1172,6 +1186,447 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     }
   }
 
+  function getCanvasMenuLayer(target: CanvasContextMenuTarget): Extract<VisualLayer, { type: "image" | "frame" }> | null {
+    const layer = currentPage.layers.find((item) => item.id === target.layerId);
+    if (layer?.type === "image" || layer?.type === "frame") return layer;
+    return null;
+  }
+
+  function updateCanvasMenuLayer(
+    target: CanvasContextMenuTarget,
+    updater: (layer: Extract<VisualLayer, { type: "image" | "frame" }>) => Extract<VisualLayer, { type: "image" | "frame" }>,
+    statusMessage?: string
+  ): void {
+    const layer = getCanvasMenuLayer(target);
+    if (layer === null) return;
+    updateLayer(currentPage.id, updater(layer));
+    setSelection([layer.id]);
+    setCanvasContextMenu(null);
+    if (statusMessage !== undefined) setStatus(statusMessage);
+  }
+
+  function fitCanvasMenuLayer(target: CanvasContextMenuTarget, mode: "fill" | "fit"): void {
+    updateCanvasMenuLayer(target, (layer) => {
+      if (layer.width <= 0 || layer.height <= 0) return layer;
+      const scaleX = currentPage.width / layer.width;
+      const scaleY = currentPage.height / layer.height;
+      const scale = mode === "fill" ? Math.max(scaleX, scaleY) : Math.min(scaleX, scaleY);
+      const width = layer.width * scale;
+      const height = layer.height * scale;
+      return {
+        ...layer,
+        width,
+        height,
+        x: (currentPage.width - width) / 2,
+        y: (currentPage.height - height) / 2
+      };
+    }, mode === "fill" ? "Image filled to canvas" : "Image fitted inside canvas");
+  }
+
+  function centerCanvasMenuLayer(target: CanvasContextMenuTarget): void {
+    updateCanvasMenuLayer(target, (layer) => ({
+      ...layer,
+      x: (currentPage.width - layer.width) / 2,
+      y: (currentPage.height - layer.height) / 2
+    }), "Image centered on canvas");
+  }
+
+  function resetCanvasMenuLayerTransform(target: CanvasContextMenuTarget): void {
+    updateCanvasMenuLayer(target, (layer) => {
+      const metadata = { ...layer.metadata };
+      delete metadata["flipH"];
+      delete metadata["flipV"];
+      if (layer.type === "image") {
+        return {
+          ...layer,
+          rotation: 0,
+          crop: { x: 0, y: 0, width: 1, height: 1 },
+          imageOffsetX: 0,
+          imageOffsetY: 0,
+          imageScale: 1,
+          metadata
+        };
+      }
+      return {
+        ...layer,
+        rotation: 0,
+        crop: { x: 0, y: 0, width: 1, height: 1 },
+        contentTransform: { ...defaultContentTransform },
+        metadata
+      };
+    }, "Image transform reset");
+  }
+
+  function applyQuickBorder(target: CanvasContextMenuTarget, color: "#ffffff" | "#000000"): void {
+    updateCanvasMenuLayer(target, (layer) => {
+      const stack: VisualEffectStack =
+        "visualEffects" in layer && layer.visualEffects !== undefined
+          ? layer.visualEffects
+          : { version: 1, enabled: true, effects: [] };
+      const stroke = stack.effects.find((effect) => effect.params.type === "stroke");
+      const nextStroke: VisualEffect = stroke !== undefined
+        ? {
+            ...stroke,
+            enabled: true,
+            params: { ...(stroke.params as StrokeEffect), color, width: 20, position: "outside", opacity: 1 }
+          }
+        : {
+            ...makeDefaultEffect("stroke"),
+            params: { type: "stroke", color, width: 20, position: "outside", opacity: 1 }
+          };
+      const effects = stroke === undefined
+        ? [...stack.effects, nextStroke]
+        : stack.effects.map((effect) => effect.id === stroke.id ? nextStroke : effect);
+      return { ...layer, visualEffects: { ...stack, enabled: true, effects } };
+    }, color === "#ffffff" ? "White 20px border applied" : "Black 20px border applied");
+  }
+
+  function duplicateCanvasMenuLayer(target: CanvasContextMenuTarget): void {
+    const layer = getCanvasMenuLayer(target);
+    if (layer === null) return;
+    const maxZIndex = Math.max(0, ...currentPage.layers.map((item) => item.zIndex));
+    const clone = {
+      ...(structuredClone(layer) as typeof layer),
+      id: crypto.randomUUID(),
+      name: `${layer.name} copy`,
+      x: layer.x + 18,
+      y: layer.y + 18,
+      zIndex: maxZIndex + 1,
+      selected: false,
+      parentId: undefined,
+      metadata: { ...layer.metadata }
+    } as VisualLayer;
+    applyDocumentChange("DuplicateContextLayerCommand", (doc) => ({
+      ...doc,
+      pages: doc.pages.map((page) => page.id === currentPage.id ? { ...page, layers: [...page.layers, clone] } : page)
+    }), currentPage.id);
+    setSelection([clone.id]);
+    setCanvasContextMenu(null);
+    setStatus("Layer duplicated");
+  }
+
+  function replaceCanvasMenuImage(target: CanvasContextMenuTarget): void {
+    setSelection([target.layerId]);
+    setCanvasContextMenu(null);
+    requestAnimationFrame(() => replaceImageInputRef.current?.click());
+  }
+
+  function handleCanvasMenuFavoritePlaceholder(): void {
+    setCanvasContextMenu(null);
+    setStatus("Favorites placeholder: element library folder is not connected yet");
+  }
+
+  async function applyMaskFromSelectionToImageLayer(layerId: string, selectionData: Uint8Array, width: number, height: number): Promise<void> {
+    if (activePage === null) return;
+    const layer = activePage.layers.find((item): item is ImageLayer => item.id === layerId && item.type === "image");
+    if (layer === undefined) return;
+
+    const canvas = window.document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (ctx === null) return;
+
+    const existing = layer.pixelMask !== undefined
+      ? currentDocument.assets.find((asset) => asset.id === layer.pixelMask!.assetId)
+      : null;
+
+    if (existing?.previewPath !== undefined) {
+      await new Promise<void>((resolve) => {
+        const img = new Image();
+        img.onload = () => { ctx.drawImage(img, 0, 0, width, height); resolve(); };
+        img.src = existing.previewPath!;
+      });
+    } else {
+      ctx.fillStyle = "white";
+      ctx.fillRect(0, 0, width, height);
+    }
+
+    const imageDataObj = ctx.getImageData(0, 0, width, height);
+    for (let i = 0; i < selectionData.length; i++) {
+      if (selectionData[i] > 128) {
+        imageDataObj.data[i * 4 + 3] = 0;
+      }
+    }
+    ctx.putImageData(imageDataObj, 0, 0);
+
+    const dataUrl = canvas.toDataURL("image/png");
+    const maskAsset = createMaskAsset(dataUrl, width, height, layer.id);
+    addAsset(maskAsset);
+    updateLayer(activePage.id, {
+      ...layer,
+      pixelMask: { version: 1, assetId: maskAsset.id, width, height }
+    });
+  }
+
+  async function selectCanvasMenuObject(target: CanvasContextMenuTarget): Promise<void> {
+    const layer = getCanvasMenuLayer(target);
+    if (layer?.type !== "image") {
+      setStatus("Smart selection needs a free image layer");
+      setCanvasContextMenu(null);
+      return;
+    }
+    const asset = currentDocument.assets.find((item) => item.id === layer.assetId);
+    if (asset === undefined) return;
+    setCanvasContextMenu(null);
+    setSelection([layer.id]);
+    enterImageEditMode(layer.id);
+    useImageEditStore.getState().setActiveTool("smart-select");
+    setStatus("Preparing smart selection...");
+    const store = useImageEditStore.getState();
+    store.setSmartSelectionStatus("preparing", "Preparing smart selection...");
+    store.setSmartSelectionProgress({ phase: "prepare", message: "Preparing smart selection...", percent: null });
+    try {
+      const result = await runSmartAutoSegment(asset, layer);
+      if (result === null) {
+        store.setSmartSelectionStatus("error", "Smart selection is unavailable");
+        store.setSmartSelectionProgress(null);
+        setStatus("Smart selection is unavailable");
+        return;
+      }
+      const mask = await maskResultToSelectionMask(result, asset.hash ?? asset.checksum ?? asset.id);
+      store.setSelectionMask(mask);
+      store.setSmartSelectionStatus(result.fallback ? "fallback" : "ready", result.message ?? "Smart selection ready");
+      store.setSmartSelectionProgress(null);
+      setStatus(result.fallback ? "Smart selection used fallback preview" : "Smart selection ready");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Smart selection failed";
+      store.setSmartSelectionStatus("error", message);
+      store.setSmartSelectionProgress(null);
+      setStatus(message);
+    }
+  }
+
+  async function removeCanvasMenuBackground(target: CanvasContextMenuTarget): Promise<void> {
+    const layer = getCanvasMenuLayer(target);
+    if (layer?.type !== "image") {
+      setStatus("Background removal needs a free image layer");
+      setCanvasContextMenu(null);
+      return;
+    }
+    const asset = currentDocument.assets.find((item) => item.id === layer.assetId);
+    if (asset === undefined) return;
+    setCanvasContextMenu(null);
+    setSelection([layer.id]);
+    setStatus("Removing background...");
+    try {
+      const result = await runSmartAutoSegment(asset, layer);
+      if (result === null) {
+        setStatus("Smart selection is unavailable");
+        return;
+      }
+      const subjectMask = await maskResultToSelectionMask(result, asset.hash ?? asset.checksum ?? asset.id);
+      const backgroundSelection = new Uint8Array(subjectMask.data.length);
+      for (let i = 0; i < backgroundSelection.length; i++) {
+        backgroundSelection[i] = subjectMask.data[i] > 128 ? 0 : 255;
+      }
+      await applyMaskFromSelectionToImageLayer(layer.id, backgroundSelection, subjectMask.width, subjectMask.height);
+      useImageEditStore.getState().clearSelection();
+      exitImageEditMode();
+      setStatus("Background removed");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Background removal failed");
+    }
+  }
+
+  function getCanvasMenuTextLayer(target: CanvasContextMenuTarget): Extract<VisualLayer, { type: "text" }> | null {
+    const layer = currentPage.layers.find((item) => item.id === target.layerId);
+    return layer?.type === "text" ? layer : null;
+  }
+
+  function updateCanvasMenuTextLayer(
+    target: CanvasContextMenuTarget,
+    updater: (layer: Extract<VisualLayer, { type: "text" }>) => Extract<VisualLayer, { type: "text" }>,
+    statusMessage?: string
+  ): void {
+    const layer = getCanvasMenuTextLayer(target);
+    if (layer === null) return;
+    const next = updater(layer);
+    const size = measureTextLayerSize(next);
+    updateLayer(currentPage.id, { ...next, width: size.width, height: size.height });
+    setSelection([layer.id]);
+    setCanvasContextMenu(null);
+    if (statusMessage !== undefined) setStatus(statusMessage);
+  }
+
+  function centerCanvasMenuText(target: CanvasContextMenuTarget, axis: "both" | "x" | "y"): void {
+    updateCanvasMenuTextLayer(target, (layer) => ({
+      ...layer,
+      ...(axis === "both" || axis === "x" ? { x: (currentPage.width - layer.width) / 2 } : {}),
+      ...(axis === "both" || axis === "y" ? { y: (currentPage.height - layer.height) / 2 } : {})
+    }), axis === "both" ? "Text centered on canvas" : "Text aligned to canvas");
+  }
+
+  function applyQuickTextStroke(target: CanvasContextMenuTarget, color: "#ffffff" | "#000000"): void {
+    updateCanvasMenuTextLayer(target, (layer) => ({
+      ...layer,
+      stroke: { version: 1, color, width: 4, opacity: 1 }
+    }), color === "#ffffff" ? "White text stroke applied" : "Black text stroke applied");
+  }
+
+  function applyQuickTextShadow(target: CanvasContextMenuTarget, mode: "soft" | "hard"): void {
+    updateCanvasMenuTextLayer(target, (layer) => ({
+      ...layer,
+      shadow: mode === "soft"
+        ? { version: 1, color: "#000000", blur: 10, offsetX: 0, offsetY: 5, opacity: 0.22 }
+        : { version: 1, color: "#000000", blur: 2, offsetX: 4, offsetY: 4, opacity: 0.55 }
+    }), mode === "soft" ? "Soft text shadow applied" : "Hard text shadow applied");
+  }
+
+  function removeCanvasMenuTextEffects(target: CanvasContextMenuTarget): void {
+    updateCanvasMenuTextLayer(target, (layer) => ({
+      ...layer,
+      stroke: undefined,
+      shadow: undefined,
+      gradient: undefined,
+      effects: [],
+      textEffects: []
+    }), "Text effects removed");
+  }
+
+  function copyCanvasMenuTextStyle(target: CanvasContextMenuTarget): void {
+    const layer = getCanvasMenuTextLayer(target);
+    if (layer === null) return;
+    copyTextStyle(currentPage.id, layer.id);
+    setSelection([layer.id]);
+    setCanvasContextMenu(null);
+    setStatus("Text style copied");
+  }
+
+  function pasteCanvasMenuTextStyle(target: CanvasContextMenuTarget): void {
+    const layer = getCanvasMenuTextLayer(target);
+    if (layer === null) return;
+    pasteTextStyle(currentPage.id, [layer.id]);
+    setSelection([layer.id]);
+    setCanvasContextMenu(null);
+    setStatus("Text style pasted");
+  }
+
+  function trimTransparentCanvas(source: HTMLCanvasElement): { canvas: HTMLCanvasElement; x: number; y: number; width: number; height: number } | null {
+    const ctx = source.getContext("2d");
+    if (ctx === null) return null;
+    const imageData = ctx.getImageData(0, 0, source.width, source.height);
+    let minX = source.width;
+    let minY = source.height;
+    let maxX = -1;
+    let maxY = -1;
+    for (let y = 0; y < source.height; y += 1) {
+      for (let x = 0; x < source.width; x += 1) {
+        const alpha = imageData.data[(y * source.width + x) * 4 + 3] ?? 0;
+        if (alpha <= 0) continue;
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+    }
+    if (maxX < minX || maxY < minY) return null;
+    const width = maxX - minX + 1;
+    const height = maxY - minY + 1;
+    const canvas = window.document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const out = canvas.getContext("2d");
+    if (out === null) return null;
+    out.putImageData(ctx.getImageData(minX, minY, width, height), 0, 0);
+    return { canvas, x: minX, y: minY, width, height };
+  }
+
+  function convertCanvasMenuTextToMask(target: CanvasContextMenuTarget): void {
+    const layer = getCanvasMenuTextLayer(target);
+    if (layer === null) return;
+    const rendered = renderTextToAlphaCanvas(layer);
+    if (rendered === null || rendered.width <= 0 || rendered.height <= 0) {
+      setCanvasContextMenu(null);
+      setStatus("Cannot create mask from empty text");
+      return;
+    }
+    const trimmed = trimTransparentCanvas(rendered);
+    if (trimmed === null) {
+      setCanvasContextMenu(null);
+      setStatus("Cannot create mask: text has no visible pixels");
+      return;
+    }
+    const renderedWithOffset = rendered as HTMLCanvasElement & { sppTextOffsetX?: number; sppTextOffsetY?: number };
+    const offsetX = renderedWithOffset.sppTextOffsetX ?? 0;
+    const offsetY = renderedWithOffset.sppTextOffsetY ?? 0;
+    const maskAsset = createMaskAsset(trimmed.canvas.toDataURL("image/png"), trimmed.width, trimmed.height, layer.id);
+    const frame = createFrameLayer({
+      id: layer.id,
+      name: `${layer.name || "Text"} Mask`,
+      rect: {
+        x: layer.x - offsetX + trimmed.x,
+        y: layer.y - offsetY + trimmed.y,
+        width: trimmed.width,
+        height: trimmed.height
+      },
+      behaviorMode: "freeform",
+      shape: "customMask",
+      contentType: "empty",
+      fitMode: "fill",
+      contentTransform: { ...defaultContentTransform },
+      lockedContent: layer.locked,
+      lockedFrame: layer.locked,
+      zIndex: layer.zIndex,
+      maskSource: {
+        version: 1,
+        type: "alphaAsset",
+        assetId: maskAsset.id,
+        width: trimmed.width,
+        height: trimmed.height
+      }
+    });
+    applyDocumentChange("ConvertTextToFrameMaskCommand", (doc) => ({
+      ...doc,
+      assets: [...doc.assets, maskAsset],
+      pages: doc.pages.map((page) => page.id === currentPage.id ? {
+        ...page,
+        layers: page.layers.map((item) => item.id === layer.id ? {
+          ...frame,
+          rotation: layer.rotation,
+          visible: layer.visible,
+          opacity: layer.opacity,
+          blendMode: layer.blendMode,
+          selected: layer.selected
+        } : item)
+      } : page)
+    }), currentPage.id);
+    setSelection([frame.id]);
+    setCanvasContextMenu(null);
+    setStatus("Text converted to mask");
+  }
+
+  function duplicateCanvasMenuTextLayer(target: CanvasContextMenuTarget): void {
+    const layer = getCanvasMenuTextLayer(target);
+    if (layer === null) return;
+    const maxZIndex = Math.max(0, ...currentPage.layers.map((item) => item.zIndex));
+    const clone = {
+      ...(structuredClone(layer) as typeof layer),
+      id: crypto.randomUUID(),
+      name: `${layer.name} copy`,
+      x: layer.x + 18,
+      y: layer.y + 18,
+      zIndex: maxZIndex + 1,
+      selected: false,
+      parentId: undefined,
+      metadata: { ...layer.metadata }
+    } as VisualLayer;
+    applyDocumentChange("DuplicateContextTextLayerCommand", (doc) => ({
+      ...doc,
+      pages: doc.pages.map((page) => page.id === currentPage.id ? { ...page, layers: [...page.layers, clone] } : page)
+    }), currentPage.id);
+    setSelection([clone.id]);
+    setCanvasContextMenu(null);
+    setStatus("Text duplicated");
+  }
+
+  function deleteCanvasMenuTarget(target: CanvasContextMenuTarget): void {
+    removeLayer(currentPage.id, target.layerId);
+    setCanvasContextMenu(null);
+    clearSelection();
+    setStatus("Layer deleted");
+  }
+
   function handleInsertGraphic(fileUrl: string, name: string, fallbackUrl?: string): void {
     void (async () => {
       try {
@@ -1189,7 +1644,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
         const ext  = isSvg ? "svg" : "png";
         const mime = isSvg ? "image/svg+xml" : "image/png";
         const file = new File([blob], `${name}.${ext}`, { type: mime });
-        const { asset } = await importImageAsset(file, currentDocument.assets, { createPreview: true });
+        const { asset } = await importImageAssetForEditor(file, currentDocument.assets, { createPreview: true });
         const layer = createFreeImageLayer(asset, currentPage.width, currentPage.height);
         addAssetAndLayer(currentPage.id, asset, layer);
         setSelection([layer.id]);
@@ -1204,7 +1659,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     void (async () => {
       try {
         const file = await dataUrlToFile(dataUrl, "qr-code.png");
-        const { asset } = await importImageAsset(file, currentDocument.assets, { createPreview: true });
+        const { asset } = await importImageAssetForEditor(file, currentDocument.assets, { createPreview: true });
         const maxZIndex = Math.max(0, ...currentPage.layers.map((l) => l.zIndex));
         const layer = createFreeImageLayer(asset, currentPage.width, currentPage.height);
         addAssetAndLayer(currentPage.id, asset, layer);
@@ -1446,11 +1901,38 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     return null;
   }
 
+  function confirmLargeFiles(files: File[]): boolean {
+    const thresholdMb = Math.max(1, performanceSettings.warnLargeFileMb);
+    const largeFiles = files.filter((file) => file.size / 1024 / 1024 >= thresholdMb);
+    if (largeFiles.length === 0) return true;
+    const totalMb = largeFiles.reduce((sum, file) => sum + file.size / 1024 / 1024, 0);
+    return window.confirm(
+      `Some imported files are larger than ${thresholdMb} MB.\n` +
+      `${largeFiles.length} file(s), ${totalMb.toFixed(1)} MB total.\n\n` +
+      "Continue importing?"
+    );
+  }
+
+  async function importImageAssetForEditor(
+    file: File,
+    existingAssets: typeof currentDocument.assets,
+    options: Parameters<typeof importImageAsset>[2] = {}
+  ): ReturnType<typeof importImageAsset> {
+    return importImageAsset(file, existingAssets, {
+      ...options,
+      previewMaxSize: options.previewMaxSize ?? getImportPreviewMaxSide(performanceSettings)
+    });
+  }
+
   async function handleImageFiles(files: FileList | File[], targetFrameId?: string): Promise<void> {
     const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
+    if (!confirmLargeFiles(imageFiles)) {
+      setStatus("Image import cancelled");
+      return;
+    }
     if (targetFrameId !== undefined && imageFiles.length > 0) {
       const file = imageFiles[0];
-      const { asset } = await importImageAsset(file, currentDocument.assets, { createPreview: true });
+      const { asset } = await importImageAssetForEditor(file, currentDocument.assets, { createPreview: true });
       applyDocumentChange(
         "InsertImageIntoFrameCommand",
         (doc) => insertImageIntoFrameDoc(
@@ -1469,7 +1951,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     if (isGridMode && activeGridRule !== null) {
       const assets: Asset[] = [];
       for (const file of imageFiles) {
-        const { asset } = await importImageAsset(file, currentDocument.assets, { createPreview: true });
+        const { asset } = await importImageAssetForEditor(file, currentDocument.assets, { createPreview: true });
         assets.push(asset);
       }
       if (assets.length > 0) {
@@ -1485,7 +1967,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     if (isMaskMode && activeMaskRule !== null) {
       const assets: Asset[] = [];
       for (const file of imageFiles) {
-        const { asset } = await importImageAsset(file, currentDocument.assets, { createPreview: true });
+        const { asset } = await importImageAssetForEditor(file, currentDocument.assets, { createPreview: true });
         assets.push(asset);
       }
       if (assets.length > 0) {
@@ -1499,7 +1981,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
       return;
     }
     for (const file of imageFiles) {
-      const { asset } = await importImageAsset(file, currentDocument.assets, { createPreview: true });
+      const { asset } = await importImageAssetForEditor(file, currentDocument.assets, { createPreview: true });
       const layer = createFreeImageLayer(asset, currentPage.width, currentPage.height);
       addAssetAndLayer(currentPage.id, asset, layer);
       setSelection([layer.id]);
@@ -1513,6 +1995,11 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   async function handleProjectLoad(event: ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = event.target.files?.[0];
     if (file === undefined) return;
+    if (!confirmLargeFiles([file])) {
+      event.target.value = "";
+      setStatus("Project load cancelled");
+      return;
+    }
     const envelope = await loadProject(file);
     setDocument(withProjectMetadata(envelope.document, envelope.metadata));
     viewport.setViewport(envelope.document.viewport);
@@ -1536,7 +2023,8 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     if (file === undefined || selectedLayer === null) return;
     if (selectedLayer.type !== "image" && selectedLayer.type !== "frame") return;
 
-    const { asset } = await importImageAsset(file, currentDocument.assets, { createPreview: true });
+    if (!confirmLargeFiles([file])) return;
+    const { asset } = await importImageAssetForEditor(file, currentDocument.assets, { createPreview: true });
     addAsset(asset);
 
     if (selectedLayer.type === "image") {
@@ -1835,7 +2323,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
         setActivePage(page.id);
         await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       }
-      rendered.push(exportStagePrintImage(stage, page, mimeType));
+      rendered.push(exportStagePrintImage(stage, page, mimeType, exportRenderOptions));
     }
     if (useDocumentStore.getState().activePageId !== originalPageId) {
       setActivePage(originalPageId);
@@ -1852,7 +2340,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
       downloadRenderedPagesAsImages(pages, currentDocument.name);
       setStatus(`יוצאו ${pages.length} עמודי PNG`);
     } else {
-      exportStagePng(stage, currentDocument.name, currentPage);
+      exportStagePng(stage, currentDocument.name, currentPage, exportRenderOptions);
       setStatus("PNG יוצא");
     }
   }
@@ -1865,7 +2353,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
       await exportRenderedPagesAsPdf(pages, currentDocument.name);
       setStatus(`PDF יוצא (${pages.length} עמודים)`);
     } else {
-      await exportStagePdf(stage, currentDocument.name, currentPage);
+      await exportStagePdf(stage, currentDocument.name, currentPage, exportRenderOptions);
       setStatus("PDF יוצא");
     }
   }
@@ -1878,7 +2366,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
       downloadRenderedPagesAsImages(pages, currentDocument.name);
       setStatus(`יוצאו ${pages.length} עמודי JPEG`);
     } else {
-      exportStageJpg(stage, currentDocument.name, currentPage);
+      exportStageJpg(stage, currentDocument.name, currentPage, exportRenderOptions);
       setStatus("JPG exported");
     }
   }
@@ -1922,7 +2410,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
         }
 
         markDebugEvent("print:render-single-start", { pageId: page.id });
-        const rendered = exportStagePrintImage(stage, page, "image/png");
+        const rendered = exportStagePrintImage(stage, page, "image/png", exportRenderOptions);
         markDebugEvent("print:render-single-end", { pageId: page.id, dataUrlLength: rendered.dataUrl.length });
         const pageName = typeof page.metadata["name"] === "string" ? page.metadata["name"] : undefined;
 
@@ -1952,7 +2440,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
           setActivePage(page.id);
           await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
           markDebugEvent("print:render-page-start", { pageId: page.id, index: idx });
-          renderedPages.push(exportStagePrintImage(stage, page, "image/png"));
+          renderedPages.push(exportStagePrintImage(stage, page, "image/png", exportRenderOptions));
           markDebugEvent("print:render-page-end", { pageId: page.id, index: idx, renderedCount: renderedPages.length });
           const name = typeof page.metadata["name"] === "string" ? page.metadata["name"] : `עמוד ${idx + 1}`;
           renderedPageNames.push(name);
@@ -2783,7 +3271,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
       const file = fileArr[i];
       if (!file) continue;
       try {
-        const { asset } = await importImageAsset(file, [], { createPreview: true });
+        const { asset } = await importImageAssetForEditor(file, [], { createPreview: true });
         imported.push(asset);
         newRecords.push(makeRecord(asset.id, file.name, "child", maxOrder + 1 + i));
       } catch { /* skip */ }
@@ -3060,16 +3548,6 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
           </button>
           <button className="icon-btn" disabled={selectedLayerIds.length < 3} onClick={() => handleAlign("distributeY")} title="Distribute vertically" type="button">
             <ChevronsDown size={15} />
-          </button>
-          <button className="icon-btn" onClick={viewport.zoomOut} title="Zoom out" type="button">
-            <ZoomOut size={15} />
-          </button>
-          <span className="zoom-readout">{Math.round(viewport.zoom * 100)}%</span>
-          <button className="icon-btn" onClick={viewport.zoomIn} title="הגדל תצוגה" type="button">
-            <ZoomIn size={15} />
-          </button>
-          <button className="icon-btn" onClick={viewport.fitPage} title="התאם דף" type="button">
-            <Maximize2 size={15} />
           </button>
         </div>
 
@@ -3602,6 +4080,78 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
               photoshopConfigured={!!utilSettings.photoshopPath}
               colorLabConfigured={!!utilSettings.colorLabPath}
               onClose={() => setCanvasContextMenu(null)}
+              onSelectObject={() => void selectCanvasMenuObject(canvasContextMenu)}
+              onRemoveBackground={() => void removeCanvasMenuBackground(canvasContextMenu)}
+              onConvertAlphaToFrame={() => {
+                setCanvasContextMenu(null);
+                void handleConvertLayerAlphaToFrameMask(canvasContextMenu.layerId);
+              }}
+              onMoveForward={() => {
+                moveLayer(currentPage.id, canvasContextMenu.layerId, "forward");
+                setCanvasContextMenu(null);
+              }}
+              onMoveBackward={() => {
+                moveLayer(currentPage.id, canvasContextMenu.layerId, "backward");
+                setCanvasContextMenu(null);
+              }}
+              onMoveToFront={() => {
+                moveLayer(currentPage.id, canvasContextMenu.layerId, "front");
+                setCanvasContextMenu(null);
+              }}
+              onMoveToBack={() => {
+                moveLayer(currentPage.id, canvasContextMenu.layerId, "back");
+                setCanvasContextMenu(null);
+              }}
+              onFitCanvasFill={() => fitCanvasMenuLayer(canvasContextMenu, "fill")}
+              onFitCanvasFit={() => fitCanvasMenuLayer(canvasContextMenu, "fit")}
+              onCenterCanvas={() => centerCanvasMenuLayer(canvasContextMenu)}
+              onResetTransform={() => resetCanvasMenuLayerTransform(canvasContextMenu)}
+              onRotate90={() => updateCanvasMenuLayer(canvasContextMenu, (layer) => ({ ...layer, rotation: ((layer.rotation ?? 0) + 90) % 360 }), "Image rotated 90 degrees")}
+              onRotate180={() => updateCanvasMenuLayer(canvasContextMenu, (layer) => ({ ...layer, rotation: ((layer.rotation ?? 0) + 180) % 360 }), "Image rotated 180 degrees")}
+              onFlipHorizontal={() => updateCanvasMenuLayer(canvasContextMenu, (layer) => ({ ...layer, metadata: { ...layer.metadata, flipH: !((layer.metadata["flipH"] as boolean | undefined) ?? false) } }), "Image flipped horizontally")}
+              onFlipVertical={() => updateCanvasMenuLayer(canvasContextMenu, (layer) => ({ ...layer, metadata: { ...layer.metadata, flipV: !((layer.metadata["flipV"] as boolean | undefined) ?? false) } }), "Image flipped vertically")}
+              onWhiteBorder={() => applyQuickBorder(canvasContextMenu, "#ffffff")}
+              onBlackBorder={() => applyQuickBorder(canvasContextMenu, "#000000")}
+              onReplaceImage={() => replaceCanvasMenuImage(canvasContextMenu)}
+              onDuplicate={() => canvasContextMenu.layerType === "text" ? duplicateCanvasMenuTextLayer(canvasContextMenu) : duplicateCanvasMenuLayer(canvasContextMenu)}
+              onDeleteTarget={() => deleteCanvasMenuTarget(canvasContextMenu)}
+              onToggleLock={() => {
+                if (canvasContextMenu.layerType === "text") {
+                  updateCanvasMenuTextLayer(canvasContextMenu, (layer) => ({ ...layer, locked: !layer.locked }), "Layer lock toggled");
+                  return;
+                }
+                updateCanvasMenuLayer(canvasContextMenu, (layer) => ({ ...layer, locked: !layer.locked }), "Layer lock toggled");
+              }}
+              onToggleVisibility={() => {
+                if (canvasContextMenu.layerType === "text") {
+                  updateCanvasMenuTextLayer(canvasContextMenu, (layer) => ({ ...layer, visible: layer.visible === false }), "Layer visibility toggled");
+                  return;
+                }
+                updateCanvasMenuLayer(canvasContextMenu, (layer) => ({ ...layer, visible: layer.visible === false }), "Layer visibility toggled");
+              }}
+              onAddToFavorites={handleCanvasMenuFavoritePlaceholder}
+              hasTextStyleClipboard={hasTextStyleClipboard}
+              onTextMaskPlaceholder={() => convertCanvasMenuTextToMask(canvasContextMenu)}
+              onTextCenterCanvas={() => centerCanvasMenuText(canvasContextMenu, "both")}
+              onTextCenterX={() => centerCanvasMenuText(canvasContextMenu, "x")}
+              onTextCenterY={() => centerCanvasMenuText(canvasContextMenu, "y")}
+              onTextBold={() => updateCanvasMenuTextLayer(canvasContextMenu, (layer) => ({ ...layer, fontWeight: layer.fontWeight >= 700 ? 400 : 700 }), "Text bold toggled")}
+              onTextItalic={() => updateCanvasMenuTextLayer(canvasContextMenu, (layer) => ({ ...layer, fontStyle: layer.fontStyle === "italic" ? "normal" : "italic" }), "Text italic toggled")}
+              onTextAlignLeft={() => updateCanvasMenuTextLayer(canvasContextMenu, (layer) => ({ ...layer, alignment: "left" }), "Text aligned left")}
+              onTextAlignCenter={() => updateCanvasMenuTextLayer(canvasContextMenu, (layer) => ({ ...layer, alignment: "center" }), "Text aligned center")}
+              onTextAlignRight={() => updateCanvasMenuTextLayer(canvasContextMenu, (layer) => ({ ...layer, alignment: "right" }), "Text aligned right")}
+              onTextDirectionAuto={() => updateCanvasMenuTextLayer(canvasContextMenu, (layer) => ({ ...layer, direction: "auto" }), "Text direction set to Auto")}
+              onTextDirectionRtl={() => updateCanvasMenuTextLayer(canvasContextMenu, (layer) => ({ ...layer, direction: "rtl" }), "Text direction set to RTL")}
+              onTextDirectionLtr={() => updateCanvasMenuTextLayer(canvasContextMenu, (layer) => ({ ...layer, direction: "ltr" }), "Text direction set to LTR")}
+              onTextIncreaseSize={() => updateCanvasMenuTextLayer(canvasContextMenu, (layer) => ({ ...layer, fontSize: Math.min(240, layer.fontSize + 4) }), "Text size increased")}
+              onTextDecreaseSize={() => updateCanvasMenuTextLayer(canvasContextMenu, (layer) => ({ ...layer, fontSize: Math.max(8, layer.fontSize - 4) }), "Text size decreased")}
+              onTextStrokeWhite={() => applyQuickTextStroke(canvasContextMenu, "#ffffff")}
+              onTextStrokeBlack={() => applyQuickTextStroke(canvasContextMenu, "#000000")}
+              onTextShadowSoft={() => applyQuickTextShadow(canvasContextMenu, "soft")}
+              onTextShadowHard={() => applyQuickTextShadow(canvasContextMenu, "hard")}
+              onTextRemoveEffects={() => removeCanvasMenuTextEffects(canvasContextMenu)}
+              onTextCopyEffects={() => copyCanvasMenuTextStyle(canvasContextMenu)}
+              onTextPasteEffects={() => pasteCanvasMenuTextStyle(canvasContextMenu)}
               onOpenImageEditor={() => void handleOpenImageEditor(canvasContextMenu)}
               onOpenInPhotoshop={() => void handleOpenInPhotoshop(canvasContextMenu)}
               onOpenInColorLab={() => void handleOpenInColorLab(canvasContextMenu)}
@@ -3924,10 +4474,38 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
         </aside>
       </section>
 
+      <EditorStatusBar
+        pageWidthPx={currentPage.width}
+        pageHeightPx={currentPage.height}
+        dpi={currentDocument.dpi}
+        selectedLayer={selectedLayer}
+        selectedCount={selectedLayerIds.length}
+        zoom={viewport.zoom}
+        onZoomIn={viewport.zoomIn}
+        onZoomOut={viewport.zoomOut}
+        onSetZoom={viewport.setZoom}
+        onFitPage={viewport.fitPage}
+        autosaveStatus={status}
+        unit={statusBarUnit}
+        onUnitChange={setStatusBarUnit}
+        onResizeSelectedLayer={(wPx, hPx) => {
+          if (selectedLayer === null) return;
+          const cx = selectedLayer.x + selectedLayer.width / 2;
+          const cy = selectedLayer.y + selectedLayer.height / 2;
+          const nextLayer = {
+            ...selectedLayer,
+            x: cx - wPx / 2,
+            y: cy - hPx / 2,
+            width: wPx,
+            height: hPx
+          } as VisualLayer;
+          handleCanvasLayerChange(nextLayer);
+        }}
+      />
+
       <footer className="bottombar">
         <div className="bottom-side">
           <span className="current-page-label">עמוד {currentPageIndex + 1} מתוך {currentDocument.pages.length}</span>
-          <span>עמוד 1 מתוך {currentDocument.pages.length}</span>
           <div className="bottom-page-nav" aria-label="ניווט עמודים">
             <button
               aria-label="עמוד קודם"
@@ -3971,13 +4549,6 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
               ›
             </button>
           </div>
-          <span className="progress-pill">{status}</span>
-        </div>
-        <div className="bottom-side bottom-left">
-          <span>
-            {Math.round(currentPage.width)} x {Math.round(currentPage.height)} px
-          </span>
-          <span>התאמה למסך</span>
         </div>
       </footer>
 
@@ -4614,8 +5185,8 @@ function TextContextToolbar({
         </div>
       </ToolbarMenu>
       <ToolbarMenu label="Stroke" title="קו חיצוני">
-        <label className="check-line"><input checked={layer.stroke !== undefined} onChange={(event) => onPatch({ stroke: event.target.checked ? { version: 1, color: "#111111", width: 2, opacity: 1 } : undefined } as Partial<VisualLayer>)} type="checkbox" /> הפעלה</label>
-        {layer.stroke !== undefined ? <><input className="context-color wide" onChange={(event) => onPatch({ stroke: { ...layer.stroke, color: event.target.value } } as Partial<VisualLayer>)} type="color" value={layer.stroke.color} /><SliderField label="עובי" min={0} max={30} value={layer.stroke.width} onChange={(value) => onPatch({ stroke: { ...layer.stroke, width: value } } as Partial<VisualLayer>)} unit=" px" /><SliderField label="שקיפות" min={0} max={1} step={0.01} decimals={2} value={layer.stroke.opacity} onChange={(value) => onPatch({ stroke: { ...layer.stroke, opacity: value } } as Partial<VisualLayer>)} /></> : null}
+        <label className="check-line"><input checked={layer.stroke !== undefined} onChange={(event) => onPatch({ stroke: event.target.checked ? { version: 1, color: "#111111", width: 2, opacity: 1, position: "outside" } : undefined } as Partial<VisualLayer>)} type="checkbox" /> הפעלה</label>
+        {layer.stroke !== undefined ? <><input className="context-color wide" onChange={(event) => onPatch({ stroke: { ...layer.stroke, color: event.target.value } } as Partial<VisualLayer>)} type="color" value={layer.stroke.color} /><SliderField label="עובי" min={0} max={30} value={layer.stroke.width} onChange={(value) => onPatch({ stroke: { ...layer.stroke, width: value } } as Partial<VisualLayer>)} unit=" px" /><SliderField label="שקיפות" min={0} max={1} step={0.01} decimals={2} value={layer.stroke.opacity} onChange={(value) => onPatch({ stroke: { ...layer.stroke, opacity: value } } as Partial<VisualLayer>)} /><label className="context-menu-section-label" style={{ marginTop: 6 }}>מיקום</label><select className="context-select full" value={layer.stroke.position ?? "outside"} onChange={(event) => onPatch({ stroke: { ...layer.stroke, position: event.target.value as "inside" | "center" | "outside" } } as Partial<VisualLayer>)}><option value="outside">חיצוני</option><option value="center">ממורכז</option><option value="inside">פנימי</option></select></> : null}
       </ToolbarMenu>
       <ToolbarMenu label="Shadow" title="צל">
         <div className="context-menu-actions">
@@ -4632,7 +5203,7 @@ function TextContextToolbar({
       </ToolbarMenu>
       <ToolbarMenu label="Pattern" title="תבנית בתוך הטקסט">
         <label className="check-line"><input checked={pattern?.enabled === true} onChange={(event) => event.target.checked ? patchTextEffect(pattern, "pattern_overlay", { patternType: "diagonal_shine", foreground: "#ffffff", opacity: 0.35, scale: 1, rotation: -18, spacing: 14 }) : removeTextEffect(pattern)} type="checkbox" /> הפעלה</label>
-        {pattern?.enabled === true ? <><select className="context-select full" onChange={(event) => patchTextEffect(pattern, "pattern_overlay", { patternType: event.target.value })} value={String((pattern.params as Record<string, unknown>)["patternType"] ?? "stripes")}><option value="stripes">Stripes</option><option value="dots">Dots</option><option value="checker">Checker</option><option value="diagonal_shine">Shine</option><option value="noise">Noise</option><option value="halftone">Halftone</option><option value="brushed_metal">Brushed metal</option><option value="uploaded_image">Uploaded image</option></select><label className="context-upload-button"><ImagePlus size={13} /> Upload pattern<input accept="image/*" type="file" onChange={(event) => uploadPatternImage(event.target.files?.[0])} /></label>{typeof (pattern.params as Record<string, unknown>)["imageName"] === "string" ? <span className="context-menu-section-label">{String((pattern.params as Record<string, unknown>)["imageName"])}</span> : null}<input className="context-color wide" onChange={(event) => patchTextEffect(pattern, "pattern_overlay", { foreground: event.target.value })} type="color" value={String((pattern.params as Record<string, unknown>)["foreground"] ?? "#ffffff")} /><SliderField label="מרווח" min={4} max={40} value={Number((pattern.params as Record<string, unknown>)["spacing"] ?? 10)} onChange={(value) => patchTextEffect(pattern, "pattern_overlay", { spacing: value })} unit=" px" /><SliderField label="זווית" min={-90} max={90} value={Number((pattern.params as Record<string, unknown>)["rotation"] ?? 0)} onChange={(value) => patchTextEffect(pattern, "pattern_overlay", { rotation: value })} unit="°" /><SliderField label="שקיפות" min={0} max={1} step={0.01} decimals={2} value={Number((pattern.params as Record<string, unknown>)["opacity"] ?? pattern.opacity)} onChange={(value) => patchTextEffect(pattern, "pattern_overlay", { opacity: value })} /></> : null}
+        {pattern?.enabled === true ? <><select className="context-select full" onChange={(event) => patchTextEffect(pattern, "pattern_overlay", { patternType: event.target.value })} value={String((pattern.params as Record<string, unknown>)["patternType"] ?? "stripes")}><option value="stripes">Stripes</option><option value="dots">Dots</option><option value="checker">Checker</option><option value="diagonal_shine">Shine</option><option value="noise">Noise</option><option value="halftone">Halftone</option><option value="brushed_metal">Brushed metal</option><option value="uploaded_image">Uploaded image</option></select><label className="context-upload-button"><ImagePlus size={13} /> Upload pattern<input accept="image/*" type="file" onChange={(event) => uploadPatternImage(event.target.files?.[0])} /></label>{typeof (pattern.params as Record<string, unknown>)["imageName"] === "string" ? <span className="context-menu-section-label">{String((pattern.params as Record<string, unknown>)["imageName"])}</span> : null}<input className="context-color wide" onChange={(event) => patchTextEffect(pattern, "pattern_overlay", { foreground: event.target.value })} type="color" value={String((pattern.params as Record<string, unknown>)["foreground"] ?? "#ffffff")} /><SliderField label="מרווח" min={4} max={40} value={Number((pattern.params as Record<string, unknown>)["spacing"] ?? 10)} onChange={(value) => patchTextEffect(pattern, "pattern_overlay", { spacing: value })} unit=" px" /><SliderField label="זווית" min={-90} max={90} value={Number((pattern.params as Record<string, unknown>)["rotation"] ?? 0)} onChange={(value) => patchTextEffect(pattern, "pattern_overlay", { rotation: value })} unit="°" /><SliderField label="שקיפות" min={0} max={1} step={0.01} decimals={2} value={Number((pattern.params as Record<string, unknown>)["opacity"] ?? pattern.opacity)} onChange={(value) => patchTextEffect(pattern, "pattern_overlay", { opacity: value })} /><label className="context-menu-section-label" style={{ marginTop: 6 }}>החל על</label><select className="context-select full" value={String((pattern.params as Record<string, unknown>)["applyTo"] ?? "fill_only")} onChange={(event) => patchTextEffect(pattern, "pattern_overlay", { applyTo: event.target.value })}><option value="fill_only">מילוי בלבד</option><option value="stroke_only">קו מתאר בלבד</option><option value="all">הכל</option></select></> : null}
       </ToolbarMenu>
       <ToolbarMenu label="3D" title="תלת ממד ותבליט">
         <label className="check-line"><input checked={extrude?.enabled === true} onChange={(event) => event.target.checked ? patchTextEffect(extrude, "extrude_3d", { color: "#333333", depth: 12, offsetX: 1, offsetY: 1, steps: 12, opacity: 0.85 }) : removeTextEffect(extrude)} type="checkbox" /> Extrude</label>
@@ -4642,7 +5213,7 @@ function TextContextToolbar({
       </ToolbarMenu>
       <ToolbarMenu label="Sparkle" title="נצנוץ סטטי להדפסה">
         <label className="check-line"><input checked={sparkle?.enabled === true} onChange={(event) => event.target.checked ? patchTextEffect(sparkle, "sparkle", { density: 0.24, size: 6, color: "#ffffff", seed: 9, opacity: 0.85, rays: 8, glint: 0.75, halo: 0.7 }) : removeTextEffect(sparkle)} type="checkbox" /> הפעלה</label>
-        {sparkle?.enabled === true ? <><input className="context-color wide" onChange={(event) => patchTextEffect(sparkle, "sparkle", { color: event.target.value })} type="color" value={String((sparkle.params as Record<string, unknown>)["color"] ?? "#ffffff")} /><SliderField label="כמות" min={0.02} max={0.8} step={0.01} decimals={2} value={Number((sparkle.params as Record<string, unknown>)["density"] ?? 0.24)} onChange={(value) => patchTextEffect(sparkle, "sparkle", { density: value })} /><SliderField label="גודל" min={1} max={18} value={Number((sparkle.params as Record<string, unknown>)["size"] ?? 6)} onChange={(value) => patchTextEffect(sparkle, "sparkle", { size: value })} unit=" px" /><SliderField label="Glint" min={0} max={1} step={0.01} decimals={2} value={Number((sparkle.params as Record<string, unknown>)["glint"] ?? 0.75)} onChange={(value) => patchTextEffect(sparkle, "sparkle", { glint: value })} /><SliderField label="Halo" min={0} max={1} step={0.01} decimals={2} value={Number((sparkle.params as Record<string, unknown>)["halo"] ?? 0.7)} onChange={(value) => patchTextEffect(sparkle, "sparkle", { halo: value })} /></> : null}
+        {sparkle?.enabled === true ? <><input className="context-color wide" onChange={(event) => patchTextEffect(sparkle, "sparkle", { color: event.target.value })} type="color" value={String((sparkle.params as Record<string, unknown>)["color"] ?? "#ffffff")} /><SliderField label="כמות" min={0.02} max={0.8} step={0.01} decimals={2} value={Number((sparkle.params as Record<string, unknown>)["density"] ?? 0.24)} onChange={(value) => patchTextEffect(sparkle, "sparkle", { density: value })} /><SliderField label="גודל" min={1} max={18} value={Number((sparkle.params as Record<string, unknown>)["size"] ?? 6)} onChange={(value) => patchTextEffect(sparkle, "sparkle", { size: value })} unit=" px" /><SliderField label="Glint" min={0} max={1} step={0.01} decimals={2} value={Number((sparkle.params as Record<string, unknown>)["glint"] ?? 0.75)} onChange={(value) => patchTextEffect(sparkle, "sparkle", { glint: value })} /><SliderField label="Halo" min={0} max={1} step={0.01} decimals={2} value={Number((sparkle.params as Record<string, unknown>)["halo"] ?? 0.7)} onChange={(value) => patchTextEffect(sparkle, "sparkle", { halo: value })} /><label className="context-menu-section-label" style={{ marginTop: 6 }}>החל על</label><select className="context-select full" value={String((sparkle.params as Record<string, unknown>)["applyTo"] ?? "fill_only")} onChange={(event) => patchTextEffect(sparkle, "sparkle", { applyTo: event.target.value })}><option value="fill_only">מילוי בלבד</option><option value="stroke_only">קו מתאר בלבד</option><option value="all">הכל</option></select></> : null}
       </ToolbarMenu>
       <ToolbarMenu label="Warp" title="עיוות טקסט">
         <select className="context-select full" onChange={(event) => onPatch({ warpSettings: { ...layer.warpSettings, enabled: event.target.value !== "none", type: event.target.value as typeof layer.warpSettings.type } } as Partial<VisualLayer>)} value={layer.warpSettings.type}>
@@ -9068,6 +9639,51 @@ function CanvasContextMenu({
   photoshopConfigured,
   colorLabConfigured,
   onClose,
+  onSelectObject,
+  onRemoveBackground,
+  onConvertAlphaToFrame,
+  onMoveForward,
+  onMoveBackward,
+  onMoveToFront,
+  onMoveToBack,
+  onFitCanvasFill,
+  onFitCanvasFit,
+  onCenterCanvas,
+  onResetTransform,
+  onRotate90,
+  onRotate180,
+  onFlipHorizontal,
+  onFlipVertical,
+  onWhiteBorder,
+  onBlackBorder,
+  onReplaceImage,
+  onDuplicate,
+  onDeleteTarget,
+  onToggleLock,
+  onToggleVisibility,
+  onAddToFavorites,
+  hasTextStyleClipboard,
+  onTextMaskPlaceholder,
+  onTextCenterCanvas,
+  onTextCenterX,
+  onTextCenterY,
+  onTextBold,
+  onTextItalic,
+  onTextAlignLeft,
+  onTextAlignCenter,
+  onTextAlignRight,
+  onTextDirectionAuto,
+  onTextDirectionRtl,
+  onTextDirectionLtr,
+  onTextIncreaseSize,
+  onTextDecreaseSize,
+  onTextStrokeWhite,
+  onTextStrokeBlack,
+  onTextShadowSoft,
+  onTextShadowHard,
+  onTextRemoveEffects,
+  onTextCopyEffects,
+  onTextPasteEffects,
   onOpenImageEditor,
   onOpenInPhotoshop,
   onOpenInColorLab
@@ -9078,11 +9694,69 @@ function CanvasContextMenu({
   photoshopConfigured: boolean;
   colorLabConfigured: boolean;
   onClose: () => void;
+  onSelectObject: () => void;
+  onRemoveBackground: () => void;
+  onConvertAlphaToFrame: () => void;
+  onMoveForward: () => void;
+  onMoveBackward: () => void;
+  onMoveToFront: () => void;
+  onMoveToBack: () => void;
+  onFitCanvasFill: () => void;
+  onFitCanvasFit: () => void;
+  onCenterCanvas: () => void;
+  onResetTransform: () => void;
+  onRotate90: () => void;
+  onRotate180: () => void;
+  onFlipHorizontal: () => void;
+  onFlipVertical: () => void;
+  onWhiteBorder: () => void;
+  onBlackBorder: () => void;
+  onReplaceImage: () => void;
+  onDuplicate: () => void;
+  onDeleteTarget: () => void;
+  onToggleLock: () => void;
+  onToggleVisibility: () => void;
+  onAddToFavorites: () => void;
+  hasTextStyleClipboard: boolean;
+  onTextMaskPlaceholder: () => void;
+  onTextCenterCanvas: () => void;
+  onTextCenterX: () => void;
+  onTextCenterY: () => void;
+  onTextBold: () => void;
+  onTextItalic: () => void;
+  onTextAlignLeft: () => void;
+  onTextAlignCenter: () => void;
+  onTextAlignRight: () => void;
+  onTextDirectionAuto: () => void;
+  onTextDirectionRtl: () => void;
+  onTextDirectionLtr: () => void;
+  onTextIncreaseSize: () => void;
+  onTextDecreaseSize: () => void;
+  onTextStrokeWhite: () => void;
+  onTextStrokeBlack: () => void;
+  onTextShadowSoft: () => void;
+  onTextShadowHard: () => void;
+  onTextRemoveEffects: () => void;
+  onTextCopyEffects: () => void;
+  onTextPasteEffects: () => void;
   onOpenImageEditor: () => void;
   onOpenInPhotoshop: () => void;
   onOpenInColorLab: () => void;
 }): ReactElement {
   const menuRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ left: target.screenX, top: target.screenY });
+  const smartSelectionEnabled = target.layerType === "image" && target.hasImage;
+
+  useEffect(() => {
+    const menu = menuRef.current;
+    if (menu === null) return;
+    const rect = menu.getBoundingClientRect();
+    const pad = 8;
+    setPosition({
+      left: Math.max(pad, Math.min(target.screenX, window.innerWidth - rect.width - pad)),
+      top: Math.max(pad, Math.min(target.screenY, window.innerHeight - rect.height - pad))
+    });
+  }, [target.screenX, target.screenY]);
 
   useEffect(() => {
     function handleClick(event: MouseEvent): void {
@@ -9102,12 +9776,112 @@ function CanvasContextMenu({
     return () => document.removeEventListener("keydown", handleKey);
   }, [onClose]);
 
+  if (target.layerType === "text") {
+    return (
+      <div
+        ref={menuRef}
+        className="canvas-context-menu"
+        style={{ left: position.left, top: position.top }}
+      >
+        <button className="ctx-item" onClick={onTextMaskPlaceholder} type="button">הפוך למסיכה</button>
+        <div className="ctx-divider" />
+        <details className="ctx-submenu">
+          <summary>מהיר</summary>
+          <button className="ctx-item" onClick={onDuplicate} type="button">שכפל טקסט</button>
+          <button className="ctx-item" onClick={onToggleLock} type="button">נעל / שחרר</button>
+          <button className="ctx-item" onClick={onToggleVisibility} type="button">הסתר / הצג</button>
+          <button className="ctx-item" onClick={onDeleteTarget} type="button">מחק</button>
+        </details>
+        <details className="ctx-submenu">
+          <summary>שכבות</summary>
+          <button className="ctx-item" onClick={onMoveToFront} type="button">העבר לשכבה עליונה</button>
+          <button className="ctx-item" onClick={onMoveToBack} type="button">העבר לרקע</button>
+          <button className="ctx-item" onClick={onMoveForward} type="button">העבר קדימה</button>
+          <button className="ctx-item" onClick={onMoveBackward} type="button">העבר אחורה</button>
+        </details>
+        <details className="ctx-submenu">
+          <summary>יישור לקנבס</summary>
+          <button className="ctx-item" onClick={onTextCenterCanvas} type="button">מרכז בקנבס</button>
+          <button className="ctx-item" onClick={onTextCenterX} type="button">יישור אופקי למרכז</button>
+          <button className="ctx-item" onClick={onTextCenterY} type="button">יישור אנכי למרכז</button>
+        </details>
+        <details className="ctx-submenu">
+          <summary>טיפוגרפיה</summary>
+          <button className="ctx-item" onClick={onTextBold} type="button">Bold</button>
+          <button className="ctx-item" onClick={onTextItalic} type="button">Italic</button>
+          <button className="ctx-item" onClick={onTextIncreaseSize} type="button">הגדל טקסט</button>
+          <button className="ctx-item" onClick={onTextDecreaseSize} type="button">הקטן טקסט</button>
+          <button className="ctx-item" onClick={onTextAlignLeft} type="button">יישור שמאל</button>
+          <button className="ctx-item" onClick={onTextAlignCenter} type="button">יישור מרכז</button>
+          <button className="ctx-item" onClick={onTextAlignRight} type="button">יישור ימין</button>
+          <button className="ctx-item" onClick={onTextDirectionAuto} type="button">כיוון Auto</button>
+          <button className="ctx-item" onClick={onTextDirectionRtl} type="button">כיוון RTL</button>
+          <button className="ctx-item" onClick={onTextDirectionLtr} type="button">כיוון LTR</button>
+        </details>
+        <details className="ctx-submenu">
+          <summary>אפקטים מהירים</summary>
+          <button className="ctx-item" onClick={onTextStrokeWhite} type="button">Stroke לבן</button>
+          <button className="ctx-item" onClick={onTextStrokeBlack} type="button">Stroke שחור</button>
+          <button className="ctx-item" onClick={onTextShadowSoft} type="button">Shadow רך</button>
+          <button className="ctx-item" onClick={onTextShadowHard} type="button">Shadow חזק</button>
+          <button className="ctx-item" onClick={onTextRemoveEffects} type="button">הסר אפקטים</button>
+          <button className="ctx-item" onClick={onTextCopyEffects} type="button">העתק אפקטים</button>
+          <button className="ctx-item" disabled={!hasTextStyleClipboard} onClick={onTextPasteEffects} type="button">הדבק אפקטים</button>
+        </details>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={menuRef}
       className="canvas-context-menu"
-      style={{ left: target.screenX, top: target.screenY }}
+      style={{ left: position.left, top: position.top }}
     >
+      <button className="ctx-item" disabled={!smartSelectionEnabled} onClick={onSelectObject} type="button">
+        Select Object
+      </button>
+      <button className="ctx-item" disabled={!smartSelectionEnabled} onClick={onRemoveBackground} type="button">
+        הסרת רקע
+      </button>
+      <button className="ctx-item" disabled={target.layerType !== "image"} onClick={onConvertAlphaToFrame} type="button">
+        Alpha Mask
+      </button>
+      <div className="ctx-divider" />
+      <details className="ctx-submenu">
+        <summary>התאמה לקנבס</summary>
+        <button className="ctx-item" onClick={onFitCanvasFill} type="button">מלא קנבס</button>
+        <button className="ctx-item" onClick={onFitCanvasFit} type="button">התאמה חלקית</button>
+        <button className="ctx-item" onClick={onCenterCanvas} type="button">מרכז בקנבס</button>
+        <button className="ctx-item" onClick={onResetTransform} type="button">איפוס טרנספורמציה</button>
+      </details>
+      <details className="ctx-submenu">
+        <summary>שכבות</summary>
+        <button className="ctx-item" onClick={onMoveToFront} type="button">העבר לשכבה עליונה</button>
+        <button className="ctx-item" onClick={onMoveToBack} type="button">העבר לרקע</button>
+        <button className="ctx-item" onClick={onMoveForward} type="button">העבר קדימה</button>
+        <button className="ctx-item" onClick={onMoveBackward} type="button">העבר אחורה</button>
+        <button className="ctx-item" onClick={onToggleLock} type="button">נעל / שחרר</button>
+        <button className="ctx-item" onClick={onToggleVisibility} type="button">הסתר / הצג</button>
+      </details>
+      <details className="ctx-submenu">
+        <summary>טרנספורמציה</summary>
+        <button className="ctx-item" onClick={onRotate90} type="button">סיבוב 90 מעלות</button>
+        <button className="ctx-item" onClick={onRotate180} type="button">סיבוב 180 מעלות</button>
+        <button className="ctx-item" onClick={onFlipHorizontal} type="button">היפוך מראה אופקי</button>
+        <button className="ctx-item" onClick={onFlipVertical} type="button">היפוך מראה אנכי</button>
+      </details>
+      <details className="ctx-submenu">
+        <summary>סגנון מהיר</summary>
+        <button className="ctx-item" onClick={onWhiteBorder} type="button">מסגרת לבנה 20px</button>
+        <button className="ctx-item" onClick={onBlackBorder} type="button">מסגרת שחורה 20px</button>
+      </details>
+      <details className="ctx-submenu">
+        <summary>עריכה</summary>
+        <button className="ctx-item" onClick={onReplaceImage} type="button">החלף תמונה</button>
+        <button className="ctx-item" onClick={onDuplicate} type="button">שכפל תמונה</button>
+      </details>
+      <div className="ctx-divider" />
       <button
         className="ctx-item"
         disabled={imageEditorBusy || !imageEditorAvailable}
@@ -9140,6 +9914,10 @@ function CanvasContextMenu({
           </button>
         </>
       )}
+      <div className="ctx-divider" />
+      <button className="ctx-item" onClick={onAddToFavorites} type="button">
+        הוסף למועדפים
+      </button>
     </div>
   );
 }

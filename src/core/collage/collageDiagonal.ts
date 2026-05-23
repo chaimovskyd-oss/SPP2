@@ -1,4 +1,4 @@
-import { createCollageSlot } from "./collageFactory";
+import { clipPolyToRect, insetPolygon, polygonToCollageSlot } from "./collageGeometryUtils";
 import type { CollageSlot } from "@/types/collage";
 
 export function buildDiagonalBands(
@@ -9,45 +9,27 @@ export function buildDiagonalBands(
   spacingPx: number
 ): CollageSlot[] {
   if (n === 0) return [];
-  const sX = spacingPx / canvasW;
   const shear = Math.tan((shearAngleDeg * Math.PI) / 180);
+  const rect = { x: 0, y: 0, w: canvasW, h: canvasH };
 
   return Array.from({ length: n }, (_, i) => {
-    const xLeft = i / n - shear / 2;
-    const xRight = (i + 1) / n - shear / 2;
+    const xLeft = (i / n - shear / 2) * canvasW;
+    const xRight = ((i + 1) / n - shear / 2) * canvasW;
+    const shearPx = shear * canvasW;
 
     const vertices = [
-      { x: clamp01(xLeft), y: 0 },
-      { x: clamp01(xRight), y: 0 },
-      { x: clamp01(xRight + shear), y: 1 },
-      { x: clamp01(xLeft + shear), y: 1 }
+      { x: xLeft, y: 0 },
+      { x: xRight, y: 0 },
+      { x: xRight + shearPx, y: canvasH },
+      { x: xLeft + shearPx, y: canvasH }
     ];
+    const clipped = clipPolyToRect(vertices, rect);
+    const spaced = insetPolygon(clipped, spacingPx / 2);
 
-    // Bounding box of vertices. Store vertices LOCAL to the slot bbox, not global page coords.
-    // KonvaLayerNode expects normalized vertices inside the FrameLayer bounds.
-    const xs = vertices.map((v) => v.x);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const x = minX;
-    const w = Math.max(0.001, maxX - minX);
-    const localVertices = vertices.map((v) => ({
-      x: (v.x - minX) / w,
-      y: v.y,
-    }));
-
-    return createCollageSlot({
-      x,
-      y: 0,
-      w,
-      h: 1,
+    return polygonToCollageSlot(spaced, canvasW, canvasH, {
       shape: "diagonalPolygon",
-      shapeParams: { vertices: localVertices }
     });
-  });
-}
-
-function clamp01(v: number): number {
-  return Math.max(0, Math.min(1, v));
+  }).filter((slot): slot is CollageSlot => Boolean(slot));
 }
 
 export function buildDiagonalLayouts(

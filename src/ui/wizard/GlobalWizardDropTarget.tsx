@@ -85,6 +85,7 @@ export function GlobalWizardDropTarget({
     function onDrop(event: DragEvent): void {
       if (!dragEventHasFiles(event)) return;
       event.preventDefault();
+      event.stopPropagation();
       dragDepthRef.current = 0;
       const files = Array.from(event.dataTransfer?.files ?? []);
       const accepted = files.filter((file) => acceptFileRef.current(file));
