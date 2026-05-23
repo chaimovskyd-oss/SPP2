@@ -8,3 +8,4 @@ export * from "./collageGeometryUtils";
 export * from "./collageV6Layouts";
 export * from "./collageDynamicEngine";
 export * from "./collageDynamicLayouts";
+export * from "./collageMaskShape";

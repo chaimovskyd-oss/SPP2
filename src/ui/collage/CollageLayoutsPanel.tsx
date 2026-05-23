@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState, type ChangeEvent, type ReactElement } from "react";
-import { ImagePlus, RefreshCw, Sparkles } from "lucide-react";
+import { ImagePlus, RefreshCw, Shapes, Sparkles, Trash2 } from "lucide-react";
 import { generateCollageSuggestions } from "@/core/collage/collageModeEngine";
+import { createCollageMaskSnapshot, readCollageMaskSnapshot, renderTemplateToAlphaMask } from "@/core/collage/collageMaskShape";
 import { applySmartCropToAssignment } from "@/core/collage/collageFrameSync";
 import { mmToPx } from "@/core/units/conversion";
-import { importImageAsset } from "@/core/assets/assetManager";
+import { createMaskAsset, importImageAsset } from "@/core/assets/assetManager";
 import { useDocumentStore } from "@/state/documentStore";
+import { useCollageShapeTemplateStore } from "@/state/collageShapeTemplateStore";
 import { CollageMiniPreview } from "./CollageMiniPreview";
+import type { CollageShapeTemplate } from "@/types/collage";
 import type { CollageImageInput, CollageRule, ScoredLayoutSuggestion } from "@/types/collage";
 
 interface CollageLayoutsPanelProps {
@@ -16,11 +19,17 @@ export function CollageLayoutsPanel({ rule }: CollageLayoutsPanelProps): ReactEl
   const [suggestions, setSuggestions] = useState<ScoredLayoutSuggestion[]>([]);
   const [smartCropProgress, setSmartCropProgress] = useState<{ done: number; total: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const templateInputRef = useRef<HTMLInputElement>(null);
   const document = useDocumentStore((s) => s.document);
   const setDocument = useDocumentStore((s) => s.setDocument);
   const applyCollageLayoutFamily = useDocumentStore((s) => s.applyCollageLayoutFamily);
+  const applyCollageShapeTemplate = useDocumentStore((s) => s.applyCollageShapeTemplate);
   const addImagesToCollage = useDocumentStore((s) => s.addImagesToCollage);
   const updateImageTransform = useDocumentStore((s) => s.updateCollageImageTransform);
+  const shapeTemplates = useCollageShapeTemplateStore((s) => s.templates);
+  const addShapeTemplate = useCollageShapeTemplateStore((s) => s.addTemplate);
+  const removeShapeTemplate = useCollageShapeTemplateStore((s) => s.removeTemplate);
+  const activeShapeTemplateId = readCollageMaskSnapshot(rule.metadata["collageShapeTemplate"])?.templateId;
 
   useEffect(() => {
     if (!document) return;
@@ -52,6 +61,104 @@ export function CollageLayoutsPanel({ rule }: CollageLayoutsPanelProps): ReactEl
     if (newAssets.length === 0) return;
     setDocument({ ...document, assets: [...document.assets, ...newAssets] });
     addImagesToCollage(rule.id, newIds);
+  }
+
+  function isTemplateFile(file: File): boolean {
+    const name = file.name.toLowerCase();
+    return file.type.startsWith("image/") || name.endsWith(".svg");
+  }
+
+  function readFileAsDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ""));
+      reader.onerror = () => reject(reader.error ?? new Error("Unable to read file"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function isSafeSvgTemplate(file: File): Promise<boolean> {
+    if (!(file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg"))) return true;
+    const text = await file.text();
+    return !/<script[\s>]/i.test(text)
+      && !/\b(?:href|xlink:href)\s*=\s*["'](?:https?:)?\/\//i.test(text)
+      && !/<(?:iframe|foreignObject)\b/i.test(text);
+  }
+
+  function readImageSize(src: string): Promise<{ width: number; height: number }> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.naturalWidth || img.width || 800, height: img.naturalHeight || img.height || 600 });
+      img.onerror = () => resolve({ width: 800, height: 600 });
+      img.src = src;
+    });
+  }
+
+  async function handleAddShapeTemplates(e: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const files = Array.from(e.target.files ?? []).filter(isTemplateFile);
+    e.target.value = "";
+    for (const file of files) {
+      if (!(await isSafeSvgTemplate(file))) {
+        window.alert("SVG עם scripts או הפניות חיצוניות לא נתמך כתבנית קולאג'.");
+        continue;
+      }
+      const fileDataUrl = await readFileAsDataUrl(file);
+      const size = await readImageSize(fileDataUrl);
+      addShapeTemplate({
+        name: file.name.replace(/\.[^.]+$/, ""),
+        sourceType: file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg") ? "svg" : "image",
+        fileDataUrl,
+        thumbnailDataUrl: fileDataUrl,
+        defaultWidth: size.width,
+        defaultHeight: size.height,
+        maskMode: "auto",
+        threshold: 245,
+        alphaThreshold: 32,
+        feather: 2,
+        invert: false,
+        metadata: {}
+      });
+    }
+  }
+
+  async function handleApplyShapeTemplate(template: CollageShapeTemplate): Promise<void> {
+    if (!document) return;
+    const page = document.pages.find((p) => p.id === rule.pageId);
+    if (!page) return;
+    const mask = await renderTemplateToAlphaMask(template);
+    if (mask.analysis.bounds === null || mask.analysis.activeRatio < 0.02) {
+      window.alert("התבנית דקה מדי או לא מכילה אזור פעיל ברור.");
+      return;
+    }
+    const fittedMaskDataUrl = await fitMaskToCanvas(mask.dataUrl, page.width, page.height);
+    const maskAsset = createMaskAsset(fittedMaskDataUrl, page.width, page.height, `collage_${rule.id}`);
+    const snapshot = createCollageMaskSnapshot(
+      { ...template, defaultWidth: mask.width, defaultHeight: mask.height, thumbnailDataUrl: mask.dataUrl },
+      maskAsset.id,
+      mask.analysis
+    );
+    applyCollageShapeTemplate(rule.id, snapshot, maskAsset);
+  }
+
+  function fitMaskToCanvas(dataUrl: string, canvasW: number, canvasH: number): Promise<string> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = window.document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(canvasW));
+        canvas.height = Math.max(1, Math.round(canvasH));
+        const ctx = canvas.getContext("2d");
+        if (ctx === null) { resolve(dataUrl); return; }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const scale = Math.min(canvas.width / Math.max(1, img.width), canvas.height / Math.max(1, img.height));
+        const w = img.width * scale;
+        const h = img.height * scale;
+        ctx.drawImage(img, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
   }
 
   async function handleSelectLayout(suggestion: ScoredLayoutSuggestion): Promise<void> {
@@ -125,6 +232,10 @@ export function CollageLayoutsPanel({ rule }: CollageLayoutsPanelProps): ReactEl
         <ImagePlus size={14} /> הוסף תמונות לקולאז&apos;
       </button>
       <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={(e) => void handleAddImages(e)} />
+      <button type="button" className="btn btn-ghost btn-full" onClick={() => templateInputRef.current?.click()}>
+        <Shapes size={14} /> העלה תבנית צורה
+      </button>
+      <input ref={templateInputRef} type="file" accept=".svg,.png,.jpg,.jpeg,.webp,image/*,image/svg+xml" multiple style={{ display: "none" }} onChange={(e) => void handleAddShapeTemplates(e)} />
       <button
         type="button"
         className="btn btn-ghost btn-full"
@@ -147,6 +258,26 @@ export function CollageLayoutsPanel({ rule }: CollageLayoutsPanelProps): ReactEl
       </div>
 
       <div className="collage-layouts-scroll">
+        {shapeTemplates.length > 0 && (
+          <div className="collage-shape-template-section">
+            <span className="panel-section-label">תבניות צורה ({shapeTemplates.length})</span>
+            <div className="collage-shape-template-grid">
+              {shapeTemplates.map((template) => (
+                <div key={template.id} className={`collage-shape-template-card${rule.activeFamily === "customMaskShape" && activeShapeTemplateId === template.id ? " active" : ""}`}>
+                  <button type="button" className="collage-shape-template-thumb" onClick={() => void handleApplyShapeTemplate(template)} title="החל תבנית קולאג'">
+                    {template.thumbnailDataUrl ? <img src={template.thumbnailDataUrl} alt={template.name} /> : <Shapes size={22} />}
+                  </button>
+                  <div className="collage-shape-template-row">
+                    <span>{template.name}</span>
+                    <button type="button" className="icon-btn danger" onClick={() => removeShapeTemplate(template.id)} title="מחק תבנית">
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {suggestions.map((s, i) => (
           <CollageMiniPreview
             key={s.family}

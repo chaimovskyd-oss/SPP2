@@ -25,6 +25,7 @@ import { applyTextPresetToLayer, applyTextStylePatch, extractTextStylePatch } fr
 import { measureTextLayerSize } from "@/core/text/measurement";
 import { createCollageImageAssignment, createCollageRule as collageRuleFactory } from "@/core/collage/collageFactory";
 import { applyLayoutFamily, applyNewImagePool, mergeLiveFrameEditsIntoCollageRule, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
+import { collageMaskSnapshotToJson, type CollageMaskSnapshot } from "@/core/collage/collageMaskShape";
 import { drainOverflow, pushOverflow, readOverflow, writeOverflow } from "@/core/reconcile";
 import { syncClassPhotoToPage } from "@/core/classPhoto/classPhotoLayoutEngine";
 import type { ClassPhotoPersonRecord, ClassPhotoFrameStyle, ClassPhotoLayoutSettings, ClassPhotoVisualBalanceSettings } from "@/types/classPhoto";
@@ -110,6 +111,7 @@ export interface DocumentState {
   applyCollageEdgeConfigToAll: (ruleId: ID, edgeConfig: CollageEdgeConfig) => void;
   updateCollageCanvasSettings: (ruleId: ID, settings: Partial<CollageCanvasSettings>) => void;
   updateCollageCachedSlots: (ruleId: ID, newSlots: import("@/types/collage").CollageSlot[]) => void;
+  applyCollageShapeTemplate: (ruleId: ID, snapshot: CollageMaskSnapshot, maskAsset: Asset) => void;
   // ─── Class Photo actions ──────────────────────────────────────────────────
   /** Regenerate the full layout from current rule settings — one undoable op */
   regenerateClassPhoto: (ruleId: ID) => void;
@@ -538,6 +540,63 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
               ...doc,
               collageRules: doc.collageRules.map((r) => r.id === ruleId ? baseRule : r),
               pages: doc.pages.map((p) => p.id === rule.pageId ? origPage : p),
+            };
+          }
+        )
+      );
+    }),
+
+  applyCollageShapeTemplate: (ruleId, snapshot, maskAsset) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const rule = state.document.collageRules.find((r) => r.id === ruleId);
+      if (!rule) return state;
+      const page = state.document.pages.find((p) => p.id === rule.pageId);
+      if (!page) return state;
+      const dpi = page.setup?.dpi ?? 300;
+      const baseRule = mergeLiveFrameEditsIntoCollageRule(rule, page);
+      const snapshotWithAsset: CollageMaskSnapshot = { ...snapshot, maskAssetId: maskAsset.id };
+      const workingRule: CollageRule = {
+        ...baseRule,
+        activeFamily: "customMaskShape",
+        metadata: {
+          ...baseRule.metadata,
+          collageShapeTemplate: collageMaskSnapshotToJson(snapshotWithAsset)
+        }
+      };
+      const computed = applyLayoutFamily(
+        workingRule,
+        "customMaskShape",
+        page.width,
+        page.height,
+        dpi,
+        collageImageInputsFromAssets(state.document.assets, workingRule.imagePool)
+      );
+      const { page: newPage, frameIds } = syncFrameLayersToPage(page, computed, page.width, page.height);
+      const finalRule = { ...computed, frameIds };
+      const assetExists = state.document.assets.some((asset) => asset.id === maskAsset.id);
+
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "ApplyCollageShapeTemplateAction",
+          (doc) => ({
+            ...doc,
+            assets: assetExists ? doc.assets : [...doc.assets, maskAsset],
+            collageRules: doc.collageRules.map((r) => r.id === ruleId ? finalRule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? newPage : p)
+          }),
+          (doc) => {
+            const { page: origPage } = syncFrameLayersToPage(
+              doc.pages.find((p) => p.id === rule.pageId) ?? page,
+              baseRule,
+              page.width,
+              page.height
+            );
+            return {
+              ...doc,
+              collageRules: doc.collageRules.map((r) => r.id === ruleId ? baseRule : r),
+              pages: doc.pages.map((p) => p.id === rule.pageId ? origPage : p)
             };
           }
         )

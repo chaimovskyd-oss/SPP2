@@ -152,6 +152,7 @@ import { useImageEditStore } from "@/state/imageEditStore";
 import { useDrawingToolsStore } from "@/state/drawingToolsStore";
 import { useColorStore } from "@/state/colorStore";
 import { useMaskContentEditStore } from "@/state/maskContentEditStore";
+import { useCollageShapeTemplateStore } from "@/state/collageShapeTemplateStore";
 import { ImageEditToolbar } from "./ImageEditToolbar";
 import { ImageEditFloatingBar } from "./ImageEditFloatingBar";
 import { CropUI } from "./CropUI";
@@ -483,6 +484,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const maskContentEditLayerId = useMaskContentEditStore((s) => s.editingLayerId);
   const enterMaskContentEdit = useMaskContentEditStore((s) => s.enter);
   const exitMaskContentEdit = useMaskContentEditStore((s) => s.exit);
+  const addCollageShapeTemplate = useCollageShapeTemplateStore((s) => s.addTemplate);
   const viewport = useViewportStore();
   const lifecycle = useProjectLifecycleStore();
 
@@ -1314,6 +1316,88 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   function handleCanvasMenuFavoritePlaceholder(): void {
     setCanvasContextMenu(null);
     setStatus("Favorites placeholder: element library folder is not connected yet");
+  }
+
+  function addCollageTemplateFromDataUrl(input: {
+    name: string;
+    sourceType: "image" | "text" | "svg" | "png" | "frameMask";
+    fileDataUrl: string;
+    width: number;
+    height: number;
+  }): void {
+    addCollageShapeTemplate({
+      name: input.name.trim() || "תבנית קולאג'",
+      sourceType: input.sourceType,
+      fileDataUrl: input.fileDataUrl,
+      thumbnailDataUrl: input.fileDataUrl,
+      defaultWidth: Math.max(1, Math.round(input.width)),
+      defaultHeight: Math.max(1, Math.round(input.height)),
+      maskMode: input.sourceType === "text" || input.sourceType === "frameMask" ? "alpha" : "auto",
+      threshold: 245,
+      alphaThreshold: 32,
+      feather: 2,
+      invert: false,
+      metadata: { savedFromCanvas: true }
+    });
+    setStatus("נשמר כתבנית קולאג'");
+  }
+
+  function saveCanvasMenuAsCollageTemplate(target: CanvasContextMenuTarget): void {
+    if (target.layerType === "text") {
+      const layer = getCanvasMenuTextLayer(target);
+      if (layer === null) return;
+      const rendered = renderTextToAlphaCanvas(layer);
+      const trimmed = rendered === null ? null : trimTransparentCanvas(rendered);
+      if (trimmed === null) {
+        setCanvasContextMenu(null);
+        setStatus("לא ניתן לשמור טקסט ריק כתבנית קולאג'");
+        return;
+      }
+      addCollageTemplateFromDataUrl({
+        name: layer.name || layer.text || "Text collage shape",
+        sourceType: "text",
+        fileDataUrl: trimmed.canvas.toDataURL("image/png"),
+        width: trimmed.width,
+        height: trimmed.height
+      });
+      setCanvasContextMenu(null);
+      return;
+    }
+
+    const layer = getCanvasMenuLayer(target);
+    if (layer === null) return;
+    if (layer.type === "frame" && layer.maskSource?.type === "alphaAsset") {
+      const maskAsset = currentDocument.assets.find((asset) => asset.id === layer.maskSource?.assetId);
+      const dataUrl = maskAsset?.originalPath ?? maskAsset?.previewPath ?? maskAsset?.thumbnailPath;
+      if (dataUrl) {
+        addCollageTemplateFromDataUrl({
+          name: `${layer.name || "Frame"} collage shape`,
+          sourceType: "frameMask",
+          fileDataUrl: dataUrl,
+          width: maskAsset?.width ?? layer.maskSource.width,
+          height: maskAsset?.height ?? layer.maskSource.height
+        });
+        setCanvasContextMenu(null);
+        return;
+      }
+    }
+
+    const assetId = layer.type === "image" ? layer.assetId : layer.imageAssetId;
+    const asset = currentDocument.assets.find((item) => item.id === assetId);
+    const dataUrl = asset?.originalPath ?? asset?.previewPath ?? asset?.thumbnailPath;
+    if (!asset || !dataUrl) {
+      setCanvasContextMenu(null);
+      setStatus("לא נמצאה תמונה לשמירה כתבנית קולאג'");
+      return;
+    }
+    addCollageTemplateFromDataUrl({
+      name: `${asset.name.replace(/\.[^.]+$/, "")} collage shape`,
+      sourceType: "image",
+      fileDataUrl: dataUrl,
+      width: asset.width ?? layer.width,
+      height: asset.height ?? layer.height
+    });
+    setCanvasContextMenu(null);
   }
 
   async function applyMaskFromSelectionToImageLayer(layerId: string, selectionData: Uint8Array, width: number, height: number): Promise<void> {
@@ -4132,6 +4216,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
               onAddToFavorites={handleCanvasMenuFavoritePlaceholder}
               hasTextStyleClipboard={hasTextStyleClipboard}
               onTextMaskPlaceholder={() => convertCanvasMenuTextToMask(canvasContextMenu)}
+              onSaveAsCollageTemplate={() => saveCanvasMenuAsCollageTemplate(canvasContextMenu)}
               onTextCenterCanvas={() => centerCanvasMenuText(canvasContextMenu, "both")}
               onTextCenterX={() => centerCanvasMenuText(canvasContextMenu, "x")}
               onTextCenterY={() => centerCanvasMenuText(canvasContextMenu, "y")}
@@ -9664,6 +9749,7 @@ function CanvasContextMenu({
   onAddToFavorites,
   hasTextStyleClipboard,
   onTextMaskPlaceholder,
+  onSaveAsCollageTemplate,
   onTextCenterCanvas,
   onTextCenterX,
   onTextCenterY,
@@ -9719,6 +9805,7 @@ function CanvasContextMenu({
   onAddToFavorites: () => void;
   hasTextStyleClipboard: boolean;
   onTextMaskPlaceholder: () => void;
+  onSaveAsCollageTemplate: () => void;
   onTextCenterCanvas: () => void;
   onTextCenterX: () => void;
   onTextCenterY: () => void;
@@ -9784,6 +9871,7 @@ function CanvasContextMenu({
         style={{ left: position.left, top: position.top }}
       >
         <button className="ctx-item" onClick={onTextMaskPlaceholder} type="button">הפוך למסיכה</button>
+        <button className="ctx-item" onClick={onSaveAsCollageTemplate} type="button">שמור כתבנית קולאג'</button>
         <div className="ctx-divider" />
         <details className="ctx-submenu">
           <summary>מהיר</summary>
@@ -9846,6 +9934,9 @@ function CanvasContextMenu({
       </button>
       <button className="ctx-item" disabled={target.layerType !== "image"} onClick={onConvertAlphaToFrame} type="button">
         Alpha Mask
+      </button>
+      <button className="ctx-item" onClick={onSaveAsCollageTemplate} type="button">
+        שמור כתבנית קולאג'
       </button>
       <div className="ctx-divider" />
       <details className="ctx-submenu">

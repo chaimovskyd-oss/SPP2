@@ -397,6 +397,10 @@ function generateRingCollageSlots(p: CollageLayoutParams): CollageSlot[] {
   });
 }
 
+function generateCustomMaskShapeSlots(p: CollageLayoutParams): CollageSlot[] {
+  return generateGridSlots(p);
+}
+
 // ─── LAYOUT_REGISTRY ──────────────────────────────────────────────────────────
 
 export interface CollageLayoutFamilyDef {
@@ -447,6 +451,7 @@ export const LAYOUT_REGISTRY: CollageLayoutFamilyDef[] = [
   { family: "radialHero",      name: "Radial Hero",     nameHe: "גיבור רדיאלי",       minImages: 4,  maxImages: 20,  mode: "creative", generate: generateRadialHeroSlots },
   { family: "freeformClusters", name: "Freeform Clusters", nameHe: "קבוצות חופשיות",   minImages: 8,  maxImages: 60,  mode: "creative", generate: generateFreeformClustersSlots },
   { family: "softVoronoi",     name: "Soft Voronoi",    nameHe: "וורונוי רך",         minImages: 5,  maxImages: 28,  mode: "creative", generate: generateSoftVoronoiSlots },
+  { family: "customMaskShape", name: "Shape Template", nameHe: "תבנית צורה", minImages: 1, maxImages: 80, mode: "creative", generate: generateCustomMaskShapeSlots },
 ];
 
 export function computeSlots(family: CollageLayoutFamily, params: CollageLayoutParams): CollageSlot[] {

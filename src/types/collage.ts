@@ -115,6 +115,7 @@ export type CollageLayoutFamily =
   | "radialHero"
   | "freeformClusters"
   | "softVoronoi"
+  | "customMaskShape"
   | "custom";        // template-applied
 
 // ─── Layout params (used when regenerating slots) ─────────────────────────────
@@ -248,6 +249,27 @@ export interface CollageRule extends VersionedEntity {
   smartCropEnabled: boolean;
   smartCropMode: "none" | "face" | "center" | "ruleOfThirds";
   frameIds: ID[];
+  metadata: Metadata;
+}
+
+export type CollageShapeTemplateSourceType = "image" | "text" | "svg" | "png" | "frameMask";
+export type CollageShapeTemplateMaskMode = "auto" | "alpha" | "blackOnWhite" | "whiteOnBlack";
+
+export interface CollageShapeTemplate extends VersionedEntity {
+  id: ID;
+  name: string;
+  sourceType: CollageShapeTemplateSourceType;
+  fileDataUrl: string;
+  thumbnailDataUrl?: string;
+  defaultWidth: number;
+  defaultHeight: number;
+  maskMode: CollageShapeTemplateMaskMode;
+  threshold: number;
+  alphaThreshold: number;
+  feather: number;
+  invert: boolean;
+  createdAt: string;
+  updatedAt: string;
   metadata: Metadata;
 }
 

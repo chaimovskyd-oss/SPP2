@@ -6,6 +6,7 @@ import { LAYOUT_REGISTRY, computeSlots } from "./collageLayoutEngine";
 import { scoreLayout } from "./collageScoring";
 import { createCollageImageAssignment, createCollageSlot } from "./collageFactory";
 import { adaptContentTransform, IDENTITY_TRANSFORM } from "@/core/reconcile";
+import { buildMaskAwareSlotsFromAnalysis, readCollageMaskSnapshot } from "./collageMaskShape";
 import type {
   CollageComplexityMode,
   CollageImageAssignment,
@@ -91,7 +92,7 @@ export function applyLayoutFamily(
     : undefined;
 
   const params: CollageLayoutParams = { imageCount, canvasW, canvasH, spacingPx, marginPx, splitTree };
-  const newSlots = computeSlots(newFamily, params);
+  const newSlots = computeRuleSlots(rule, newFamily, params);
 
   // Port of Python: cell.image_index = i — assign pool[0]→slot[0], pool[1]→slot[1]
   // This is always correct regardless of previous layout's hero/non-hero structure
@@ -119,7 +120,7 @@ export function reflowCollage(
   const marginPx = mmToPx(rule.marginMM, dpi);
   const imageCount = rule.imagePool.length;
   const params: CollageLayoutParams = { imageCount, canvasW, canvasH, spacingPx, marginPx, splitTree: rule.splitTree };
-  const newSlots = computeSlots(rule.activeFamily, params);
+  const newSlots = computeRuleSlots(rule, rule.activeFamily, params);
   // Reflow keeps same family — just re-assign by pool order to new slots
   const newAssignments = assignByPoolOrder(rule.imagePool, newSlots, rule.id, rule.imageAssignments, rule.cachedSlots ?? [], imageInputs);
   return { ...rule, cachedSlots: newSlots, imageAssignments: newAssignments };
@@ -144,11 +145,19 @@ export function applyNewImagePool(
     : undefined;
 
   const params: CollageLayoutParams = { imageCount, canvasW, canvasH, spacingPx, marginPx, splitTree };
-  const newSlots = computeSlots(rule.activeFamily, params);
+  const newSlots = computeRuleSlots(rule, rule.activeFamily, params);
   // Simple pool-order assignment — always assigns ALL pool images, no gaps
   const newAssignments = assignByPoolOrder(newPool, newSlots, rule.id, rule.imageAssignments, rule.cachedSlots ?? [], imageInputs);
 
   return { ...rule, imagePool: newPool, cachedSlots: newSlots, imageAssignments: newAssignments, splitTree };
+}
+
+function computeRuleSlots(rule: CollageRule, family: CollageLayoutFamily, params: CollageLayoutParams): CollageSlot[] {
+  if (family === "customMaskShape") {
+    const snapshot = readCollageMaskSnapshot(rule.metadata["collageShapeTemplate"]);
+    return buildMaskAwareSlotsFromAnalysis(snapshot?.analysis, params.imageCount, params.canvasW, params.canvasH, params.spacingPx, params.marginPx);
+  }
+  return computeSlots(family, params);
 }
 
 // ─── 5. Apply saved template ──────────────────────────────────────────────────
@@ -451,6 +460,7 @@ export function syncFrameLayersToPage(
 
   const sortedSlots = [...rule.cachedSlots].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
   const globalMask = collageGlobalMaskForRule(rule, canvasW, canvasH);
+  const rasterMask = readCollageMaskSnapshot(rule.metadata["collageShapeTemplate"]);
   const dpi = page.setup?.dpi ?? 300;
   const marginPx = mmToPx(rule.marginMM, dpi);
   const spacingBackground = createCollageSpacingBackgroundLayer(rule, canvasW, canvasH, marginPx, otherLayers.length);
@@ -477,6 +487,15 @@ export function syncFrameLayersToPage(
       cornerRadius: slot.shapeParams.cornerRadius,
       lockedFrame: false,
       lockedContent: false,
+      maskSource: rasterMask?.maskAssetId
+        ? {
+            version: 1,
+            type: "alphaAsset",
+            assetId: rasterMask.maskAssetId,
+            width: rasterMask.width,
+            height: rasterMask.height
+          }
+        : undefined,
       zIndex: (otherLayers.length + (spacingBackground ? 1 : 0) + i),
       metadata: {
         collageFrame: {
@@ -490,6 +509,16 @@ export function syncFrameLayersToPage(
           pathData: slot.shapeParams.pathData,
           edgeConfig: slot.edgeConfig,
           globalMask,
+          globalRasterMask: rasterMask?.maskAssetId
+            ? {
+                enabled: true,
+                canvasW,
+                canvasH,
+                maskAssetId: rasterMask.maskAssetId,
+                maskWidth: rasterMask.width,
+                maskHeight: rasterMask.height
+              }
+            : undefined,
           zIndex: slot.zIndex ?? 0,
           ...(slot.shape === "puzzle" && slot.shapeParams.puzzleTabs
             ? { puzzleTabs: slot.shapeParams.puzzleTabs }

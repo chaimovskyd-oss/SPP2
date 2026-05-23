@@ -1364,7 +1364,7 @@ function FrameNode({
   const isGridCell = layer.metadata["gridCell"] !== undefined;
   const isMaskFrame = layer.metadata["maskFrame"] !== undefined;
   const isPhotoPrintFrame = layer.metadata["photoPrintSlot"] !== undefined;
-  const collageFrameMeta = layer.metadata["collageFrame"] as { isCollageFrame?: boolean; layoutManaged?: boolean; slotType?: string; slotId?: string; slotShape?: string; vertices?: Array<{ x: number; y: number }>; edgeConfig?: CollageEdgeConfig; globalMask?: CollageGlobalMaskMeta } | undefined;
+  const collageFrameMeta = layer.metadata["collageFrame"] as { isCollageFrame?: boolean; layoutManaged?: boolean; slotType?: string; slotId?: string; slotShape?: string; vertices?: Array<{ x: number; y: number }>; edgeConfig?: CollageEdgeConfig; globalMask?: CollageGlobalMaskMeta; globalRasterMask?: { enabled?: boolean; canvasW?: number; canvasH?: number } } | undefined;
   const isCollageFrame = collageFrameMeta?.isCollageFrame === true;
   const isCollageEmpty = isCollageFrame && collageFrameMeta?.slotType === "empty";
   const collageSelectColor = "#22d3ee";
@@ -1573,6 +1573,7 @@ function FrameNode({
   const collageSlotShape = collageFrameMeta?.slotShape;
   const collageVertices = collageFrameMeta?.vertices;
   const collageGlobalMask = collageFrameMeta?.globalMask;
+  const collageGlobalRasterMask = collageFrameMeta?.globalRasterMask;
   const [swapAnchorHovered, setSwapAnchorHovered] = useState(false);
   const [activeSwapSlotId, setActiveSwapSlotId] = useState<string | null>(null);
 
@@ -1889,10 +1890,10 @@ function FrameNode({
         )}
         {frameMaskImage !== null && (
           <KonvaImage
-            x={0}
-            y={0}
-            width={layer.width}
-            height={layer.height}
+            x={collageGlobalRasterMask?.enabled === true ? -layer.x : 0}
+            y={collageGlobalRasterMask?.enabled === true ? -layer.y : 0}
+            width={collageGlobalRasterMask?.enabled === true && typeof collageGlobalRasterMask.canvasW === "number" ? collageGlobalRasterMask.canvasW : layer.width}
+            height={collageGlobalRasterMask?.enabled === true && typeof collageGlobalRasterMask.canvasH === "number" ? collageGlobalRasterMask.canvasH : layer.height}
             image={frameMaskImage}
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             globalCompositeOperation={"destination-in" as any}
