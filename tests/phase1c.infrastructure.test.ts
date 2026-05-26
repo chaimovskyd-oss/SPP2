@@ -123,8 +123,9 @@ describe("Phase 1C core infrastructure", () => {
     const record = result.record;
     const restored = restoreRecoveryRecord(record);
 
-    expect(restored.document.id).toBe(document.id);
-    expect(restored.metadata.internalUuid).toBe(envelope.metadata.internalUuid);
+    expect(restored.envelope.document.id).toBe(document.id);
+    expect(restored.envelope.metadata.internalUuid).toBe(envelope.metadata.internalUuid);
+    expect(restored.status).toBe("full");
     expect(record.metadata?.internalUuid).toBe(envelope.metadata.internalUuid);
     expect(storage.get("test.recovery")).toContain("Recovery");
   });

@@ -88,7 +88,7 @@ describe("autosave recovery safety", () => {
 
     expect(getRecoveryRecords(STORAGE_KEY).map((record) => record.id)).toEqual(["valid"]);
     expect(getLatestRecoveryRecord(undefined, STORAGE_KEY)?.id).toBe("valid");
-    expect(restoreRecoveryRecord(validRecord).document.pages).toHaveLength(1);
+    expect(restoreRecoveryRecord(validRecord).envelope.document.pages).toHaveLength(1);
   });
 
   it("detects browser quota exceptions", () => {

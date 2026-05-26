@@ -56,7 +56,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     maskModeDefaults: {
       defaultMaskFitMode: "cover",
       showOutlineByDefault: true,
-      defaultFeatherPx: 0
+      defaultFeatherPx: 0,
+      defaultCellLocked: false,
+      defaultSpacingUnit: "mm"
     }
   },
 

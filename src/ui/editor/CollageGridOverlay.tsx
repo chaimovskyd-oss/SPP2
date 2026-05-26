@@ -1,5 +1,5 @@
-import { useRef, useState, type ReactElement } from "react";
-import { Stage, Layer, Line as KonvaLine, Rect as KonvaRect, Text as KonvaText } from "react-konva";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { Group, Line as KonvaLine, Rect as KonvaRect, Text as KonvaText } from "react-konva";
 import type Konva from "konva";
 import type { CollageRule, CollageSlot } from "@/types/collage";
 import type { Page } from "@/types/document";
@@ -8,13 +8,15 @@ import type { ViewportStore } from "@/state/viewportStore";
 interface CollageGridOverlayProps {
   rule: CollageRule;
   page: Page;
-  viewport: ViewportStore;
+  scale?: number;
+  viewport?: ViewportStore;
   onUpdateSlots: (newSlots: CollageSlot[]) => void;
 }
 
 const DIVIDER_COLOR = "#22d3ee";
 const CELL_HIGHLIGHT = "rgba(34,211,238,0.08)";
 const EPSILON = 0.005;
+const MIN_CELL_SIZE = 0.02;
 
 interface SlotDivider {
   id: string;
@@ -71,35 +73,45 @@ function extractDividers(slots: CollageSlot[]): SlotDivider[] {
 }
 
 function applyDividerMove(slots: CollageSlot[], divider: SlotDivider, newPos: number): CollageSlot[] {
-  const clamped = Math.max(0.05, Math.min(0.95, newPos));
+  const leftSlots = slots.filter((slot) => divider.leftIds.includes(slot.id));
+  const rightSlots = slots.filter((slot) => divider.rightIds.includes(slot.id));
+  const minPos = divider.direction === "H"
+    ? Math.max(0, ...leftSlots.map((slot) => slot.x + MIN_CELL_SIZE))
+    : Math.max(0, ...leftSlots.map((slot) => slot.y + MIN_CELL_SIZE));
+  const maxPos = divider.direction === "H"
+    ? Math.min(1, ...rightSlots.map((slot) => slot.x + slot.w - MIN_CELL_SIZE))
+    : Math.min(1, ...rightSlots.map((slot) => slot.y + slot.h - MIN_CELL_SIZE));
+  const clamped = Math.max(minPos, Math.min(maxPos, newPos));
   const delta = clamped - divider.position;
   return slots.map((slot) => {
     if (divider.direction === "H") {
-      if (divider.leftIds.includes(slot.id)) return { ...slot, w: Math.max(0.02, slot.w + delta) };
-      if (divider.rightIds.includes(slot.id)) return { ...slot, x: slot.x + delta, w: Math.max(0.02, slot.w - delta) };
+      if (divider.leftIds.includes(slot.id)) return { ...slot, w: slot.w + delta };
+      if (divider.rightIds.includes(slot.id)) return { ...slot, x: slot.x + delta, w: slot.w - delta };
     } else {
-      if (divider.leftIds.includes(slot.id)) return { ...slot, h: Math.max(0.02, slot.h + delta) };
-      if (divider.rightIds.includes(slot.id)) return { ...slot, y: slot.y + delta, h: Math.max(0.02, slot.h - delta) };
+      if (divider.leftIds.includes(slot.id)) return { ...slot, h: slot.h + delta };
+      if (divider.rightIds.includes(slot.id)) return { ...slot, y: slot.y + delta, h: slot.h - delta };
     }
     return slot;
   });
 }
 
-export function CollageGridOverlay({ rule, page, viewport, onUpdateSlots }: CollageGridOverlayProps): ReactElement {
+export function CollageGridOverlay({ rule, page, scale, viewport, onUpdateSlots }: CollageGridOverlayProps): ReactElement {
   const [activeDivider, setActiveDivider] = useState<string | null>(null);
-  const dragSlotsRef = useRef<CollageSlot[]>(rule.cachedSlots);
+  const [previewSlots, setPreviewSlots] = useState<CollageSlot[] | null>(null);
+  const dragStartSlotsRef = useRef<CollageSlot[]>(rule.cachedSlots);
+  const effectiveScale = scale ?? Math.min(0.42, 720 / page.height, 820 / page.width) * (viewport?.zoom ?? 1);
 
-  const baseScale = Math.min(0.42, 720 / page.height, 820 / page.width);
-  const scale = baseScale * viewport.zoom;
-  const stageW = Math.round(page.width * scale);
-  const stageH = Math.round(page.height * scale);
+  const slots = previewSlots ?? rule.cachedSlots;
+  const dividers = useMemo(() => extractDividers(slots), [slots]);
 
-  const slots = rule.cachedSlots;
-  const dividers = extractDividers(slots);
+  useEffect(() => {
+    if (activeDivider === null) setPreviewSlots(null);
+  }, [activeDivider, rule.cachedSlots]);
 
   function handleDividerDragStart(id: string): void {
     setActiveDivider(id);
-    dragSlotsRef.current = rule.cachedSlots;
+    dragStartSlotsRef.current = rule.cachedSlots;
+    setPreviewSlots(rule.cachedSlots);
   }
 
   function handleDividerDragMove(divider: SlotDivider, e: Konva.KonvaEventObject<DragEvent>): void {
@@ -112,9 +124,7 @@ export function CollageGridOverlay({ rule, page, viewport, onUpdateSlots }: Coll
       newPos = node.y() / page.height;
       node.x(divider.start * page.width); // constrain horizontal movement
     }
-    const newSlots = applyDividerMove(dragSlotsRef.current, divider, newPos);
-    dragSlotsRef.current = newSlots;
-    onUpdateSlots(newSlots);
+    setPreviewSlots(applyDividerMove(dragStartSlotsRef.current, divider, newPos));
   }
 
   function handleDividerDragEnd(divider: SlotDivider, e: Konva.KonvaEventObject<DragEvent>): void {
@@ -125,20 +135,14 @@ export function CollageGridOverlay({ rule, page, viewport, onUpdateSlots }: Coll
     } else {
       newPos = node.y() / page.height;
     }
-    const newSlots = applyDividerMove(dragSlotsRef.current, divider, newPos);
+    const newSlots = applyDividerMove(dragStartSlotsRef.current, divider, newPos);
+    setPreviewSlots(newSlots);
     onUpdateSlots(newSlots);
     setActiveDivider(null);
   }
 
   return (
-    <Stage
-      width={stageW}
-      height={stageH}
-      scaleX={scale}
-      scaleY={scale}
-      style={{ position: "absolute", top: 0, left: 0, pointerEvents: activeDivider !== null ? "auto" : "auto" }}
-    >
-      <Layer>
+    <Group>
         {/* Cell highlight rects */}
         {slots.map((slot) => (
           <KonvaRect
@@ -149,7 +153,7 @@ export function CollageGridOverlay({ rule, page, viewport, onUpdateSlots }: Coll
             height={slot.h * page.height}
             fill={CELL_HIGHLIGHT}
             stroke={DIVIDER_COLOR}
-            strokeWidth={1.5 / scale}
+            strokeWidth={1.5 / effectiveScale}
             listening={false}
           />
         ))}
@@ -158,10 +162,10 @@ export function CollageGridOverlay({ rule, page, viewport, onUpdateSlots }: Coll
         {slots.map((slot, i) => (
           <KonvaText
             key={`label-${slot.id}`}
-            x={slot.x * page.width + 6 / scale}
-            y={slot.y * page.height + 6 / scale}
+            x={slot.x * page.width + 6 / effectiveScale}
+            y={slot.y * page.height + 6 / effectiveScale}
             text={`תא ${i + 1}`}
-            fontSize={11 / scale}
+            fontSize={11 / effectiveScale}
             fill={DIVIDER_COLOR}
             listening={false}
           />
@@ -183,13 +187,9 @@ export function CollageGridOverlay({ rule, page, viewport, onUpdateSlots }: Coll
               y={py}
               points={pts}
               stroke={activeDivider === d.id ? "#f59e0b" : DIVIDER_COLOR}
-              strokeWidth={activeDivider === d.id ? 4 / scale : 3 / scale}
-              hitStrokeWidth={20 / scale}
+              strokeWidth={activeDivider === d.id ? 4 / effectiveScale : 3 / effectiveScale}
+              hitStrokeWidth={20 / effectiveScale}
               draggable
-              dragBoundFunc={(pos) => {
-                if (isH) return { x: pos.x, y: py * scale };
-                return { x: px * scale, y: pos.y };
-              }}
               onDragStart={() => handleDividerDragStart(d.id)}
               onDragMove={(e) => handleDividerDragMove(d, e)}
               onDragEnd={(e) => handleDividerDragEnd(d, e)}
@@ -198,7 +198,6 @@ export function CollageGridOverlay({ rule, page, viewport, onUpdateSlots }: Coll
             />
           );
         })}
-      </Layer>
-    </Stage>
+    </Group>
   );
 }

@@ -129,6 +129,8 @@ export function createCollageRule(
     id: ruleId,
     name: "קולאז'",
     pageId,
+    layoutMode: "auto",
+    hasManualLayoutOverrides: false,
     activeFamily,
     spacingMM,
     marginMM,
@@ -177,6 +179,7 @@ export function createCollageModeDocument(
     photoPrintRules: [],
     photoPrintImageAssignments: [],
     classPhotoRules: [],
+    blessingRules: [],
     viewport: {
       version: 1,
       zoom: 1,

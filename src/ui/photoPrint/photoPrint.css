@@ -179,6 +179,103 @@
 .pp-toggle-btn:hover { border-color: var(--accent); color: var(--text-primary); }
 .pp-toggle-btn.active { border-color: var(--accent); background: var(--accent); color: #fff; font-weight: 600; }
 
+.passport-check-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-surface);
+}
+.passport-check-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.passport-check-title { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+.passport-check-subtitle { font-size: 11px; color: var(--text-secondary); }
+.passport-status {
+  border-radius: 5px;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.passport-status-ok { background: rgba(57,185,128,0.16); color: #52c97a; }
+.passport-status-review { background: rgba(247,201,72,0.16); color: #f7c948; }
+.passport-status-notRecommended { background: rgba(224,93,93,0.16); color: #ff7676; }
+.passport-info-grid {
+  display: grid;
+  grid-template-columns: minmax(64px, auto) 1fr;
+  gap: 4px 8px;
+  font-size: 11px;
+}
+.passport-info-grid span { color: var(--text-secondary); }
+.passport-info-grid strong { color: var(--text-primary); font-weight: 600; }
+.passport-loading {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.passport-checklist { display: flex; flex-direction: column; gap: 4px; }
+.passport-checkitem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  border-radius: 5px;
+  padding: 4px 6px;
+  background: var(--bg-elevated);
+  font-size: 12px;
+}
+.passport-checkitem p { margin: 0; color: var(--text-primary); }
+.passport-checkitem.ok span { color: #52c97a; }
+.passport-checkitem.review span { color: #f7c948; }
+.passport-checkitem.notRecommended span { color: #ff7676; }
+.passport-issue-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.passport-wide-button,
+.passport-actions button {
+  min-height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+}
+.passport-wide-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.passport-wide-button:hover,
+.passport-actions button:hover:not(:disabled) { border-color: var(--accent); }
+.passport-actions { display: grid; grid-template-columns: 1fr; gap: 5px; }
+.passport-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.passport-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+.passport-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 /* ─── Drop zone ──────────────────────────────────────── */
 .pp-drop-zone {
   border: 2px dashed var(--border);

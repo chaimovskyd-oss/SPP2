@@ -227,7 +227,8 @@ export function fillPhotoPrintWithImages(document: Document, ruleId: string, inp
     rule.autoRotateOnSheet,
     rule.globalCopies,
     inputs.length,
-    rule.targetsPerPage
+    rule.targetsPerPage,
+    rule.orientationPolicy
   );
   const updatedRule: PhotoPrintRule = {
     ...rule,
@@ -309,7 +310,11 @@ function createPhotoPrintRule(ruleId: string, setup: PageSetup, options: PhotoPr
     globalCopies: options.globalCopies ?? DEFAULT_COPIES,
     perImageCopies: {},
     smartFillEnabled: options.smartFillEnabled ?? false,
-    metadata: { dpi: setup.dpi }
+    passportPresetId: options.passportPresetId ?? options.printPresetId,
+    passportRequirementId: options.passportRequirementId,
+    passportSizeMm: options.passportSizeMm,
+    showPassportGuidelines: options.showPassportGuidelines,
+    metadata: { dpi: setup.dpi, printPresetId: options.printPresetId ?? "" }
   };
 }
 
@@ -476,7 +481,13 @@ function buildAssignments(pages: Page[], rule: PhotoPrintRule, expandedInputs: E
         manualContentTransform: input.manualContentTransform,
         manualFitModeOverride: input.manualFitModeOverride,
         hasManualCropOverride: input.manualContentTransform !== undefined,
-        hasManualRotationOverride: false
+        hasManualRotationOverride: false,
+        passportState: rule.passportRequirementId === undefined ? undefined : {
+          version: 1,
+          selectedPassportPreset: rule.passportPresetId,
+          selectedPassportSize: rule.passportSizeMm,
+          showPassportGuidelines: rule.showPassportGuidelines ?? true
+        }
       });
     });
   });

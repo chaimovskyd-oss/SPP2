@@ -1,6 +1,7 @@
 import type { Asset, Document, Page } from "@/types/document";
 import type { FrameLayer, VisualLayer } from "@/types/layers";
 import type { BatchProductionDocMeta } from "@/types/batchProduction";
+import { getTextFieldRecordKey } from "./textImportParser";
 
 // ─── Page clone ───────────────────────────────────────────────────────────────
 
@@ -134,9 +135,10 @@ export function generateBatchProduction(
     }
 
     // ── Variable text fields (one per BatchVariableField of type text) ────
+    const textFields = meta.variableFields.filter((f) => f.type === "text");
     for (const field of meta.variableFields) {
       if (field.type !== "text") continue;
-      const value = record.fields[field.id] ?? "";
+      const value = record.fields[getTextFieldRecordKey(field, textFields)] ?? record.fields[field.id] ?? "";
       if (value.trim().length === 0) continue;
       const newLayerId = layerIdMap[field.layerId];
       if (newLayerId === undefined) continue;

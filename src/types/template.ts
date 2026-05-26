@@ -10,7 +10,8 @@ export type ModeType =
   | "product"
   | "collage"
   | "pdf_tools"
-  | "batch_production";
+  | "batch_production"
+  | "blessing";
 
 export interface TextStyle extends VersionedEntity {
   fontFamily: string;

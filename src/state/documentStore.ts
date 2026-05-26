@@ -24,10 +24,17 @@ import { touchProjectMetadata } from "@/core/projectMetadata";
 import { applyTextPresetToLayer, applyTextStylePatch, extractTextStylePatch } from "@/core/text/presets";
 import { measureTextLayerSize } from "@/core/text/measurement";
 import { createCollageImageAssignment, createCollageRule as collageRuleFactory } from "@/core/collage/collageFactory";
-import { applyLayoutFamily, applyNewImagePool, mergeLiveFrameEditsIntoCollageRule, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
+import { applyLayoutFamily, applyNewImagePool, mergeLiveFrameEditsIntoCollageRule, normalizeCollageColorAdjustments, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import { collageMaskSnapshotToJson, type CollageMaskSnapshot } from "@/core/collage/collageMaskShape";
 import { drainOverflow, pushOverflow, readOverflow, writeOverflow } from "@/core/reconcile";
 import { syncClassPhotoToPage } from "@/core/classPhoto/classPhotoLayoutEngine";
+import {
+  updateBlessingTextInDoc,
+  applyBlessingSelectionToDoc,
+  applyBlessingSourceSelectionToDoc,
+  setBlessingComputedFontSizeInDoc,
+  updateBlessingTextStyleInDoc
+} from "@/core/blessing/blessingModeEngine";
 import type { ClassPhotoPersonRecord, ClassPhotoFrameStyle, ClassPhotoLayoutSettings, ClassPhotoVisualBalanceSettings } from "@/types/classPhoto";
 import type { TextStyle } from "@/types/template";
 import { clampContentTransformToFillBounds } from "@/core/rendering/frameFitEngine";
@@ -144,6 +151,12 @@ export interface DocumentState {
     pageId: ID,
     target: "child" | "staff" | "all_names" | "title" | "footer" | "all"
   ) => void;
+  // ─── Blessing actions ─────────────────────────────────────────────────────
+  updateBlessingText: (ruleId: ID, field: "titleText" | "bodyText" | "signatureText", text: string) => void;
+  applyBlessingSelection: (ruleId: ID, blessing: import("@/types/blessing").BlessingItem) => void;
+  applyBlessingSourceSelection: (ruleId: ID, quote: import("@/types/blessing").SourceQuoteItem) => void;
+  setBlessingComputedFontSize: (ruleId: ID, fontSize: number, overflows: boolean) => void;
+  updateBlessingTextStyle: (ruleId: ID, target: "title" | "body" | "signature", stylePatch: Partial<TextStyle>) => void;
 }
 
 function collageImageInputsFromAssets(assets: Asset[], assetIds: ID[]): CollageImageInput[] {
@@ -1061,7 +1074,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
                     ...r,
                     imageAssignments: r.imageAssignments.map((a) =>
                       a.slotId === slotId
-                        ? { ...a, colorAdjustments: { ...a.colorAdjustments, ...adjustments } }
+                        ? { ...a, colorAdjustments: normalizeCollageColorAdjustments({ ...a.colorAdjustments, ...adjustments }) }
                         : a
                     )
                   }
@@ -1303,18 +1316,36 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         return { ...assignment, contentTransform: clamped };
       });
 
-      const updatedRule = { ...rule, cachedSlots: newSlots, imageAssignments: reclampedAssignments };
+      const updatedRule = {
+        ...rule,
+        layoutMode: "manual" as const,
+        hasManualLayoutOverrides: true,
+        cachedSlots: newSlots,
+        imageAssignments: reclampedAssignments
+      };
       const { page: updatedPage, frameIds } = syncFrameLayersToPage(page, updatedRule, page.width, page.height);
       const finalRule = { ...updatedRule, frameIds };
-      return {
-        ...state,
-        document: {
-          ...state.document,
-          collageRules: state.document.collageRules.map((r) => r.id === ruleId ? finalRule : r),
-          pages: state.document.pages.map((p) => p.id === rule.pageId ? updatedPage : p),
-        },
-        revision: state.revision + 1,
-      };
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "UpdateCollageManualLayoutAction",
+          (doc) => ({
+            ...doc,
+            collageRules: doc.collageRules.map((r) => r.id === ruleId ? finalRule : r),
+            pages: doc.pages.map((p) => p.id === rule.pageId ? updatedPage : p),
+          }),
+          (doc) => {
+            const { page: restoredPage, frameIds: restoredFrameIds } = syncFrameLayersToPage(page, rule, page.width, page.height);
+            const restoredRule = { ...rule, frameIds: restoredFrameIds };
+            return {
+              ...doc,
+              collageRules: doc.collageRules.map((r) => r.id === ruleId ? restoredRule : r),
+              pages: doc.pages.map((p) => p.id === rule.pageId ? restoredPage : p),
+            };
+          }
+        ),
+        rule.pageId
+      );
     }),
 
   // ─── Class Photo actions ─────────────────────────────────────────────────
@@ -1654,6 +1685,63 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
             pages: doc.pages.map((p) => p.id === pageId ? page : p)
           })
         )
+      );
+    }),
+
+  // ─── Blessing actions ─────────────────────────────────────────────────────
+  updateBlessingText: (ruleId, field, text) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const before = state.document;
+      const after = updateBlessingTextInDoc(before, ruleId, field, text);
+      if (after === before) return state;
+      return commitDocumentAction(
+        state,
+        createInlineAction("UpdateBlessingTextAction", () => after, () => before)
+      );
+    }),
+
+  applyBlessingSelection: (ruleId, blessing) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const before = state.document;
+      const after = applyBlessingSelectionToDoc(before, ruleId, blessing);
+      return commitDocumentAction(
+        state,
+        createInlineAction("ApplyBlessingSelectionAction", () => after, () => before)
+      );
+    }),
+
+  applyBlessingSourceSelection: (ruleId, quote) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const before = state.document;
+      const after = applyBlessingSourceSelectionToDoc(before, ruleId, quote);
+      return commitDocumentAction(
+        state,
+        createInlineAction("ApplyBlessingSourceSelectionAction", () => after, () => before)
+      );
+    }),
+
+  setBlessingComputedFontSize: (ruleId, fontSize, overflows) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const before = state.document;
+      const after = setBlessingComputedFontSizeInDoc(before, ruleId, fontSize, overflows);
+      return commitDocumentAction(
+        state,
+        createInlineAction("SetBlessingComputedFontSizeAction", () => after, () => before)
+      );
+    }),
+
+  updateBlessingTextStyle: (ruleId, target, stylePatch) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const before = state.document;
+      const after = updateBlessingTextStyleInDoc(before, ruleId, target, stylePatch);
+      return commitDocumentAction(
+        state,
+        createInlineAction("UpdateBlessingTextStyleAction", () => after, () => before)
       );
     }),
 

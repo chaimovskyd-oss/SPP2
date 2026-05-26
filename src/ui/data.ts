@@ -8,7 +8,8 @@ import {
   Users,
   GalleryHorizontalEnd,
   FileText,
-  Zap
+  Zap,
+  Heart
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ModeType } from "@/types/template";
@@ -84,6 +85,13 @@ export const homeModes: HomeMode[] = [
     description: "עצב תבנית אחת, הפק מאות עיצובים מותאמים אישית.",
     icon: Zap,
     color: "#a855f7"
+  },
+  {
+    id: "blessing",
+    title: "מצב ברכות",
+    description: "עיצוב כרטיסי ברכה עם 906 ברכות, רקעים ומסגרות.",
+    icon: Heart,
+    color: "#E06FA8"
   }
 ];
 

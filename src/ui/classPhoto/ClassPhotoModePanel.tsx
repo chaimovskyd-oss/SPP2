@@ -13,6 +13,7 @@ import {
   X
 } from "lucide-react";
 import type { ShadowStyle, StrokeStyle } from "@/types/primitives";
+import { HEIC_CONVERSION_ERROR_MESSAGE, SUPPORTED_IMAGE_ACCEPT, isSupportedIncomingImageFile, normalizeIncomingImages } from "@/core/image/normalizeIncomingImage";
 import {
   useRef,
   useState,
@@ -74,7 +75,8 @@ export function ClassPhotoModePanel({ rule, selectedLayer, onBackToWizard }: Cla
 
   async function handleAddFiles(e: ChangeEvent<HTMLInputElement>): Promise<void> {
     if (!e.target.files || e.target.files.length === 0) return;
-    const files = Array.from(e.target.files);
+    const { files, failed } = await normalizeIncomingImages(Array.from(e.target.files).filter(isSupportedIncomingImageFile));
+    if (failed.length > 0) window.alert(HEIC_CONVERSION_ERROR_MESSAGE);
     e.target.value = "";
 
     const imported: import("@/types/document").Asset[] = [];
@@ -154,7 +156,7 @@ export function ClassPhotoModePanel({ rule, selectedLayer, onBackToWizard }: Cla
               הוסף תמונות לתמונת מחזור
             </button>
             <input
-              accept="image/*"
+              accept={SUPPORTED_IMAGE_ACCEPT}
               hidden
               multiple
               onChange={(e) => void handleAddFiles(e)}

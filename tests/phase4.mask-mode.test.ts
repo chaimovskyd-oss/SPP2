@@ -39,7 +39,7 @@ describe("Phase 4 Mask Mode", () => {
     expect(maskFrames).toHaveLength(2);
     expect(maskFrames.every((frame) => frame.behaviorMode === "layoutLocked")).toBe(true);
     expect(maskFrames.every((frame) => frame.metadata["maskFrame"] !== undefined)).toBe(true);
-    expect(maskFrames.every((frame) => frame.lockedFrame === true)).toBe(true);
+    expect(maskFrames.every((frame) => frame.lockedFrame === false)).toBe(true);
   });
 
   it("uses uploaded image count as mask count and creates overflow pages without shrinking masks", () => {

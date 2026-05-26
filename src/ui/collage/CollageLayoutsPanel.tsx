@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type ChangeEvent, type ReactElement } from "react";
-import { ImagePlus, RefreshCw, Shapes, Sparkles, Trash2 } from "lucide-react";
+﻿import { useEffect, useRef, useState, type ChangeEvent, type ReactElement } from "react";
+import { ImagePlus, LayoutGrid, Shapes, Sparkles, Trash2 } from "lucide-react";
 import { generateCollageSuggestions } from "@/core/collage/collageModeEngine";
 import { createCollageMaskSnapshot, readCollageMaskSnapshot, renderTemplateToAlphaMask } from "@/core/collage/collageMaskShape";
 import { applySmartCropToAssignment } from "@/core/collage/collageFrameSync";
 import { mmToPx } from "@/core/units/conversion";
 import { createMaskAsset, importImageAsset } from "@/core/assets/assetManager";
+import { HEIC_CONVERSION_ERROR_MESSAGE, SUPPORTED_IMAGE_ACCEPT, isSupportedIncomingImageFile, normalizeIncomingImages } from "@/core/image/normalizeIncomingImage";
 import { useDocumentStore } from "@/state/documentStore";
 import { useCollageShapeTemplateStore } from "@/state/collageShapeTemplateStore";
 import { CollageMiniPreview } from "./CollageMiniPreview";
@@ -18,6 +19,7 @@ interface CollageLayoutsPanelProps {
 export function CollageLayoutsPanel({ rule }: CollageLayoutsPanelProps): ReactElement {
   const [suggestions, setSuggestions] = useState<ScoredLayoutSuggestion[]>([]);
   const [smartCropProgress, setSmartCropProgress] = useState<{ done: number; total: number } | null>(null);
+  const [layoutTab, setLayoutTab] = useState<"standard" | "custom">("standard");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const templateInputRef = useRef<HTMLInputElement>(null);
   const document = useDocumentStore((s) => s.document);
@@ -47,7 +49,8 @@ export function CollageLayoutsPanel({ rule }: CollageLayoutsPanelProps): ReactEl
 
   async function handleAddImages(e: ChangeEvent<HTMLInputElement>): Promise<void> {
     if (!e.target.files || !document) return;
-    const files = Array.from(e.target.files);
+    const { files, failed } = await normalizeIncomingImages(Array.from(e.target.files).filter(isSupportedIncomingImageFile));
+    if (failed.length > 0) window.alert(HEIC_CONVERSION_ERROR_MESSAGE);
     e.target.value = "";
     const newAssets = [];
     const newIds: string[] = [];
@@ -65,7 +68,7 @@ export function CollageLayoutsPanel({ rule }: CollageLayoutsPanelProps): ReactEl
 
   function isTemplateFile(file: File): boolean {
     const name = file.name.toLowerCase();
-    return file.type.startsWith("image/") || name.endsWith(".svg");
+    return isSupportedIncomingImageFile(file) || name.endsWith(".svg");
   }
 
   function readFileAsDataUrl(file: File): Promise<string> {
@@ -95,7 +98,8 @@ export function CollageLayoutsPanel({ rule }: CollageLayoutsPanelProps): ReactEl
   }
 
   async function handleAddShapeTemplates(e: ChangeEvent<HTMLInputElement>): Promise<void> {
-    const files = Array.from(e.target.files ?? []).filter(isTemplateFile);
+    const { files, failed } = await normalizeIncomingImages(Array.from(e.target.files ?? []).filter(isTemplateFile));
+    if (failed.length > 0) window.alert(HEIC_CONVERSION_ERROR_MESSAGE);
     e.target.value = "";
     for (const file of files) {
       if (!(await isSafeSvgTemplate(file))) {
@@ -211,82 +215,74 @@ export function CollageLayoutsPanel({ rule }: CollageLayoutsPanelProps): ReactEl
     setSmartCropProgress(null);
   }
 
-  function handleRegenerate(): void {
-    if (!document) return;
-    const page = document.pages.find((p) => p.id === rule.pageId);
-    if (!page) return;
-    const dpi = page.setup?.dpi ?? 300;
-    const spacingPx = mmToPx(rule.spacingMM, dpi);
-    const marginPx = mmToPx(rule.marginMM, dpi);
-    const imageInputs: CollageImageInput[] = rule.imagePool.map((assetId) => {
-      const asset = document.assets.find((a) => a.id === assetId);
-      return { assetId, width: asset?.width ?? 800, height: asset?.height ?? 600 };
-    });
-    setSuggestions(generateCollageSuggestions(imageInputs, page.width, page.height, spacingPx, marginPx, "creative"));
-  }
-
   return (
     <div className="collage-layouts-panel">
       <div className="collage-layouts-sticky">
-      <button type="button" className="btn btn-primary btn-full" onClick={() => fileInputRef.current?.click()}>
-        <ImagePlus size={14} /> הוסף תמונות לקולאז&apos;
-      </button>
-      <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={(e) => void handleAddImages(e)} />
-      <button type="button" className="btn btn-ghost btn-full" onClick={() => templateInputRef.current?.click()}>
-        <Shapes size={14} /> העלה תבנית צורה
-      </button>
-      <input ref={templateInputRef} type="file" accept=".svg,.png,.jpg,.jpeg,.webp,image/*,image/svg+xml" multiple style={{ display: "none" }} onChange={(e) => void handleAddShapeTemplates(e)} />
-      <button
-        type="button"
-        className="btn btn-ghost btn-full"
-        disabled={smartCropProgress !== null}
-        onClick={() => void handleSmartCrop()}
-        title="התאם תמונות לפי זיהוי פנים"
-      >
-        <Sparkles size={14} />
-        {smartCropProgress === null
-          ? "התאם לפי פנים"
-          : `מנתח ${smartCropProgress.done}/${smartCropProgress.total}`}
-      </button>
-
-      <div className="collage-panel-row" style={{ marginTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span className="panel-section-label">פריסות ({suggestions.length})</span>
-        <button type="button" className="btn btn-ghost btn-xs" onClick={handleRegenerate} title="ייצר מחדש">
-          <RefreshCw size={12} />
+        <button type="button" className="btn btn-primary btn-full" onClick={() => fileInputRef.current?.click()}>
+          <ImagePlus size={14} /> הוסף תמונות לקולאז'
         </button>
-      </div>
+        <input ref={fileInputRef} type="file" accept={SUPPORTED_IMAGE_ACCEPT} multiple style={{ display: "none" }} onChange={(e) => void handleAddImages(e)} />
+        <button type="button" className="btn btn-ghost btn-full" onClick={() => templateInputRef.current?.click()}>
+          <Shapes size={14} /> העלה תבנית צורה
+        </button>
+        <input ref={templateInputRef} type="file" accept={SUPPORTED_IMAGE_ACCEPT} multiple style={{ display: "none" }} onChange={(e) => void handleAddShapeTemplates(e)} />
+        <button
+          type="button"
+          className="btn btn-ghost btn-full"
+          disabled={smartCropProgress !== null}
+          onClick={() => void handleSmartCrop()}
+          title="התאם תמונות לפי זיהוי פנים"
+        >
+          <Sparkles size={14} />
+          {smartCropProgress === null
+            ? "התאם לפי פנים"
+            : `מנתח ${smartCropProgress.done}/${smartCropProgress.total}`}
+        </button>
+
+        <div className="collage-layout-tabs" role="tablist" aria-label="סוג פריסות קולאז'">
+          <button type="button" className={layoutTab === "standard" ? "active" : ""} onClick={() => setLayoutTab("standard")}>
+            <LayoutGrid size={13} /> פריסות ({suggestions.length})
+          </button>
+          <button type="button" className={layoutTab === "custom" ? "active" : ""} onClick={() => setLayoutTab("custom")}>
+            <Shapes size={13} /> מותאם אישית ({shapeTemplates.length})
+          </button>
+        </div>
       </div>
 
       <div className="collage-layouts-scroll">
-        {shapeTemplates.length > 0 && (
+        {layoutTab === "custom" ? (
           <div className="collage-shape-template-section">
-            <span className="panel-section-label">תבניות צורה ({shapeTemplates.length})</span>
-            <div className="collage-shape-template-grid">
-              {shapeTemplates.map((template) => (
-                <div key={template.id} className={`collage-shape-template-card${rule.activeFamily === "customMaskShape" && activeShapeTemplateId === template.id ? " active" : ""}`}>
-                  <button type="button" className="collage-shape-template-thumb" onClick={() => void handleApplyShapeTemplate(template)} title="החל תבנית קולאג'">
-                    {template.thumbnailDataUrl ? <img src={template.thumbnailDataUrl} alt={template.name} /> : <Shapes size={22} />}
-                  </button>
-                  <div className="collage-shape-template-row">
-                    <span>{template.name}</span>
-                    <button type="button" className="icon-btn danger" onClick={() => removeShapeTemplate(template.id)} title="מחק תבנית">
-                      <Trash2 size={12} />
+            {shapeTemplates.length === 0 ? (
+              <div className="collage-empty-state">אין עדיין פריסות מותאמות. אפשר להעלות תבנית צורה או לשמור תמונה/טקסט מהקנבס כתבנית.</div>
+            ) : (
+              <div className="collage-shape-template-grid">
+                {shapeTemplates.map((template) => (
+                  <div key={template.id} className={`collage-shape-template-card${rule.activeFamily === "customMaskShape" && activeShapeTemplateId === template.id ? " active" : ""}`}>
+                    <button type="button" className="collage-shape-template-thumb" onClick={() => void handleApplyShapeTemplate(template)} title="החל תבנית קולאג'">
+                      {template.thumbnailDataUrl ? <img src={template.thumbnailDataUrl} alt={template.name} /> : <Shapes size={22} />}
                     </button>
+                    <div className="collage-shape-template-row">
+                      <span>{template.name}</span>
+                      <button type="button" className="icon-btn danger" onClick={() => removeShapeTemplate(template.id)} title="מחק תבנית">
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
+        ) : (
+          suggestions.map((s, i) => (
+            <CollageMiniPreview
+              key={s.family}
+              suggestion={s}
+              isSelected={s.family === rule.activeFamily}
+              isTop={i === 0}
+              onClick={() => void handleSelectLayout(s)}
+            />
+          ))
         )}
-        {suggestions.map((s, i) => (
-          <CollageMiniPreview
-            key={s.family}
-            suggestion={s}
-            isSelected={s.family === rule.activeFamily}
-            isTop={i === 0}
-            onClick={() => void handleSelectLayout(s)}
-          />
-        ))}
       </div>
     </div>
   );

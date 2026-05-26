@@ -23,6 +23,22 @@ import type { Page } from "@/types/document";
 import type { FrameLayer, ShapeLayer } from "@/types/layers";
 import type { ID } from "@/types/primitives";
 
+const DEFAULT_COLLAGE_COLOR_ADJUSTMENTS: CollageImageAssignment["colorAdjustments"] = {
+  brightness: 1,
+  contrast: 1,
+  saturation: 1,
+  sharpness: 1,
+  isBlackAndWhite: false,
+  exposureEV: 0,
+  vignette: 0
+};
+
+export function normalizeCollageColorAdjustments(
+  adjustments: Partial<CollageImageAssignment["colorAdjustments"]> | null | undefined
+): CollageImageAssignment["colorAdjustments"] {
+  return { ...DEFAULT_COLLAGE_COLOR_ADJUSTMENTS, ...(adjustments ?? {}) };
+}
+
 // ─── 1. Generate scored suggestions (in-memory only, never stored) ────────────
 
 export function generateCollageSuggestions(
@@ -100,6 +116,8 @@ export function applyLayoutFamily(
 
   return {
     ...rule,
+    layoutMode: "auto",
+    hasManualLayoutOverrides: false,
     activeFamily: newFamily,
     splitTree,
     cachedSlots: newSlots,
@@ -247,7 +265,7 @@ export function assignByPoolOrder(
         hasManualTransform: adapted.hasManual,
         // Explicitly carry user work that is independent of slot geometry.
         visualEffects: prev.visualEffects,
-        colorAdjustments: prev.colorAdjustments,
+        colorAdjustments: normalizeCollageColorAdjustments(prev.colorAdjustments),
         imageEditParams: prev.imageEditParams,
         edgeConfig: prev.edgeConfig,
       };
@@ -354,12 +372,16 @@ function isManagedCollageLayer(layer: { metadata?: Record<string, unknown> }, ru
   return frameMeta?.collageRuleId === ruleId || backgroundMeta?.collageRuleId === ruleId;
 }
 
-function asNumberRecord(value: unknown): Record<string, number> | undefined {
+function asEditParamsRecord(value: unknown): Record<string, number | boolean | string> | undefined {
   if (value == null || typeof value !== "object" || Array.isArray(value)) return undefined;
   const entries = Object.entries(value as Record<string, unknown>)
-    .filter(([, v]) => typeof v === "number" && Number.isFinite(v));
+    .filter(([, v]) =>
+      (typeof v === "number" && Number.isFinite(v)) ||
+      typeof v === "boolean" ||
+      typeof v === "string"
+    );
   if (entries.length === 0) return undefined;
-  return Object.fromEntries(entries) as Record<string, number>;
+  return Object.fromEntries(entries) as Record<string, number | boolean | string>;
 }
 
 function sameContentTransform(a: CollageImageAssignment["contentTransform"], b: CollageImageAssignment["contentTransform"]): boolean {
@@ -383,8 +405,8 @@ export function mergeLiveFrameEditsIntoCollageRule(rule: CollageRule, page: Page
     if (!frame) return assignment;
 
     const quickEditParams =
-      asNumberRecord(frame.metadata["imageEditParams"]) ??
-      asNumberRecord(frame.metadata["collageImageEditParams"]);
+      asEditParamsRecord(frame.metadata["imageEditParams"]) ??
+      asEditParamsRecord(frame.metadata["collageImageEditParams"]);
     const collageColorAdj = frame.metadata["collageColorAdj"] as CollageImageAssignment["colorAdjustments"] | null | undefined;
     const edgeConfig = frame.metadata["collageEdgeConfig"] as CollageImageAssignment["edgeConfig"] | null | undefined;
 
@@ -393,7 +415,7 @@ export function mergeLiveFrameEditsIntoCollageRule(rule: CollageRule, page: Page
       contentTransform: frame.contentTransform ?? assignment.contentTransform,
       fitMode: frame.fitMode ?? assignment.fitMode,
       visualEffects: frame.visualEffects ?? assignment.visualEffects,
-      colorAdjustments: collageColorAdj ?? assignment.colorAdjustments,
+      colorAdjustments: normalizeCollageColorAdjustments(collageColorAdj ?? assignment.colorAdjustments),
       imageEditParams: quickEditParams ?? assignment.imageEditParams,
       edgeConfig: edgeConfig ?? assignment.edgeConfig
     };
@@ -526,8 +548,8 @@ export function syncFrameLayersToPage(
         } as unknown as import("@/types/primitives").JsonValue,
         // Mirror color adjustments, extras, and edge config so FrameNode can apply them
         // without looking up the collage rule at render time.
-        collageColorAdj: assignment?.colorAdjustments != null
-          ? assignment.colorAdjustments as unknown as import("@/types/primitives").JsonValue
+        collageColorAdj: assignment != null
+          ? normalizeCollageColorAdjustments(assignment.colorAdjustments) as unknown as import("@/types/primitives").JsonValue
           : null,
         collageImageEditParams: (assignment?.imageEditParams != null && Object.keys(assignment.imageEditParams).length > 0)
           ? assignment.imageEditParams as unknown as import("@/types/primitives").JsonValue

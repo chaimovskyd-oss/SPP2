@@ -3,6 +3,7 @@ import { createId } from "@/core/ids";
 import { createFrameLayer, createTextLayer, defaultContentTransform } from "@/core/layers/factory";
 import { withProjectMetadata } from "@/core/projectMetadata";
 import { measureTextLayerSize } from "@/core/text/measurement";
+import { mmToPx, pxToMm } from "@/core/units/conversion";
 import type { Asset, Document, Page } from "@/types/document";
 import type { ContentTransform, FrameLayer, TextLayer, VisualLayer } from "@/types/layers";
 import type {
@@ -22,6 +23,15 @@ import type { ProjectMetadataInput } from "@/types/project";
 export const DEFAULT_MASK_SIZE = 220;
 export const DEFAULT_MASK_SPACING = 24;
 export const MIN_MASK_CANVAS_INSET = 8;
+export const DEFAULT_MASK_CELL_LOCKED = false;
+
+interface MaskFrameLockState {
+  locked: boolean;
+  lockedFrame: boolean;
+  lockedContent: boolean;
+}
+
+type MaskFrameLockSnapshot = Map<number, MaskFrameLockState>;
 
 export interface MaskAvailableArea {
   left: number;
@@ -74,7 +84,7 @@ export function createMaskModeDocument(name: string, setup: PageSetup, options: 
   }, { ...projectMetadata, projectType: projectMetadata.projectType ?? "Mask" });
 }
 
-export function computeMaskFrameRects(page: Pick<Page, "width" | "height" | "setup">, rule: Pick<MaskLayoutRule, "maskWidth" | "maskHeight" | "margins" | "safeArea" | "spacingX" | "spacingY">): MaskFrameRect[] {
+export function computeMaskFrameRects(page: Pick<Page, "width" | "height" | "setup">, rule: Pick<MaskLayoutRule, "maskWidth" | "maskHeight" | "margins" | "safeArea" | "spacingX" | "spacingY" | "spacingMM">): MaskFrameRect[] {
   const area = getMaskAvailableArea(page, rule);
   const left = area.left;
   const top = area.top;
@@ -82,8 +92,9 @@ export function computeMaskFrameRects(page: Pick<Page, "width" | "height" | "set
   const availableHeight = area.height;
   const width = Math.max(1, rule.maskWidth);
   const height = Math.max(1, rule.maskHeight);
-  const columns = Math.max(1, Math.floor((availableWidth + rule.spacingX) / (width + rule.spacingX)));
-  const rows = Math.max(1, Math.floor((availableHeight + rule.spacingY) / (height + rule.spacingY)));
+  const { x: spacingPxX, y: spacingPxY } = getEffectiveSpacingPx(rule, page.setup.dpi);
+  const columns = Math.max(1, Math.floor((availableWidth + spacingPxX) / (width + spacingPxX)));
+  const rows = Math.max(1, Math.floor((availableHeight + spacingPxY) / (height + spacingPxY)));
   const rects: MaskFrameRect[] = [];
 
   if (availableWidth < width || availableHeight < height) {
@@ -93,8 +104,8 @@ export function computeMaskFrameRects(page: Pick<Page, "width" | "height" | "set
   for (let row = 0; row < rows; row += 1) {
     for (let column = 0; column < columns; column += 1) {
       rects.push({
-        x: left + column * (width + rule.spacingX),
-        y: top + row * (height + rule.spacingY),
+        x: left + column * (width + spacingPxX),
+        y: top + row * (height + spacingPxY),
         width,
         height,
         row,
@@ -105,6 +116,23 @@ export function computeMaskFrameRects(page: Pick<Page, "width" | "height" | "set
   }
 
   return rects;
+}
+
+/** Returns spacing in pixels, preferring canonical spacingMM if defined. */
+export function getEffectiveSpacingPx(rule: Pick<MaskLayoutRule, "spacingX" | "spacingY" | "spacingMM">, dpi: number): { x: number; y: number } {
+  if (typeof rule.spacingMM === "number" && Number.isFinite(rule.spacingMM)) {
+    const px = mmToPx(Math.max(0, rule.spacingMM), dpi);
+    return { x: px, y: px };
+  }
+  return { x: Math.max(0, rule.spacingX), y: Math.max(0, rule.spacingY) };
+}
+
+/** Returns spacing in mm, canonical if defined; else derives from spacingX with given DPI. */
+export function getEffectiveSpacingMM(rule: Pick<MaskLayoutRule, "spacingX" | "spacingMM">, dpi: number): number {
+  if (typeof rule.spacingMM === "number" && Number.isFinite(rule.spacingMM)) {
+    return Math.max(0, rule.spacingMM);
+  }
+  return pxToMm(Math.max(0, rule.spacingX), dpi);
 }
 
 export function getMaskAvailableArea(
@@ -187,7 +215,8 @@ export function fillMaskWithImages(document: Document, maskId: string, inputs: M
   const framesPerPage = Math.max(1, computeMaskFrameRects(basePage, rule).length);
   const pageCount = rule.autoCreatePages ? Math.max(1, Math.ceil(Math.max(inputs.length, 1) / framesPerPage)) : Math.max(1, rule.pageIds.length);
 
-  let working = ensureMaskPageCount(document, rule, basePage, pageCount, inputs.length);
+  const lockSnapshot = snapshotMaskFrameLockStates(document, maskId);
+  let working = ensureMaskPageCount(document, rule, basePage, pageCount, inputs.length, lockSnapshot);
   const workingRule = getMaskRule(working, maskId);
   if (workingRule === undefined) return working;
   const frameIds = workingRule.frameIds;
@@ -250,11 +279,12 @@ export function regenerateMaskLayout(document: Document, maskId: string, patch: 
   if (firstPage === undefined) return document;
   const framesPerPage = Math.max(1, computeMaskFrameRects(firstPage, nextRule).length);
   const requiredPages = nextRule.autoCreatePages ? Math.max(1, Math.ceil(Math.max(assignments.length, 1) / framesPerPage)) : nextRule.pageIds.length;
+  const lockSnapshot = snapshotMaskFrameLockStates(document, maskId);
   const cleared = removeMaskFrames(document, maskId);
   const ensured = ensureMaskPageCount({
     ...cleared,
     maskRules: cleared.maskRules.map((item) => item.id === maskId ? { ...nextRule, pageIds: item.pageIds, frameIds: [] } : item)
-  }, nextRule, firstPage, requiredPages, assignments.length);
+  }, nextRule, firstPage, requiredPages, assignments.length, lockSnapshot);
   const inputs = assignments.flatMap((assignment): MaskImageInput[] => {
     const asset = ensured.assets.find((item) => item.id === assignment.assetId);
     return asset === undefined ? [] : [{
@@ -503,14 +533,20 @@ function normalizeMaskRulePatch(rule: MaskLayoutRule): MaskLayoutRule {
     maskWidth: width,
     maskHeight: height,
     spacingX: Math.max(0, rule.spacingX),
-    spacingY: Math.max(0, rule.spacingY)
+    spacingY: Math.max(0, rule.spacingY),
+    spacingMM: typeof rule.spacingMM === "number" ? Math.max(0, rule.spacingMM) : rule.spacingMM,
+    spacingUnit: rule.spacingUnit
   };
 }
 
-function createMaskPage(page: Page, rule: MaskLayoutRule, pageIndex: number, maxFramesOnPage?: number): { page: Page; rule: MaskLayoutRule } {
+function createMaskPage(page: Page, rule: MaskLayoutRule, pageIndex: number, maxFramesOnPage?: number, lockSnapshot?: MaskFrameLockSnapshot): { page: Page; rule: MaskLayoutRule } {
   const rects = computeMaskFrameRects(page, rule);
   const frameRects = maxFramesOnPage === undefined ? rects : rects.slice(0, Math.max(0, maxFramesOnPage));
-  const frames = frameRects.map((rect, index) => createMaskFrame(rule, rect, pageIndex, pageIndex * rects.length + index));
+  const dpi = page.setup.dpi;
+  const frames = frameRects.map((rect, index) => {
+    const globalIndex = pageIndex * rects.length + index;
+    return createMaskFrame(rule, rect, pageIndex, globalIndex, dpi, lockSnapshot?.get(globalIndex));
+  });
   return {
     page: {
       ...page,
@@ -525,8 +561,9 @@ function createMaskPage(page: Page, rule: MaskLayoutRule, pageIndex: number, max
   };
 }
 
-function createMaskFrame(rule: MaskLayoutRule, rect: MaskFrameRect, pageIndex: number, globalIndex: number): FrameLayer {
+function createMaskFrame(rule: MaskLayoutRule, rect: MaskFrameRect, pageIndex: number, globalIndex: number, dpi: number, lockState?: MaskFrameLockState): FrameLayer {
   const maskAssetId = typeof rule.metadata["maskAssetId"] === "string" ? rule.metadata["maskAssetId"] : undefined;
+  const borderPx = rule.maskStyle?.border.enabled ? mmToPx(Math.max(0, rule.maskStyle.border.widthMm), dpi) : 0;
   const metadata: MaskFrameMetadata = {
     maskId: rule.id,
     maskPageIndex: pageIndex,
@@ -536,9 +573,13 @@ function createMaskFrame(rule: MaskLayoutRule, rect: MaskFrameRect, pageIndex: n
     column: rect.column,
     isMaskFrame: true,
     layoutManaged: true,
-    maskShape: rule.maskShape
+    maskShape: rule.maskShape,
+    ...(rule.maskStyle ? { maskStyle: rule.maskStyle, maskStyleBorderPx: borderPx } : {})
   };
-  return createFrameLayer({
+  const lockedFrame = lockState?.lockedFrame ?? DEFAULT_MASK_CELL_LOCKED;
+  const lockedContent = lockState?.lockedContent ?? DEFAULT_MASK_CELL_LOCKED;
+  const baseLocked = lockState?.locked ?? DEFAULT_MASK_CELL_LOCKED;
+  const layer = createFrameLayer({
     name: `Mask ${globalIndex + 1}`,
     rect,
     behaviorMode: "layoutLocked",
@@ -547,21 +588,24 @@ function createMaskFrame(rule: MaskLayoutRule, rect: MaskFrameRect, pageIndex: n
     fitMode: rule.fitMode,
     linkedGroup: rule.linkedGroupId,
     batchIndex: globalIndex,
-    lockedFrame: true,
+    lockedFrame,
+    lockedContent,
     cornerRadius: rule.maskShape === "roundedRect" ? Math.min(rect.width, rect.height) * 0.18 : undefined,
     maskSource: rule.maskShape === "custom" && maskAssetId !== undefined
       ? { version: 1, type: "alphaAsset", assetId: maskAssetId, width: rect.width, height: rect.height }
       : undefined,
     smartCropMode: rule.smartCropEnabled ? "face" : "center",
     zIndex: globalIndex,
-    metadata: { maskFrame: metadata }
+    metadata: { maskFrame: metadata as unknown as import("@/types/primitives").JsonValue }
   });
+  return { ...layer, locked: baseLocked };
 }
 
-function ensureMaskPageCount(document: Document, rule: MaskLayoutRule, basePage: Page, pageCount: number, desiredFrameCount: number): Document {
+function ensureMaskPageCount(document: Document, rule: MaskLayoutRule, basePage: Page, pageCount: number, desiredFrameCount: number, lockSnapshot?: MaskFrameLockSnapshot): Document {
   let pages = document.pages.slice();
   let nextRule = document.maskRules.find((item) => item.id === rule.id) ?? rule;
   const framesPerPage = Math.max(1, computeMaskFrameRects(basePage, rule).length);
+  const snapshot = lockSnapshot ?? snapshotMaskFrameLockStates(document, rule.id);
 
   for (let index = 0; index < pageCount; index += 1) {
     const existingPage = pages.find((page) => page.id === nextRule.pageIds[index]) ?? (index === 0 ? basePage : undefined);
@@ -572,7 +616,7 @@ function ensureMaskPageCount(document: Document, rule: MaskLayoutRule, basePage:
     };
     const cleaned = { ...source, layers: source.layers.filter((layer) => !isMaskFrameForRule(layer, rule.id)) };
     const remainingFrames = Math.max(0, desiredFrameCount - index * framesPerPage);
-    const result = createMaskPage(cleaned, { ...nextRule, frameIds: nextRule.frameIds.filter((frameId) => !source.layers.some((layer) => layer.id === frameId)) }, index, Math.min(framesPerPage, remainingFrames));
+    const result = createMaskPage(cleaned, { ...nextRule, frameIds: nextRule.frameIds.filter((frameId) => !source.layers.some((layer) => layer.id === frameId)) }, index, Math.min(framesPerPage, remainingFrames), snapshot);
     pages = pages.some((page) => page.id === result.page.id)
       ? pages.map((page) => page.id === result.page.id ? result.page : page)
       : [...pages, result.page];
@@ -766,6 +810,23 @@ function getMaskRule(document: Document, maskId: string): MaskLayoutRule | undef
 function getMaskFrameMetadata(layer: VisualLayer): MaskFrameMetadata | null {
   const value = layer.metadata["maskFrame"];
   return isMaskFrameMetadata(value) ? value : null;
+}
+
+function snapshotMaskFrameLockStates(document: Document, maskId: string): MaskFrameLockSnapshot {
+  const snapshot: MaskFrameLockSnapshot = new Map();
+  for (const page of document.pages) {
+    for (const layer of page.layers) {
+      if (layer.type !== "frame") continue;
+      const meta = getMaskFrameMetadata(layer);
+      if (meta?.maskId !== maskId) continue;
+      snapshot.set(meta.maskIndexGlobal, {
+        locked: layer.locked ?? false,
+        lockedFrame: layer.lockedFrame ?? false,
+        lockedContent: layer.lockedContent ?? false
+      });
+    }
+  }
+  return snapshot;
 }
 
 function isMaskFrameForRule(layer: VisualLayer, maskId: string): boolean {

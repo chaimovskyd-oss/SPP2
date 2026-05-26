@@ -9,6 +9,8 @@ import { resetWorkspaceForHome } from "@/state/workspaceReset";
 import { ProductLibraryScreen } from "./productLibrary/ProductLibraryScreen";
 import type { ProductDefinition } from "@/types/product";
 import { createCollageModeDocument } from "@/core/collage/collageFactory";
+import { createBatchCollageDocument } from "@/core/collage/batchCollageBuilder";
+import { collageMaskSnapshotToJson } from "@/core/collage/collageMaskShape";
 import { assignByPoolOrder, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import { importImageAsset } from "@/core/assets/assetManager";
 import { generateMaskThumbnail } from "@/state/maskLibraryStore";
@@ -36,6 +38,9 @@ import { DocumentSetupScreen } from "./setup/DocumentSetupScreen";
 import { CollageSetupWizard } from "./collage/CollageSetupWizard";
 import { PhotoPrintSetupWizard } from "./photoPrint/PhotoPrintSetupWizard";
 import { ClassPhotoSetupWizard } from "./classPhoto/ClassPhotoSetupWizard";
+import { BlessingSetupWizard } from "./blessing/BlessingSetupWizard";
+import { createBlessingModeDocument, createMinimalBlessingAsset } from "@/core/blessing/blessingModeEngine";
+import type { BlessingWizardResult } from "@/types/blessing";
 import "./photoPrint/photoPrint.css";
 import "./classPhoto/classPhoto.css";
 import { SettingsWindow } from "./settings/SettingsWindow";
@@ -47,6 +52,7 @@ import { loadTemplateDocument } from "@/core/batchProduction/batchTemplateStore"
 import { getBatchProductionMeta } from "@/core/batchProduction/batchProductionMeta";
 import { generateBatchProduction } from "@/core/batchProduction/generateEngine";
 import type { BatchWizardResult } from "@/types/batchProduction";
+import type { BatchCollageAssetGroup } from "@/types/batchCollage";
 
 const EditorScreen = lazy(() =>
   import("./editor/EditorScreen").then((module) => ({
@@ -60,7 +66,7 @@ const PdfStudioScreen = lazy(() =>
   }))
 );
 
-type AppScreen = "home" | "setup" | "editor" | "collage-wizard" | "photo-print-wizard" | "pdf-studio" | "class-photo-wizard" | "mask-wizard" | "product-library" | "batch-production-library" | "batch-wizard";
+type AppScreen = "home" | "setup" | "editor" | "collage-wizard" | "photo-print-wizard" | "pdf-studio" | "class-photo-wizard" | "mask-wizard" | "product-library" | "batch-production-library" | "batch-wizard" | "blessing-wizard";
 
 interface ModeWindowInfo {
   mode: string;
@@ -81,6 +87,42 @@ function fileToDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error("Cannot read image file"));
     reader.readAsDataURL(file);
   });
+}
+
+async function importCollageWizardImage(
+  imgEntry: { file: File; width: number; height: number },
+  existingAssets: Asset[],
+  fallbackReason: string
+): Promise<Asset> {
+  try {
+    const { asset } = await importImageAsset(imgEntry.file, existingAssets, { createPreview: true });
+    return asset;
+  } catch (error) {
+    writeLog("import", "warn", "Collage image import fallback used", {
+      fileName: imgEntry.file.name,
+      message: error instanceof Error ? error.message : String(error)
+    });
+    const dataUrl = await fileToDataUrl(imgEntry.file);
+    return {
+      version: 1,
+      id: crypto.randomUUID(),
+      name: imgEntry.file.name,
+      kind: "image",
+      status: "ready",
+      originalPath: dataUrl,
+      previewPath: dataUrl,
+      thumbnailPath: dataUrl,
+      mimeType: imgEntry.file.type || "image/jpeg",
+      width: imgEntry.width,
+      height: imgEntry.height,
+      fileSize: imgEntry.file.size,
+      metadata: {
+        importedAt: new Date().toISOString(),
+        originalFileName: imgEntry.file.name,
+        fallbackReason
+      }
+    };
+  }
 }
 
 const MODE_WINDOW_TITLES: Record<string, string> = {
@@ -284,6 +326,8 @@ export function App(): ReactElement {
       setScreen("product-library");
     } else if (mode === "batch_production") {
       setScreen("batch-production-library");
+    } else if (mode === "blessing") {
+      setScreen("blessing-wizard");
     } else {
       setScreen("setup");
     }
@@ -382,41 +426,91 @@ export function App(): ReactElement {
   }
 
   async function handleCollageWizardComplete(result: CollageWizardResult): Promise<void> {
-    const { images, pageSetup, selectedFamily, cachedSlots, spacingMm, marginMm, customerInfo } = result;
+    if (result.mode === "batch") {
+      setScreen("home");
+      setIsCreatingBatch(true);
+      setCreatingBatchProgress("מכין יצירת קולאז׳ים מרובים...");
+      try {
+        const importedGroups: BatchCollageAssetGroup[] = [];
+        const allImportedAssets: Asset[] = [];
+        for (let groupIndex = 0; groupIndex < result.batchGroups.length; groupIndex += 1) {
+          const group = result.batchGroups[groupIndex];
+          if (group === undefined) continue;
+          const groupAssets: Asset[] = [];
+          for (let imageIndex = 0; imageIndex < group.images.length; imageIndex += 1) {
+            const image = group.images[imageIndex];
+            if (image === undefined) continue;
+            setCreatingBatchProgress(`מייבא תמונות עבור ${group.name || `קבוצה ${groupIndex + 1}`} (${imageIndex + 1}/${group.images.length})...`);
+            const asset = await importCollageWizardImage(
+              image,
+              allImportedAssets,
+              "batch-collage-file-reader"
+            );
+            groupAssets.push(asset);
+            allImportedAssets.push(asset);
+          }
+          importedGroups.push({
+            id: group.id,
+            name: group.name,
+            assets: groupAssets,
+          });
+        }
+
+        setCreatingBatchProgress("יוצר עמודי קולאז׳...");
+        const build = await createBatchCollageDocument({
+          name: result.customerInfo?.customerName ? `קולאז׳ים מרובים - ${result.customerInfo.customerName}` : "קולאז׳ים מרובים",
+          groups: importedGroups,
+          settings: {
+            pageSetup: result.pageSetup,
+            spacingMm: result.spacingMm,
+            marginMm: result.marginMm,
+            allowedLayoutMode: result.allowedLayoutMode,
+            smartCropEnabled: result.smartCropEnabled,
+            maxCollages: 50,
+          },
+          metadata: {
+            ...(result.customerInfo?.customerName ? { customerName: result.customerInfo.customerName } : {}),
+            ...(result.customerInfo?.customerPhone ?? result.customerInfo?.phoneNumber ? { customerPhone: result.customerInfo.customerPhone ?? result.customerInfo.phoneNumber } : {}),
+            ...(result.customerInfo?.customerEmail ?? result.customerInfo?.email ? { customerEmail: result.customerInfo.customerEmail ?? result.customerInfo.email } : {}),
+          }
+        });
+
+        if (build.createdCount === 0) {
+          window.alert("לא נוצרו קולאז׳ים. הוסף תמונות לפחות לקבוצה אחת ונסה שוב.");
+          setScreen("collage-wizard");
+          return;
+        }
+        if (build.warnings.length > 0 || build.failedCount > 0) {
+          writeLog("app", "warn", "Batch collage completed with warnings", {
+            createdCount: build.createdCount,
+            failedCount: build.failedCount,
+            warnings: build.warnings
+          });
+        }
+
+        const envelope = beginProject(createProjectEnvelope({ document: build.document, linkedGroups: [], batchJobs: [] }));
+        setDocument(withProjectMetadata(envelope.document, envelope.metadata));
+        resetViewport();
+        clearSelection();
+        setScreen("editor");
+      } catch (error) {
+        captureError("app", error, { action: "batch-collage-create" });
+        window.alert(error instanceof Error ? error.message : "יצירת קולאז׳ים מרובים נכשלה.");
+        setScreen("collage-wizard");
+      } finally {
+        setIsCreatingBatch(false);
+        setCreatingBatchProgress("");
+      }
+      return;
+    }
+
+    const { images, pageSetup, selectedFamily, cachedSlots, spacingMm, marginMm, customerInfo, shapeTemplateSnapshot, shapeTemplateMaskAsset } = result;
 
     // Import each image as a real SPP2 Asset (data URL stored in previewPath/originalPath)
     const importedAssets: Asset[] = [];
     for (const imgEntry of images) {
-      try {
-        const { asset } = await importImageAsset(imgEntry.file, [], { createPreview: true });
-        importedAssets.push(asset);
-      } catch (error) {
-        writeLog("import", "warn", "Collage image import fallback used", {
-          fileName: imgEntry.file.name,
-          message: error instanceof Error ? error.message : String(error)
-        });
-        const dataUrl = await fileToDataUrl(imgEntry.file);
-        // If import fails, keep a stable data URL instead of persisting a temporary object URL.
-        importedAssets.push({
-          version: 1,
-          id: crypto.randomUUID(),
-          name: imgEntry.file.name,
-          kind: "image",
-          status: "ready",
-          originalPath: dataUrl,
-          previewPath: dataUrl,
-          thumbnailPath: dataUrl,
-          mimeType: imgEntry.file.type || "image/jpeg",
-          width: imgEntry.width,
-          height: imgEntry.height,
-          fileSize: imgEntry.file.size,
-          metadata: {
-            importedAt: new Date().toISOString(),
-            originalFileName: imgEntry.file.name,
-            fallbackReason: "collage-file-reader"
-          }
-        });
-      }
+      const asset = await importCollageWizardImage(imgEntry, importedAssets, "collage-file-reader");
+      importedAssets.push(asset);
     }
 
     const assetIds = importedAssets.map((a) => a.id);
@@ -449,7 +543,7 @@ export function App(): ReactElement {
     );
 
     // Add the imported assets to the document
-    doc = { ...doc, assets: importedAssets };
+    doc = { ...doc, assets: shapeTemplateMaskAsset ? [...importedAssets, shapeTemplateMaskAsset] : importedAssets };
 
     // Sync CollageSlots → real FrameLayers with correct imageAssetIds
     const rule = doc.collageRules[0];
@@ -461,6 +555,10 @@ export function App(): ReactElement {
       }));
       const smartRule = {
         ...rule,
+        activeFamily: shapeTemplateSnapshot ? "customMaskShape" as const : rule.activeFamily,
+        metadata: shapeTemplateSnapshot
+          ? { ...rule.metadata, collageShapeTemplate: collageMaskSnapshotToJson(shapeTemplateSnapshot) }
+          : rule.metadata,
         imageAssignments: assignByPoolOrder(rule.imagePool, rule.cachedSlots, rule.id, rule.imageAssignments, rule.cachedSlots, imageInputs)
       };
       doc = { ...doc, collageRules: doc.collageRules.map((r) => r.id === rule.id ? smartRule : r) };
@@ -914,6 +1012,20 @@ export function App(): ReactElement {
     setScreen("batch-wizard");
   }
 
+  async function handleBlessingWizardComplete(result: BlessingWizardResult): Promise<void> {
+    const bgAsset = createMinimalBlessingAsset(result.backgroundFilename, "blessing-backgrounds");
+    const frameAsset =
+      result.frameEnabled && result.frameFilename
+        ? createMinimalBlessingAsset(result.frameFilename, "blessing-frames")
+        : null;
+    const doc = createBlessingModeDocument(result.name, result, bgAsset, frameAsset);
+    const envelope = beginProject(createProjectEnvelope({ document: doc, linkedGroups: [], batchJobs: [] }));
+    setDocument(withProjectMetadata(envelope.document, envelope.metadata));
+    resetViewport();
+    clearSelection();
+    setScreen("editor");
+  }
+
   async function handleBatchWizardComplete(result: BatchWizardResult): Promise<void> {
     setBatchWizardTemplate(null);
     setIsCreatingBatch(true);
@@ -932,7 +1044,7 @@ export function App(): ReactElement {
 
       for (let i = 0; i < result.records.length; i++) {
         const rec = result.records[i];
-        if (hasImageField && rec.file !== undefined) {
+        if (hasImageField && rec.sourceType === "image") {
           setCreatingBatchProgress(`מייבא תמונות… ${i + 1} / ${result.records.length}`);
           const { asset } = await importImageAsset(
             rec.file,
@@ -1056,13 +1168,23 @@ export function App(): ReactElement {
   function restoreRecovery(): void {
     if (recoveryRecord === null) return;
     try {
-      const envelope = restoreRecoveryRecord(recoveryRecord);
+      const result = restoreRecoveryRecord(recoveryRecord);
+      const { envelope } = result;
       const opened = beginProject(envelope, envelope.metadata.currentFilePath);
       setDocument(withProjectMetadata(opened.document, opened.metadata));
       resetViewport();
       clearSelection();
       setRecoveryRecord(null);
       setScreen("editor");
+      if (result.status === "assetsMissing") {
+        // Autosave intentionally strips embedded image bytes to stay under
+        // the localStorage quota. The document skeleton (layouts, layers,
+        // texts, transforms) is preserved; affected assets are flagged
+        // with status: "missing" so existing UI placeholders kick in.
+        window.alert(
+          `הפרויקט שוחזר חלקית: ${result.missingAssetIds.length} תמונות חסרות וצריך לקשר אותן מחדש.`
+        );
+      }
     } catch (error) {
       captureError("recovery", error, { recordId: recoveryRecord.id });
       discardRecoveryRecord(recoveryRecord.id);
@@ -1146,6 +1268,18 @@ export function App(): ReactElement {
         <ClassPhotoSetupWizard
           initialState={classPhotoWizardInitialState}
           onComplete={(result) => void handleClassPhotoWizardComplete(result)}
+          onCancel={backHome}
+        />
+      </>
+    );
+  }
+
+  if (screen === "blessing-wizard") {
+    return (
+      <>
+        {renderSeparateWindowButton()}
+        <BlessingSetupWizard
+          onComplete={(result) => void handleBlessingWizardComplete(result)}
           onCancel={backHome}
         />
       </>

@@ -65,6 +65,8 @@ export interface MaskModeDefaults {
   defaultMaskFitMode: "cover" | "contain" | "fit";
   showOutlineByDefault: boolean;
   defaultFeatherPx: number;
+  defaultCellLocked: boolean;
+  defaultSpacingUnit: Unit;
 }
 
 export interface WorkspaceSettings {

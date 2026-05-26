@@ -4,6 +4,8 @@ import { mmToPx } from "@/core/units/conversion";
 import type { Document } from "@/types/document";
 import type { PhotoPrintRule } from "@/types/photoPrint";
 import { PRINT_SIZE_PRESETS, PHOTO_PAGE_PRESETS } from "@/types/photoPrint";
+import { PassportCheckPanel } from "./PassportCheckPanel";
+import { isPassportPrintPreset } from "@/core/passport/passportRequirements";
 
 interface PhotoPrintModePanelProps {
   rule: PhotoPrintRule;
@@ -13,7 +15,7 @@ interface PhotoPrintModePanelProps {
 
 type PanelTab = "size" | "frame" | "margins" | "layout";
 
-export function PhotoPrintModePanel({ rule, onRegenerate }: PhotoPrintModePanelProps): ReactElement {
+export function PhotoPrintModePanel({ rule, document, onRegenerate }: PhotoPrintModePanelProps): ReactElement {
   const [tab, setTab] = useState<PanelTab>("size");
 
   const dpi = (rule.metadata["dpi"] as number | undefined) ?? 300;
@@ -41,6 +43,7 @@ export function PhotoPrintModePanel({ rule, onRegenerate }: PhotoPrintModePanelP
       </div>
 
       <div className="pp-panel-body">
+        <PassportCheckPanel document={document} rule={rule} />
         {tab === "size" && <SizeTab rule={rule} dpi={dpi} onPatch={patchAndRegenerate} />}
         {tab === "frame" && <FrameTab rule={rule} onPatch={patchAndRegenerate} />}
         {tab === "margins" && <MarginsTab rule={rule} onPatch={patchAndRegenerate} />}
@@ -69,7 +72,31 @@ function SizeTab({ rule, onPatch }: { rule: PhotoPrintRule; dpi: number; onPatch
             key={p.id}
             className={`pp-preset-sm${rule.printWidthMm === p.widthMm && rule.printHeightMm === p.heightMm ? " active" : ""}`}
             type="button"
-            onClick={() => onPatch({ printWidthMm: p.widthMm, printHeightMm: p.heightMm, targetsPerPage: 0 })}
+            onClick={() => onPatch({ printWidthMm: p.widthMm, printHeightMm: p.heightMm, targetsPerPage: 0, passportPresetId: undefined, passportRequirementId: undefined, passportSizeMm: undefined, showPassportGuidelines: undefined, metadata: { ...rule.metadata, printPresetId: p.id } })}
+          >
+            {p.name}
+          </button>
+        ))}
+      </div>
+
+      <div className="pp-panel-divider" />
+      <div className="pp-panel-label">Passport / ID</div>
+      <div className="pp-preset-grid-sm">
+        {PRINT_SIZE_PRESETS.filter((p) => isPassportPrintPreset(p)).map((p) => (
+          <button
+            key={p.id}
+            className={`pp-preset-sm${rule.passportPresetId === (p.passportPresetId ?? p.id) || (rule.printWidthMm === p.widthMm && rule.printHeightMm === p.heightMm && rule.passportRequirementId === p.passportRequirementId) ? " active" : ""}`}
+            type="button"
+            onClick={() => onPatch({
+              printWidthMm: p.widthMm,
+              printHeightMm: p.heightMm,
+              targetsPerPage: 0,
+              passportPresetId: p.passportPresetId ?? p.id,
+              passportRequirementId: p.passportRequirementId,
+              passportSizeMm: { width: p.widthMm, height: p.heightMm },
+              showPassportGuidelines: true,
+              metadata: { ...rule.metadata, printPresetId: p.id }
+            })}
           >
             {p.name}
           </button>

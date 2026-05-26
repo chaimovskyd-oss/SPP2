@@ -97,6 +97,50 @@ export function resetScreenshotCropForAsset(asset: Asset): Asset {
   return { ...asset, metadata };
 }
 
+/**
+ * Destructively crops the asset bitmap to cropRect at 1:1 scale (no stretching).
+ * Returns an updated asset with: new width/height matching cropRect, new previewPath
+ * (data URL of the cropped PNG), and metadata recording the source for potential undo.
+ *
+ * Caller is responsible for: (a) updating layer width/height proportionally so the
+ * aspect-ratio change is visible, (b) clearing layer.crop, (c) wrapping in an undo action.
+ */
+export async function cropAssetBitmapDestructive(asset: Asset, sourceImage: HTMLImageElement, cropRect: CropRect): Promise<Asset> {
+  const sx = Math.max(0, Math.round(cropRect.x));
+  const sy = Math.max(0, Math.round(cropRect.y));
+  const sw = Math.max(1, Math.round(cropRect.width));
+  const sh = Math.max(1, Math.round(cropRect.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = sw;
+  canvas.height = sh;
+  const ctx = canvas.getContext("2d");
+  if (ctx === null) throw new Error("Failed to acquire 2D context for destructive crop");
+  ctx.drawImage(sourceImage, sx, sy, sw, sh, 0, 0, sw, sh);
+  const dataUrl = canvas.toDataURL("image/png");
+  const previousPreviewPath = asset.previewPath ?? asset.originalPath;
+  const previousMetaSnapshot = {
+    width: asset.width,
+    height: asset.height,
+    previewPath: previousPreviewPath
+  };
+  const nextMetadata = { ...asset.metadata };
+  delete nextMetadata["screenshotCropSuggestion"];
+  delete nextMetadata["screenshotCrop"];
+  nextMetadata["screenshotCropApplied"] = {
+    appliedAt: new Date().toISOString(),
+    cropRect: { x: sx, y: sy, width: sw, height: sh },
+    previous: previousMetaSnapshot
+  } as unknown as JsonValue;
+  return {
+    ...asset,
+    width: sw,
+    height: sh,
+    previewPath: dataUrl,
+    thumbnailPath: dataUrl,
+    metadata: nextMetadata
+  };
+}
+
 function isCropRect(value: unknown): value is CropRect {
   if (typeof value !== "object" || value === null) return false;
   const rect = value as Partial<CropRect>;

@@ -38,6 +38,10 @@ function isCollageFrame(layer: VisualLayer | null | undefined): layer is Extract
   return meta?.isCollageFrame === true;
 }
 
+function asEditNumber(value: number | boolean | string | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 function selectedSlotFromLayer(layer: VisualLayer | null | undefined): ID | null {
   if (!isCollageFrame(layer)) return null;
   const meta = layer.metadata["collageFrame"] as { slotId?: ID } | undefined;
@@ -109,7 +113,10 @@ export function CollageRightPanel({ rule, selectedSlotId, selectedLayer, onRepla
       if (!imageAsset) return [];
       return [{ assetId, width: imageAsset.width ?? 800, height: imageAsset.height ?? 600 }];
     });
-    const relaidRule = applyLayoutFamily(patchedRule, patchedRule.activeFamily, currentPage.width, currentPage.height, dpi, imageInputs);
+    const shouldPreserveManualLayout = patchedRule.layoutMode === "manual" || patchedRule.hasManualLayoutOverrides === true;
+    const relaidRule = shouldPreserveManualLayout
+      ? patchedRule
+      : applyLayoutFamily(patchedRule, patchedRule.activeFamily, currentPage.width, currentPage.height, dpi, imageInputs);
     const { page: syncedPage, frameIds } = syncFrameLayersToPage(currentPage, relaidRule, currentPage.width, currentPage.height);
     const finalRule = { ...relaidRule, frameIds };
 
@@ -267,9 +274,9 @@ export function CollageRightPanel({ rule, selectedSlotId, selectedLayer, onRepla
             </label>
 
             <div className="panel-subtitle">תיקוני תמונה מהירים</div>
-            <Slider label="חום / קור" value={assignment.imageEditParams?.temperature ?? 0} min={-100} max={100} step={1} onChange={(v) => updateEditParams(rule.id, resolvedSlotId, { temperature: v })} />
-            <Slider label="היילייטים" value={assignment.imageEditParams?.highlights ?? 0} min={-100} max={100} step={1} onChange={(v) => updateEditParams(rule.id, resolvedSlotId, { highlights: v })} />
-            <Slider label="צללים" value={assignment.imageEditParams?.shadows ?? 0} min={-100} max={100} step={1} onChange={(v) => updateEditParams(rule.id, resolvedSlotId, { shadows: v })} />
+            <Slider label="חום / קור" value={asEditNumber(assignment.imageEditParams?.temperature)} min={-100} max={100} step={1} onChange={(v) => updateEditParams(rule.id, resolvedSlotId, { temperature: v })} />
+            <Slider label="היילייטים" value={asEditNumber(assignment.imageEditParams?.highlights)} min={-100} max={100} step={1} onChange={(v) => updateEditParams(rule.id, resolvedSlotId, { highlights: v })} />
+            <Slider label="צללים" value={asEditNumber(assignment.imageEditParams?.shadows)} min={-100} max={100} step={1} onChange={(v) => updateEditParams(rule.id, resolvedSlotId, { shadows: v })} />
           </div>
         )}
 
@@ -319,7 +326,6 @@ export function CollageRightPanel({ rule, selectedSlotId, selectedLayer, onRepla
     <div className="collage-right-panel collage-mode-panel">
       <div className="panel-tabs">
         <button type="button" className={`panel-tab${emptyTab === "layout" ? " active" : ""}`} onClick={() => setEmptyTab("layout")}>קולאז׳</button>
-        <button type="button" className={`panel-tab${emptyTab === "style" ? " active" : ""}`} onClick={() => setEmptyTab("style")}>סגנון תאים</button>
         <button type="button" className={`panel-tab${emptyTab === "canvas" ? " active" : ""}`} onClick={() => setEmptyTab("canvas")}>קנבס</button>
       </div>
 

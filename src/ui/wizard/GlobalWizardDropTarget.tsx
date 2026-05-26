@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import { UploadCloud } from "lucide-react";
+import { isSupportedIncomingImageFile } from "@/core/image/normalizeIncomingImage";
 
 interface GlobalWizardDropTargetProps {
   acceptFile: (file: File) => boolean;
@@ -19,7 +20,7 @@ function dragEventHasFiles(event: DragEvent): boolean {
 }
 
 export function isImageDropFile(file: File): boolean {
-  return file.type.startsWith("image/") || /\.(avif|bmp|gif|heic|heif|jpe?g|png|tiff?|webp)$/i.test(file.name);
+  return isSupportedIncomingImageFile(file);
 }
 
 export function GlobalWizardDropTarget({

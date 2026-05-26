@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>תוכנית עבודה ופרומפט לקלוד — שילוב יוצר ברכות ב-SPP2</title>
+  <style>
+    body {
+      font-family: Arial, "Segoe UI", sans-serif;
+      direction: rtl;
+      line-height: 1.7;
+      background: #f5f7fb;
+      color: #1f2937;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      background: linear-gradient(135deg, #143d8f, #1e88e5);
+      color: white;
+      padding: 32px 24px;
+      text-align: center;
+    }
+    header h1 {
+      margin: 0 0 8px;
+      font-size: 32px;
+    }
+    header p {
+      margin: 0;
+      font-size: 18px;
+      opacity: 0.95;
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 28px 18px 60px;
+    }
+    section {
+      background: white;
+      border-radius: 18px;
+      padding: 24px;
+      margin-bottom: 22px;
+      box-shadow: 0 8px 28px rgba(15, 23, 42, 0.08);
+      border: 1px solid #e5e7eb;
+    }
+    h2 {
+      margin-top: 0;
+      color: #143d8f;
+      border-bottom: 2px solid #e7eefc;
+      padding-bottom: 8px;
+    }
+    h3 {
+      color: #0f346c;
+      margin-top: 26px;
+    }
+    .warning {
+      background: #fff7ed;
+      border-right: 5px solid #f97316;
+      padding: 16px;
+      border-radius: 12px;
+      margin: 18px 0;
+    }
+    .success {
+      background: #ecfdf5;
+      border-right: 5px solid #10b981;
+      padding: 16px;
+      border-radius: 12px;
+      margin: 18px 0;
+    }
+    .info {
+      background: #eff6ff;
+      border-right: 5px solid #3b82f6;
+      padding: 16px;
+      border-radius: 12px;
+      margin: 18px 0;
+    }
+    ul, ol {
+      padding-right: 24px;
+    }
+    li {
+      margin-bottom: 7px;
+    }
+    code {
+      direction: ltr;
+      unicode-bidi: embed;
+      background: #eef2ff;
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-family: Consolas, monospace;
+      font-size: 0.95em;
+    }
+    pre {
+      direction: ltr;
+      text-align: left;
+      white-space: pre-wrap;
+      background: #0f172a;
+      color: #e5e7eb;
+      padding: 20px;
+      border-radius: 14px;
+      overflow-x: auto;
+      font-family: Consolas, "Courier New", monospace;
+      line-height: 1.55;
+      font-size: 14px;
+    }
+    .rtl-pre {
+      direction: rtl;
+      text-align: right;
+      unicode-bidi: plaintext;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      background: white;
+    }
+    th, td {
+      border: 1px solid #e5e7eb;
+      padding: 10px 12px;
+      vertical-align: top;
+    }
+    th {
+      background: #eef2ff;
+      color: #111827;
+    }
+    .small {
+      font-size: 14px;
+      color: #4b5563;
+    }
+    .checklist label {
+      display: block;
+      padding: 8px 0;
+    }
+    .checklist input {
+      margin-left: 8px;
+      transform: scale(1.15);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>שילוב יוצר הברכות כמצב חדש ב־SPP2</h1>
+    <p>תוכנית עבודה ופרומפט מוכן לקלוד — גרסה חדשה, מהירה, ללא Python, עם Auto Fit מלא לטקסט בעברית</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>מטרת המסמך</h2>
+      <p>
+        המטרה היא לבנות בתוך SPP2 מצב חדש ועצמאי בשם <strong>מצב ברכות</strong>,
+        המבוסס רעיונית ותוכנית על יוצר הברכות הישן, אבל לא כהמרה ישירה שלו.
+        המודול החדש צריך להיבנות ב־React/TypeScript, להשתמש בקנבס ובשכבות הקיימות של SPP2,
+        ולהיות מהיר, יעיל, איכותי ומתאים לעבודה יומיומית בחנות.
+      </p>
+
+      <div class="warning">
+        <strong>חשוב מאוד:</strong>
+        לא מבקשים מקלוד “להמיר את תוכנת הפייתון ל־React”.
+        מבקשים ממנו לבנות מודול חדש ונקי ב־SPP2, ולהשתמש בכלי הישן רק כ־Reference וכמקור נתונים.
+      </div>
+    </section>
+
+    <section>
+      <h2>החלטות מוצר סופיות</h2>
+      <table>
+        <tr>
+          <th>נושא</th>
+          <th>החלטה</th>
+        </tr>
+        <tr>
+          <td>אופי הכלי</td>
+          <td>מצב עצמאי ב־SPP2, שנכנסים אליו מדף הבית.</td>
+        </tr>
+        <tr>
+          <td>התנהגות יצירה</td>
+          <td>המצב יוצר עמוד חדש, ולא נכנס אוטומטית לעמוד קיים.</td>
+        </tr>
+        <tr>
+          <td>שפה</td>
+          <td>עברית כברירת מחדל. תמיכה טובה ב־RTL היא חובה.</td>
+        </tr>
+        <tr>
+          <td>תמונות בתוך הברכה</td>
+          <td>לא בגרסה הראשונה. אין photo slot כדי לא לסבך את המימוש.</td>
+        </tr>
+        <tr>
+          <td>רינדור טקסט</td>
+          <td>הטקסט חייב להישאר שכבת טקסט אמיתית של SPP2, לא תמונה שטוחה.</td>
+        </tr>
+        <tr>
+          <td>ייצוא ושמירה</td>
+          <td>דרך מערכות SPP2 הקיימות בלבד. לא לבנות Export/Save חדש.</td>
+        </tr>
+      </table>
+    </section>
+
+    <section>
+      <h2>גדלי קנבס נדרשים</h2>
+      <p>מצב הברכות צריך להציע בחירת גודל בתחילת העבודה:</p>
+      <ul>
+        <li>10×15 ס״מ</li>
+        <li>13×18 ס״מ</li>
+        <li>A5</li>
+        <li>A4</li>
+        <li>20×20 ס״מ</li>
+        <li>30×30 ס״מ</li>
+        <li>4×6 אינץ׳</li>
+        <li>5×7 אינץ׳</li>
+        <li>8×6 אינץ׳</li>
+        <li>מותאם אישית</li>
+      </ul>
+
+      <h3>מותאם אישית</h3>
+      <p>
+        במצב מותאם אישית המשתמש צריך להכניס רוחב וגובה,
+        עם בחירת יחידות:
+      </p>
+      <ul>
+        <li>ס״מ — ברירת מחדל</li>
+        <li>מ״מ</li>
+        <li>אינץ׳</li>
+      </ul>
+
+      <div class="info">
+        מומלץ שכל הגדלים יומרו פנימית למ״מ או פיקסלים לפי מנגנון הקנבס הקיים של SPP2,
+        כדי לשמור על התאמה להדפסה ולייצוא.
+      </div>
+    </section>
+
+    <section>
+      <h2>מבנה תיקיות מומלץ</h2>
+      <p>
+        את הכלי הישן כדאי להכניס לפרויקט, אבל רק כתיקיית reference לקריאה בלבד:
+      </p>
+
+<pre>SPP2/
+  reference/
+    hadish_blessing_designer_v042/
+      old python app here - read only
+
+  src/
+    features/
+      blessings/
+        BlessingMode.tsx
+        BlessingStartScreen.tsx
+        BlessingPanel.tsx
+        BlessingSearch.tsx
+        BlessingPreview.tsx
+        blessingRepository.ts
+        blessingTemplates.ts
+        blessingToCanvas.ts
+        textAutoFit.ts
+        hebrewTextMeasure.ts
+        types.ts
+        data/
+          blessings.json
+          sources_quotes.json</pre>
+
+      <div class="warning">
+        אסור לייבא קוד מתוך תיקיית <code>reference</code>.
+        היא קיימת רק כדי שקלוד יוכל להבין את הכלי הישן, מבנה הנתונים וההתנהגות הרצויה.
+      </div>
+    </section>
+
+    <section>
+      <h2>הדגש המרכזי: Text Auto Fit Engine</h2>
+      <p>
+        זה הלב של הכלי. יוצר ברכות טוב חייב לדעת להכניס טקסטים באורכים שונים
+        לתוך אזור עיצוב מוגדר, בלי שהמשתמש יצטרך להתחיל לשחק ידנית עם גדלים.
+      </p>
+
+      <h3>המנוע צריך לקבל</h3>
+<pre>{
+  text: string,
+  boxWidth: number,
+  boxHeight: number,
+  fontFamily: string,
+  maxFontSize: number,
+  minFontSize: number,
+  lineHeight: number,
+  fontWeight?: string,
+  direction: "rtl" | "ltr",
+  align: "center" | "right" | "left"
+}</pre>
+
+      <h3>המנוע צריך להחזיר</h3>
+<pre>{
+  fontSize: number,
+  lines: string[],
+  lineHeight: number,
+  fits: boolean,
+  overflowReason?: string
+}</pre>
+
+      <h3>התנהגות נדרשת</h3>
+      <ol>
+        <li>מדידת הטקסט באמצעות Canvas measurement בדפדפן.</li>
+        <li>שבירת שורות לפי רוחב התיבה.</li>
+        <li>תמיכה בעברית ו־RTL כברירת מחדל.</li>
+        <li>הקטנת גודל הפונט בהדרגה עד שהטקסט נכנס לגובה התיבה.</li>
+        <li>שמירה על טקסט מקורי ללא חיתוך שקט.</li>
+        <li>אם הטקסט לא נכנס גם בגודל מינימלי — החזרת <code>fits:false</code>.</li>
+        <li>הצגת אזהרה ב־UI כשהברכה ארוכה מדי.</li>
+      </ol>
+
+      <div class="success">
+        אסור לפתור בעיית Auto Fit על ידי הפיכת הטקסט לתמונה.
+        הטקסט חייב להישאר שכבת TextLayer רגילה ועריכה.
+      </div>
+    </section>
+
+    <section>
+      <h2>תבניות עיצוב נדרשות בגרסה הראשונה</h2>
+      <p>
+        מומלץ להתחיל עם 6–8 תבניות טקסט בלבד, ללא תמונה:
+      </p>
+      <ul>
+        <li>יוקרתי ונקי</li>
+        <li>מרגש ועדין</li>
+        <li>ילדותי ושמח</li>
+        <li>ברכת תודה</li>
+        <li>ברכה למורה/גננת</li>
+        <li>יום הולדת</li>
+        <li>ברכה זוגית/משפחתית</li>
+        <li>תבנית מינימליסטית ללא רקע</li>
+      </ul>
+
+      <h3>כל תבנית צריכה להגדיר</h3>
+<pre>{
+  id: string,
+  name: string,
+  recommendedSizes: string[],
+  background?: TemplateBackground,
+  titleBox: LayoutBox,
+  bodyBox: LayoutBox,
+  signatureBox?: LayoutBox,
+  quoteBox?: LayoutBox,
+  defaultFonts: {
+    title: string,
+    body: string,
+    signature: string
+  },
+  colors: {
+    background: string,
+    title: string,
+    body: string,
+    signature: string
+  },
+  autoFit: {
+    title: AutoFitSettings,
+    body: AutoFitSettings,
+    signature: AutoFitSettings
+  }
+}</pre>
+    </section>
+
+    <section>
+      <h2>פרומפט מלא לקלוד</h2>
+      <p>
+        אפשר להעתיק את כל הטקסט הבא לקלוד. מומלץ לתת לו קודם לבצע את שלב הסקירה,
+        ורק אחרי שהוא מחזיר סיכום נקודות חיבור — לתת לו להמשיך למימוש.
+      </p>
+
+<pre class="rtl-pre">אני רוצה לשלב ב-SPP2 מודול חדש בשם "מצב ברכות" / Blessing Mode.
+
+יש לי כלי ישן בשם hadish_blessing_designer_v042 שנמצא בתיקיית reference בלבד.
+הכלי הישן נכתב בפייתון, אבל הוא לא אמור להפוך לחלק פעיל מהתוכנה.
+
+חשוב מאוד:
+- אל תמיר את אפליקציית הפייתון אחד לאחד.
+- אל תייבא קוד Python.
+- אל תריץ Python.
+- אל תבנה Canvas חדש.
+- אל תבנה מערכת Export חדשה.
+- אל תשכפל מנגנוני שמירה קיימים.
+- אל תיצור אפליקציה פנימית נפרדת בתוך SPP2.
+- אל תיגע במצבים קיימים מעבר לחיבור ניווט מינימלי ונקי.
+- השתמש בכלי הישן רק כמקור אפיון, מקור נתונים, מבנה JSON, והבנת זרימת עבודה.
+
+המטרה:
+לבנות מודול React/TypeScript חדש ונקי בתוך SPP2, שמשתמש בקנבס, שכבות הטקסט, מערכת העמודים, מערכת השמירה והייצוא הקיימות של SPP2.
+
+המודול צריך להיות מצב עצמאי:
+- נכנסים אליו מדף הבית של SPP2.
+- הוא יוצר עמוד ברכה חדש.
+- הוא לא אמור להיכנס אוטומטית לעמוד קיים.
+- הוא לא כולל תמונה בתוך הברכה בגרסה הראשונה.
+- רוב השימוש הוא בעברית, לכן RTL ועברית הם ברירת המחדל.
+
+שם המודול:
+src/features/blessings/
+
+מקורות מידע מהכלי הישן:
+- reference/hadish_blessing_designer_v042/hadish_blessings_tool/data/blessings.json
+- reference/hadish_blessing_designer_v042/hadish_blessings_tool/data/sources_quotes.json
+- reference/hadish_blessing_designer_v042/designer_settings.json
+- README או קבצי תיעוד של הכלי הישן לצורך הבנת הזרימה בלבד.
+
+אם הנתיבים המדויקים שונים, אתר את קבצי ה-JSON הרלוונטיים בתוך תיקיית reference, אבל אל תייבא משם קוד פעיל.
+
+דרישות מרכזיות:
+1. ליצור מצב חדש ב-SPP2 בשם "ברכות".
+2. המצב יופיע בדף הבית או באזור בחירת המצבים של SPP2.
+3. בכניסה למצב הברכות המשתמש יבחר גודל קנבס מתוך רשימה:
+   - 10x15 ס"מ
+   - 13x18 ס"מ
+   - A5
+   - A4
+   - 20x20 ס"מ
+   - 30x30 ס"מ
+   - 4x6 אינץ'
+   - 5x7 אינץ'
+   - 8x6 אינץ'
+   - מותאם אישית
+4. במותאם אישית המשתמש יוכל להזין רוחב וגובה ולבחור יחידות:
+   - ס"מ כברירת מחדל
+   - מ"מ
+   - אינץ'
+5. לאחר בחירת הגודל, המצב יפתח עמוד חדש בגודל שנבחר.
+6. המצב יאפשר חיפוש וסינון ברכות לפי:
+   - אירוע
+   - למי הברכה
+   - מוצר
+   - סגנון
+   - אורך
+   - חיפוש חופשי בטקסט
+7. להציג רשימת ברכות עם preview קצר וברור.
+8. לאפשר:
+   - צור ברכה בעמוד חדש
+   - החלף את הברכה בתבנית הנוכחית
+   - ברכה אקראית לפי הסינון הנוכחי
+   - מועדפים
+   - כתיבה חופשית
+9. להוסיף גם לשונית "מקורות/ציטוטים" מתוך sources_quotes.json.
+10. כל ברכה שנכנסת לקנבס חייבת להפוך לשכבות SPP2 רגילות:
+   - TextLayer לכותרת
+   - TextLayer לגוף הברכה
+   - TextLayer לחתימה / מאת אם קיים
+   - TextLayer למקור/ציטוט אם נבחר
+   - ShapeLayer או ImageLayer לרקע/מסגרת אם התבנית דורשת
+11. אין להפוך טקסט לתמונה.
+12. אין לבנות מנגנון ייצוא נפרד.
+13. אין לשבור שום התנהגות קיימת של SPP2.
+
+החלק החשוב ביותר:
+לבנות כבר בגרסה הראשונה Text Auto Fit Engine איכותי.
+
+צור קובץ:
+src/features/blessings/textAutoFit.ts
+
+המנוע צריך:
+- לקבל טקסט, רוחב תיבה, גובה תיבה, fontFamily, maxFontSize, minFontSize, lineHeight, fontWeight, direction, align.
+- למדוד טקסט באמצעות canvas measurement בדפדפן.
+- לשבור שורות לפי רוחב.
+- לתמוך בעברית RTL כברירת מחדל.
+- להקטין fontSize אוטומטית עד שהטקסט נכנס לגובה התיבה.
+- להחזיר:
+  fontSize,
+  lines,
+  lineHeight,
+  fits,
+  overflowReason.
+- לא לשנות את הטקסט המקורי.
+- לא לחתוך טקסט בלי להודיע.
+- אם הטקסט לא נכנס גם במינימום, להחזיר fits:false כדי שה-UI יציג אזהרה.
+
+שים לב:
+אם מערכת הטקסט הקיימת של SPP2 לא תומכת בצורה טובה ב-width/height/autoFit/RTL, אל תעקוף אותה באמצעות רינדור תמונה.
+במקום זאת:
+1. דווח מה חסר במערכת הטקסט הקיימת.
+2. הצע הרחבה מינימלית ל-TextLayer.
+3. ודא שההרחבה לא שוברת טקסטים קיימים.
+
+צור גם:
+src/features/blessings/blessingTemplates.ts
+
+התבניות צריכות להגדיר אזורי טקסט:
+- titleBox
+- bodyBox
+- signatureBox אופציונלי
+- quoteBox אופציונלי
+
+בגרסה הראשונה אין photoBox ואין שילוב תמונות בתוך הברכה.
+
+כל תבנית תכלול:
+- שם
+- יחס/גודל מומלץ
+- padding
+- סגנון צבעים
+- ברירות מחדל לפונטים
+- מיקומי תיבות באחוזים מתוך הקנבס
+- הגדרות autoFit לכל תיבת טקסט
+
+צור לפחות 6 תבניות ראשונות:
+1. יוקרתי ונקי
+2. מרגש ועדין
+3. ילדותי ושמח
+4. ברכת תודה
+5. מורה/גננת
+6. יום הולדת
+7. משפחתי/זוגי אם פשוט להוסיף
+8. מינימליסטי ללא רקע אם פשוט להוסיף
+
+צור:
+src/features/blessings/blessingToCanvas.ts
+
+הקובץ אחראי לקחת ברכה + תבנית + גודל קנבס וליצור שכבות SPP2 רגילות.
+הוא חייב להשתמש במבני השכבות הקיימים בפרויקט.
+לפני כתיבה, אתר איך SPP2 יוצר TextLayer/ShapeLayer כיום, והשתמש באותו pattern.
+
+צור:
+src/features/blessings/blessingRepository.ts
+
+הקובץ אחראי:
+- טעינת blessings.json
+- טעינת sources_quotes.json
+- נירמול נתונים אם צריך
+- חיפוש טקסט חופשי
+- סינון לפי קטגוריות
+- החזרת ברכה אקראית לפי סינון פעיל
+- ניהול מועדפים בצורה לא מסוכנת, למשל localStorage או מנגנון הגדרות קיים אם יש כזה
+
+צור UI:
+src/features/blessings/BlessingMode.tsx
+src/features/blessings/BlessingStartScreen.tsx
+src/features/blessings/BlessingPanel.tsx
+src/features/blessings/BlessingSearch.tsx
+src/features/blessings/BlessingPreview.tsx
+
+דרישות UI:
+- ממשק פשוט בעברית.
+- קודם בחירת גודל.
+- לאחר מכן בחירת תבנית.
+- לאחר מכן בחירת ברכה / כתיבה חופשית.
+- תצוגה מקדימה לפני יצירה.
+- כפתור ברור "צור ברכה".
+- כפתור "החלף ברכה" כאשר כבר קיימת ברכה בעמוד.
+- הודעת אזהרה אם הטקסט לא נכנס לתיבה גם לאחר Auto Fit.
+- לא להעמיס אפשרויות מתקדמות במסך הראשון.
+
+שלבי עבודה:
+שלב 1 — סקירה בלבד:
+סקור את מבנה SPP2:
+- איפה מוגדרים modes
+- איך דף הבית מפעיל מצב חדש
+- איפה מוגדרות שכבות
+- איך מוסיפים TextLayer
+- איך מוסיפים ShapeLayer
+- איך יוצרים עמוד חדש
+- איך משנים גודל קנבס
+- איך נשמר פרויקט
+- איך עובד הקנבס/EditorScreen
+- איך עובד יצוא PDF/PNG אם יש נקודת חיבור רלוונטית
+
+בשלב זה אל תבצע שינויי קוד.
+תחזיר סיכום קצר של נקודות החיבור המומלצות ושל קבצים שיידרשו לשינוי.
+
+שלב 2 — תשתית:
+לאחר אישור הסקירה, בנה:
+- types.ts
+- blessingRepository.ts
+- textAutoFit.ts
+- blessingTemplates.ts
+- blessingToCanvas.ts
+- העתקת JSON למקום נכון בתוך src/features/blessings/data או public/data/blessings לפי מבנה הפרויקט
+
+שלב 3 — UI:
+בנה:
+- BlessingMode.tsx
+- BlessingStartScreen.tsx
+- BlessingPanel.tsx
+- BlessingSearch.tsx
+- BlessingPreview.tsx
+- חיבור ניווט מינימלי מדף הבית למצב ברכות
+
+שלב 4 — חיבור לקנבס:
+חבר את המודול ליצירת עמוד חדש בגודל שנבחר.
+חבר יצירת שכבות טקסט רגילות לפי תבנית.
+ודא שכל שכבה ניתנת לעריכה רגילה בכלי SPP2.
+
+שלב 5 — Auto Fit ו-RTL:
+חבר את מנוע ה-Auto Fit בפועל.
+בדוק עברית, יישור לימין/מרכז, שורות ארוכות, פיסוק, מספרים וסימני גרשיים.
+ודא שטקסט ארוך לא נחתך בשקט.
+
+שלב 6 — בדיקות:
+הרץ:
+- npm run typecheck
+- npm test אם קיים
+- בדיקת טעינת JSON
+- בדיקת סינון
+- בדיקת ברכה אקראית
+- בדיקת מועדפים
+- בדיקת קנבס 10x15 ס"מ
+- בדיקת קנבס A4
+- בדיקת 4x6 אינץ'
+- בדיקת מותאם אישית בס"מ
+- בדיקת מותאם אישית במ"מ
+- בדיקת מותאם אישית באינץ'
+- בדיקת טקסט קצר
+- בדיקת טקסט בינוני
+- בדיקת טקסט ארוך
+- בדיקת מצב שבו הטקסט לא נכנס גם במינימום
+- בדיקת שמירה ופתיחה מחדש של פרויקט
+- בדיקת יצוא PDF/PNG דרך המנגנון הקיים
+
+קריטריוני הצלחה:
+- אין תלות בפייתון.
+- אין Canvas נפרד.
+- אין Export נפרד.
+- הברכה נוצרת כעמוד חדש.
+- הברכה הופכת לשכבות רגילות.
+- הטקסט נשאר עריך.
+- עברית ו-RTL עובדים טוב.
+- Auto Fit עובד כבר בגרסה הראשונה.
+- המודול מבודד ולא שובר מצבים קיימים.
+- אפשר בעתיד להוסיף תמונות, רקעים מורכבים, מסגרות, AI או ייצור כמותי בלי לשכתב את הבסיס.</pre>
+    </section>
+
+    <section>
+      <h2>צ׳ק ליסט ביצוע</h2>
+      <div class="checklist">
+        <label><input type="checkbox"> הכלי הישן הוכנס לתיקיית reference בלבד</label>
+        <label><input type="checkbox"> קלוד ביצע סקירה לפני שינוי קוד</label>
+        <label><input type="checkbox"> נמצא המקום הנכון לחיבור מצב חדש בדף הבית</label>
+        <label><input type="checkbox"> הוגדרו גדלי קנבס כולל אינץ׳ ומותאם אישית</label>
+        <label><input type="checkbox"> נבנה blessingRepository</label>
+        <label><input type="checkbox"> נבנה textAutoFit</label>
+        <label><input type="checkbox"> נבנו blessingTemplates</label>
+        <label><input type="checkbox"> נבנה blessingToCanvas</label>
+        <label><input type="checkbox"> נבנה UI בסיסי בעברית</label>
+        <label><input type="checkbox"> חובר יצירת עמוד חדש</label>
+        <label><input type="checkbox"> טקסט נכנס כשכבות TextLayer רגילות</label>
+        <label><input type="checkbox"> Auto Fit עובד לטקסט קצר/בינוני/ארוך</label>
+        <label><input type="checkbox"> RTL עובד בצורה תקינה</label>
+        <label><input type="checkbox"> שמירה ופתיחה מחדש עובדות</label>
+        <label><input type="checkbox"> יצוא PDF/PNG עובד דרך SPP2</label>
+      </div>
+    </section>
+
+    <section>
+      <h2>הערה חשובה לסיום</h2>
+      <p>
+        המפתח להצלחה כאן הוא לא “להעתיק תוכנה ישנה”, אלא להפוך את יוצר הברכות
+        ליכולת טבעית בתוך SPP2. ברגע שהברכה היא עמוד ושכבות רגילות,
+        כל שאר היתרונות של SPP2 עובדים עליה: עריכה, שמירה, ייצוא, הדפסה,
+        שילוב עם תבניות, ושדרוגים עתידיים.
+      </p>
+    </section>
+  </main>
+</body>
+</html>

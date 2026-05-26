@@ -4,6 +4,7 @@ import { Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer } from
 import type Konva from "konva";
 import { renderPdfPage } from "./pdfRenderService";
 import type { PdfOverlayObject, PdfStudioPage, PdfStudioSourceFile } from "./pdfStudioTypes";
+import { HEIC_CONVERSION_ERROR_MESSAGE, SUPPORTED_IMAGE_ACCEPT, normalizeIncomingImage } from "@/core/image/normalizeIncomingImage";
 
 type OverlayTool = "select" | "text" | "rect" | "line";
 
@@ -131,10 +132,17 @@ export function PdfOverlayEditor({ page, source, onDone, onCancel }: PdfOverlayE
     setSelectedId(null);
   }
 
-  function handleImageInput(event: ChangeEvent<HTMLInputElement>): void {
+  async function handleImageInput(event: ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (file === undefined) return;
+    let normalizedFile: File;
+    try {
+      normalizedFile = await normalizeIncomingImage(file);
+    } catch {
+      window.alert(HEIC_CONVERSION_ERROR_MESSAGE);
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       const id = crypto.randomUUID();
@@ -149,7 +157,7 @@ export function PdfOverlayEditor({ page, source, onDone, onCancel }: PdfOverlayE
       }]);
       setSelectedId(id);
     };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(normalizedFile);
   }
 
   return (
@@ -167,7 +175,7 @@ export function PdfOverlayEditor({ page, source, onDone, onCancel }: PdfOverlayE
           <button type="button" onClick={onCancel}><X size={16} /> ביטול</button>
           <button className="primary" type="button" onClick={() => onDone(objects)}><Check size={16} /> סיום</button>
         </header>
-        <input ref={fileInputRef} accept="image/*" hidden type="file" onChange={handleImageInput} />
+        <input ref={fileInputRef} accept={SUPPORTED_IMAGE_ACCEPT} hidden type="file" onChange={(event) => void handleImageInput(event)} />
         {selectedObject?.type === "text" ? (
           <section className="pdf-overlay-text-tools">
             <label>

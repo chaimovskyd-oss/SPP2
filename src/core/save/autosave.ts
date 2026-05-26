@@ -2,6 +2,7 @@ import { captureError, writeLog } from "@/core/logging/logger";
 import type { ProjectEnvelope, ProjectMetadata } from "@/types/project";
 import { parseProject, serializeProject } from "./projectFormat";
 import { recordProjectAutosaved, type ProjectLifecycleStorage } from "./projectLifecycle";
+import { createAutosaveSafeProject } from "./autosaveSerialize";
 
 export interface AutosaveRecord {
   id: string;
@@ -33,7 +34,12 @@ export interface RecoveryEntry {
   recordId: string;
 }
 
-export type AutosaveFailureReason = "quota-exceeded" | "invalid-recovery" | "unknown";
+export type AutosaveFailureReason =
+  | "quota-exceeded"
+  | "invalid-recovery"
+  | "too-large"
+  | "disabled-by-safety-net"
+  | "unknown";
 
 export type AutosaveResult =
   | {
@@ -51,9 +57,13 @@ export type AutosaveResult =
     };
 
 const DEFAULT_STORAGE_KEY = "spp.v2.recovery";
-const runtimeProcess = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
-const isAutosaveTestRuntime = runtimeProcess?.env?.VITEST === "true" || runtimeProcess?.env?.NODE_ENV === "test";
-export const AUTOSAVE_TEMPORARILY_DISABLED = !isAutosaveTestRuntime;
+const MAX_AUTOSAVE_PAYLOAD_BYTES = 4_500_000;
+const ADAPTIVE_TIER_3_RECORDS_BYTES = 2_000_000;
+const ADAPTIVE_TIER_BELOW_10_RECORDS_BYTES = 1_000_000;
+const SAFETY_NET_FAILURE_THRESHOLD = 3;
+// Re-enabled with lightweight serialization. Tests previously kept this off entirely;
+// they continue to work because the runtime check above is no longer needed.
+export const AUTOSAVE_TEMPORARILY_DISABLED = false;
 
 export class AutosaveManager {
   private timer: number | null = null;
@@ -62,11 +72,17 @@ export class AutosaveManager {
   private pendingKind: AutosaveRecord["kind"] = "unsaved";
   private changesSinceFlush = 0;
   private flushing = false;
+  private consecutiveUnexpectedFailures = 0;
+  private disabledBySafetyNet = false;
 
   constructor(private readonly options: AutosaveOptions = {}) {}
 
+  isDisabledBySafetyNet(): boolean {
+    return this.disabledBySafetyNet;
+  }
+
   schedule(project: ProjectEnvelope, kind: AutosaveRecord["kind"] = "unsaved"): void {
-    if (AUTOSAVE_TEMPORARILY_DISABLED) {
+    if (AUTOSAVE_TEMPORARILY_DISABLED || this.disabledBySafetyNet) {
       this.stop();
       return;
     }
@@ -83,7 +99,7 @@ export class AutosaveManager {
   }
 
   recordMeaningfulChange(project: ProjectEnvelope, kind: AutosaveRecord["kind"] = "unsaved"): void {
-    if (AUTOSAVE_TEMPORARILY_DISABLED) {
+    if (AUTOSAVE_TEMPORARILY_DISABLED || this.disabledBySafetyNet) {
       this.stop();
       return;
     }
@@ -122,7 +138,7 @@ export class AutosaveManager {
   }
 
   async flush(kind: AutosaveRecord["kind"] = "unsaved"): Promise<AutosaveResult | null> {
-    if (AUTOSAVE_TEMPORARILY_DISABLED) {
+    if (AUTOSAVE_TEMPORARILY_DISABLED || this.disabledBySafetyNet) {
       this.stop();
       return null;
     }
@@ -134,17 +150,37 @@ export class AutosaveManager {
     this.pending = null;
     try {
       const result = await saveRecoveryRecord(project, kind, this.options);
-      if (result.ok) {
-        this.changesSinceFlush = 0;
-      }
+      this.observeResult(result);
       this.options.onResult?.(result);
       return result;
     } catch (error) {
       const result = autosaveErrorResult(error, project, this.options.storageKey);
+      this.observeResult(result);
       this.options.onResult?.(result);
       return result;
     } finally {
       this.flushing = false;
+    }
+  }
+
+  private observeResult(result: AutosaveResult): void {
+    if (result.ok) {
+      this.changesSinceFlush = 0;
+      this.consecutiveUnexpectedFailures = 0;
+      return;
+    }
+    // Expected, well-handled failures should not trip the safety net.
+    if (result.reason === "quota-exceeded" || result.reason === "too-large") {
+      this.consecutiveUnexpectedFailures = 0;
+      return;
+    }
+    this.consecutiveUnexpectedFailures += 1;
+    if (this.consecutiveUnexpectedFailures >= SAFETY_NET_FAILURE_THRESHOLD) {
+      this.disabledBySafetyNet = true;
+      this.stop();
+      writeLog("recovery", "error", "Autosave disabled by safety net", {
+        consecutiveFailures: this.consecutiveUnexpectedFailures
+      });
     }
   }
 
@@ -166,14 +202,37 @@ export async function saveRecoveryRecord(project: ProjectEnvelope, kind: Autosav
   if (AUTOSAVE_TEMPORARILY_DISABLED) {
     return {
       ok: false,
-      reason: "unknown",
+      reason: "disabled-by-safety-net",
       estimatedSizeBytes: 0,
       storageKey,
-      message: "Autosave is temporarily disabled for crash isolation."
+      message: "Autosave is disabled for this build."
     };
   }
-  const payload = serializeProject(project);
+
+  // Build a lightweight project envelope: strip embedded data URLs so payloads
+  // stay well under the localStorage quota. Manual Save / Export are unaffected;
+  // they use serializeProject directly on the live document.
+  const { safe, strippedAssetIds } = createAutosaveSafeProject(project);
+  const payload = serializeProject(safe);
   const estimatedSizeBytes = estimateStringBytes(payload);
+
+  if (estimatedSizeBytes > MAX_AUTOSAVE_PAYLOAD_BYTES) {
+    const result: AutosaveResult = {
+      ok: false,
+      reason: "too-large",
+      estimatedSizeBytes,
+      storageKey,
+      message: `Autosave skipped: payload ${(estimatedSizeBytes / 1024 / 1024).toFixed(2)}MB exceeds safe quota.`
+    };
+    writeLog("recovery", "warn", "Autosave payload too large", {
+      projectId: project.metadata.internalUuid,
+      estimatedSizeBytes,
+      strippedAssetCount: strippedAssetIds.length
+    });
+    logAutosaveDiagnostics(safe, result, strippedAssetIds.length);
+    return result;
+  }
+
   const record: AutosaveRecord = {
     id: crypto.randomUUID(),
     projectId: project.metadata.internalUuid,
@@ -184,7 +243,7 @@ export async function saveRecoveryRecord(project: ProjectEnvelope, kind: Autosav
     payload
   };
 
-  if (!isValidRecoveryRecord(record)) {
+  if (!isStructurallyValidRecord(record)) {
     const result: AutosaveResult = {
       ok: false,
       reason: "invalid-recovery",
@@ -192,7 +251,7 @@ export async function saveRecoveryRecord(project: ProjectEnvelope, kind: Autosav
       storageKey,
       message: "Autosave skipped because the recovery record is invalid."
     };
-    logAutosaveDiagnostics(project, result);
+    logAutosaveDiagnostics(safe, result, strippedAssetIds.length);
     return result;
   }
 
@@ -204,37 +263,85 @@ export async function saveRecoveryRecord(project: ProjectEnvelope, kind: Autosav
       storageKey,
       message: "Autosave skipped because localStorage is unavailable."
     };
-    logAutosaveDiagnostics(project, result);
+    logAutosaveDiagnostics(safe, result, strippedAssetIds.length);
     return result;
   }
 
-  try {
+  const requestedMaxRecords = options.maxRecords ?? 10;
+  const adaptiveMaxRecords =
+    estimatedSizeBytes > ADAPTIVE_TIER_3_RECORDS_BYTES
+      ? 1
+      : estimatedSizeBytes > ADAPTIVE_TIER_BELOW_10_RECORDS_BYTES
+        ? Math.min(3, requestedMaxRecords)
+        : requestedMaxRecords;
+
+  const writeWithCap = (cap: number): void => {
     const records = getRecoveryRecords(storageKey);
     records.unshift(record);
-    localStorage.setItem(storageKey, JSON.stringify(records.slice(0, options.maxRecords ?? 10)));
+    localStorage.setItem(storageKey, JSON.stringify(records.slice(0, cap)));
+  };
+
+  try {
+    writeWithCap(adaptiveMaxRecords);
     recordProjectAutosaved(project, project.metadata.thumbnailPath, options.indexStorage);
-    writeLog("recovery", "info", "נשמר autosave", { projectId: record.projectId, kind });
-    const result: AutosaveResult = { ok: true, record, estimatedSizeBytes, storageKey };
-    logAutosaveDiagnostics(project, result);
-    return result;
-  } catch (error) {
-    captureError("recovery", error, { projectId: project.document.id });
-    const result: AutosaveResult = {
-      ok: false,
-      reason: isQuotaExceededError(error) ? "quota-exceeded" : "unknown",
-      estimatedSizeBytes,
-      storageKey,
-      message: error instanceof Error ? error.message : String(error)
-    };
-    writeLog("recovery", result.reason === "quota-exceeded" ? "warn" : "error", "Autosave failed", {
+    writeLog("recovery", "info", "נשמר autosave", {
       projectId: record.projectId,
       kind,
-      reason: result.reason,
-      estimatedSizeBytes
+      estimatedSizeBytes,
+      strippedAssetCount: strippedAssetIds.length,
+      adaptiveMaxRecords
     });
-    logAutosaveDiagnostics(project, result);
+    const result: AutosaveResult = { ok: true, record, estimatedSizeBytes, storageKey };
+    logAutosaveDiagnostics(safe, result, strippedAssetIds.length);
     return result;
+  } catch (error) {
+    if (isQuotaExceededError(error) && adaptiveMaxRecords > 1) {
+      // Retry once keeping only the latest record.
+      try {
+        writeWithCap(1);
+        recordProjectAutosaved(project, project.metadata.thumbnailPath, options.indexStorage);
+        writeLog("recovery", "warn", "Autosave succeeded after quota retry", {
+          projectId: record.projectId,
+          estimatedSizeBytes,
+          strippedAssetCount: strippedAssetIds.length
+        });
+        const result: AutosaveResult = { ok: true, record, estimatedSizeBytes, storageKey };
+        logAutosaveDiagnostics(safe, result, strippedAssetIds.length);
+        return result;
+      } catch (retryError) {
+        return reportSaveFailure(retryError, record, estimatedSizeBytes, storageKey, kind, safe, strippedAssetIds.length);
+      }
+    }
+    return reportSaveFailure(error, record, estimatedSizeBytes, storageKey, kind, safe, strippedAssetIds.length);
   }
+}
+
+function reportSaveFailure(
+  error: unknown,
+  record: AutosaveRecord,
+  estimatedSizeBytes: number,
+  storageKey: string,
+  kind: AutosaveRecord["kind"],
+  safeProject: ProjectEnvelope,
+  strippedAssetCount: number
+): AutosaveResult {
+  captureError("recovery", error, { projectId: record.projectId });
+  const result: AutosaveResult = {
+    ok: false,
+    reason: isQuotaExceededError(error) ? "quota-exceeded" : "unknown",
+    estimatedSizeBytes,
+    storageKey,
+    message: error instanceof Error ? error.message : String(error)
+  };
+  writeLog("recovery", result.reason === "quota-exceeded" ? "warn" : "error", "Autosave failed", {
+    projectId: record.projectId,
+    kind,
+    reason: result.reason,
+    estimatedSizeBytes,
+    strippedAssetCount
+  });
+  logAutosaveDiagnostics(safeProject, result, strippedAssetCount);
+  return result;
 }
 
 export function getRecoveryRecords(storageKey = DEFAULT_STORAGE_KEY): AutosaveRecord[] {
@@ -279,14 +386,25 @@ export function getRecoveryEntries(storageKey = DEFAULT_STORAGE_KEY): RecoveryEn
   }));
 }
 
-export function restoreRecoveryRecord(record: AutosaveRecord): ProjectEnvelope {
-  if (AUTOSAVE_TEMPORARILY_DISABLED) {
-    throw new Error("Recovery is temporarily disabled for crash isolation.");
-  }
+export interface RestoreResult {
+  envelope: ProjectEnvelope;
+  status: "full" | "assetsMissing";
+  missingAssetIds: string[];
+}
+
+export function restoreRecoveryRecord(record: AutosaveRecord): RestoreResult {
   if (!isValidRecoveryRecord(record)) {
     throw new Error("Recovery record is invalid.");
   }
-  return parseProject(record.payload);
+  const envelope = parseProject(record.payload);
+  const missingAssetIds = envelope.document.assets
+    .filter((asset) => asset.status === "missing" && !asset.previewPath && !asset.thumbnailPath)
+    .map((asset) => asset.id);
+  return {
+    envelope,
+    status: missingAssetIds.length > 0 ? "assetsMissing" : "full",
+    missingAssetIds
+  };
 }
 
 export function discardRecoveryRecord(recordId: string, storageKey = DEFAULT_STORAGE_KEY): void {
@@ -348,7 +466,11 @@ export function isQuotaExceededError(error: unknown): boolean {
   return false;
 }
 
-export function isValidRecoveryRecord(record: unknown): record is AutosaveRecord {
+/**
+ * Lightweight validation used during save. Avoids the expensive parseProject
+ * round-trip that runs migrations and full schema normalization.
+ */
+function isStructurallyValidRecord(record: unknown): record is AutosaveRecord {
   if (typeof record !== "object" || record === null) return false;
   const candidate = record as Partial<AutosaveRecord>;
   if (typeof candidate.id !== "string" || candidate.id.length === 0) return false;
@@ -357,8 +479,13 @@ export function isValidRecoveryRecord(record: unknown): record is AutosaveRecord
   if (typeof candidate.savedAt !== "string" || Number.isNaN(Date.parse(candidate.savedAt))) return false;
   if (candidate.kind !== "unsaved" && candidate.kind !== "json" && candidate.kind !== "spp") return false;
   if (typeof candidate.payload !== "string" || candidate.payload.length === 0) return false;
+  return true;
+}
+
+export function isValidRecoveryRecord(record: unknown): record is AutosaveRecord {
+  if (!isStructurallyValidRecord(record)) return false;
   try {
-    const envelope = parseProject(candidate.payload);
+    const envelope = parseProject(record.payload);
     return (
       envelope.format === "SPP_PROJECT" &&
       typeof envelope.metadata?.internalUuid === "string" &&
@@ -373,8 +500,13 @@ export function isValidRecoveryRecord(record: unknown): record is AutosaveRecord
 
 function autosaveErrorResult(error: unknown, project: ProjectEnvelope, storageKey = DEFAULT_STORAGE_KEY): AutosaveResult {
   let estimatedSizeBytes = 0;
+  let safeProject = project;
+  let strippedAssetCount = 0;
   try {
-    estimatedSizeBytes = estimateStringBytes(serializeProject(project));
+    const { safe, strippedAssetIds } = createAutosaveSafeProject(project);
+    safeProject = safe;
+    strippedAssetCount = strippedAssetIds.length;
+    estimatedSizeBytes = estimateStringBytes(serializeProject(safe));
   } catch {
     estimatedSizeBytes = 0;
   }
@@ -385,11 +517,11 @@ function autosaveErrorResult(error: unknown, project: ProjectEnvelope, storageKe
     storageKey,
     message: error instanceof Error ? error.message : String(error)
   };
-  logAutosaveDiagnostics(project, result);
+  logAutosaveDiagnostics(safeProject, result, strippedAssetCount);
   return result;
 }
 
-function logAutosaveDiagnostics(project: ProjectEnvelope, result: AutosaveResult): void {
+function logAutosaveDiagnostics(project: ProjectEnvelope, result: AutosaveResult, strippedAssetCount = 0): void {
   if (!import.meta.env.DEV) return;
   const pagesCount = project.document.pages.length;
   const assetsCount = project.document.assets.length;
@@ -398,7 +530,8 @@ function logAutosaveDiagnostics(project: ProjectEnvelope, result: AutosaveResult
     ok: result.ok,
     pagesCount,
     assetsCount,
-    estimatedSizeMb,
+    strippedAssetCount,
+    payloadMb: estimatedSizeMb,
     storageTarget: result.storageKey,
     failureReason: result.ok ? undefined : result.reason
   });

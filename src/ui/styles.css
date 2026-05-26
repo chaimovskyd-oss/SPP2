@@ -5593,6 +5593,22 @@ input[type="range"]::-webkit-slider-runnable-track {
   padding: 14px;
 }
 
+.collage-template-toast {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  z-index: 45;
+  max-width: min(420px, calc(100% - 48px));
+  background: rgba(24, 28, 38, 0.96);
+  color: #fff;
+  border: 1px solid rgba(124,111,224,0.55);
+  border-radius: 8px;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.35);
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .smart-crop-toast-text {
   font-weight: 700;
   margin-bottom: 10px;

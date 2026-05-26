@@ -214,6 +214,44 @@ export const PROJECT_MIGRATIONS: ProjectMigration[] = [
         }))
       }
     })
+  },
+  {
+    fromSchema: 11,
+    toSchema: 12,
+    description: "הוספת blessingRules למסמך (מצב ברכות v1)",
+    migrate: (project) => ({
+      ...project,
+      schemaVersion: 12,
+      document: {
+        ...project.document,
+        blessingRules: (((project.document as unknown) as Record<string, unknown>).blessingRules as import("@/types/blessing").BlessingRule[]) ?? []
+      }
+    })
+  },
+  {
+    fromSchema: 10,
+    toSchema: 11,
+    description: "מצב מסיכה: הוספת spacingMM קנוני, spacingUnit ו-maskStyle (מסגרת/צל לכל המסיכות)",
+    migrate: (project) => {
+      const dpi = project.document.dpi || 300;
+      return {
+        ...project,
+        schemaVersion: 11,
+        document: {
+          ...project.document,
+          maskRules: (project.document.maskRules ?? []).map((rule) => {
+            if (typeof rule.spacingMM === "number") return rule;
+            const px = Math.max(rule.spacingX ?? 0, rule.spacingY ?? 0);
+            const mm = (px / dpi) * 25.4;
+            return {
+              ...rule,
+              spacingMM: Math.max(0, mm),
+              spacingUnit: rule.spacingUnit ?? "mm"
+            };
+          })
+        }
+      };
+    }
   }
 ];
 
@@ -239,6 +277,7 @@ export function normalizeProjectEnvelope(input: unknown): ProjectEnvelope {
       maskTextOverlayRules: input.document.maskTextOverlayRules ?? [],
       maskPresets: input.document.maskPresets ?? [],
       collageRules: ((input.document as unknown) as Record<string, unknown>).collageRules as CollageRule[] ?? [],
+      blessingRules: ((input.document as unknown) as Record<string, unknown>).blessingRules as import("@/types/blessing").BlessingRule[] ?? [],
       classPhotoRules: (((input.document as unknown) as Record<string, unknown>).classPhotoRules as Array<Record<string, unknown>> | undefined ?? []).map((r) => ({
         ...r,
         titleTextEffects: (r["titleTextEffects"] as unknown[]) ?? [],

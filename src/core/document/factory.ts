@@ -47,6 +47,7 @@ export function createDocument(options: CreateDocumentOptions): Document {
     photoPrintRules: [],
     photoPrintImageAssignments: [],
     classPhotoRules: [],
+    blessingRules: [],
     viewport: options.viewport ?? { ...defaultViewportState },
     metadata: options.metadata ?? {}
   };

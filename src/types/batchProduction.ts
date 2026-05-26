@@ -51,15 +51,25 @@ export type BatchTextVariableField = Extract<BatchVariableField, { type: "text" 
 
 // ─── Wizard record ────────────────────────────────────────────────────────────
 
-export interface BatchRecord {
-  id: string;
-  file: File;
-  previewUrl: string; // URL.createObjectURL — revoke on cleanup
-  /** fieldId → value. One entry per variable text field. */
-  fields: Record<string, string>;
-  originalFilename: string;
-  status: "ready" | "warning"; // warning = at least one text field is empty
-}
+export type BatchRecord =
+  | {
+      id: string;
+      sourceType: "image";
+      file: File;
+      previewUrl: string; // URL.createObjectURL - revoke on cleanup
+      /** fieldId -> value. One entry per variable text field. */
+      fields: Record<string, string>;
+      originalFilename: string;
+      status: "ready" | "warning"; // warning = at least one text field is empty
+    }
+  | {
+      id: string;
+      sourceType: "text";
+      /** fieldId -> value. One entry per variable text field. */
+      fields: Record<string, string>;
+      originalFilename?: string;
+      status: "ready" | "warning"; // warning = at least one text field is empty
+    };
 
 export interface BatchWizardResult {
   templateId: string;

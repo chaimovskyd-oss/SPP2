@@ -31,6 +31,7 @@ import {
 } from "@/core/classPhoto/classPhotoFactory";
 import { computeOptimalClassPhotoLayout } from "@/core/classPhoto/classPhotoLayoutEngine";
 import { BUILTIN_TEXT_PRESETS } from "@/core/text/presets";
+import { HEIC_CONVERSION_ERROR_MESSAGE, SUPPORTED_IMAGE_ACCEPT, normalizeIncomingImage, normalizeIncomingImages } from "@/core/image/normalizeIncomingImage";
 import { FONT_LIST } from "@/ui/editor/fonts";
 import { GlobalWizardDropTarget, isImageDropFile } from "@/ui/wizard/GlobalWizardDropTarget";
 import type {
@@ -266,8 +267,10 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
 
   // ─── Image upload ────────────────────────────────────────────────────────
 
-  function addFiles(files: FileList | File[]): void {
-    const todo = Array.from(files).filter(isImageDropFile);
+  async function addFiles(files: FileList | File[]): Promise<void> {
+    const { files: normalizedFiles, failed } = await normalizeIncomingImages(Array.from(files).filter(isImageDropFile));
+    if (failed.length > 0) window.alert(HEIC_CONVERSION_ERROR_MESSAGE);
+    const todo = normalizedFiles.filter(isImageDropFile);
     if (todo.length === 0) return;
     let pending = todo.length;
     const toAddImages: ClassPhotoWizardImageEntry[] = [];
@@ -303,15 +306,23 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
     setPersonRecords((prev) => prev.filter((_, i) => i !== idx).map((r, i) => ({ ...r, orderIndex: i })));
   }
 
-  function handleBgChange(e: ChangeEvent<HTMLInputElement>): void {
+  async function handleBgChange(e: ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = e.target.files?.[0];
     if (!file) return;
-    setBackgroundFile(file);
+    let normalizedFile: File;
+    try {
+      normalizedFile = await normalizeIncomingImage(file);
+    } catch {
+      window.alert(HEIC_CONVERSION_ERROR_MESSAGE);
+      e.target.value = "";
+      return;
+    }
+    setBackgroundFile(normalizedFile);
     setBackgroundUrl((prev) => {
       if (prev !== undefined && prev.length > 0) {
         try { URL.revokeObjectURL(prev); } catch { /* ignore */ }
       }
-      return URL.createObjectURL(file);
+      return URL.createObjectURL(normalizedFile);
     });
     e.target.value = "";
   }
@@ -421,7 +432,7 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
     <div className="cp-wizard-overlay">
       <GlobalWizardDropTarget
         acceptFile={isImageDropFile}
-        onFiles={addFiles}
+        onFiles={(files) => void addFiles(files)}
       />
       <div className="cp-wizard">
         {/* Header */}
@@ -583,7 +594,7 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
                     onClick={() => fileInputRef.current?.click()}
                     onDragLeave={() => setDragging(false)}
                     onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-                    onDrop={(e) => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }}
+                    onDrop={(e) => { e.preventDefault(); setDragging(false); void addFiles(e.dataTransfer.files); }}
                     style={{ padding: "16px 20px" }}
                   >
                     <UserRound size={24} strokeWidth={1.4} />
@@ -598,7 +609,7 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
                     onClick={() => fileInputRef.current?.click()}
                     onDragLeave={() => setDragging(false)}
                     onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-                    onDrop={(e) => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }}
+                    onDrop={(e) => { e.preventDefault(); setDragging(false); void addFiles(e.dataTransfer.files); }}
                   >
                     <UserRound size={36} strokeWidth={1.2} />
                     <span>גרור תמונות לכאן או לחץ לבחירה</span>
@@ -617,7 +628,7 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
                   <div className="cp-upload-count">{images.length} תמונות</div>
                 </>
               )}
-              <input accept="image/*" hidden multiple onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }} ref={fileInputRef} type="file" />
+              <input accept={SUPPORTED_IMAGE_ACCEPT} hidden multiple onChange={(e) => { if (e.target.files) void addFiles(e.target.files); e.target.value = ""; }} ref={fileInputRef} type="file" />
             </div>
           )}
 
@@ -794,7 +805,7 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
                   <span>לחץ לבחירת תמונת רקע</span>
                 </button>
               )}
-              <input accept="image/*" hidden onChange={handleBgChange} ref={bgInputRef} type="file" />
+              <input accept={SUPPORTED_IMAGE_ACCEPT} hidden onChange={(event) => void handleBgChange(event)} ref={bgInputRef} type="file" />
             </div>
           )}
         </div>

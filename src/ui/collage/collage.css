@@ -47,6 +47,23 @@
 .wizard-field label { font-size: 13px; color: var(--text-secondary); }
 .wizard-field input[type=range] { accent-color: var(--accent); }
 .wizard-row { display: flex; align-items: center; gap: 8px; }
+.wizard-check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.wizard-check-row input { accent-color: var(--accent); }
+.wizard-warning {
+  margin: 0;
+  border: 1px solid color-mix(in oklab, var(--warning) 45%, transparent);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--warning) 14%, transparent);
+  color: var(--warning);
+  padding: 8px 10px;
+  font-size: 12px;
+}
 .wizard-complexity-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .wizard-presets-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 8px;
@@ -81,6 +98,33 @@
   color: var(--text-secondary); cursor: pointer; transition: var(--t);
 }
 .drop-zone.dragover { border-color: var(--accent); background: var(--accent-glow); }
+
+.batch-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.batch-group-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  padding: 12px;
+}
+
+.batch-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.batch-drop-zone {
+  padding: 18px;
+  min-height: 96px;
+}
 
 /* ─── Mini preview cards ─────────────────────────────── */
 .collage-mini-preview {
@@ -229,12 +273,50 @@
 .collage-layouts-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 .collage-layouts-sticky {
   position: sticky; top: 0; z-index: 5;
+  flex: 0 0 auto;
   display: flex; flex-direction: column; gap: 8px;
   padding: 8px; background: var(--bg-surface);
   border-bottom: 1px solid var(--border);
 }
 .collage-layouts-scroll { overflow-y: auto; flex: 1; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
 .btn-full { width: 100%; justify-content: center; }
+
+.collage-layout-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.collage-layout-tabs button {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  padding: 6px 8px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+.collage-layout-tabs button.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+
+.collage-empty-state {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
 
 .collage-shape-template-section {
   display: flex;
@@ -323,6 +405,8 @@
 }
 .wizard-input:focus { outline: none; border-color: var(--accent); }
 .wizard-divider { height: 1px; background: var(--border); margin: 4px 0; }
+.wizard-section-title { color: var(--text-secondary); font-size: 12px; font-weight: 700; margin-top: 4px; }
+.wizard-shape-template-grid { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); }
 
 /* ─── Custom size fields ─────────────────────────────── */
 .wizard-custom-size { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }

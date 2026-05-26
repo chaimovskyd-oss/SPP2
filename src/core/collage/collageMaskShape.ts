@@ -200,21 +200,15 @@ function applyMaskModeToImageData(
 
 function detectMaskMode(data: Uint8ClampedArray): CollageShapeTemplateMaskMode {
   let transparent = 0;
-  let samples = 0;
-  let edgeBrightness = 0;
   const pixelCount = data.length / 4;
   for (let i = 0; i < data.length; i += 4) {
     const a = data[i + 3] ?? 0;
     if (a < 245) transparent++;
   }
   if (transparent / Math.max(1, pixelCount) > 0.02) return "alpha";
-  const sampleCount = Math.min(pixelCount, 300);
-  for (let p = 0; p < sampleCount; p++) {
-    const i = Math.floor((p / sampleCount) * pixelCount) * 4;
-    edgeBrightness += ((data[i] ?? 0) + (data[i + 1] ?? 0) + (data[i + 2] ?? 0)) / 3;
-    samples++;
-  }
-  return edgeBrightness / Math.max(1, samples) > 128 ? "blackOnWhite" : "whiteOnBlack";
+  // In auto mode, opaque black/white artwork is treated as black ink on white
+  // paper: black is the collage area, white is the background.
+  return "blackOnWhite";
 }
 
 function extractAlpha(imageData: ImageData): Uint8Array {

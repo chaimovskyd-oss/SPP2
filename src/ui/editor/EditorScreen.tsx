@@ -126,9 +126,11 @@ import {
 } from "@/core";
 import { MASK_DIMENSION_LABELS, MASK_DIMENSION_UNITS, type MaskDimensionUnit } from "@/core/mask/maskDimensions";
 import { importImageAsset, createMaskAsset, resolveCanvasAssetPath } from "@/core/assets/assetManager";
+import { HEIC_CONVERSION_ERROR_MESSAGE, SUPPORTED_IMAGE_ACCEPT, isSupportedIncomingImageFile, normalizeIncomingImage, normalizeIncomingImages } from "@/core/image/normalizeIncomingImage";
 import { analyzeScreenshotCrop } from "@/core/image/screenshotCropDetector";
 import {
   applyScreenshotCropToAsset,
+  cropAssetBitmapDestructive,
   getAppliedScreenshotCrop,
   getEffectiveSourceSize,
   getScreenshotCropSuggestion,
@@ -137,6 +139,11 @@ import {
   type ScreenshotCropSuggestionMetadata
 } from "@/core/image/screenshotCropMetadata";
 import { measureTextLayerSize } from "@/core/text/measurement";
+import {
+  fitTextToPageBox,
+  getTextFitSafeRect,
+  type SmartTextFitMode
+} from "@/core/text/smartTextFit";
 import {
   BUILTIN_TEXT_PRESETS,
   createTextPresetFromLayer,
@@ -158,7 +165,7 @@ import { ImageEditFloatingBar } from "./ImageEditFloatingBar";
 import { CropUI } from "./CropUI";
 import { useViewportStore, type ViewportStore } from "@/state/viewportStore";
 import type { Asset, Document } from "@/types/document";
-import type { BlendMode, FrameLayer, ImageLayer, ImageLayerEffects, VisualLayer } from "@/types/layers";
+import type { BlendMode, FrameLayer, ImageLayer, ImageLayerEffects, TextLayer, VisualLayer } from "@/types/layers";
 import { DEFAULT_IMAGE_LAYER_EFFECTS } from "@/types/layers";
 import type { GridLayoutRule } from "@/types/grid";
 import type { MaskLayoutRule } from "@/types/mask";
@@ -200,7 +207,6 @@ import { CanvasStage } from "./CanvasStage";
 import { EditorStatusBar } from "./EditorStatusBar";
 import { ColorPanel } from "./ColorPanel";
 import { CanvasErrorBoundary } from "./CanvasErrorBoundary";
-import { CollageGridOverlay } from "./CollageGridOverlay";
 import { renderTextToAlphaCanvas } from "./warpText";
 import type { CanvasContextMenuTarget } from "./KonvaLayerNode";
 import { isImageEditorAvailable, openImageEditorForAsset } from "@/services/imageEditorService";
@@ -219,9 +225,11 @@ import { useProjectLifecycleStore } from "@/state/projectLifecycleStore";
 import { CollageModePanel } from "@/ui/collage/CollageModePanel";
 import { PhotoPrintModePanel } from "@/ui/photoPrint/PhotoPrintModePanel";
 import { ClassPhotoModePanel } from "@/ui/classPhoto/ClassPhotoModePanel";
+import { BlessingModePanel } from "@/ui/blessing/BlessingModePanel";
 import { ProductDefinitionPanel } from "./panels/ProductDefinitionPanel";
 import { useProductStore } from "@/state/productStore";
 import { regeneratePhotoPrint } from "@/core/photoPrint/photoPrintModeEngine";
+import { resolvePassportRequirementForRule } from "@/core/passport/passportRequirements";
 import type { PhotoPrintRule } from "@/types/photoPrint";
 import { CollageLayoutsPanel } from "@/ui/collage/CollageLayoutsPanel";
 import { UtilitiesMenu } from "@/ui/utilities/UtilitiesMenu";
@@ -340,6 +348,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const [collageSwapSourceSlotId, setCollageSwapSourceSlotId] = useState<string | null>(null);
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [status, setStatus] = useState("שמירה אוטומטית מוכנה");
+  const [collageTemplateToast, setCollageTemplateToast] = useState<string | null>(null);
   const [statusBarUnit, setStatusBarUnit] = useState<Unit>("cm");
   const lastAutosaveWarningRef = useRef(0);
   const autosaveMetricsRef = useRef({ pagesCount: 0, assetsCount: 0 });
@@ -376,6 +385,13 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
       }
     })
   );
+
+  useEffect(() => {
+    if (collageTemplateToast === null) return;
+    const timer = window.setTimeout(() => setCollageTemplateToast(null), 2600);
+    return () => window.clearTimeout(timer);
+  }, [collageTemplateToast]);
+
   const [canvasContextMenu, setCanvasContextMenu] = useState<CanvasContextMenuTarget | null>(null);
   const [layerContextMenu, setLayerContextMenu] = useState<{ layerId: string; screenX: number; screenY: number } | null>(null);
   const [effectsClipboard, setEffectsClipboard] = useState<LayerEffectsClipboard | null>(null);
@@ -404,7 +420,6 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const [dismissedScreenshotCropAssetIds, setDismissedScreenshotCropAssetIds] = useState<Set<string>>(() => new Set());
   const [projectScreenshotCropMuted, setProjectScreenshotCropMuted] = useState(false);
   const [screenshotCropReviewOpen, setScreenshotCropReviewOpen] = useState(false);
-  const [dynamicGridMode, setDynamicGridMode] = useState(false);
   const utilSettings = useUtilitiesSettings();
   const shortcutSettings = useAppSettings((state) => state.settings.shortcuts.shortcuts);
   const performanceSettings = useAppSettings((state) => state.settings.performance);
@@ -529,12 +544,23 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     if (!document || !isClassPhotoMode || !activePage) return null;
     return document.classPhotoRules.find((r) => r.pageId === activePage.id) ?? document.classPhotoRules[0] ?? null;
   }, [document, isClassPhotoMode, activePage]);
+  const isBlessingMode = document?.metadata["mode"] === "blessing";
+  const activeBlessingRule = useMemo(() => {
+    if (!document || !isBlessingMode || !activePage) return null;
+    return document.blessingRules.find((r) => r.pageId === activePage.id) ?? document.blessingRules[0] ?? null;
+  }, [document, isBlessingMode, activePage]);
   const activePhotoPrintRule = useMemo((): PhotoPrintRule | null => {
     if (!document || !isPhotoPrintMode) return null;
     const ruleId = document.metadata["activePhotoPrintId"];
     if (typeof ruleId !== "string") return document.photoPrintRules[0] ?? null;
     return document.photoPrintRules.find((r) => r.id === ruleId) ?? null;
   }, [document, isPhotoPrintMode]);
+  const passportGuidelinesEnabled = useMemo(
+    () => activePhotoPrintRule !== null &&
+      resolvePassportRequirementForRule(activePhotoPrintRule) !== null &&
+      (activePhotoPrintRule.showPassportGuidelines ?? true),
+    [activePhotoPrintRule]
+  );
 
   function switchPageFromUi(pageId: string, source: string): void {
     markDebugEvent("page-switch:intent", {
@@ -867,7 +893,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
           if (hasSelection) handleCopySelectedLayers();
           break;
         case "paste":
-          handlePasteLayers();
+          void handlePasteLayers();
           break;
         case "cut":
           if (hasSelection) handleCutSelectedLayers();
@@ -1339,6 +1365,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
       invert: false,
       metadata: { savedFromCanvas: true }
     });
+    setCollageTemplateToast(`התבנית "${input.name.trim() || "קולאג'"}" נשמרה לספריית הקולאג'`);
     setStatus("נשמר כתבנית קולאג'");
   }
 
@@ -1919,33 +1946,41 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
         setStatus("לא נמצאו שוליים שחורים משמעותיים בתמונה הזו.");
         return;
       }
-      const suggestion: ScreenshotCropSuggestionMetadata = {
-        ...analysis,
-        originalWidth: asset.width ?? image.naturalWidth,
-        originalHeight: asset.height ?? image.naturalHeight
-      };
+      const croppedAsset = await cropAssetBitmapDestructive(asset, image, analysis.cropRect);
+      const newAspect = croppedAsset.width !== undefined && croppedAsset.height !== undefined && croppedAsset.height > 0
+        ? croppedAsset.width / croppedAsset.height
+        : 1;
       applyDocumentChange(
         "ApplyManualSmartScreenshotCropCommand",
         (doc) => ({
           ...doc,
-          assets: doc.assets.map((item) =>
-            item.id === asset.id
-              ? applyScreenshotCropToAsset(
-                  {
-                    ...item,
-                    metadata: {
-                    ...item.metadata,
-                      screenshotCropSuggestion: suggestion as unknown as import("@/types/primitives").JsonValue
-                    }
-                  },
-                  suggestion
-                )
-              : item
-          )
+          assets: doc.assets.map((item) => item.id === asset.id ? croppedAsset : item),
+          pages: doc.pages.map((page) => ({
+            ...page,
+            layers: page.layers.map((layer) => {
+              if (layer.type === "image" && layer.assetId === asset.id) {
+                const nextHeight = Math.max(1, layer.width / newAspect);
+                return {
+                  ...layer,
+                  height: nextHeight,
+                  crop: { x: 0, y: 0, width: 1, height: 1 }
+                };
+              }
+              if (layer.type === "frame" && layer.imageAssetId === asset.id) {
+                // Frame size is layout-managed; just reset crop so the cropped
+                // bitmap fills via the layer's existing fitMode without stretching.
+                return {
+                  ...layer,
+                  crop: { x: 0, y: 0, width: 1, height: 1 }
+                };
+              }
+              return layer;
+            })
+          }))
         }),
         currentPage.id
       );
-      setStatus("השוליים השחורים נחתכו בצורה לא הרסנית");
+      setStatus("השוליים השחורים נחתכו בלי לעוות את התמונה");
     } catch {
       setStatus("לא ניתן לנתח את התמונה לחיתוך שוליים");
     }
@@ -2009,7 +2044,8 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   }
 
   async function handleImageFiles(files: FileList | File[], targetFrameId?: string): Promise<void> {
-    const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
+    const { files: imageFiles, failed } = await normalizeIncomingImages(Array.from(files).filter(isSupportedIncomingImageFile));
+    if (failed.length > 0) setStatus(HEIC_CONVERSION_ERROR_MESSAGE);
     if (!confirmLargeFiles(imageFiles)) {
       setStatus("Image import cancelled");
       return;
@@ -2108,7 +2144,14 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     if (selectedLayer.type !== "image" && selectedLayer.type !== "frame") return;
 
     if (!confirmLargeFiles([file])) return;
-    const { asset } = await importImageAssetForEditor(file, currentDocument.assets, { createPreview: true });
+    let normalizedFile: File;
+    try {
+      normalizedFile = await normalizeIncomingImage(file);
+    } catch {
+      setStatus(HEIC_CONVERSION_ERROR_MESSAGE);
+      return;
+    }
+    const { asset } = await importImageAssetForEditor(normalizedFile, currentDocument.assets, { createPreview: true });
     addAsset(asset);
 
     if (selectedLayer.type === "image") {
@@ -2644,28 +2687,100 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     return pasted;
   }
 
+  function applySmartTextFitToLayer(layerId: string, mode: SmartTextFitMode): void {
+    const layer = currentPage.layers.find((item): item is TextLayer => item.id === layerId && item.type === "text");
+    if (layer === undefined) {
+      return;
+    }
+
+    const result = fitTextToPageBox(layer, currentPage, mode);
+    applyDocumentChange(
+      "SmartTextFitCommand",
+      (doc) => ({
+        ...doc,
+        pages: doc.pages.map((docPage) =>
+          docPage.id === currentPage.id
+            ? { ...docPage, layers: docPage.layers.map((item) => (item.id === result.layer.id ? result.layer : item)) }
+            : docPage
+        )
+      }),
+      currentPage.id
+    );
+    setSelection([result.layer.id]);
+    const labels: Record<SmartTextFitMode, string> = {
+      balanced: "התאמה מלאה",
+      shrink: "התאמה חלקית",
+      wrap: "פריסת שורות"
+    };
+    setStatus(result.overflows ? `${labels[mode]} בוצעה ככל האפשר, אבל הטקסט עדיין ארוך מדי` : `${labels[mode]} בוצעה`);
+  }
+
   function handleCopySelectedLayers(): void {
     if (selectedLayers.length === 0) return;
     setLayerClipboard(selectedLayers.map((layer) => structuredClone(layer) as VisualLayer));
     setStatus("Selection copied");
   }
 
-  function handlePasteLayers(): void {
-    if (layerClipboard === null || layerClipboard.length === 0) return;
+  async function handlePasteLayers(): Promise<void> {
+    if (layerClipboard !== null && layerClipboard.length > 0) {
+      const maxZIndex = Math.max(0, ...currentPage.layers.map((layer) => layer.zIndex));
+      const clones = layerClipboard.map((layer, index) => cloneLayerForPaste(layer, index, maxZIndex));
+      applyDocumentChange(
+        "PasteLayersCommand",
+        (doc) => ({
+          ...doc,
+          pages: doc.pages.map((page) =>
+            page.id === currentPage.id ? { ...page, layers: [...page.layers, ...clones] } : page
+          )
+        }),
+        currentPage.id
+      );
+      setSelection(clones.map((layer) => layer.id));
+      setStatus("Selection pasted");
+      return;
+    }
+
+    if (isEditableShortcutTarget(window.document.activeElement)) return;
+    const text = await navigator.clipboard?.readText().catch(() => "");
+    const trimmedText = text?.trim();
+    if (!trimmedText) return;
+
     const maxZIndex = Math.max(0, ...currentPage.layers.map((layer) => layer.zIndex));
-    const clones = layerClipboard.map((layer, index) => cloneLayerForPaste(layer, index, maxZIndex));
+    const starter = createStarterTextLayer(currentPage.width, currentPage.height) as TextLayer;
+    const draftLayer: TextLayer = {
+      ...starter,
+      id: crypto.randomUUID(),
+      name: "טקסט מודבק",
+      text,
+      color: useColorStore.getState().currentColor,
+      zIndex: maxZIndex + 1,
+      overflowPolicy: "auto_shrink"
+    };
+    const safeRect = getTextFitSafeRect(currentPage);
+    const pastedTextIsLong = trimmedText.length >= 80;
+    const initialWidth = pastedTextIsLong ? Math.round(safeRect.width * 0.82) : draftLayer.width;
+    const size = measureTextLayerSize({ ...draftLayer, width: initialWidth });
+    const initialHeight = pastedTextIsLong ? Math.min(safeRect.height, Math.max(80, size.height)) : size.height;
+    const layer: TextLayer = {
+      ...draftLayer,
+      width: pastedTextIsLong ? initialWidth : size.width,
+      height: initialHeight,
+      x: Math.round(safeRect.x + (safeRect.width - (pastedTextIsLong ? initialWidth : size.width)) / 2),
+      y: Math.round(safeRect.y + (safeRect.height - initialHeight) / 2)
+    };
     applyDocumentChange(
-      "PasteLayersCommand",
+      "PasteTextLayerCommand",
       (doc) => ({
         ...doc,
         pages: doc.pages.map((page) =>
-          page.id === currentPage.id ? { ...page, layers: [...page.layers, ...clones] } : page
+          page.id === currentPage.id ? { ...page, layers: [...page.layers, layer] } : page
         )
       }),
       currentPage.id
     );
-    setSelection(clones.map((layer) => layer.id));
-    setStatus("Selection pasted");
+    setSelection([layer.id]);
+    setTool("text");
+    setStatus("הטקסט הודבק כשכבה חדשה");
   }
 
   function handleCutSelectedLayers(): void {
@@ -3119,7 +3234,8 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     if (selectedLayer?.type !== "text") return;
     const nextLayer = { ...selectedLayer, text };
     const size = measureTextLayerSize(nextLayer);
-    updateLayer(currentPage.id, { ...nextLayer, width: size.width, height: size.height });
+    const updatedLayer = { ...nextLayer, width: size.width, height: size.height };
+    updateLayer(currentPage.id, updatedLayer);
   }
 
   function handleImageEditApply(): void {
@@ -3280,6 +3396,33 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
           })()
         : null;
 
+    // For frame quick-edit patches (metadata.imageEditParams), compute a per-key
+    // delta vs the primary layer's previous params. Applying { ...layer, ...patch }
+    // would overwrite each other selected frame's entire metadata with the primary's,
+    // wiping their collageColorAdj / collageFrame / per-frame settings.
+    const patchMeta = (patch as { metadata?: Record<string, unknown> }).metadata;
+    const editParamsDelta: { setKeys: Record<string, unknown>; removeKeys: string[] } | null =
+      patchMeta !== undefined && Object.prototype.hasOwnProperty.call(patchMeta, "imageEditParams") && selectedLayer.type === "frame"
+        ? (() => {
+            const origParams = (selectedLayer.metadata["imageEditParams"] ?? {}) as Record<string, unknown>;
+            const newParams = (patchMeta["imageEditParams"] ?? {}) as Record<string, unknown>;
+            const setKeys: Record<string, unknown> = {};
+            const removeKeys: string[] = [];
+            const allKeys = new Set<string>([...Object.keys(origParams), ...Object.keys(newParams)]);
+            for (const key of allKeys) {
+              const before = origParams[key];
+              const after = newParams[key];
+              if (before === after) continue;
+              if (key in newParams) {
+                setKeys[key] = after;
+              } else {
+                removeKeys.push(key);
+              }
+            }
+            return { setKeys, removeKeys };
+          })()
+        : null;
+
     applyDocumentChange(
       `UpdateMultiLayerPatch(${matchingLayers.length})`,
       (doc) => ({
@@ -3295,6 +3438,18 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                     return {
                       ...layer,
                       effects: { ...(layer as Extract<VisualLayer, { type: "image" }>).effects, ...effectsDelta }
+                    } as VisualLayer;
+                  }
+                  if (editParamsDelta !== null && layer.type === "frame") {
+                    const ownParams = { ...((layer.metadata["imageEditParams"] ?? {}) as Record<string, unknown>) };
+                    for (const [k, v] of Object.entries(editParamsDelta.setKeys)) ownParams[k] = v;
+                    for (const k of editParamsDelta.removeKeys) delete ownParams[k];
+                    return {
+                      ...layer,
+                      metadata: {
+                        ...layer.metadata,
+                        imageEditParams: ownParams as unknown as import("@/types/primitives").JsonValue
+                      }
                     } as VisualLayer;
                   }
                   if (layer.type === "text") {
@@ -3347,7 +3502,8 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     if (!activeClassPhotoRule) return;
     const { createClassPhotoPersonRecord: makeRecord } = await import("@/core/classPhoto/classPhotoFactory");
     const { addPeopleToClassPhoto } = useDocumentStore.getState();
-    const fileArr = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    const { files: fileArr, failed } = await normalizeIncomingImages(Array.from(files).filter(isSupportedIncomingImageFile));
+    if (failed.length > 0) setStatus(HEIC_CONVERSION_ERROR_MESSAGE);
     const imported: import("@/types/document").Asset[] = [];
     const newRecords: import("@/types/classPhoto").ClassPhotoPersonRecord[] = [];
     const maxOrder = activeClassPhotoRule.personRecords.reduce((m, r) => Math.max(m, r.orderIndex), -1);
@@ -3600,14 +3756,16 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
             <span />
             Free Mode
           </span>
-          <button
-            className={`btn btn-ghost ${layoutEditMode ? "btn-accent" : ""}`}
-            onClick={toggleLayoutEditMode}
-            title="מצב עריכת פריסה — מאפשר הזזה ושינוי גודל של פריימים"
-            type="button"
-          >
-            {layoutEditMode ? "✏️ עריכת פריסה פעילה" : "עריכת פריסה"}
-          </button>
+          {!isMaskMode && (
+            <button
+              className={`btn btn-ghost ${layoutEditMode ? "btn-accent" : ""}`}
+              onClick={toggleLayoutEditMode}
+              title="מצב עריכת פריסה — מאפשר הזזה ושינוי גודל של פריימים"
+              type="button"
+            >
+              {layoutEditMode ? "✏️ עריכת פריסה פעילה" : "עריכת פריסה"}
+            </button>
+          )}
           <span className="topbar-divider" />
           <button className="icon-btn" disabled={selectedLayerIds.length === 0} onClick={() => handleAlign("left")} title="Align left" type="button">
             <AlignLeft size={15} />
@@ -3865,6 +4023,11 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
           }
         }}
         onPatch={patchSelectedLayer}
+        onSmartTextFit={(mode) => {
+          if (selectedLayer?.type === "text") {
+            applySmartTextFitToLayer(selectedLayer.id, mode);
+          }
+        }}
         onToggleGrid={viewport.toggleGrid}
         onToggleSnap={viewport.toggleSnap}
       />
@@ -3875,20 +4038,22 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
             <ToolButton active={tool === "move"} icon={MousePointer2} label="הזזה" onClick={() => setTool("move")} testId="tool-move" />
             <ToolButton active={tool === "text"} icon={Type} label="טקסט" onClick={handleAddText} testId="tool-text" />
             <ToolButton active={tool === "image"} icon={ImagePlus} label="תמונה" onClick={() => imageInputRef.current?.click()} testId="tool-image" />
-            <ToolButton
-              active={layoutEditMode}
-              icon={Frame}
-              label="עריכת פריסה"
-              onClick={toggleLayoutEditMode}
-              testId="tool-layout-edit"
-            />
+            {!isMaskMode && (
+              <ToolButton
+                active={layoutEditMode}
+                icon={Frame}
+                label="עריכת פריסה"
+                onClick={toggleLayoutEditMode}
+                testId="tool-layout-edit"
+              />
+            )}
             {isCollageMode && (
               <ToolButton
-                active={dynamicGridMode}
+                active={layoutEditMode}
                 icon={LayoutGrid}
-                label="גריד דינמי"
-                onClick={() => setDynamicGridMode((v) => !v)}
-                testId="tool-dynamic-grid"
+                label="קווי חלוקה"
+                onClick={toggleLayoutEditMode}
+                testId="tool-collage-layout-edit"
               />
             )}
             {isClassPhotoMode && (
@@ -4047,6 +4212,13 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
               page={currentPage}
               selectedLayerIds={selectedLayerIds}
               selectedLayerId={selectedLayerId}
+              passportGuidelinesEnabled={passportGuidelinesEnabled}
+              collageLayoutRule={isCollageMode && layoutEditMode ? activeCollageRule : null}
+              onUpdateCollageSlots={
+                activeCollageRule !== null
+                  ? (newSlots) => updateCollageCachedSlots(activeCollageRule.id, newSlots)
+                  : undefined
+              }
               hoveredLayerId={hoveredLayerId}
               stageRef={stageRef}
               onBeginTextEdit={(layerId) => {
@@ -4094,15 +4266,6 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
               מצב החלפה — לחץ על נקודה כחולה בתמונה שנייה להחלפה | Esc לביטול
             </div>
           )}
-          {/* Dynamic collage grid overlay */}
-          {isCollageMode && dynamicGridMode && activeCollageRule !== null && (
-            <CollageGridOverlay
-              rule={activeCollageRule}
-              page={currentPage}
-              viewport={viewport}
-              onUpdateSlots={(newSlots) => updateCollageCachedSlots(activeCollageRule.id, newSlots)}
-            />
-          )}
           <div className="drop-hint">גרור תמונות אל הקנבס או לחץ על כלי התמונה</div>
           {fileDropActive ? (
             <div className="canvas-file-drop-overlay">
@@ -4139,6 +4302,11 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
               }}
               onReview={() => setScreenshotCropReviewOpen(true)}
             />
+          ) : null}
+          {collageTemplateToast !== null ? (
+            <div className="collage-template-toast" role="status" dir="rtl">
+              {collageTemplateToast}
+            </div>
           ) : null}
           {screenshotCropReviewOpen ? (
             <ScreenshotCropReviewPanel
@@ -4230,6 +4398,18 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
               onTextDirectionLtr={() => updateCanvasMenuTextLayer(canvasContextMenu, (layer) => ({ ...layer, direction: "ltr" }), "Text direction set to LTR")}
               onTextIncreaseSize={() => updateCanvasMenuTextLayer(canvasContextMenu, (layer) => ({ ...layer, fontSize: Math.min(240, layer.fontSize + 4) }), "Text size increased")}
               onTextDecreaseSize={() => updateCanvasMenuTextLayer(canvasContextMenu, (layer) => ({ ...layer, fontSize: Math.max(8, layer.fontSize - 4) }), "Text size decreased")}
+              onTextSmartFitFull={() => {
+                applySmartTextFitToLayer(canvasContextMenu.layerId, "balanced");
+                setCanvasContextMenu(null);
+              }}
+              onTextSmartFitPartial={() => {
+                applySmartTextFitToLayer(canvasContextMenu.layerId, "shrink");
+                setCanvasContextMenu(null);
+              }}
+              onTextSmartFitWrap={() => {
+                applySmartTextFitToLayer(canvasContextMenu.layerId, "wrap");
+                setCanvasContextMenu(null);
+              }}
               onTextStrokeWhite={() => applyQuickTextStroke(canvasContextMenu, "#ffffff")}
               onTextStrokeBlack={() => applyQuickTextStroke(canvasContextMenu, "#000000")}
               onTextShadowSoft={() => applyQuickTextShadow(canvasContextMenu, "soft")}
@@ -4436,6 +4616,16 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
             </div>
           ) : null}
 
+          {isBlessingMode && activeBlessingRule !== null ? (
+            <div className="rs-mode-section">
+              <div className="rs-mode-label"><SlidersHorizontal size={11} />מצב ברכות</div>
+              <BlessingModePanel
+                rule={activeBlessingRule}
+                selectedLayer={selectedLayer}
+              />
+            </div>
+          ) : null}
+
           {/* Contextual inspector body */}
           <div className="rs-body">
             {selectedLayer === null ? (
@@ -4637,10 +4827,10 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
         </div>
       </footer>
 
-      <input ref={imageInputRef} accept="image/*" hidden multiple onChange={handleImageInput} type="file" />
-      <input ref={replaceImageInputRef} accept="image/*" hidden onChange={(e) => void handleReplaceImageInput(e)} type="file" />
+      <input ref={imageInputRef} accept={SUPPORTED_IMAGE_ACCEPT} hidden multiple onChange={handleImageInput} type="file" />
+      <input ref={replaceImageInputRef} accept={SUPPORTED_IMAGE_ACCEPT} hidden onChange={(e) => void handleReplaceImageInput(e)} type="file" />
       <input ref={projectInputRef} accept=".json,.spp.json,.spp" hidden onChange={(event) => void handleProjectLoadLifecycle(event)} type="file" />
-      <input ref={classPhotoAddInputRef} accept="image/*" hidden multiple onChange={(e) => { if (e.target.files) void handleClassPhotoAddFiles(e.target.files); e.target.value = ""; }} type="file" />
+      <input ref={classPhotoAddInputRef} accept={SUPPORTED_IMAGE_ACCEPT} hidden multiple onChange={(e) => { if (e.target.files) void handleClassPhotoAddFiles(e.target.files); e.target.value = ""; }} type="file" />
 
       {showFontsBrowser && (
         <div className="util-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowFontsBrowser(false); }}>
@@ -4932,6 +5122,7 @@ function ContextToolbar({
   onNotify,
   onPasteTextStyle,
   onPatch,
+  onSmartTextFit,
   onToggleGrid,
   onToggleSnap
 }: {
@@ -4969,6 +5160,7 @@ function ContextToolbar({
   onNotify: (message: string) => void;
   onPasteTextStyle: () => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
+  onSmartTextFit: (mode: SmartTextFitMode) => void;
   onToggleGrid: () => void;
   onToggleSnap: () => void;
 }): ReactElement {
@@ -5004,6 +5196,7 @@ function ContextToolbar({
         onNotify={onNotify}
         onPasteTextStyle={onPasteTextStyle}
         onPatch={onPatch}
+        onSmartTextFit={onSmartTextFit}
       />
     );
   }
@@ -5146,7 +5339,8 @@ function TextContextToolbar({
   onMoveLayer,
   onNotify,
   onPasteTextStyle,
-  onPatch
+  onPatch,
+  onSmartTextFit
 }: {
   hasTextStyleClipboard: boolean;
   layer: Extract<VisualLayer, { type: "text" }>;
@@ -5159,6 +5353,7 @@ function TextContextToolbar({
   onNotify: (message: string) => void;
   onPasteTextStyle: () => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
+  onSmartTextFit: (mode: SmartTextFitMode) => void;
 }): ReactElement {
   const glow = layer.effects.find((effect) => effect.effectType === "outer_glow");
   const pattern = layer.effects.find((effect) => effect.effectType === "pattern_overlay");
@@ -5210,19 +5405,26 @@ function TextContextToolbar({
     onNotify(`הפריסט "${preset.name}" נמחק`);
   }
 
-  function uploadPatternImage(file: File | undefined): void {
+  async function uploadPatternImage(file: File | undefined): Promise<void> {
     if (file === undefined || pattern === undefined) return;
+    let normalizedFile: File;
+    try {
+      normalizedFile = await normalizeIncomingImage(file);
+    } catch {
+      onNotify(HEIC_CONVERSION_ERROR_MESSAGE);
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result !== "string") return;
       patchTextEffect(pattern, "pattern_overlay", {
         patternType: "uploaded_image",
         imageDataUrl: reader.result,
-        imageName: file.name,
+        imageName: normalizedFile.name,
         opacity: Math.max(0.2, Number((pattern.params as Record<string, unknown>)["opacity"] ?? 0.65))
       });
     };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(normalizedFile);
   }
 
   return (
@@ -5255,6 +5457,19 @@ function TextContextToolbar({
         <CompactRange label="Layer" max={1} min={0} step={0.01} value={layer.opacity} onChange={(value) => onPatch({ opacity: value } as Partial<VisualLayer>)} />
         <BlendModeSelect value={layer.blendMode} onChange={(blendMode) => onPatch({ blendMode } as Partial<VisualLayer>)} />
       </div>
+      <ToolbarMenu label="ארגון חכם" title="התאמת טקסט לקנבס">
+        <div className="context-menu-actions">
+          <button className="context-menu-button" onClick={() => onSmartTextFit("balanced")} type="button">
+            <Maximize2 size={13} /> התאמה מלאה
+          </button>
+          <button className="context-menu-button" onClick={() => onSmartTextFit("shrink")} type="button">
+            <Type size={13} /> התאמה חלקית
+          </button>
+          <button className="context-menu-button" onClick={() => onSmartTextFit("wrap")} type="button">
+            <AlignJustify size={13} /> פריסת שורות
+          </button>
+        </div>
+      </ToolbarMenu>
       <ToolbarMenu label="Presets" title="פריסטים לטקסט">
         <div className="context-menu-actions">
           <button className="context-menu-button" onClick={onCopyTextStyle} type="button"><Copy size={13} /> Copy FX</button>
@@ -5288,7 +5503,7 @@ function TextContextToolbar({
       </ToolbarMenu>
       <ToolbarMenu label="Pattern" title="תבנית בתוך הטקסט">
         <label className="check-line"><input checked={pattern?.enabled === true} onChange={(event) => event.target.checked ? patchTextEffect(pattern, "pattern_overlay", { patternType: "diagonal_shine", foreground: "#ffffff", opacity: 0.35, scale: 1, rotation: -18, spacing: 14 }) : removeTextEffect(pattern)} type="checkbox" /> הפעלה</label>
-        {pattern?.enabled === true ? <><select className="context-select full" onChange={(event) => patchTextEffect(pattern, "pattern_overlay", { patternType: event.target.value })} value={String((pattern.params as Record<string, unknown>)["patternType"] ?? "stripes")}><option value="stripes">Stripes</option><option value="dots">Dots</option><option value="checker">Checker</option><option value="diagonal_shine">Shine</option><option value="noise">Noise</option><option value="halftone">Halftone</option><option value="brushed_metal">Brushed metal</option><option value="uploaded_image">Uploaded image</option></select><label className="context-upload-button"><ImagePlus size={13} /> Upload pattern<input accept="image/*" type="file" onChange={(event) => uploadPatternImage(event.target.files?.[0])} /></label>{typeof (pattern.params as Record<string, unknown>)["imageName"] === "string" ? <span className="context-menu-section-label">{String((pattern.params as Record<string, unknown>)["imageName"])}</span> : null}<input className="context-color wide" onChange={(event) => patchTextEffect(pattern, "pattern_overlay", { foreground: event.target.value })} type="color" value={String((pattern.params as Record<string, unknown>)["foreground"] ?? "#ffffff")} /><SliderField label="מרווח" min={4} max={40} value={Number((pattern.params as Record<string, unknown>)["spacing"] ?? 10)} onChange={(value) => patchTextEffect(pattern, "pattern_overlay", { spacing: value })} unit=" px" /><SliderField label="זווית" min={-90} max={90} value={Number((pattern.params as Record<string, unknown>)["rotation"] ?? 0)} onChange={(value) => patchTextEffect(pattern, "pattern_overlay", { rotation: value })} unit="°" /><SliderField label="שקיפות" min={0} max={1} step={0.01} decimals={2} value={Number((pattern.params as Record<string, unknown>)["opacity"] ?? pattern.opacity)} onChange={(value) => patchTextEffect(pattern, "pattern_overlay", { opacity: value })} /><label className="context-menu-section-label" style={{ marginTop: 6 }}>החל על</label><select className="context-select full" value={String((pattern.params as Record<string, unknown>)["applyTo"] ?? "fill_only")} onChange={(event) => patchTextEffect(pattern, "pattern_overlay", { applyTo: event.target.value })}><option value="fill_only">מילוי בלבד</option><option value="stroke_only">קו מתאר בלבד</option><option value="all">הכל</option></select></> : null}
+        {pattern?.enabled === true ? <><select className="context-select full" onChange={(event) => patchTextEffect(pattern, "pattern_overlay", { patternType: event.target.value })} value={String((pattern.params as Record<string, unknown>)["patternType"] ?? "stripes")}><option value="stripes">Stripes</option><option value="dots">Dots</option><option value="checker">Checker</option><option value="diagonal_shine">Shine</option><option value="noise">Noise</option><option value="halftone">Halftone</option><option value="brushed_metal">Brushed metal</option><option value="uploaded_image">Uploaded image</option></select><label className="context-upload-button"><ImagePlus size={13} /> Upload pattern<input accept={SUPPORTED_IMAGE_ACCEPT} type="file" onChange={(event) => void uploadPatternImage(event.target.files?.[0])} /></label>{typeof (pattern.params as Record<string, unknown>)["imageName"] === "string" ? <span className="context-menu-section-label">{String((pattern.params as Record<string, unknown>)["imageName"])}</span> : null}<input className="context-color wide" onChange={(event) => patchTextEffect(pattern, "pattern_overlay", { foreground: event.target.value })} type="color" value={String((pattern.params as Record<string, unknown>)["foreground"] ?? "#ffffff")} /><SliderField label="מרווח" min={4} max={40} value={Number((pattern.params as Record<string, unknown>)["spacing"] ?? 10)} onChange={(value) => patchTextEffect(pattern, "pattern_overlay", { spacing: value })} unit=" px" /><SliderField label="זווית" min={-90} max={90} value={Number((pattern.params as Record<string, unknown>)["rotation"] ?? 0)} onChange={(value) => patchTextEffect(pattern, "pattern_overlay", { rotation: value })} unit="°" /><SliderField label="שקיפות" min={0} max={1} step={0.01} decimals={2} value={Number((pattern.params as Record<string, unknown>)["opacity"] ?? pattern.opacity)} onChange={(value) => patchTextEffect(pattern, "pattern_overlay", { opacity: value })} /><label className="context-menu-section-label" style={{ marginTop: 6 }}>החל על</label><select className="context-select full" value={String((pattern.params as Record<string, unknown>)["applyTo"] ?? "fill_only")} onChange={(event) => patchTextEffect(pattern, "pattern_overlay", { applyTo: event.target.value })}><option value="fill_only">מילוי בלבד</option><option value="stroke_only">קו מתאר בלבד</option><option value="all">הכל</option></select></> : null}
       </ToolbarMenu>
       <ToolbarMenu label="3D" title="תלת ממד ותבליט">
         <label className="check-line"><input checked={extrude?.enabled === true} onChange={(event) => event.target.checked ? patchTextEffect(extrude, "extrude_3d", { color: "#333333", depth: 12, offsetX: 1, offsetY: 1, steps: 12, opacity: 0.85 }) : removeTextEffect(extrude)} type="checkbox" /> Extrude</label>
@@ -7364,14 +7579,20 @@ function MaskModePanel({
   onResetCrops: () => void;
   onChangePreset: (entry: import("@/state/maskLibraryStore").MaskLibraryEntry) => void;
 }): ReactElement {
+  const initialSpacingMM = typeof rule.spacingMM === "number" ? rule.spacingMM : pxToMm(Math.max(rule.spacingX, rule.spacingY), dpi);
   const [maskWidth, setMaskWidth] = useState(rule.maskWidth);
   const [maskHeight, setMaskHeight] = useState(rule.maskHeight);
-  const [spacingX, setSpacingX] = useState(rule.spacingX);
-  const [spacingY, setSpacingY] = useState(rule.spacingY);
+  const [spacingMM, setSpacingMM] = useState<number>(initialSpacingMM);
+  const [spacingUnit, setSpacingUnit] = useState<"mm" | "cm" | "inch">(rule.spacingUnit === "cm" || rule.spacingUnit === "inch" ? rule.spacingUnit : "mm");
+  const [spacingDraft, setSpacingDraft] = useState("");
   const [maskUnit, setMaskUnit] = useState<MaskDimensionUnit>("mm");
   const [widthDraft, setWidthDraft] = useState("");
   const [heightDraft, setHeightDraft] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const maskStyle: import("@/types/mask").MaskStyle = rule.maskStyle ?? {
+    border: { enabled: false, color: "#1f2937", widthMm: 1 },
+    shadow: { enabled: false, color: "#000000", blur: 12, opacity: 0.35, offsetX: 0, offsetY: 4 }
+  };
   const libraryEntries = useMaskLibraryStore((s) => s.entries);
   const selectedIsMaskFrame = selectedLayer?.type === "frame" && selectedLayer.metadata["maskFrame"] !== undefined;
   const selectedIsText = selectedLayer?.type === "text";
@@ -7386,14 +7607,30 @@ function MaskModePanel({
   useEffect(() => {
     setMaskWidth(rule.maskWidth);
     setMaskHeight(rule.maskHeight);
-    setSpacingX(rule.spacingX);
-    setSpacingY(rule.spacingY);
-  }, [rule.id, rule.maskWidth, rule.maskHeight, rule.spacingX, rule.spacingY]);
+    const nextMM = typeof rule.spacingMM === "number" ? rule.spacingMM : pxToMm(Math.max(rule.spacingX, rule.spacingY), dpi);
+    setSpacingMM(nextMM);
+  }, [dpi, rule.id, rule.maskWidth, rule.maskHeight, rule.spacingMM, rule.spacingX, rule.spacingY]);
 
   useEffect(() => {
     setWidthDraft(formatDimension(pxToUnit(maskWidth, maskUnit, dpi), maskUnit));
     setHeightDraft(formatDimension(pxToUnit(maskHeight, maskUnit, dpi), maskUnit));
   }, [dpi, maskUnit, maskWidth, maskHeight]);
+
+  useEffect(() => {
+    const displayed = spacingUnit === "mm" ? spacingMM : spacingUnit === "cm" ? spacingMM / 10 : spacingMM / 25.4;
+    setSpacingDraft(formatDimension(displayed, spacingUnit));
+  }, [spacingMM, spacingUnit]);
+
+  function commitSpacingDraft(): void {
+    const parsed = parseFloat(spacingDraft.replace(",", "."));
+    const safe = Number.isFinite(parsed) && parsed >= 0 ? parsed : (spacingUnit === "mm" ? spacingMM : spacingUnit === "cm" ? spacingMM / 10 : spacingMM / 25.4);
+    const mm = spacingUnit === "mm" ? safe : spacingUnit === "cm" ? safe * 10 : safe * 25.4;
+    setSpacingMM(mm);
+  }
+
+  function updateMaskStyle(next: import("@/types/mask").MaskStyle): void {
+    onRegenerate(rule, { maskStyle: next });
+  }
 
   function updateWidth(value: number): void {
     setMaskWidth(value);
@@ -7439,7 +7676,8 @@ function MaskModePanel({
     const nextHeight = unitToPx(rule.keepProportions ? widthUnit : heightUnit, maskUnit, dpi);
     setMaskWidth(nextWidth);
     setMaskHeight(nextHeight);
-    onRegenerate(rule, { maskWidth: nextWidth, maskHeight: nextHeight, spacingX, spacingY });
+    const spacingPx = mmToPx(spacingMM, dpi);
+    onRegenerate(rule, { maskWidth: nextWidth, maskHeight: nextHeight, spacingX: spacingPx, spacingY: spacingPx, spacingMM, spacingUnit });
   }
 
   return (
@@ -7525,12 +7763,86 @@ function MaskModePanel({
       <div className="field-grid">
         <DraftNumberField label="רוחב" value={widthDraft} onChange={setWidthDraft} onCommit={() => commitDimensionDraft("width")} />
         <DraftNumberField label="גובה" value={heightDraft} onChange={setHeightDraft} onCommit={() => commitDimensionDraft("height")} />
-        <NumberField label="רווח X" min={0} max={400} value={Math.round(spacingX)} onChange={setSpacingX} />
-        <NumberField label="רווח Y" min={0} max={400} value={Math.round(spacingY)} onChange={setSpacingY} />
+      </div>
+      <div className="field">
+        <span className="field-label">ריווח בין מסיכות</span>
+        <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
+          <DraftNumberField label="" value={spacingDraft} onChange={setSpacingDraft} onCommit={commitSpacingDraft} />
+          <div className="seg" style={{ alignSelf: "end" }}>
+            {(["mm", "cm", "inch"] as const).map((u) => (
+              <button className={spacingUnit === u ? "on" : ""} key={u} onClick={() => setSpacingUnit(u)} type="button">
+                {u === "inch" ? "in" : u}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
       <button className="mini-action success" onClick={commitAndRegenerate} type="button">
         בנה מחדש
       </button>
+
+      {/* Mask-wide style: border + shadow */}
+      <div className="panel-section-title" style={{ marginTop: 12 }}>סגנון מסכה</div>
+      <div className="field">
+        <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <input type="checkbox" checked={maskStyle.border.enabled} onChange={(e) => updateMaskStyle({ ...maskStyle, border: { ...maskStyle.border, enabled: e.target.checked } })} />
+          <span>מסגרת</span>
+        </label>
+        {maskStyle.border.enabled ? (
+          <div className="field-grid" style={{ marginTop: 4 }}>
+            <label className="field">
+              <span className="field-label">עובי (מ"מ)</span>
+              <input className="text-input" type="number" min={0} max={20} step={0.1}
+                value={maskStyle.border.widthMm}
+                onChange={(e) => updateMaskStyle({ ...maskStyle, border: { ...maskStyle.border, widthMm: Math.max(0, Number(e.target.value) || 0) } })} />
+            </label>
+            <label className="field">
+              <span className="field-label">צבע</span>
+              <input type="color" value={maskStyle.border.color}
+                onChange={(e) => updateMaskStyle({ ...maskStyle, border: { ...maskStyle.border, color: e.target.value } })} />
+            </label>
+          </div>
+        ) : null}
+      </div>
+      <div className="field">
+        <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <input type="checkbox" checked={maskStyle.shadow.enabled} onChange={(e) => updateMaskStyle({ ...maskStyle, shadow: { ...maskStyle.shadow, enabled: e.target.checked } })} />
+          <span>צל</span>
+        </label>
+        {maskStyle.shadow.enabled ? (
+          <div className="field-grid" style={{ marginTop: 4 }}>
+            <label className="field">
+              <span className="field-label">צבע</span>
+              <input type="color" value={maskStyle.shadow.color}
+                onChange={(e) => updateMaskStyle({ ...maskStyle, shadow: { ...maskStyle.shadow, color: e.target.value } })} />
+            </label>
+            <label className="field">
+              <span className="field-label">טשטוש</span>
+              <input className="text-input" type="number" min={0} max={80} step={1}
+                value={maskStyle.shadow.blur}
+                onChange={(e) => updateMaskStyle({ ...maskStyle, shadow: { ...maskStyle.shadow, blur: Math.max(0, Number(e.target.value) || 0) } })} />
+            </label>
+            <label className="field">
+              <span className="field-label">שקיפות</span>
+              <input className="text-input" type="number" min={0} max={1} step={0.05}
+                value={maskStyle.shadow.opacity}
+                onChange={(e) => updateMaskStyle({ ...maskStyle, shadow: { ...maskStyle.shadow, opacity: Math.max(0, Math.min(1, Number(e.target.value) || 0)) } })} />
+            </label>
+            <label className="field">
+              <span className="field-label">היסט X</span>
+              <input className="text-input" type="number" step={1}
+                value={maskStyle.shadow.offsetX}
+                onChange={(e) => updateMaskStyle({ ...maskStyle, shadow: { ...maskStyle.shadow, offsetX: Number(e.target.value) || 0 } })} />
+            </label>
+            <label className="field">
+              <span className="field-label">היסט Y</span>
+              <input className="text-input" type="number" step={1}
+                value={maskStyle.shadow.offsetY}
+                onChange={(e) => updateMaskStyle({ ...maskStyle, shadow: { ...maskStyle.shadow, offsetY: Number(e.target.value) || 0 } })} />
+            </label>
+          </div>
+        ) : null}
+      </div>
       <div className="field">
         <span className="field-label">התאמת תמונה</span>
         <div className="seg">
@@ -9763,6 +10075,9 @@ function CanvasContextMenu({
   onTextDirectionLtr,
   onTextIncreaseSize,
   onTextDecreaseSize,
+  onTextSmartFitFull,
+  onTextSmartFitPartial,
+  onTextSmartFitWrap,
   onTextStrokeWhite,
   onTextStrokeBlack,
   onTextShadowSoft,
@@ -9819,6 +10134,9 @@ function CanvasContextMenu({
   onTextDirectionLtr: () => void;
   onTextIncreaseSize: () => void;
   onTextDecreaseSize: () => void;
+  onTextSmartFitFull: () => void;
+  onTextSmartFitPartial: () => void;
+  onTextSmartFitWrap: () => void;
   onTextStrokeWhite: () => void;
   onTextStrokeBlack: () => void;
   onTextShadowSoft: () => void;
@@ -9892,6 +10210,12 @@ function CanvasContextMenu({
           <button className="ctx-item" onClick={onTextCenterCanvas} type="button">מרכז בקנבס</button>
           <button className="ctx-item" onClick={onTextCenterX} type="button">יישור אופקי למרכז</button>
           <button className="ctx-item" onClick={onTextCenterY} type="button">יישור אנכי למרכז</button>
+        </details>
+        <details className="ctx-submenu">
+          <summary>ארגון חכם</summary>
+          <button className="ctx-item" onClick={onTextSmartFitFull} type="button">התאמה מלאה</button>
+          <button className="ctx-item" onClick={onTextSmartFitPartial} type="button">התאמה חלקית</button>
+          <button className="ctx-item" onClick={onTextSmartFitWrap} type="button">פריסת שורות</button>
         </details>
         <details className="ctx-submenu">
           <summary>טיפוגרפיה</summary>

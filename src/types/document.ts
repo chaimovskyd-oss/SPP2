@@ -6,6 +6,7 @@ import type { MaskImageAssignment, MaskLayoutRule, MaskPreset, MaskTextOverlayRu
 import type { CollageRule } from "./collage";
 import type { PhotoPrintImageAssignment, PhotoPrintRule } from "./photoPrint";
 import type { ClassPhotoLayoutRule } from "./classPhoto";
+import type { BlessingRule } from "./blessing";
 
 export interface Asset extends VersionedEntity {
   id: ID;
@@ -65,6 +66,7 @@ export interface Document extends VersionedEntity {
   photoPrintRules: PhotoPrintRule[];
   photoPrintImageAssignments: PhotoPrintImageAssignment[];
   classPhotoRules: ClassPhotoLayoutRule[];
+  blessingRules: BlessingRule[];
   viewport: ViewportState;
   metadata: Metadata;
 }

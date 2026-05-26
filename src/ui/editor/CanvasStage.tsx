@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { Circle, Group, Image as KonvaImage, Layer, Line, Path, Rect, Stage, Transformer } from "react-konva";
 import { useProductStore } from "@/state/productStore";
 import { ProductGuidesOverlay } from "./ProductGuidesOverlay";
+import { CollageGridOverlay } from "./CollageGridOverlay";
 import type { ProductPageContext } from "@/types/product";
 import { calculateRotateHandlePosition, nodeAABBInCanvasUnits, type RotateHandlePosition } from "./rotateHandleUtils";
 import { useKonvaImage } from "./useKonvaImage";
@@ -31,10 +32,12 @@ import { useDocumentStore } from "@/state/documentStore";
 import { resolveEffectivePerformanceSettings, useAppSettings } from "@/settings";
 import { createShapeLayer } from "@/core/layers/factory";
 import type { Asset, Page } from "@/types/document";
+import type { CollageRule, CollageSlot } from "@/types/collage";
 import type { Rect as RectType } from "@/types/primitives";
 import type { FrameLayer, ImageLayer, ShapeLayer, TextLayer, VisualLayer } from "@/types/layers";
 import { SCREEN_HELPER_NODE_NAME } from "./canvasNodeNames";
 import { KonvaLayerNode, type CanvasContextMenuTarget } from "./KonvaLayerNode";
+import { PassportGuidelinesOverlay } from "@/ui/photoPrint/PassportGuidelinesOverlay";
 import { markDebugEvent, registerKonvaStage, trackDebugMount } from "@/debug/sppDiagnostics";
 
 // Extra screen-pixel buffer around the Stage canvas so that Transformer anchors
@@ -105,6 +108,9 @@ interface CanvasStageProps {
   onLayerContextMenu?: (target: CanvasContextMenuTarget) => void;
   stageRef: React.RefObject<Konva.Stage | null>;
   onMaskPainted?: (layerId: string, maskDataUrl: string, width: number, height: number) => void;
+  passportGuidelinesEnabled?: boolean;
+  collageLayoutRule?: CollageRule | null;
+  onUpdateCollageSlots?: (newSlots: CollageSlot[]) => void;
 }
 
 export function CanvasStage({
@@ -122,7 +128,10 @@ export function CanvasStage({
   onEndTextEdit,
   onLayerContextMenu,
   stageRef,
-  onMaskPainted
+  onMaskPainted,
+  passportGuidelinesEnabled = false,
+  collageLayoutRule = null,
+  onUpdateCollageSlots
 }: CanvasStageProps): React.ReactElement {
   const transformerRef = useRef<Konva.Transformer>(null);
   const marqueeStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -424,12 +433,23 @@ export function CanvasStage({
   // maps to Stage pixel (OVERFLOW_PAD, OVERFLOW_PAD), not (0,0).
   const layerOffset = OVERFLOW_PAD / scale;
   const gridLines = useMemo(() => buildGridLines(page, viewport.showGrid), [page, viewport.showGrid]);
+  const passportGuidelineFrames = useMemo(
+    () => passportGuidelinesEnabled
+      ? page.layers.filter((layer): layer is FrameLayer => isPhotoPrintSlotLayer(layer) && layer.contentType === "image")
+      : [],
+    [page.layers, passportGuidelinesEnabled]
+  );
   const performanceSettings = useAppSettings((state) => state.settings.performance);
   const effectivePerformance = useMemo(
     () => resolveEffectivePerformanceSettings(performanceSettings),
     [performanceSettings]
   );
-  const reduceImageEffects = effectivePerformance.reduceEffectsDuringInteraction;
+  // `reduceEffectsDuringInteraction` is a policy/setting — it only applies during
+  // an actual drag or transform. Without gating on transient interaction state,
+  // having the setting enabled would keep image filters off forever, so sliders
+  // (brightness/contrast/grayscale/etc) would never visibly affect the canvas.
+  const [isInteracting, setIsInteracting] = useState(false);
+  const reduceImageEffects = isInteracting && effectivePerformance.reduceEffectsDuringInteraction;
   const editingLayer = useMemo(
     () => page.layers.find((layer): layer is TextLayer => layer.type === "text" && layer.id === editingLayerId) ?? null,
     [editingLayerId, page.layers]
@@ -453,7 +473,12 @@ export function CanvasStage({
         page.layers
           .filter((l) =>
             l.locked ||
-            (l.type === "frame" && (l.metadata["gridCell"] !== undefined || l.metadata["maskFrame"] !== undefined || (l.behaviorMode === "layoutLocked" && !layoutEditMode)))
+            (l.type === "frame" && (
+              l.metadata["gridCell"] !== undefined ||
+              l.metadata["maskFrame"] !== undefined ||
+              l.metadata["collageFrame"] !== undefined ||
+              (l.behaviorMode === "layoutLocked" && !layoutEditMode)
+            ))
           )
           .map((l) => l.id)
       );
@@ -571,7 +596,9 @@ export function CanvasStage({
       const layer = page.layers.find((l) => l.id === layerId);
       if (layer === undefined) return;
       if (isGridCellLayer(layer)) return;
-      if (isMaskFrameLayer(layer)) return;
+      if (isMaskFrameLayer(layer as VisualLayer)) {
+        if (((layer as unknown as { lockedFrame?: boolean }).lockedFrame ?? false)) return;
+      }
       if (isPhotoPrintSlotLayer(layer)) return;
 
       const x = node.x();
@@ -609,7 +636,9 @@ export function CanvasStage({
       const layer = page.layers.find((item) => item.id === node.id());
       if (layer === undefined) return;
       if (isGridCellLayer(layer)) return;
-      if (isMaskFrameLayer(layer)) return;
+      if (isMaskFrameLayer(layer as VisualLayer)) {
+        if (((layer as unknown as { lockedFrame?: boolean }).lockedFrame ?? false)) return;
+      }
       if (isPhotoPrintSlotLayer(layer)) return;
 
       const anchor = transformer.getActiveAnchor();
@@ -649,16 +678,21 @@ export function CanvasStage({
       return;
     }
     if (previous !== undefined && isMaskFrameLayer(previous) && layer.type === "frame") {
-      onLayerChange({
-        ...layer,
-        x: previous.x,
-        y: previous.y,
-        width: previous.width,
-        height: previous.height,
-        rotation: previous.rotation,
-        behaviorMode: "layoutLocked",
-        lockedFrame: true
-      });
+      const wasLocked = previous.lockedFrame ?? false;
+      if (wasLocked) {
+        onLayerChange({
+          ...layer,
+          x: previous.x,
+          y: previous.y,
+          width: previous.width,
+          height: previous.height,
+          rotation: previous.rotation,
+          behaviorMode: "layoutLocked",
+          lockedFrame: true
+        });
+      } else {
+        onLayerChange({ ...layer, lockedFrame: false });
+      }
       return;
     }
     if (previous !== undefined && isPhotoPrintSlotLayer(previous) && layer.type === "frame" && !layoutEditMode) {
@@ -1096,8 +1130,12 @@ export function CanvasStage({
         height={extStageHeight}
         scaleX={scale}
         scaleY={scale}
+        onDragStart={() => setIsInteracting(true)}
         onDragMove={handleStageDragMove}
-        onDragEnd={handleStageDragEnd}
+        onDragEnd={() => {
+          setIsInteracting(false);
+          handleStageDragEnd();
+        }}
         onMouseDown={(event) => {
           if (event.evt.button === 1) {
             event.evt.preventDefault();
@@ -1610,6 +1648,17 @@ export function CanvasStage({
               scale={scale}
             />
           )}
+          {passportGuidelinesEnabled ? (
+            <PassportGuidelinesOverlay frames={passportGuidelineFrames} scale={scale} />
+          ) : null}
+          {layoutEditMode && collageLayoutRule !== null && onUpdateCollageSlots !== undefined ? (
+            <CollageGridOverlay
+              rule={collageLayoutRule}
+              page={page}
+              scale={scale}
+              onUpdateSlots={onUpdateCollageSlots}
+            />
+          ) : null}
 
           {smartLines.map((line) => {
             const color = GUIDE_COLORS[line.kind] ?? "#F7C948";
@@ -1733,8 +1782,12 @@ export function CanvasStage({
             borderStroke="#7C6FE0"
             anchorStroke="#9B8FF0"
             anchorFill="#17161C"
+            onTransformStart={() => setIsInteracting(true)}
             onTransform={handleTransformerTransform}
-            onTransformEnd={clearGuides}
+            onTransformEnd={() => {
+              setIsInteracting(false);
+              clearGuides();
+            }}
           />
         </Layer>
         {/* ── Image edit overlay layer (crop handles, selection) ── */}

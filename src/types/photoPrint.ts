@@ -29,6 +29,20 @@ export interface PhotoPrintImageAssignment extends VersionedEntity {
   manualFitModeOverride?: FitMode;
   hasManualCropOverride?: boolean;
   hasManualRotationOverride?: boolean;
+  passportState?: PhotoPrintPassportAssignmentState;
+}
+
+export interface PhotoPrintPassportSize {
+  width: number;
+  height: number;
+}
+
+export interface PhotoPrintPassportAssignmentState extends VersionedEntity {
+  selectedPassportPreset?: string;
+  selectedPassportSize?: PhotoPrintPassportSize;
+  showPassportGuidelines?: boolean;
+  manualAdjustmentState?: ContentTransform;
+  autoAdjustmentState?: ContentTransform;
 }
 
 export interface PhotoPrintRule extends VersionedEntity {
@@ -59,6 +73,10 @@ export interface PhotoPrintRule extends VersionedEntity {
   globalCopies: number;
   perImageCopies: Record<number, number>;
   smartFillEnabled: boolean;
+  passportPresetId?: string;
+  passportRequirementId?: string;
+  passportSizeMm?: PhotoPrintPassportSize;
+  showPassportGuidelines?: boolean;
   metadata: Metadata;
 }
 
@@ -80,6 +98,11 @@ export interface PhotoPrintCreateOptions {
   orientationPolicy?: "auto" | "portrait" | "landscape";
   faceDetectionEnabled?: boolean;
   smartFillEnabled?: boolean;
+  printPresetId?: string;
+  passportPresetId?: string;
+  passportRequirementId?: string;
+  passportSizeMm?: PhotoPrintPassportSize;
+  showPassportGuidelines?: boolean;
 }
 
 export interface PhotoPrintImageInput {
@@ -94,7 +117,9 @@ export interface PrintSizePreset {
   name: string;
   widthMm: number;
   heightMm: number;
-  category: "photo" | "paper" | "passport" | "custom";
+  category: "photo" | "paper" | "passport" | "official" | "custom";
+  passportRequirementId?: string;
+  passportPresetId?: string;
 }
 
 export const PRINT_SIZE_PRESETS: PrintSizePreset[] = [
@@ -113,6 +138,13 @@ export const PRINT_SIZE_PRESETS: PrintSizePreset[] = [
   { id: "a5", name: "A5", widthMm: 148, heightMm: 210, category: "paper" },
   { id: "a4", name: "A4", widthMm: 210, heightMm: 297, category: "paper" },
   { id: "a3", name: "A3", widthMm: 297, heightMm: 420, category: "paper" },
+  { id: "israel_biometric_35x45", name: "Israeli Biometric 35x45", widthMm: 35, heightMm: 45, category: "passport", passportRequirementId: "israelBiometric", passportPresetId: "israelBiometric35x45" },
+  { id: "israel_biometric_50x50", name: "Israeli Biometric 50x50", widthMm: 50, heightMm: 50, category: "passport", passportRequirementId: "israelBiometric", passportPresetId: "israelBiometric50x50" },
+  { id: "israel_passport_35x45", name: "Israeli Passport 35x45", widthMm: 35, heightMm: 45, category: "passport", passportRequirementId: "israelPassport35x45", passportPresetId: "israelPassport35x45" },
+  { id: "israel_passport_50x50", name: "Israeli Passport 50x50", widthMm: 50, heightMm: 50, category: "passport", passportRequirementId: "israelPassport50x50", passportPresetId: "israelPassport50x50" },
+  { id: "israel_id", name: "Israeli ID 35x45", widthMm: 35, heightMm: 45, category: "official", passportRequirementId: "israelId", passportPresetId: "israelId" },
+  { id: "israel_visa_embassy", name: "Israeli Visa / Embassy 50x50", widthMm: 50, heightMm: 50, category: "official", passportRequirementId: "israelVisaEmbassy", passportPresetId: "israelVisaEmbassy" },
+  { id: "us_visa", name: "US Visa 2x2\"", widthMm: 50.8, heightMm: 50.8, category: "official", passportRequirementId: "usVisa", passportPresetId: "usVisa" },
   { id: "passport_il", name: "דרכון ישראלי 3.5×4.5", widthMm: 35, heightMm: 45, category: "passport" },
   { id: "passport_us", name: "US Passport 2×2\"", widthMm: 50.8, heightMm: 50.8, category: "passport" },
   { id: "passport_uk", name: "UK Passport 35×45", widthMm: 35, heightMm: 45, category: "passport" },

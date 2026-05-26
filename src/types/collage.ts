@@ -196,8 +196,10 @@ export interface CollageImageAssignment extends VersionedEntity {
     exposureEV: number;
     vignette: number;
   };
-  /** Extended per-image parameters matching ImageStudio's imageEditParams schema (delta -100..100). */
-  imageEditParams?: Record<string, number>;
+  /** Extended per-image parameters matching ImageStudio's imageEditParams schema.
+   *  Numeric sliders (delta -100..100), boolean toggles (black_white, sepia, invert,
+   *  remove_white, color_pop), and string options (color_pop_color hex). */
+  imageEditParams?: Record<string, number | boolean | string>;
   visualEffects?: VisualEffectStack;
   edgeConfig?: CollageEdgeConfig;
   hasManualCrop?: boolean;
@@ -233,6 +235,9 @@ export interface CollageRule extends VersionedEntity {
   id: ID;
   name: string;
   pageId: ID;
+  /** Auto layouts may be regenerated from presets; manual layouts preserve cachedSlots. */
+  layoutMode?: "auto" | "manual";
+  hasManualLayoutOverrides?: boolean;
   /** Active layout family — geometry is regenerated on demand */
   activeFamily: CollageLayoutFamily;
   /** Spacing between cells in mm — converted to px at compute time */

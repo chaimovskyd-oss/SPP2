@@ -25,6 +25,7 @@ import { PdfOverlayEditor } from "./PdfOverlayEditor";
 import { PdfPagePreview } from "./PdfPagePreview";
 import { PdfThumbnail } from "./PdfThumbnail";
 import { openPdfStudioPrintPreview } from "./pdfStudioToPrintPreviewAdapter";
+import { HEIC_CONVERSION_ERROR_MESSAGE, SUPPORTED_IMAGE_ACCEPT, isSupportedIncomingImageFile, normalizeIncomingImages } from "@/core/image/normalizeIncomingImage";
 import {
   DEFAULT_ADJUSTMENTS,
   DEFAULT_RESIZE_BEHAVIOR,
@@ -127,7 +128,8 @@ export function PdfStudioScreen({ onBackHome, initialDocument }: PdfStudioScreen
   }
 
   async function importImageFiles(files: FileList | File[]): Promise<void> {
-    const fileArray = Array.from(files).filter((file) => file.type.startsWith("image/"));
+    const { files: fileArray, failed } = await normalizeIncomingImages(Array.from(files).filter(isSupportedIncomingImageFile));
+    if (failed.length > 0) setError(HEIC_CONVERSION_ERROR_MESSAGE);
     if (fileArray.length === 0) return;
 
     await runBusy(`מוסיף ${fileArray.length} תמונות כעמודים...`, async () => {
@@ -184,7 +186,7 @@ export function PdfStudioScreen({ onBackHome, initialDocument }: PdfStudioScreen
 
   async function importDroppedFiles(files: File[]): Promise<void> {
     const pdfFiles = files.filter(isPdfFile);
-    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+    const imageFiles = files.filter(isSupportedIncomingImageFile);
     const officeFiles = files.filter(isOfficeFile);
     const supportedCount = pdfFiles.length + imageFiles.length + officeFiles.length;
     if (supportedCount === 0) {
@@ -490,7 +492,7 @@ export function PdfStudioScreen({ onBackHome, initialDocument }: PdfStudioScreen
       </section>
 
       <input ref={pdfInputRef} accept="application/pdf,.pdf" hidden multiple onChange={(event) => { if (event.target.files !== null) void importPdfFiles(event.target.files); event.target.value = ""; }} type="file" />
-      <input ref={imageInputRef} accept="image/png,image/jpeg,image/jpg,image/webp" hidden multiple onChange={(event) => { if (event.target.files !== null) void importImageFiles(event.target.files); event.target.value = ""; }} type="file" />
+      <input ref={imageInputRef} accept={SUPPORTED_IMAGE_ACCEPT} hidden multiple onChange={(event) => { if (event.target.files !== null) void importImageFiles(event.target.files); event.target.value = ""; }} type="file" />
       <input ref={officeInputRef} accept=".doc,.docx,.ppt,.pptx,.xls,.xlsx,.odt,.ods,.odp" hidden multiple onChange={(event) => { if (event.target.files !== null) void importOfficeFiles(event.target.files); event.target.value = ""; }} type="file" />
 
       {!electronAvailable ? <div className="pdf-warning">חלק מפעולות הקבצים זמינות רק בהרצת Electron מלאה. התצוגה והייצוא בדפדפן עדיין יעבדו.</div> : null}

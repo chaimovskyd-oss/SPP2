@@ -333,6 +333,36 @@
 }
 .bpw-dropzone p { margin: 0; font-size: 13px; }
 .bpw-dropzone small { font-size: 11px; color: var(--text-tertiary, #6b7a99); }
+.bpw-dropzone.compact {
+  padding: 20px 18px;
+  margin-bottom: 12px;
+}
+.bpw-text-import {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.bpw-manual-list {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: stretch;
+}
+.bpw-textarea {
+  min-height: 88px;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-primary, #edf4ff);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+  outline: none;
+}
+.bpw-textarea:focus { border-color: #a855f7; }
 
 /* Records table */
 .bpw-table-wrap {

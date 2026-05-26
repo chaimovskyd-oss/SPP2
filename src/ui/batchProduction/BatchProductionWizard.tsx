@@ -1,6 +1,8 @@
 import {
   CheckCircle,
+  FileText,
   ImageIcon,
+  Plus,
   RefreshCw,
   Trash2,
   UploadCloud,
@@ -19,6 +21,8 @@ import type { BatchRecord, BatchTextVariableField, BatchWizardResult } from "@/t
 import type { BatchTemplateIndexItem } from "@/core/batchProduction/batchTemplateStore";
 import { loadTemplateDocument } from "@/core/batchProduction/batchTemplateStore";
 import { getBatchProductionMeta } from "@/core/batchProduction/batchProductionMeta";
+import { getTextFieldRecordKey, parseTextImportContent, parseTxtImport, type ParsedTextImportRow } from "@/core/batchProduction/textImportParser";
+import { HEIC_CONVERSION_ERROR_MESSAGE, SUPPORTED_IMAGE_ACCEPT, normalizeIncomingImage, normalizeIncomingImages } from "@/core/image/normalizeIncomingImage";
 import { GlobalWizardDropTarget } from "@/ui/wizard/GlobalWizardDropTarget";
 import "./batchProduction.css";
 
@@ -50,7 +54,7 @@ function buildInitialFields(
   const baseName = extractBaseName(file);
   const fields: Record<string, string> = {};
   for (const f of textFields) {
-    fields[f.id] = f.sourceField === "name" || f.id === "name" ? baseName : "";
+    fields[getTextFieldRecordKey(f, textFields)] = f.sourceField === "name" || f.id === "name" ? baseName : "";
   }
   if (textFields.length === 0) fields["name"] = baseName;
   return fields;
@@ -60,27 +64,46 @@ function validateRecord(
   r: BatchRecord,
   textFields: BatchTextVariableField[],
 ): BatchRecord {
+  const namedPrimaryFields = textFields.filter((f) => f.sourceField === "name" || f.id === "name");
   const primaryFields =
-    textFields.length > 0
-      ? textFields.filter((f) => f.sourceField === "name" || f.id === "name")
+    namedPrimaryFields.length > 0
+      ? namedPrimaryFields
+      : textFields.length > 0
+        ? [textFields[0]]
       : [{ id: "name", sourceField: "name" } as BatchTextVariableField];
   const anyPrimaryEmpty = primaryFields.some(
-    (f) => (r.fields[f.id] ?? "").trim() === "",
+    (f) => (r.fields[getTextFieldRecordKey(f, textFields)] ?? "").trim() === "",
   );
   return { ...r, status: anyPrimaryEmpty ? "warning" : "ready" };
 }
 
-const ACCEPTED = "image/jpeg,image/png,image/webp";
+const ACCEPTED = SUPPORTED_IMAGE_ACCEPT;
+const ACCEPTED_TEXT_DATA = ".txt,.csv,text/plain,text/csv";
 
 function isBatchImageFile(file: File): boolean {
-  return ["image/jpeg", "image/png", "image/webp"].includes(file.type) || /\.(jpe?g|png|webp)$/i.test(file.name);
+  return ["image/jpeg", "image/png", "image/webp", "image/svg+xml", "image/heic", "image/heif"].includes(file.type) || /\.(jpe?g|png|webp|svg|heic|heif)$/i.test(file.name);
+}
+
+function isBatchTextDataFile(file: File): boolean {
+  return ["text/plain", "text/csv", "application/vnd.ms-excel"].includes(file.type) || /\.(txt|csv)$/i.test(file.name);
+}
+
+function getRecordDisplayValue(rec: BatchRecord, textFields: BatchTextVariableField[]): string {
+  const primary =
+    textFields.find((field) => field.sourceField === "name" || field.id === "name") ??
+    textFields[0];
+  if (primary !== undefined) {
+    const value = rec.fields[getTextFieldRecordKey(primary, textFields)];
+    if (value !== undefined && value.trim().length > 0) return value;
+  }
+  return Object.values(rec.fields).find((value) => value.trim().length > 0) ?? "";
 }
 
 // ─── Step dots ────────────────────────────────────────────────────────────────
 
-function StepDots({ step }: { step: WizardStep }): ReactElement {
+function StepDots({ step, hasImageField }: { step: WizardStep; hasImageField: boolean }): ReactElement {
   const steps = [
-    { n: 1, label: "העלאה ושמות" },
+    { n: 1, label: hasImageField ? "העלאה ושמות" : "רשימות טקסט" },
     { n: 2, label: "סיכום" },
   ];
   return (
@@ -108,6 +131,7 @@ function Step1({
   textFields,
   records,
   onAddFiles,
+  onAddTextRows,
   onUpdateField,
   onDeleteRecord,
   onReplaceFile,
@@ -117,10 +141,11 @@ function Step1({
   template: BatchTemplateIndexItem;
   textFields: BatchTextVariableField[];
   records: BatchRecord[];
-  onAddFiles: (files: File[]) => void;
+  onAddFiles: (files: File[]) => void | Promise<void>;
+  onAddTextRows: (rows: ParsedTextImportRow[], sourceName?: string) => void;
   onUpdateField: (id: string, fieldId: string, value: string) => void;
   onDeleteRecord: (id: string) => void;
-  onReplaceFile: (id: string, file: File) => void;
+  onReplaceFile: (id: string, file: File) => void | Promise<void>;
   onNext: () => void;
   onCancel: () => void;
 }): ReactElement {
@@ -128,6 +153,7 @@ function Step1({
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const replacingId = useRef<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [manualText, setManualText] = useState("");
 
   const hasImageField = template.variableFieldTypes.includes("image");
   const warningCount = records.filter((r) => r.status === "warning").length;
@@ -139,18 +165,28 @@ function Step1({
   function handleDrop(e: DragEvent<HTMLDivElement>): void {
     e.preventDefault();
     setDragging(false);
-    if (e.dataTransfer.files) onAddFiles(Array.from(e.dataTransfer.files));
+    if (!e.dataTransfer.files) return;
+    const files = Array.from(e.dataTransfer.files);
+    if (hasImageField) {
+      void onAddFiles(files);
+    } else {
+      void addTextFiles(files);
+    }
   }
 
   function handleFileInput(e: ChangeEvent<HTMLInputElement>): void {
-    if (e.target.files) onAddFiles(Array.from(e.target.files));
+    if (e.target.files) {
+      const files = Array.from(e.target.files);
+      if (hasImageField) void onAddFiles(files);
+      else void addTextFiles(files);
+    }
     e.target.value = "";
   }
 
   function handleReplaceInput(e: ChangeEvent<HTMLInputElement>): void {
     const id = replacingId.current;
     if (!id || !e.target.files?.[0]) return;
-    onReplaceFile(id, e.target.files[0]);
+    void onReplaceFile(id, e.target.files[0]);
     e.target.value = "";
     replacingId.current = null;
   }
@@ -160,24 +196,73 @@ function Step1({
     replaceInputRef.current?.click();
   }
 
+  async function addTextFiles(files: File[]): Promise<void> {
+    const textFiles = files.filter(isBatchTextDataFile);
+    const rows: ParsedTextImportRow[] = [];
+    const names: string[] = [];
+    for (const file of textFiles) {
+      const content = await file.text();
+      rows.push(...parseTextImportContent(content, file.name, textFields));
+      names.push(file.name);
+    }
+    if (rows.length > 0) onAddTextRows(rows, names.join(", "));
+  }
+
+  function addManualText(): void {
+    const rows = parseTxtImport(manualText, textFields);
+    if (rows.length === 0) return;
+    onAddTextRows(rows, "manual");
+    setManualText("");
+  }
+
   return (
     <>
       <div className="bpw-body">
-        {/* Drop zone */}
-        <div
-          className={`bpw-dropzone${dragging ? " dragover" : ""}`}
-          onClick={() => fileInputRef.current?.click()}
-          onDragLeave={() => setDragging(false)}
-          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-          onDrop={handleDrop}
-          role="button"
-          tabIndex={0}
-        >
-          <UploadCloud size={32} strokeWidth={1.5} />
-          <p>גרור תמונות לכאן, או לחץ לבחירה</p>
-          <small>JPEG · PNG · WEBP — עד 200 קבצים</small>
-        </div>
-        <input ref={fileInputRef} accept={ACCEPTED} hidden multiple type="file" onChange={handleFileInput} />
+        {hasImageField ? (
+          <div
+            className={`bpw-dropzone${dragging ? " dragover" : ""}`}
+            onClick={() => fileInputRef.current?.click()}
+            onDragLeave={() => setDragging(false)}
+            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+            onDrop={handleDrop}
+            role="button"
+            tabIndex={0}
+          >
+            <UploadCloud size={32} strokeWidth={1.5} />
+            <p>גרור תמונות לכאן, או לחץ לבחירה</p>
+            <small>JPEG · PNG · WEBP — עד 200 קבצים</small>
+          </div>
+        ) : (
+          <div className="bpw-text-import">
+            <div
+              className={`bpw-dropzone compact${dragging ? " dragover" : ""}`}
+              onClick={() => fileInputRef.current?.click()}
+              onDragLeave={() => setDragging(false)}
+              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+              onDrop={handleDrop}
+              role="button"
+              tabIndex={0}
+            >
+              <FileText size={28} strokeWidth={1.5} />
+              <p>גרור קובץ TXT או CSV, או לחץ לבחירה</p>
+              <small>TXT: שם בכל שורה · CSV: שורה לכל עיצוב ועמודה לכל תיבת טקסט</small>
+            </div>
+            <div className="bpw-manual-list">
+              <textarea
+                className="bpw-textarea"
+                dir="auto"
+                onChange={(event) => setManualText(event.target.value)}
+                placeholder="הדבק כאן רשימת שמות, שם אחד בכל שורה"
+                value={manualText}
+              />
+              <button className="btn btn-ghost" disabled={manualText.trim().length === 0} onClick={addManualText} type="button">
+                <Plus size={14} />
+                הוסף לרשימה
+              </button>
+            </div>
+          </div>
+        )}
+        <input ref={fileInputRef} accept={hasImageField ? ACCEPTED : ACCEPTED_TEXT_DATA} hidden multiple type="file" onChange={handleFileInput} />
         <input ref={replaceInputRef} accept={ACCEPTED} hidden type="file" onChange={handleReplaceInput} />
 
         {/* Records table */}
@@ -189,7 +274,7 @@ function Step1({
                   {hasImageField && <th style={{ width: 56 }}>תמונה</th>}
                   {textFields.length > 0
                     ? fieldLabels.map((label, i) => (
-                        <th key={textFields[i]?.id ?? i}>{label}</th>
+                        <th key={textFields[i]?.layerId ?? i}>{label}</th>
                       ))
                     : <th>שם</th>}
                   <th>שם קובץ</th>
@@ -202,21 +287,29 @@ function Step1({
                   <tr key={rec.id}>
                     {hasImageField && (
                       <td>
-                        <img alt="" className="bpw-thumb" src={rec.previewUrl} />
+                        {rec.sourceType === "image" ? (
+                          <img alt="" className="bpw-thumb" src={rec.previewUrl} />
+                        ) : (
+                          <span className="bpw-thumb-placeholder"><FileText size={15} /></span>
+                        )}
                       </td>
                     )}
                     {textFields.length > 0
-                      ? textFields.map((f) => (
-                          <td key={f.id}>
+                      ? textFields.map((f) => {
+                          const fieldKey = getTextFieldRecordKey(f, textFields);
+                          const isPrimary = f.sourceField === "name" || f.id === "name" || textFields[0]?.layerId === f.layerId;
+                          return (
+                          <td key={f.layerId}>
                             <input
-                              className={`bpw-name-input${!(rec.fields[f.id] ?? "").trim() && (f.sourceField === "name" || f.id === "name") ? " warn" : ""}`}
+                              className={`bpw-name-input${!(rec.fields[fieldKey] ?? "").trim() && isPrimary ? " warn" : ""}`}
                               dir="auto"
                               type="text"
-                              value={rec.fields[f.id] ?? ""}
-                              onChange={(e) => onUpdateField(rec.id, f.id, e.target.value)}
+                              value={rec.fields[fieldKey] ?? ""}
+                              onChange={(e) => onUpdateField(rec.id, fieldKey, e.target.value)}
                             />
                           </td>
-                        ))
+                          );
+                        })
                       : (
                           <td>
                             <input
@@ -229,7 +322,7 @@ function Step1({
                           </td>
                         )}
                     <td>
-                      <span className="bpw-filename">{rec.originalFilename}</span>
+                      <span className="bpw-filename">{rec.originalFilename ?? "רשימת טקסט"}</span>
                     </td>
                     <td>
                       {rec.status === "ready"
@@ -260,7 +353,7 @@ function Step1({
         <span className="count-label">
           {records.length > 0
             ? `${records.length} רשומות${warningCount > 0 ? ` · ${warningCount} ⚠ שדה ריק` : ""}`
-            : "טרם הועלו תמונות"}
+            : hasImageField ? "טרם הועלו תמונות" : "טרם נוספו רשומות טקסט"}
         </span>
         <button className="btn btn-ghost" onClick={onCancel} type="button">ביטול</button>
         <button className="btn btn-accent" disabled={!canNext} onClick={onNext} type="button">
@@ -317,12 +410,12 @@ function Step2({
         {/* Preview thumbnails */}
         <div className="bpw-confirm-grid">
           {preview.map((rec) =>
-            template.variableFieldTypes.includes("image") ? (
-              <img key={rec.id} alt={rec.fields["name"] ?? ""} className="bpw-confirm-thumb" src={rec.previewUrl} title={rec.fields["name"] ?? rec.originalFilename} />
+            rec.sourceType === "image" ? (
+              <img key={rec.id} alt={getRecordDisplayValue(rec, textFields)} className="bpw-confirm-thumb" src={rec.previewUrl} title={getRecordDisplayValue(rec, textFields) || rec.originalFilename} />
             ) : (
-              <div key={rec.id} className="bpw-confirm-placeholder" title={rec.fields["name"] ?? ""}>
+              <div key={rec.id} className="bpw-confirm-placeholder" title={getRecordDisplayValue(rec, textFields)}>
                 <span style={{ fontSize: 10, textAlign: "center", padding: 4 }}>
-                  {rec.fields["name"] || rec.fields[Object.keys(rec.fields)[0] ?? ""] || "—"}
+                  {getRecordDisplayValue(rec, textFields) || "—"}
                 </span>
               </div>
             )
@@ -368,6 +461,7 @@ export function BatchProductionWizard({
 }: BatchProductionWizardProps): ReactElement {
   const [step, setStep] = useState<WizardStep>(1);
   const [records, setRecords] = useState<BatchRecord[]>([]);
+  const hasImageField = template.variableFieldTypes.includes("image");
 
   // Load template variable fields so we know which text columns to show
   const [textFields, setTextFields] = useState<BatchTextVariableField[]>([]);
@@ -386,14 +480,18 @@ export function BatchProductionWizard({
   useEffect(() => {
     return () => {
       setRecords((prev) => {
-        prev.forEach((r) => URL.revokeObjectURL(r.previewUrl));
+        prev.forEach((r) => {
+          if (r.sourceType === "image") URL.revokeObjectURL(r.previewUrl);
+        });
         return prev;
       });
     };
   }, []);
 
-  function addFiles(files: File[]): void {
-    const images = files.filter((f) =>
+  async function addFiles(files: File[]): Promise<void> {
+    const { files: normalizedFiles, failed } = await normalizeIncomingImages(files.filter(isBatchImageFile));
+    if (failed.length > 0) window.alert(HEIC_CONVERSION_ERROR_MESSAGE);
+    const images = normalizedFiles.filter((f) =>
       isBatchImageFile(f),
     );
     if (images.length === 0) return;
@@ -404,6 +502,7 @@ export function BatchProductionWizard({
           const fields = buildInitialFields(file, textFields);
           const rec: BatchRecord = {
             id: crypto.randomUUID(),
+            sourceType: "image",
             file,
             previewUrl: URL.createObjectURL(file),
             fields,
@@ -414,6 +513,37 @@ export function BatchProductionWizard({
         }),
       ].slice(0, 200),
     );
+  }
+
+  function addTextRows(rows: ParsedTextImportRow[], sourceName?: string): void {
+    if (rows.length === 0) return;
+    setRecords((prev) =>
+      [
+        ...prev,
+        ...rows.map((row): BatchRecord => {
+          const rec: BatchRecord = {
+            id: crypto.randomUUID(),
+            sourceType: "text",
+            fields: row.fields,
+            originalFilename: sourceName ?? row.sourceLabel,
+            status: "ready",
+          };
+          return validateRecord(rec, textFields);
+        }),
+      ].slice(0, 200),
+    );
+  }
+
+  async function addTextFiles(files: File[]): Promise<void> {
+    const textFiles = files.filter(isBatchTextDataFile);
+    const rows: ParsedTextImportRow[] = [];
+    const names: string[] = [];
+    for (const file of textFiles) {
+      const content = await file.text();
+      rows.push(...parseTextImportContent(content, file.name, textFields));
+      names.push(file.name);
+    }
+    addTextRows(rows, names.join(", ") || undefined);
   }
 
   function updateField(id: string, fieldId: string, value: string): void {
@@ -428,18 +558,26 @@ export function BatchProductionWizard({
   function deleteRecord(id: string): void {
     setRecords((prev) => {
       const rec = prev.find((r) => r.id === id);
-      if (rec) URL.revokeObjectURL(rec.previewUrl);
+      if (rec?.sourceType === "image") URL.revokeObjectURL(rec.previewUrl);
       return prev.filter((r) => r.id !== id);
     });
   }
 
-  function replaceFile(id: string, file: File): void {
+  async function replaceFile(id: string, file: File): Promise<void> {
+    let normalizedFile: File;
+    try {
+      normalizedFile = await normalizeIncomingImage(file);
+    } catch {
+      window.alert(HEIC_CONVERSION_ERROR_MESSAGE);
+      return;
+    }
     setRecords((prev) =>
       prev.map((r) => {
         if (r.id !== id) return r;
+        if (r.sourceType !== "image") return r;
         URL.revokeObjectURL(r.previewUrl);
         return validateRecord(
-          { ...r, file, previewUrl: URL.createObjectURL(file), originalFilename: file.name },
+          { ...r, file: normalizedFile, previewUrl: URL.createObjectURL(normalizedFile), originalFilename: normalizedFile.name },
           textFields,
         );
       }),
@@ -447,16 +585,19 @@ export function BatchProductionWizard({
   }
 
   const stepLabels: Record<WizardStep, string> = {
-    1: "העלאת תמונות ועריכת שמות",
+    1: hasImageField ? "העלאת תמונות ועריכת שמות" : "ייבוא רשימות טקסט",
     2: "סיכום ואישור",
   };
 
   return (
     <div className="bpw-overlay" dir="rtl">
       <GlobalWizardDropTarget
-        acceptFile={isBatchImageFile}
-        onFiles={addFiles}
-        invalidSubtitle="גרור קבצי JPEG, PNG או WEBP בלבד"
+        acceptFile={hasImageField ? isBatchImageFile : isBatchTextDataFile}
+        onFiles={(files) => {
+          if (hasImageField) void addFiles(files);
+          else void addTextFiles(files);
+        }}
+        invalidSubtitle={hasImageField ? "גרור קבצי JPEG, PNG או WEBP בלבד" : "גרור קבצי TXT או CSV בלבד"}
       />
       <div className="bpw-card">
         <div className="bpw-header">
@@ -464,7 +605,7 @@ export function BatchProductionWizard({
           <div style={{ fontSize: 12, color: "var(--text-tertiary, #6b7a99)", marginBottom: 12 }}>
             שלב {step}: {stepLabels[step]}
           </div>
-          <StepDots step={step} />
+          <StepDots step={step} hasImageField={hasImageField} />
         </div>
 
         {step === 1 && (
@@ -473,6 +614,7 @@ export function BatchProductionWizard({
             textFields={textFields}
             records={records}
             onAddFiles={addFiles}
+            onAddTextRows={addTextRows}
             onUpdateField={updateField}
             onDeleteRecord={deleteRecord}
             onReplaceFile={replaceFile}

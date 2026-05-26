@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useImageEditStore } from "@/state/imageEditStore";
 import { useMaskContentEditStore } from "@/state/maskContentEditStore";
-import { Circle, Ellipse, Group, Image as KonvaImage, Line, Path, Rect, Text } from "react-konva";
+import { Circle, Ellipse, Group, Image as KonvaImage, Line, Path, Rect, Shape, Text } from "react-konva";
 import { drawPuzzlePath } from "@/core/collage/collagePuzzle";
 import { generateTornEdgePoints } from "@/core/collage/collageTornPaper";
 import type { CollageEdgeConfig } from "@/types/collage";
@@ -454,6 +454,7 @@ function TextNode({
     layer.metadata?.["classPhotoName"] !== undefined ||
     layer.metadata?.["classPhotoTitle"] !== undefined ||
     layer.metadata?.["classPhotoFooter"] !== undefined;
+  const isManagedTextBox = isClassPhotoText || layer.metadata?.["blessingTextRole"] !== undefined;
 
   const commonDrag = {
     draggable: !layer.locked,
@@ -544,11 +545,10 @@ function TextNode({
         }
       : {};
 
-  // When this is a class-photo managed text layer (name/title/footer), use the stored
-  // layer.width/height so align="center" centers within the frame or title container.
-  // For all other text layers, always use measuredSize (natural fit).
-  const renderWidth = isClassPhotoText && layer.width > measuredSize.width ? layer.width : measuredSize.width;
-  const renderHeight = isClassPhotoText && layer.height > measuredSize.height ? layer.height : measuredSize.height;
+  // Managed text layers are real text boxes: their saved rect controls wrapping,
+  // alignment and vertical footprint instead of shrinking to natural text bounds.
+  const renderWidth = isManagedTextBox ? layer.width : measuredSize.width;
+  const renderHeight = isManagedTextBox ? layer.height : measuredSize.height;
 
   return (
     <Text
@@ -573,6 +573,7 @@ function TextNode({
       lineHeight={layer.lineHeight}
       letterSpacing={layer.letterSpacing}
       align={layer.alignment}
+      verticalAlign={isManagedTextBox ? "middle" : undefined}
       direction={layer.direction === "auto" ? "rtl" : layer.direction}
       {...commonDrag}
       rotation={layer.rotation}
@@ -1665,9 +1666,13 @@ function FrameNode({
     }
   };
 
-  const shadowProps = fx.shadow !== undefined
-    ? { shadowColor: fx.shadow.color, shadowBlur: fx.shadow.blur, shadowOffsetX: fx.shadow.offsetX, shadowOffsetY: fx.shadow.offsetY, shadowOpacity: fx.shadow.opacity, shadowEnabled: true }
-    : {};
+  const maskFrameStyle = (layer.metadata["maskFrame"] as { maskStyle?: import("@/types/mask").MaskStyle } | undefined)?.maskStyle;
+  const maskWideShadow = isMaskFrame && maskFrameStyle?.shadow?.enabled === true ? maskFrameStyle.shadow : null;
+  const shadowProps = maskWideShadow !== null
+    ? { shadowColor: maskWideShadow.color, shadowBlur: maskWideShadow.blur, shadowOffsetX: maskWideShadow.offsetX, shadowOffsetY: maskWideShadow.offsetY, shadowOpacity: maskWideShadow.opacity, shadowEnabled: true }
+    : fx.shadow !== undefined
+      ? { shadowColor: fx.shadow.color, shadowBlur: fx.shadow.blur, shadowOffsetX: fx.shadow.offsetX, shadowOffsetY: fx.shadow.offsetY, shadowOpacity: fx.shadow.opacity, shadowEnabled: true }
+      : {};
 
   const handleFrameDragEnd = (event: Konva.KonvaEventObject<DragEvent>): void => {
     if (isMaskFrame) {
@@ -1902,6 +1907,19 @@ function FrameNode({
         )}
         </Group>
       </Group>
+
+      {/* מסגרת מסיכה גלובלית (מעל התמונה, עוקבת אחר צורת התא) */}
+      {isMaskFrame && maskFrameStyle?.border?.enabled === true && ((layer.metadata["maskFrame"] as { maskStyleBorderPx?: number } | undefined)?.maskStyleBorderPx ?? 0) > 0 && (
+        <Shape
+          sceneFunc={(ctx, shape) => {
+            clipFunc(ctx);
+            ctx.fillStrokeShape(shape);
+          }}
+          stroke={maskFrameStyle.border.color}
+          strokeWidth={(layer.metadata["maskFrame"] as { maskStyleBorderPx?: number } | undefined)?.maskStyleBorderPx ?? 0}
+          listening={false}
+        />
+      )}
 
       {/* מסגרת חיצונית (מעל התמונה, ללא fill) */}
       {image === null ? (

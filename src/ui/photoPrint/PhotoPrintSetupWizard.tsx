@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type DragEvent, type Rea
 import { ArrowLeft, ArrowRight, Check, Printer, UploadCloud, X } from "lucide-react";
 import { mmToPx } from "@/core/units/conversion";
 import { computeBestGridForCount, computePhotoPrintLayout } from "@/core/photoPrint/photoPrintModeEngine";
+import { HEIC_CONVERSION_ERROR_MESSAGE, SUPPORTED_IMAGE_ACCEPT, normalizeIncomingImages } from "@/core/image/normalizeIncomingImage";
 import { GlobalWizardDropTarget, isImageDropFile } from "@/ui/wizard/GlobalWizardDropTarget";
 import type {
   PhotoPagePreset,
@@ -67,8 +68,10 @@ export function PhotoPrintSetupWizard({ onComplete, onCancel }: PhotoPrintSetupW
 
   // ─── Image upload ──────────────────────────────────────────────────────────
 
-  function addFiles(files: FileList | File[]): void {
-    const todo = Array.from(files).filter(isImageDropFile);
+  async function addFiles(files: FileList | File[]): Promise<void> {
+    const { files: normalizedFiles, failed } = await normalizeIncomingImages(Array.from(files).filter(isImageDropFile));
+    if (failed.length > 0) window.alert(HEIC_CONVERSION_ERROR_MESSAGE);
+    const todo = normalizedFiles.filter(isImageDropFile);
     if (todo.length === 0) return;
     let pending = todo.length;
     const toAdd: PhotoPrintWizardImageEntry[] = [];
@@ -80,6 +83,11 @@ export function PhotoPrintSetupWizard({ onComplete, onCancel }: PhotoPrintSetupW
         pending -= 1;
         if (pending === 0) setImages((prev) => [...prev, ...toAdd]);
       };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        pending -= 1;
+        if (pending === 0 && toAdd.length > 0) setImages((prev) => [...prev, ...toAdd]);
+      };
       img.src = url;
     }
   }
@@ -87,7 +95,7 @@ export function PhotoPrintSetupWizard({ onComplete, onCancel }: PhotoPrintSetupW
   function onDrop(e: DragEvent): void {
     e.preventDefault();
     setDragging(false);
-    addFiles(e.dataTransfer.files);
+    void addFiles(e.dataTransfer.files);
   }
 
   function removeImage(index: number): void {
@@ -128,6 +136,10 @@ export function PhotoPrintSetupWizard({ onComplete, onCancel }: PhotoPrintSetupW
     }
     const preset = PRINT_SIZE_PRESETS.find((p) => p.id === printPresetId) ?? PRINT_SIZE_PRESETS[0];
     return { widthMm: preset.widthMm, heightMm: preset.heightMm };
+  }
+
+  function getPrintPreset(): PrintSizePreset {
+    return PRINT_SIZE_PRESETS.find((p) => p.id === printPresetId) ?? PRINT_SIZE_PRESETS[0];
   }
 
   function getLayout(forCount?: number): PhotoPrintLayoutResult {
@@ -205,9 +217,15 @@ export function PhotoPrintSetupWizard({ onComplete, onCancel }: PhotoPrintSetupW
     const { widthMm: pageW, heightMm: pageH } = getPageDimsMm();
     const { widthMm: printW, heightMm: printH } = getPrintDimsMm();
     const pageDpi = getPagePreset().dpi;
+    const printPreset = getPrintPreset();
     const printOptions: PhotoPrintCreateOptions = {
       printWidthMm: printW,
       printHeightMm: printH,
+      printPresetId,
+      passportPresetId: printPreset.passportPresetId,
+      passportRequirementId: printPreset.passportRequirementId,
+      passportSizeMm: printPreset.passportRequirementId === undefined ? undefined : { width: printW, height: printH },
+      showPassportGuidelines: printPreset.passportRequirementId !== undefined ? true : undefined,
       globalCopies,
       fitMode,
       frameBorderEnabled,
@@ -253,7 +271,7 @@ export function PhotoPrintSetupWizard({ onComplete, onCancel }: PhotoPrintSetupW
         >
           <UploadCloud size={28} />
           <span>גרור תמונות לכאן, או לחץ לבחירה</span>
-          <input ref={fileInputRef} type="file" multiple accept="image/*" hidden onChange={(e: ChangeEvent<HTMLInputElement>) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }} />
+          <input ref={fileInputRef} type="file" multiple accept={SUPPORTED_IMAGE_ACCEPT} hidden onChange={(e: ChangeEvent<HTMLInputElement>) => { if (e.target.files) void addFiles(e.target.files); e.target.value = ""; }} />
         </div>
 
         {images.length > 0 && (
@@ -349,7 +367,7 @@ export function PhotoPrintSetupWizard({ onComplete, onCancel }: PhotoPrintSetupW
 
     const photoPresets = PRINT_SIZE_PRESETS.filter((p) => p.category === "photo" || p.category === "custom");
     const paperPresets = PRINT_SIZE_PRESETS.filter((p) => p.category === "paper");
-    const passportPresets = PRINT_SIZE_PRESETS.filter((p) => p.category === "passport");
+    const passportPresets = PRINT_SIZE_PRESETS.filter((p) => p.category === "passport" || p.category === "official");
 
     return (
       <div className="wizard-body">

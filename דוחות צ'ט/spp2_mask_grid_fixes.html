@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SPP2 — סט תיקונים למצב מסיכה / גריד / כוונוני תמונה</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: rgba(17,24,39,.86);
+      --panel2: rgba(31,41,55,.78);
+      --text: #f8fafc;
+      --muted: #cbd5e1;
+      --accent: #38bdf8;
+      --yellow: #facc15;
+      --green: #34d399;
+      --red: #fb7185;
+      --border: rgba(255,255,255,.14);
+      --code: #020617;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, "Noto Sans Hebrew", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(56,189,248,.18), transparent 32%),
+        radial-gradient(circle at top right, rgba(250,204,21,.13), transparent 28%),
+        linear-gradient(135deg, #0f172a, #111827 55%, #020617);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    header {
+      padding: 44px 7vw 30px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(2,6,23,.38);
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(28px, 5vw, 48px);
+      letter-spacing: -1px;
+    }
+    .subtitle {
+      max-width: 1100px;
+      color: var(--muted);
+      font-size: 18px;
+    }
+    main {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 28px 7vw 80px;
+    }
+    nav, section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      box-shadow: 0 18px 44px rgba(0,0,0,.22);
+    }
+    nav {
+      padding: 18px 20px;
+      margin-bottom: 24px;
+    }
+    nav a {
+      display: inline-block;
+      margin: 0 0 0 18px;
+      color: #e0f2fe;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    nav a:hover { color: var(--yellow); }
+    section {
+      padding: 26px;
+      margin: 22px 0;
+    }
+    h2 {
+      margin-top: 0;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+      color: #e0f2fe;
+      font-size: 30px;
+    }
+    h3 {
+      margin-top: 28px;
+      color: var(--yellow);
+      font-size: 22px;
+    }
+    h4 {
+      margin-bottom: 6px;
+      color: #bae6fd;
+      font-size: 18px;
+    }
+    p, li { color: var(--text); }
+    .muted { color: var(--muted); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 18px;
+    }
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(56,189,248,.12);
+      color: #e0f2fe;
+      padding: 4px 10px;
+      margin: 2px;
+      font-size: 13px;
+    }
+    .ok { color: var(--green); }
+    .warn { color: var(--yellow); }
+    .danger { color: var(--red); }
+    code, pre {
+      direction: ltr;
+      text-align: left;
+      font-family: Consolas, Monaco, monospace;
+    }
+    pre {
+      background: var(--code);
+      color: #e2e8f0;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px;
+      overflow-x: auto;
+      line-height: 1.55;
+      white-space: pre-wrap;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0;
+      border-radius: 14px;
+      overflow: hidden;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 10px 12px;
+      vertical-align: top;
+    }
+    th {
+      background: rgba(56,189,248,.13);
+      color: #e0f2fe;
+    }
+    td { background: rgba(15,23,42,.35); }
+    .checklist label {
+      display: block;
+      padding: 8px 0;
+      border-bottom: 1px dashed rgba(255,255,255,.12);
+    }
+    input[type="checkbox"] {
+      transform: scale(1.15);
+      margin-left: 8px;
+    }
+    textarea {
+      width: 100%;
+      min-height: 80px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: rgba(2,6,23,.55);
+      color: var(--text);
+      padding: 12px;
+      resize: vertical;
+      font-family: inherit;
+    }
+    .quote {
+      border-right: 4px solid var(--accent);
+      padding: 12px 16px;
+      background: rgba(56,189,248,.08);
+      border-radius: 14px;
+      color: #e0f2fe;
+    }
+    @media print {
+      body { background: #fff; color: #000; }
+      header, nav, section, .card { background: #fff; color: #000; box-shadow: none; border-color: #aaa; }
+      h2, h3, h4, p, li, td, th, .muted { color: #000; }
+      pre { background: #f4f4f4; color: #000; }
+      .tag { color: #000; border-color: #777; }
+    }
+  </style>
+</head>
+
+<body>
+<header>
+  <h1>SPP2 — סט תיקונים למצב מסיכה / גריד / כוונוני תמונה</h1>
+  <p class="subtitle">
+    מסמך עבודה לקודקס / Claude / מודל פיתוח: כולל רקע על המערכת, פירוק בעיות,
+    הנחיות תיקון, סיכונים, חוזי התנהגות, בדיקות ופרומפטים מוכנים.
+  </p>
+</header>
+
+<main>
+  <nav>
+    <a href="#context">רקע</a>
+    <a href="#issues">בעיות</a>
+    <a href="#principles">עקרונות תיקון</a>
+    <a href="#fixes">סט תיקונים</a>
+    <a href="#tests">בדיקות</a>
+    <a href="#prompts">פרומפטים</a>
+  </nav>
+
+  <section id="context">
+    <h2>1. רקע מערכת</h2>
+    <p>
+      SPP2 היא תוכנת דסקטופ מבוססת Electron / React / Konva, עם רכיבי עיבוד תמונה ו־Sidecar בפייתון.
+      המערכת כוללת מצבים כמו קולאג', מסיכה, גריד, עריכת תמונות, הכנת הדפסה, PDF, מוצרים, שכבות, שמירה אוטומטית וייצוא.
+    </p>
+    <p>
+      מצב מסיכה ומצבי גריד/קולאג' הם מצבי container: הם לא רק תמונה רגילה, אלא מסגרת או קבוצת תאים
+      שבתוכה יושבות תמונות. לכן חשוב להפריד בין התא עצמו לבין התמונה שבתוכו.
+    </p>
+
+    <div class="grid">
+      <div class="card">
+        <h3>תא / Cell</h3>
+        <p>מסגרת, חריץ או אזור שמגדיר גבולות. הוא יכול לקבל גבול, צל, ריווח, מסיכה וצורה.</p>
+        <span class="tag">frame</span>
+        <span class="tag">mask slot</span>
+        <span class="tag">container</span>
+      </div>
+      <div class="card">
+        <h3>תמונה בתוך תא</h3>
+        <p>התוכן הגרפי. יש לה crop, zoom, offset, fill/fit, rotation, כוונוני צבע ו־Face Fit.</p>
+        <span class="tag">image transform</span>
+        <span class="tag">adjustments</span>
+        <span class="tag">asset</span>
+      </div>
+      <div class="card">
+        <h3>עיצוב תא</h3>
+        <p>גבול, צל, צבע, עובי, רדיוס, ריווח. אלו לא צריכים להרוס את התמונה או לשנות crop.</p>
+        <span class="tag">border</span>
+        <span class="tag">shadow</span>
+        <span class="tag">spacing</span>
+      </div>
+    </div>
+
+    <h3>חוזה בסיסי</h3>
+    <p class="quote">
+      תא הוא מסגרת. תמונה היא תוכן. כוונוני תמונה חלים על התמונה. גבול וצל חלים על התא.
+      שינוי מרווחים, החלפת מסיכה או הוספת תמונות לא אמורים לנעול מחדש תאים או לאפס הגדרות משתמש.
+    </p>
+  </section>
+
+  <section id="issues">
+    <h2>2. פירוק הבעיות שהועלו</h2>
+
+    <table>
+      <tr>
+        <th>בעיה</th>
+        <th>מה קורה היום</th>
+        <th>מה צריך לקרות</th>
+        <th>סיכון מרכזי</th>
+      </tr>
+      <tr>
+        <td>ברירת מחדל נעולה במצב מסיכה</td>
+        <td>תאים/שכבות נעולים כברירת מחדל.</td>
+        <td>תאים לא נעולים כברירת מחדל, ונשארים כך גם אחרי פעולות נוספות.</td>
+        <td>Rebuild של מסיכה עלול לאפס שוב ל־locked.</td>
+      </tr>
+      <tr>
+        <td>ריווח ביחידה לא ברורה</td>
+        <td>המשתמש לא יודע אם הערך הוא פיקסלים, מ״מ או משהו אחר.</td>
+        <td>ברירת מחדל מ״מ, עם אפשרות ס״מ/אינץ׳.</td>
+        <td>המרה שגויה עלולה לשנות גודל הדפסה.</td>
+      </tr>
+      <tr>
+        <td>אין עיצוב מסיכה גלובלי</td>
+        <td>אין פקדים נוחים לגבול/צל שמשפיעים על כל התאים.</td>
+        <td>תפריט צד עם גבול, צבע, עובי, צל וכו'.</td>
+        <td>לא לצייר את העיצוב כחלק הרסני מהתמונה.</td>
+      </tr>
+      <tr>
+        <td>חיתוך צילום מסך מעוות תמונה</td>
+        <td>השוליים השחורים יורדים אבל התמונה נמתחת/מתעוותת.</td>
+        <td>Crop נקי בלבד, בלי מתיחה.</td>
+        <td>שמירה על גודל layer מול שינוי גודל bitmap.</td>
+      </tr>
+      <tr>
+        <td>אין כוונוני תמונה במצב מסיכה/גריד</td>
+        <td>אי אפשר לערוך בהירות/קונטרסט וכו' לתמונה בתוך תא.</td>
+        <td>לשונית כוונוני תמונה לצד לשונית המצב.</td>
+        <td>UI בלי pipeline אמיתי ייצור אשליית תיקון.</td>
+      </tr>
+      <tr>
+        <td>כפתור עריכת פריסה חסר השפעה במצב מסיכה</td>
+        <td>הכפתור מופיע אבל לא עושה כלום.</td>
+        <td>להסתיר או להשבית עם tooltip. עדיף להסתיר כרגע.</td>
+        <td>לא לשבור מצבים אחרים שבהם הכפתור כן עובד.</td>
+      </tr>
+    </table>
+  </section>
+
+  <section id="principles">
+    <h2>3. עקרונות תיקון כדי לא ליצור בעיות חדשות</h2>
+
+    <h3>3.1 לא לאפס state של משתמש</h3>
+    <p>
+      פעולות כמו הוספת תמונות, שינוי ריווח, החלפת מסיכה, שינוי כמות תאים או רענון layout
+      לא אמורות לאפס נעילה, crop, כוונוני צבע, מיקום פנימי של תמונה או הגדרות עיצוב.
+    </p>
+
+    <h3>3.2 לשמור יחידות פיזיות במודל אחיד</h3>
+    <p>
+      מומלץ לשמור spacing פנימי במילימטרים, ולהמיר רק לתצוגה. כך הייצוא וההדפסה נשארים צפויים.
+    </p>
+    <pre><code>spacingMm = 5
+
+displayValue:
+  mm   => 5
+  cm   => 0.5
+  inch => 0.19685
+
+onUserInput:
+  mm   => value
+  cm   => value * 10
+  inch => value * 25.4</code></pre>
+
+    <h3>3.3 להפריד בין עיצוב תא לעיבוד תמונה</h3>
+    <p>
+      גבול וצל הם decoration של התא. בהירות וקונטרסט הם adjustment של התמונה.
+      אין לערבב ביניהם.
+    </p>
+
+    <h3>3.4 Crop צילום מסך לא משנה יחס תמונה</h3>
+    <p>
+      הסרת שוליים שחורים היא פעולה של חיתוך גבולות. אסור לבצע scale לא אחיד.
+      אם רוצים לשמור את ה־layer באותו גודל ויזואלי, צריך לבצע זאת עם scale אחיד או עדכון bounds מודע,
+      אבל לא למתוח את התמונה.
+    </p>
+
+    <h3>3.5 UI חייב להיות מחובר לפעולה אמיתית</h3>
+    <p>
+      אם מוסיפים לשונית כוונוני תמונה, היא חייבת להשפיע בפועל על תמונות בתוך תאים,
+      להישמר בפרויקט, לעבוד ב־undo/redo, autosave וייצוא.
+    </p>
+  </section>
+
+  <section id="fixes">
+    <h2>4. סט תיקונים מסודר</h2>
+
+    <h3>תיקון 1 — מצב מסיכה: תאים לא נעולים כברירת מחדל</h3>
+    <h4>דרישה</h4>
+    <ul>
+      <li>ברירת מחדל של תאי מסיכה תהיה לא נעולה.</li>
+      <li>המצב הלא נעול יישמר גם אחרי הוספת תמונות, שינוי מרווחים, החלפת מסיכה ושינויים נוספים.</li>
+      <li>אין לאפס ל־locked אלא אם המשתמש נעל במפורש.</li>
+    </ul>
+    <h4>יישום מומלץ</h4>
+    <pre><code>const DEFAULT_MASK_CELL_LOCKED = false;
+
+// בעת יצירת תא חדש:
+cell.locked = userProvidedLockedValue ?? DEFAULT_MASK_CELL_LOCKED;
+
+// בעת rebuild:
+cell.locked = previousCell?.locked ?? DEFAULT_MASK_CELL_LOCKED;</code></pre>
+    <h4>נקודת זהירות</h4>
+    <p>
+      לבדוק שאין פונקציות normalize / rebuild / regenerate שמגדירות locked: true באופן קשיח.
+    </p>
+
+    <h3>תיקון 2 — ריווח במצב מסיכה עם יחידות ברורות</h3>
+    <h4>דרישה</h4>
+    <ul>
+      <li>ברירת מחדל: מילימטר.</li>
+      <li>אפשרויות: מ״מ, ס״מ, אינץ׳.</li>
+      <li>שמירה פנימית במ״מ.</li>
+      <li>שינוי יחידה לא משנה את המרווח בפועל.</li>
+    </ul>
+    <h4>יישום מומלץ</h4>
+    <pre><code>type Unit = "mm" | "cm" | "inch";
+
+function toMm(value: number, unit: Unit): number {
+  if (unit === "mm") return value;
+  if (unit === "cm") return value * 10;
+  return value * 25.4;
+}
+
+function fromMm(mm: number, unit: Unit): number {
+  if (unit === "mm") return mm;
+  if (unit === "cm") return mm / 10;
+  return mm / 25.4;
+}</code></pre>
+
+    <h3>תיקון 3 — כלי עיצוב למסיכות / תאים</h3>
+    <h4>דרישה</h4>
+    <p>
+      להוסיף בתפריט הצד של מצב מסיכה אזור עיצוב שמשפיע על כל התאים.
+    </p>
+    <ul>
+      <li>גבול פעיל/כבוי.</li>
+      <li>עובי גבול.</li>
+      <li>צבע גבול.</li>
+      <li>צל פעיל/כבוי.</li>
+      <li>צבע צל.</li>
+      <li>טשטוש צל.</li>
+      <li>עוצמת צל / opacity.</li>
+      <li>היסט צל X/Y.</li>
+    </ul>
+    <h4>State מוצע</h4>
+    <pre><code>maskStyle: {
+  borderEnabled: boolean
+  borderColor: string
+  borderWidthMm: number
+
+  shadowEnabled: boolean
+  shadowColor: string
+  shadowBlur: number
+  shadowOpacity: number
+  shadowOffsetX: number
+  shadowOffsetY: number
+}</code></pre>
+    <h4>נקודת זהירות</h4>
+    <p>
+      אם הגבול מצויר מעל התמונה, הוא עלול לכסות קצוות. אם הוא מצויר מחוץ לתא, צריך לוודא שהוא לא נחתך.
+      עדיף לאפשר render עקבי: צל מאחורי התא, תמונה clipped, גבול מעל התא.
+    </p>
+
+    <h3>תיקון 4 — חיתוך צילום מסך בלי עיוות</h3>
+    <h4>דרישה</h4>
+    <ul>
+      <li>לזהות שוליים שחורים.</li>
+      <li>לבצע crop נקי.</li>
+      <li>לא לבצע stretch לתוכן הפנימי.</li>
+      <li>לא לבצע resize לא פרופורציונלי.</li>
+      <li>לשמור יחס תמונה של התוכן שנשאר.</li>
+    </ul>
+    <h4>אלגוריתם בסיסי</h4>
+    <pre><code>1. Load image bitmap/canvas.
+2. Scan from top/bottom/left/right until non-black pixels are found.
+3. Compute cropRect.
+4. Create a new bitmap/canvas with cropRect width/height.
+5. Draw original image region into new bitmap at 1:1 scale.
+6. Replace asset or create new cropped asset.
+7. Update layer bounds carefully:
+   - either shrink layer to cropped aspect
+   - or preserve visual width with proportional height
+   - never stretch X and Y independently.</code></pre>
+
+    <h3>תיקון 5 — כוונוני תמונה במצב מסיכה / גריד</h3>
+    <h4>דרישה</h4>
+    <p>
+      להוסיף לשונית כוונוני תמונה לצד לשונית מצב מסיכה/גריד כאשר נבחרת תמונה בתוך תא.
+    </p>
+    <ul>
+      <li>בהירות.</li>
+      <li>קונטרסט.</li>
+      <li>רוויה.</li>
+      <li>שחור־לבן.</li>
+      <li>ספיה / חום אם קיים.</li>
+      <li>איפוס כוונונים.</li>
+    </ul>
+    <h4>חיבור Pipeline</h4>
+    <pre><code>selectedCell.image.adjustments = {
+  brightness,
+  contrast,
+  saturation,
+  grayscale,
+  sepia
+}
+
+render:
+  image asset
+  + fill/crop transform
+  + adjustments
+  + cell clipping
+  + cell border/shadow decoration</code></pre>
+    <h4>נקודת זהירות</h4>
+    <p>
+      אין להסתפק בהוספת UI. צריך לבדוק שהשינוי משפיע ב־Konva, נשמר ב־state,
+      משתלב עם Undo/Redo ומופיע בייצוא.
+    </p>
+
+    <h3>תיקון 6 — הסתרת כפתור עריכת פריסה במצב מסיכה</h3>
+    <h4>דרישה</h4>
+    <ul>
+      <li>במצב מסיכה, אם הכפתור לא פעיל באמת — להסתיר אותו.</li>
+      <li>לא לפגוע במצב קולאג' או גריד אם שם הכפתור כן רלוונטי.</li>
+      <li>אם מחליטים להשבית במקום להסתיר, להציג tooltip ברור.</li>
+    </ul>
+    <pre><code>const showEditLayoutButton =
+  mode !== "mask" &&
+  supportsManualLayoutEditing(mode, currentLayout);</code></pre>
+  </section>
+
+  <section id="tests">
+    <h2>5. בדיקות חובה</h2>
+
+    <div class="checklist">
+      <h3>ברירת מחדל ונעילה</h3>
+      <label><input type="checkbox"> פתיחת מצב מסיכה חדש יוצרת תאים לא נעולים.</label>
+      <label><input type="checkbox"> הוספת תמונות לא נועלת תאים מחדש.</label>
+      <label><input type="checkbox"> שינוי ריווח לא נועל תאים מחדש.</label>
+      <label><input type="checkbox"> החלפת מסיכה לא נועלת תאים מחדש.</label>
+      <label><input type="checkbox"> אם המשתמש נעל ידנית, הנעילה נשמרת.</label>
+
+      <h3>יחידות ריווח</h3>
+      <label><input type="checkbox"> ברירת מחדל מוצגת במ״מ.</label>
+      <label><input type="checkbox"> מעבר לס״מ מציג ערך מומר נכון.</label>
+      <label><input type="checkbox"> מעבר לאינץ׳ מציג ערך מומר נכון.</label>
+      <label><input type="checkbox"> שינוי יחידה בלבד לא משנה את המרווח הפיזי.</label>
+      <label><input type="checkbox"> ייצוא/הדפסה שומרים על מרווח נכון.</label>
+
+      <h3>עיצוב מסיכה</h3>
+      <label><input type="checkbox"> גבול מופיע על כל התאים.</label>
+      <label><input type="checkbox"> שינוי צבע גבול משפיע על כל התאים.</label>
+      <label><input type="checkbox"> שינוי עובי גבול משפיע על כל התאים.</label>
+      <label><input type="checkbox"> צל מופיע מאחורי התאים ולא הורס crop.</label>
+      <label><input type="checkbox"> העיצוב נשמר אחרי שמירה ופתיחה מחדש.</label>
+
+      <h3>חיתוך צילום מסך</h3>
+      <label><input type="checkbox"> שוליים שחורים נחתכים.</label>
+      <label><input type="checkbox"> התמונה לא נמתחת.</label>
+      <label><input type="checkbox"> יחס התמונה נשמר.</label>
+      <label><input type="checkbox"> התוכן הפנימי נשאר חד ולא מעוות.</label>
+
+      <h3>כוונוני תמונה</h3>
+      <label><input type="checkbox"> לשונית כוונוני תמונה מופיעה כשנבחרת תמונה בתוך תא.</label>
+      <label><input type="checkbox"> בהירות משפיעה בפועל.</label>
+      <label><input type="checkbox"> קונטרסט משפיע בפועל.</label>
+      <label><input type="checkbox"> רוויה משפיעה בפועל.</label>
+      <label><input type="checkbox"> איפוס כוונונים עובד.</label>
+      <label><input type="checkbox"> הכוונונים נשמרים ונטענים מחדש.</label>
+      <label><input type="checkbox"> הכוונונים מופיעים בייצוא.</label>
+
+      <h3>UI</h3>
+      <label><input type="checkbox"> כפתור עריכת פריסה מוסתר במצב מסיכה.</label>
+      <label><input type="checkbox"> הכפתור עדיין זמין במצבים שבהם הוא עובד.</label>
+    </div>
+
+    <h3>הערות בדיקה</h3>
+    <textarea placeholder="כתוב כאן הערות, תוצאות בדיקה או באגים שנשארו..."></textarea>
+  </section>
+
+  <section id="prompts">
+    <h2>6. פרומפטים מוכנים לקודקס</h2>
+
+    <h3>פרומפט 1 — מיפוי לפני שינוי</h3>
+    <pre><code>Before implementing, inspect SPP2 mask/grid/collage related code.
+
+Map:
+1. Where mask mode state is created and normalized.
+2. Where mask cells/layers get their locked state.
+3. Where spacing is stored and displayed.
+4. Which units are currently assumed for spacing.
+5. Where mask cells are rendered in Konva.
+6. How normal ImageLayer adjustments are implemented.
+7. Whether cell images in mask/grid modes reuse the same adjustment pipeline.
+8. Where screenshot black-border crop is implemented.
+9. Where the Edit Layout button is rendered and which modes show it.
+
+Do not change code yet.
+Return the relevant files, functions, current flow, root causes, and a safe implementation plan.</code></pre>
+
+    <h3>פרומפט 2 — תאים לא נעולים כברירת מחדל</h3>
+    <pre><code>Fix mask mode default cell locking.
+
+Requirements:
+- In mask mode, cells/layers should be unlocked by default.
+- Default locked state should be false.
+- Preserve this behavior after adding images, changing spacing, replacing masks, rebuilding mask layout, changing mask settings, and switching modes.
+- If the user explicitly locks a cell/layer, preserve that explicit state.
+- Do not reset locked=true during normalize/recompute/rebuild.
+- Keep backwards compatibility with existing project files.
+
+Add or update tests/manual checks:
+- New mask mode cells are unlocked.
+- Adding images keeps cells unlocked.
+- Changing spacing keeps cells unlocked.
+- Replacing mask keeps cells unlocked unless user explicitly locked.</code></pre>
+
+    <h3>פרומפט 3 — יחידות ריווח במצב מסיכה</h3>
+    <pre><code>Improve mask mode spacing units.
+
+Requirements:
+- Display spacing in millimeters by default.
+- Add a unit selector: mm, cm, inch.
+- Store internal spacing in millimeters if possible.
+- Changing display unit should convert the displayed value but keep the actual physical spacing unchanged.
+- Editing the value in any unit should convert back to mm internally.
+- Ensure export/print dimensions remain correct.
+- Avoid breaking old project files that stored spacing without unit metadata.
+
+Add a safe migration/default:
+- If spacingUnit is missing, assume mm unless existing code clearly used another physical unit.</code></pre>
+
+    <h3>פרומפט 4 — עיצוב מסיכה גלובלי</h3>
+    <pre><code>Add mask-wide style controls in mask mode side panel.
+
+Controls:
+- Border enabled
+- Border width
+- Border color
+- Shadow enabled
+- Shadow color
+- Shadow blur
+- Shadow opacity/intensity
+- Shadow offset X/Y
+
+Behavior:
+- These controls apply to all mask cells.
+- Render shadow/border as cell decoration, not as destructive modification to the image.
+- Do not affect image crop/fill/transform.
+- Save style in project state.
+- Support undo/redo and autosave.
+- Render correctly in export.
+
+Recommended render order:
+1. Shadow behind cell shape.
+2. Clipped image content.
+3. Border above clipped image.</code></pre>
+
+    <h3>פרומפט 5 — תיקון חיתוך צילום מסך</h3>
+    <pre><code>Fix screenshot black-border crop distortion.
+
+Current bug:
+The crop removes black borders but distorts/stretches the image.
+
+Required behavior:
+- Detect black borders.
+- Crop the bitmap/canvas to the detected content bounds.
+- Do not non-uniformly resize the remaining content.
+- Do not stretch the cropped content back into the old dimensions.
+- Preserve the content aspect ratio.
+- If layer bounds must be updated, update them proportionally.
+- Internal pixels should only be cropped, not warped.
+
+Manual test:
+Use a screenshot with black bars.
+Run crop.
+Verify black borders are removed and the image content is not stretched horizontally or vertically.</code></pre>
+
+    <h3>פרומפט 6 — כוונוני תמונה במצב מסיכה / גריד</h3>
+    <pre><code>Add image adjustment access for images inside mask/grid/container modes.
+
+Requirements:
+- In mask mode, grid mode and similar cell-based modes, show an Image Adjustments tab next to the mode-specific tab when an image inside a cell is selected.
+- Include controls for brightness, contrast, saturation, grayscale/black-white, sepia if available, and reset.
+- Reuse the normal ImageLayer adjustment pipeline where possible.
+- Adjustments must apply to the selected image inside the cell, not to the whole mask/grid.
+- Adjustments must save, undo/redo, autosave, and export correctly.
+- The render order should be:
+  image asset -> fill/crop transform -> image adjustments -> cell clipping -> cell border/shadow decoration.
+- Avoid re-rendering all cells when only one selected image adjustment changes if possible.</code></pre>
+
+    <h3>פרומפט 7 — הסתרת כפתור עריכת פריסה במצב מסיכה</h3>
+    <pre><code>Hide or disable the Edit Layout button in mask mode.
+
+Requirement:
+- The Edit Layout button currently appears in mask mode but has no useful effect.
+- Hide it in mask mode to avoid user confusion.
+- Do not remove or break Edit Layout in collage/grid modes where it works.
+- If hiding is not feasible, disable it and show a tooltip: "עריכת פריסה אינה זמינה במצב מסיכה".
+- Make sure TypeScript checks pass and no dead handlers cause errors.</code></pre>
+
+    <h3>פרומפט 8 — רגרסיה מלאה</h3>
+    <pre><code>Run a focused regression pass after the mask/grid fixes.
+
+Check:
+1. Create new mask project.
+2. Verify cells are unlocked by default.
+3. Add images and verify cells remain unlocked.
+4. Change spacing in mm, cm, inch and verify physical spacing remains correct.
+5. Add border and shadow, verify all cells update.
+6. Select an image inside a mask cell and adjust brightness/contrast/saturation.
+7. Save and reopen project.
+8. Export and compare visual output.
+9. Replace mask and confirm unlocked/default/user states are preserved.
+10. Test screenshot black-border crop and confirm no distortion.
+11. Verify Edit Layout button is hidden in mask mode but still available where supported.
+12. Run TypeScript checks and relevant tests.
+
+Return:
+- files changed
+- bugs fixed
+- remaining risks
+- any unsupported edge cases</code></pre>
+  </section>
+
+  <section>
+    <h2>7. משפט מנחה למפתח</h2>
+    <p class="quote">
+      אל תתקן את מצב מסיכה כמערכת נפרדת ומקבילה. השתמש באותם עקרונות של SPP2:
+      תא הוא container, תמונה היא image instance, עיצוב תא הוא decoration, וכיוונוני תמונה עוברים דרך pipeline אחיד.
+    </p>
+    <p class="muted">נוצר עבור Daniel / SPP2 — 25/05/2026 08:14</p>
+  </section>
+</main>
+</body>
+</html>

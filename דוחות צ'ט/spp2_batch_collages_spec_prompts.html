@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SPP2 — Batch Collages</title>
+  <style>
+    :root{--bg:#0f1220;--panel:#171b2d;--panel2:#20263d;--text:#eef2ff;--muted:#b9c2e2;--accent:#7c5cff;--accent2:#38bdf8;--good:#22c55e;--warn:#f59e0b;--code:#0a0d18;--border:rgba(255,255,255,.12)}
+    *{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at top left,rgba(124,92,255,.22),transparent 35%),radial-gradient(circle at bottom right,rgba(56,189,248,.12),transparent 30%),var(--bg);color:var(--text);font-family:Arial,"Noto Sans Hebrew","Segoe UI",sans-serif;line-height:1.75} header{padding:42px 6vw 28px;border-bottom:1px solid var(--border);background:rgba(10,12,24,.72);position:sticky;top:0;backdrop-filter:blur(10px);z-index:5} h1{margin:0 0 12px;font-size:clamp(28px,4vw,48px);line-height:1.15}.subtitle{max-width:1100px;color:var(--muted);font-size:18px}.meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}.chip{border:1px solid var(--border);background:rgba(255,255,255,.06);border-radius:999px;padding:6px 12px;color:var(--muted);font-size:14px} main{display:grid;grid-template-columns:minmax(220px,280px) minmax(0,1fr);gap:24px;padding:28px 6vw 80px;max-width:1500px;margin:0 auto} nav{position:sticky;top:162px;align-self:start;background:rgba(23,27,45,.8);border:1px solid var(--border);border-radius:18px;padding:18px;max-height:calc(100vh - 190px);overflow:auto}nav h3{margin:0 0 10px;font-size:16px;color:var(--accent2)}nav a{display:block;color:var(--muted);text-decoration:none;padding:7px 0;font-size:14px;border-bottom:1px solid rgba(255,255,255,.05)}nav a:hover{color:white}section{background:rgba(23,27,45,.75);border:1px solid var(--border);border-radius:22px;padding:26px;margin-bottom:24px;box-shadow:0 12px 40px rgba(0,0,0,.16)}h2{margin-top:0;font-size:28px;border-bottom:1px solid var(--border);padding-bottom:12px}h3{color:#dbe4ff;margin-top:28px;font-size:22px}h4{color:var(--accent2);margin-top:22px;font-size:18px}p,li{color:var(--muted)}strong{color:#fff}.note,.warning,.success{border-radius:16px;padding:14px 16px;margin:16px 0;border:1px solid var(--border)}.note{background:rgba(56,189,248,.08);border-color:rgba(56,189,248,.28)}.warning{background:rgba(245,158,11,.09);border-color:rgba(245,158,11,.35)}.success{background:rgba(34,197,94,.09);border-color:rgba(34,197,94,.35)}code{direction:ltr;unicode-bidi:embed;background:rgba(0,0,0,.3);padding:2px 5px;border-radius:6px;color:#d8f3ff}pre{direction:ltr;text-align:left;white-space:pre-wrap;background:var(--code);border:1px solid var(--border);border-radius:16px;padding:18px;overflow:auto;color:#e6edf7;line-height:1.55;font-size:14px}.prompt{position:relative;margin-top:16px}.copy-btn{position:absolute;top:10px;left:10px;border:1px solid var(--border);background:rgba(124,92,255,.22);color:white;border-radius:10px;padding:6px 10px;cursor:pointer;font-size:12px}.copy-btn:hover{background:rgba(124,92,255,.42)}table{width:100%;border-collapse:collapse;margin:18px 0;overflow:hidden;border-radius:14px}th,td{border:1px solid var(--border);padding:10px 12px;vertical-align:top}th{background:rgba(124,92,255,.18);color:#fff}td{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}.card{background:rgba(255,255,255,.045);border:1px solid var(--border);border-radius:16px;padding:16px}.card h4{margin-top:0}.checklist li{margin:6px 0}footer{color:var(--muted);text-align:center;padding:30px;border-top:1px solid var(--border)}@media(max-width:900px){main{grid-template-columns:1fr;padding:20px}nav{position:static;max-height:none}header{position:static;padding:30px 20px}}
+  </style>
+</head>
+<body>
+<header>
+  <h1>SPP2 — Batch Collages / יצירת קולאז׳ים כמותית</h1>
+  <div class="subtitle">אפיון מלא וסט פרומפטים לבניית מצב Batch Collages כחלק מאשף הקולאז׳ הקיים: יצירת עשרות קולאז׳ים בעמודים נפרדים באותו פרויקט, עם בחירת פריסה אוטומטית לפי ניקוד, שימוש במנוע הקולאז׳ הקיים, ואפשרות עריכה רגילה לאחר מכן.</div>
+  <div class="meta"><span class="chip">יעד MVP: עד 50 קולאז׳ים</span><span class="chip">כ־6 תמונות לקולאז׳ בממוצע</span><span class="chip">כל קולאז׳ = עמוד נפרד</span><span class="chip">שילוב בתוך אשף הקולאז׳</span><span class="chip">ללא מסך Review ייעודי בשלב ראשון</span></div>
+</header>
+<main>
+<nav>
+  <h3>ניווט</h3>
+  <a href="#background">רקע ומבנה קיים</a><a href="#decisions">החלטות מוצר</a><a href="#flow">זרימת משתמש</a><a href="#data">מודל נתונים</a><a href="#wizard">אשף Batch</a><a href="#engine">מנוע יצירה</a><a href="#scoring">ניקוד ובחירת פריסה</a><a href="#smartcrop">Smart Crop</a><a href="#pages">עמודים ועריכה</a><a href="#prompts">פרומפטים לבנייה</a><a href="#checklist">בדיקות</a><a href="#future">המשך עתידי</a>
+</nav>
+<div>
+<section id="background"><h2>1. רקע על מבנה הקולאז׳ הקיים ב־SPP2</h2><p>מצב הקולאז׳ הנוכחי בנוי סביב רעיון נכון: <strong>קולאז׳ הוא ישות מנוהלת בתוך עמוד</strong>, ולא קנבס נפרד. כל קולאז׳ נשמר כ־<code>CollageRule</code>, עם רשימת תמונות, תאים מחושבים, שיוכים בין תמונות לתאים, והמרה לשכבות/פריימים רגילים על הקנבס.</p><div class="grid"><div class="card"><h4>CollageRule</h4><p>ישות הקולאז׳ המנוהלת. שומרת עמוד יעד, משפחת פריסה פעילה, spacing/margin, cached slots, image pool, assignments ועוד.</p></div><div class="card"><h4>CollageSlot</h4><p>תא בתוך הקולאז׳. יכול להיות מלבני, פוליגוני, לב/מסיכה ועוד.</p></div><div class="card"><h4>Image Assignments</h4><p>המיפוי בין תמונה לבין תא, כולל assetId, slotId, fit/crop/transform, התאמות צבע ונתוני Smart Crop.</p></div><div class="card"><h4>FrameLayer</h4><p>בפועל, התאים נראים בקנבס כשכבות/פריימים רגילים עם metadata של קולאז׳.</p></div></div><div class="note"><strong>עיקרון חשוב:</strong> Batch Collages לא צריך לבנות מנוע קולאז׳ חדש. הוא צריך להשתמש במנוע הקיים שוב ושוב — פעם לכל קבוצה/ילד — וליצור עמוד נפרד לכל תוצאה.</div></section>
+<section id="decisions"><h2>2. החלטות מוצר סופיות</h2><table><thead><tr><th>נושא</th><th>החלטה</th></tr></thead><tbody><tr><td>פלט</td><td>כל קולאז׳ נוצר כעמוד נפרד באותו פרויקט SPP2.</td></tr><tr><td>ייצוא/הדפסה</td><td>משתמשים בכלי ההדפסה/ייצוא הרגילים של SPP2 על הפרויקט הרב־עמודי.</td></tr><tr><td>מסך אחרי יצירה</td><td>מסך העריכה הרגיל של הקולאז׳ים. אין Review ייעודי בשלב ראשון.</td></tr><tr><td>הזנת קבוצות</td><td>המשתמש נותן שם לקבוצה/ילד, מכניס תמונות, ולוחץ + לפתיחת ילד/קבוצה חדשה.</td></tr><tr><td>כמות תמונות</td><td>אין מספר קבוע. כל קולאז׳ משתמש בכל התמונות שהועלו לקבוצה שלו.</td></tr><tr><td>בחירת פריסה</td><td>ברירת מחדל: פריסות רגילות/בטוחות. צ׳קבוקס מאפשר שימוש בכל סוגי הקולאז׳ים.</td></tr><tr><td>אחידות</td><td>כל קולאז׳ מקבל את הפריסה שהכי מתאימה לו לפי ניקוד.</td></tr><tr><td>עדיפות</td><td>התאמת תמונות עם מינימום חיתוך.</td></tr><tr><td>Smart Crop</td><td>אופציה באשף. ניתן גם לערוך ידנית לאחר מכן.</td></tr><tr><td>טקסט/שמות</td><td>אפשרות עתידית, לא חובה בשלב ראשון. אם יתווסף — שכבת טקסט רגילה.</td></tr><tr><td>הגדרות עיצוב</td><td>נלקחות מאשף הקולאז׳ הרגיל.</td></tr><tr><td>כניסה למצב</td><td>Checkbox בעמוד הראשון של אשף הקולאז׳: יצירת קולאז׳ים מרובים.</td></tr><tr><td>כמות MVP</td><td>עד 50 קולאז׳ים, כ־6 תמונות לקולאז׳ בממוצע.</td></tr><tr><td>התקדמות</td><td>Progress Bar או תהליך ברור עם סטטוס.</td></tr></tbody></table></section>
+<section id="flow"><h2>3. זרימת משתמש מוצעת</h2><ol><li>המשתמש פותח את אשף הקולאז׳ הרגיל.</li><li>בעמוד הראשון מופיע checkbox: <strong>יצירת קולאז׳ים מרובים</strong>.</li><li>אם לא סומן — האשף ממשיך כרגיל.</li><li>אם סומן — האשף עובר למצב Batch.</li><li>המשתמש מגדיר גודל דף, כיוון, spacing, margin, רקע וסגנון תאים כמו באשף הרגיל.</li><li>המשתמש מוסיף קבוצות: שם קבוצה/ילד, תמונות לקבוצה, וכפתור +.</li><li>המשתמש בוחר אם להפעיל Smart Crop אוטומטי.</li><li>המשתמש בוחר אם להשתמש רק בפריסות רגילות או בכל סוגי הפריסות.</li><li>לוחץ <strong>צור קולאז׳ים</strong>.</li><li>המערכת יוצרת עמוד לכל קבוצה, בוחרת פריסה לפי ניקוד, ומפעילה Smart Crop אם נדרש.</li><li>בסיום נפתח פרויקט רגיל עם כל העמודים.</li></ol><div class="success">אין סביבת עריכה חדשה. לאחר היצירה, כל קולאז׳ מתנהג כמו קולאז׳ רגיל ב־SPP2.</div></section>
+<section id="data"><h2>4. מודל נתונים מוצע</h2><p>Batch לא חייב להישמר כישות כבדה בתוך הפרויקט בשלב ראשון. אפשר להשתמש במבנה זמני באשף, ואז ליצור עמודים וקולאז׳ים רגילים.</p><pre><code>type BatchCollageGroup = {
+  id: string;
+  name: string;
+  assetIds: string[];
+  status: "ready" | "processing" | "created" | "warning" | "error";
+  pageId?: string;
+  collageRuleId?: string;
+  chosenLayoutFamily?: CollageLayoutFamily;
+  chosenScore?: number;
+  warnings?: string[];
+  error?: string;
+};
+
+type BatchCollageSettings = {
+  pageSetup: PageSetup;
+  spacingMM: number;
+  marginMM: number;
+  allowedLayoutMode: "safeOnly" | "allLayouts";
+  smartCropEnabled: boolean;
+  preferMinimalCrop: boolean;
+  maxCollages: number;
+};
+
+type BatchCollageJob = {
+  id: string;
+  groups: BatchCollageGroup[];
+  settings: BatchCollageSettings;
+  createdAt: string;
+};</code></pre><div class="note">אפשר לשמור את ה־BatchJob רק ב־state של האשף. התוצאה הסופית היא עמודים וקולאז׳ים רגילים.</div></section>
+<section id="wizard"><h2>5. אשף Batch Collages</h2><h3>שלב 1 — בחירת מצב</h3><ul><li>Checkbox: <strong>יצירת קולאז׳ים מרובים</strong></li><li>טקסט הסבר: “צור עמוד נפרד לכל קבוצת תמונות, מתאים לגנים/כיתות/לקוחות בכמות.”</li></ul><h3>שלב 2 — הגדרות כלליות</h3><ul><li>גודל דף / פריסט מוצר</li><li>כיוון</li><li>Spacing</li><li>Margin</li><li>רקע</li><li>סוג שוליים / Cell style</li><li>Smart Crop אוטומטי — checkbox</li><li>השתמש בכל סוגי הפריסות — checkbox</li></ul><h3>שלב 3 — קבוצות תמונות</h3><pre><code>+-----------------------------------------+
+| שם קבוצה / ילד: [ נועם ]                |
+| [גרור תמונות לכאן] [בחר תמונות]          |
+| thumbnails...                            |
++-----------------------------------------+
+
+[ + הוסף ילד / קבוצה נוספת ]
+
+[ צור קולאז׳ים ]</code></pre><h4>יכולות נדרשות</h4><ul><li>Drag & drop לתוך קבוצה ספציפית.</li><li>Drag & drop של תיקייה שלמה אם אלקטרון מאפשר.</li><li>בחירת קבצים ידנית לכל קבוצה.</li><li>שינוי שם קבוצה, מחיקת קבוצה, מחיקת תמונה.</li><li>גרירת תמונות בין קבוצות — אם פשוט, אחרת לשלב הבא.</li></ul><h3>שלב 4 — יצירה עם Progress</h3><ul><li>Progress bar: “יוצר קולאז׳ 12 מתוך 30”.</li><li>סטטוס: מייבא תמונות / מחשב פריסות / Smart Crop / יוצר עמוד.</li><li>שגיאה בקבוצה אחת לא עוצרת את כל התהליך.</li></ul></section>
+<section id="engine"><h2>6. מנוע יצירה אוטומטי</h2><p>Batch Collage Engine הוא שכבת orchestration. הוא לא מייצר פריסות בעצמו, אלא מפעיל את מנוע הקולאז׳ הקיים לכל קבוצה.</p><ol><li>צור עמוד חדש לפי ההגדרות הכלליות.</li><li>ייבא/שייך את כל התמונות של הקבוצה כ־assets.</li><li>צור image inputs לפי מידות התמונות.</li><li>הפק הצעות פריסה דרך המנוע הקיים.</li><li>סנן פריסות לפי <code>safeOnly</code> או <code>allLayouts</code>.</li><li>נקד לפי התאמת תמונות ומינימום חיתוך.</li><li>בחר את ההצעה הטובה ביותר.</li><li>צור <code>CollageRule</code> לעמוד.</li><li>סנכרן ל־FrameLayers.</li><li>אם Smart Crop מסומן — הרץ לכל assignment.</li><li>עדכן שם עמוד לפי שם הקבוצה.</li></ol><div class="warning">לא ליצור מסך/קנבס חדש ל־Batch. התוצאה חייבת להיות עמודים רגילים עם קולאז׳ים רגילים.</div></section>
+<section id="scoring"><h2>7. בחירת פריסה וניקוד</h2><p>ברירת המחדל צריכה להעדיף <strong>התאמת תמונות עם מינימום חיתוך</strong>.</p><h3>Safe Layouts כברירת מחדל</h3><ul><li>Grid</li><li>Hero</li><li>Magazine / clean layouts</li><li>Frame רגיל אם יציב</li><li>SplitTree רק אם יציב ולא דורש עריכה ידנית</li></ul><h3>All Layouts checkbox</h3><p>אם המשתמש מסמן “השתמש בכל סוגי הקולאז׳”, אפשר לכלול Diamond, Geometric, Heart, Circle, Wave/Blob בעתיד.</p><h3>ניקוד מוצע</h3><pre><code>finalScore =
+  layoutScore * 0.35 +
+  imageFitScore * 0.30 +
+  cropSafetyScore * 0.25 +
+  readabilityScore * 0.10</code></pre></section>
+<section id="smartcrop"><h2>8. Smart Crop וטיפים</h2><ul><li>אם Smart Crop כבוי — יצירה מהירה יותר.</li><li>אם Smart Crop דולק — לאחר יצירת assignments, המערכת מנסה לשפר crop.</li><li>כל קולאז׳ עדיין ניתן לעריכה ידנית לאחר מכן.</li></ul><pre><code>Batch completed:
+- 47 collages created
+- 3 collages have warnings
+Open pages normally and review highlighted pages if needed.</code></pre></section>
+<section id="pages"><h2>9. יצירת עמודים ועריכה לאחר מכן</h2><p>כל קבוצה הופכת לעמוד חדש בפרויקט. שם העמוד יכול להיות שם הקבוצה/ילד. בתוך העמוד יש <code>CollageRule</code> רגיל.</p><ul><li>המשתמש נמצא במסך העריכה הרגיל.</li><li>העמודים זמינים ב־Pages panel.</li><li>אפשר להחליף פריסה, לערוך crop, swap, צבעים וטקסטים.</li></ul></section>
+<section id="prompts"><h2>10. סט פרומפטים לבנייה</h2>
+<h3>Prompt 1 — מיפוי מבנה קיים לפני בנייה</h3><div class="prompt"><button class="copy-btn" onclick="copyPrompt(this)">העתק</button><pre><code>We are adding Batch Collages to SPP2.
+
+Before implementing, inspect the current codebase and identify the exact current files responsible for:
+- Collage Wizard / setup flow
+- CollageRule creation
+- Collage layout suggestion generation
+- Collage scoring
+- add images to collage
+- sync CollageRule to FrameLayers
+- page creation
+- document store actions
+- smart crop for collage assignments
+- page setup presets
+
+Do not assume old file names from previous patches.
+Return an implementation map:
+1. files to edit
+2. existing functions to reuse
+3. functions that must not be duplicated
+4. risks
+5. proposed minimal implementation order
+
+Do not code yet.</code></pre></div>
+<h3>Prompt 2 — הגדרת Batch Mode בתוך אשף הקולאז׳</h3><div class="prompt"><button class="copy-btn" onclick="copyPrompt(this)">העתק</button><pre><code>Implement Batch Collage entry inside the existing Collage Wizard.
+
+Requirement:
+In the first step of the existing Collage Wizard, add a checkbox:
+"Create multiple collages / יצירת קולאז׳ים מרובים"
+
+If unchecked:
+- existing single collage flow remains unchanged.
+
+If checked:
+- wizard switches into Batch Collage mode.
+
+Batch mode must still reuse the existing collage wizard page setup controls:
+- page size
+- orientation
+- spacing
+- margin
+- background
+- edge/cell style if already supported
+- smart crop checkbox
+- allowed layout mode checkbox:
+  "Use all collage layout types"
+  default false
+
+Default behavior:
+- safe layout families only
+- each group becomes a separate page in the same project
+- output opens in normal editor, not a special review screen.
+
+Do not implement export features in this step.
+Do not create a new editor.</code></pre></div>
+<h3>Prompt 3 — UI לקבוצות תמונות</h3><div class="prompt"><button class="copy-btn" onclick="copyPrompt(this)">העתק</button><pre><code>Implement the Batch Collage Groups step.
+
+UI requirements:
+Each group represents one final collage/page.
+
+Each group card includes:
+- group name input
+- drag-and-drop area
+- choose images button
+- thumbnails of selected images
+- remove image button
+- remove group button
+
+Below the list:
+- "+ Add child/group" button
+- "Create collages" button
+
+Supported input:
+- user can add images to each group manually
+- drag and drop into a specific group
+- if folder drag/drop is available in Electron/browser, support it gracefully
+- if folder drop is not available, do not break; user can choose files manually
+
+Important:
+There is no fixed number of images per group.
+Each group uses all images assigned to it.
+Each group later becomes one independent collage with its own best layout.
+
+Validation:
+- warn if a group has zero images
+- allow creation only if at least one group has images
+- recommended max: 50 groups
+- recommended average: 6 images per group
+- show warning if user exceeds recommended range, but do not crash.</code></pre></div>
+<h3>Prompt 4 — Batch Engine</h3><div class="prompt"><button class="copy-btn" onclick="copyPrompt(this)">העתק</button><pre><code>Create a Batch Collage Engine as an orchestration layer.
+
+Do not create a new collage layout engine.
+Reuse the existing single-collage engine for every group.
+
+For each BatchCollageGroup:
+1. create a new page using the selected page setup
+2. import/add all group images as document assets
+3. create CollageImageInput[] from the assets
+4. generate collage layout suggestions using existing engine
+5. filter suggestions:
+   - safeOnly by default
+   - allLayouts only if checkbox is enabled
+6. score suggestions with preference for minimal crop and image fit
+7. choose the best suggestion
+8. create a normal CollageRule for that page
+9. sync it to normal FrameLayers
+10. optionally run smart crop if enabled
+11. name the page after the group name
+12. store warnings if any
+
+Output:
+A normal SPP2 document with one page per group.
+
+Do not create a review screen for MVP.
+Do not implement special export for MVP.
+The user will use existing print/export tools.</code></pre></div>
+<h3>Prompt 5 — Safe Layout Filtering</h3><div class="prompt"><button class="copy-btn" onclick="copyPrompt(this)">העתק</button><pre><code>Implement safe layout filtering for Batch Collages.
+
+Default Batch behavior:
+Use only stable/safe layout families.
+
+Safe families should include only layouts that:
+- adapt reliably to image count
+- work with page size changes
+- produce readable cells
+- minimize crop risk
+- do not require manual fixing in most cases
+
+Suggested safe families:
+- grid
+- hero
+- magazine / clean layouts
+- simple frame if stable
+- simple split/tree only if stable
+
+Do not include creative/geometric/heart/circle/blob layouts by default.
+
+If the user enables:
+"Use all collage layout types"
+then include all currently available layout families, but still reject layouts that fail validation.
+
+Important:
+Batch default should prioritize reliable output over creative output.</code></pre></div>
+<h3>Prompt 6 — בחירת פריסה לפי מינימום חיתוך</h3><div class="prompt"><button class="copy-btn" onclick="copyPrompt(this)">העתק</button><pre><code>Improve Batch layout selection scoring.
+
+Batch Collages should prioritize:
+1. minimal cropping
+2. image-to-cell aspect compatibility
+3. face/crop safety if available
+4. readable cell sizes
+5. layout score
+
+Suggested score:
+finalScore =
+  layoutScore * 0.35 +
+  imageFitScore * 0.30 +
+  cropSafetyScore * 0.25 +
+  readabilityScore * 0.10
+
+If the project already has a scoring function, reuse and extend it instead of duplicating.
+
+Rules:
+- Do not choose a layout with tiny cells for a small group.
+- Do not choose a layout that cuts faces badly if smart crop/crop risk data is available.
+- If all creative layouts score poorly, fallback to grid/hero.
+- Store chosen score per group for status/debug.</code></pre></div>
+<h3>Prompt 7 — Progress Bar ושגיאות</h3><div class="prompt"><button class="copy-btn" onclick="copyPrompt(this)">העתק</button><pre><code>Implement Batch Collage progress UI.
+
+During generation show:
+- progress bar
+- current group index / total
+- current group name
+- current step:
+  importing images
+  generating suggestions
+  choosing layout
+  creating page
+  applying smart crop
+  done
+
+Behavior:
+- generation may take time; make it clear to the user
+- do not freeze the UI if possible
+- process groups sequentially for MVP
+- if one group fails, continue with the next group
+- collect errors and warnings
+- after completion, show summary:
+  "Created X collages"
+  "Y warnings"
+  "Z failed"
+
+No dedicated review screen is required.
+After completion, open the normal editor with the generated pages.</code></pre></div>
+<h3>Prompt 8 — יצירת עמודים רגילים</h3><div class="prompt"><button class="copy-btn" onclick="copyPrompt(this)">העתק</button><pre><code>Ensure Batch Collages create normal editable SPP2 pages.
+
+For every generated group:
+- create a normal Page
+- create a normal CollageRule attached to that page
+- create normal FrameLayers through the existing collage sync path
+- page name should use group name
+- no special batch-only canvas
+- no special batch-only layers
+
+After generation:
+- user lands in normal EditorScreen
+- pages panel shows all generated collage pages
+- selecting any page allows normal collage editing
+- existing print/export tools work without special handling</code></pre></div>
+<h3>Prompt 9 — Smart Crop אופציונלי</h3><div class="prompt"><button class="copy-btn" onclick="copyPrompt(this)">העתק</button><pre><code>Add optional smart crop to Batch Collages.
+
+In Batch Wizard settings:
+- checkbox: "Apply Smart Crop automatically"
+- default can be off or follow the existing collage wizard default
+
+If enabled:
+After creating each CollageRule and assignments:
+- run the existing collage smart crop logic for every assignment
+- skip assignments that already have manual transform
+- handle missing Python/model/service gracefully
+- if smart crop fails for an image, continue without stopping the batch
+
+If disabled:
+- do not run smart crop
+- user can still manually use smart crop/editing after generation.
+
+Do not create a new smart crop system.
+Reuse existing collage smart crop functions.</code></pre></div>
+<h3>Prompt 10 — בדיקות לפני סגירה</h3><div class="prompt"><button class="copy-btn" onclick="copyPrompt(this)">העתק</button><pre><code>Create and run a Batch Collage MVP test checklist.
+
+Test cases:
+1. Single collage wizard still works unchanged.
+2. Batch checkbox appears and switches wizard mode.
+3. Create 3 groups with different image counts.
+4. Each group becomes a separate page.
+5. Each page contains a normal editable CollageRule.
+6. Layout selection uses safe layouts by default.
+7. "Use all layouts" checkbox expands layout choices.
+8. Smart crop on/off works and does not crash.
+9. Progress bar updates during generation.
+10. If one group has no images, it warns but does not crash.
+11. If one image fails to import, batch continues.
+12. Output project can be saved.
+13. Output project can be printed/exported with existing tools.
+14. Editing a generated collage works like manual collage.
+15. 50 groups with ~6 images each does not crash.</code></pre></div>
+</section>
+<section id="checklist"><h2>11. Checklist ביצוע</h2><ul class="checklist"><li>☐ לא נשבר אשף קולאז׳ רגיל.</li><li>☐ Checkbox למצב Batch מופיע רק במקום הנכון.</li><li>☐ אפשר להוסיף קבוצות ידנית.</li><li>☐ אפשר להוסיף תמונות לכל קבוצה.</li><li>☐ אין כמות תמונות קבועה.</li><li>☐ כל קבוצה יוצרת עמוד נפרד.</li><li>☐ כל עמוד מקבל CollageRule רגיל.</li><li>☐ הפריסה נבחרת לפי score.</li><li>☐ ברירת המחדל משתמשת רק בפריסות בטוחות.</li><li>☐ checkbox “כל הפריסות” עובד.</li><li>☐ Smart Crop אופציונלי.</li><li>☐ Progress bar עובד.</li><li>☐ שגיאה בקבוצה אחת לא מפילה את כל התהליך.</li><li>☐ התוצאה נפתחת במסך עריכה רגיל.</li><li>☐ כלי הדפסה/ייצוא קיימים עובדים על הפרויקט שנוצר.</li></ul></section>
+<section id="future"><h2>12. המשך עתידי לאחר MVP</h2><h3>Batch V2</h3><ul><li>CSV/Excel עם שמות, קבוצות ונתיבי תמונות.</li><li>טקסט אוטומטי כשכבת טקסט רגילה.</li><li>שמירת Batch Preset.</li><li>Review screen עם thumbnails, score ו־warnings.</li><li>Regenerate only low-score collages.</li></ul><h3>Batch V3</h3><ul><li>ייצוא ZIP עם קבצים לפי שמות.</li><li>PDF אחד מרוכז / PDF נפרד לכל עמוד.</li><li>הדפסה ישירה לכל העמודים.</li><li>שילוב עם משתנים/ייצור סדרתי.</li><li>חלוקה אוטומטית לפי תיקיות או CSV.</li></ul></section>
+</div>
+</main><footer>SPP2 Batch Collages — מסמך אפיון ופרומפטים לבנייה הדרגתית</footer><script>function copyPrompt(btn){const pre=btn.parentElement.querySelector('pre');const text=pre.innerText;navigator.clipboard.writeText(text).then(()=>{const old=btn.innerText;btn.innerText='הועתק!';setTimeout(()=>btn.innerText=old,1200);});}</script>
+</body></html>

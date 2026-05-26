@@ -1,5 +1,6 @@
 import { useRef, type ChangeEvent, type ReactElement } from "react";
 import { ImagePlus, X } from "lucide-react";
+import { SUPPORTED_IMAGE_ACCEPT } from "@/core/image/normalizeIncomingImage";
 import { useDocumentStore } from "@/state/documentStore";
 import type { CollageRule } from "@/types/collage";
 
@@ -36,7 +37,7 @@ export function CollageLeftPanel({ rule }: CollageLeftPanelProps): ReactElement 
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
+          accept={SUPPORTED_IMAGE_ACCEPT}
           multiple
           style={{ display: "none" }}
           onChange={handleAddImages}

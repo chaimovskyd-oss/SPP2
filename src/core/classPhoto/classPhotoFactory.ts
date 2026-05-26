@@ -312,6 +312,7 @@ export function createClassPhotoModeDocument(
     photoPrintRules: [],
     photoPrintImageAssignments: [],
     classPhotoRules: [rule],
+    blessingRules: [],
     viewport: {
       version: 1,
       zoom: 1,
