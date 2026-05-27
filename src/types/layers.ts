@@ -201,16 +201,16 @@ export interface ImageLayerEffects extends VersionedEntity {
   shadow: ImageLayerShadow | null;
   outline: ImageLayerOutline | null;
   // Quick effects (optional — undefined = off). UI keys in EditorScreen.tsx.
-  luminance?: number;          // -25..25
+  luminance?: number;          // -25..25, decimals allowed for fine control
   sepia?: boolean;
   invert?: boolean;
   threshold?: number;          // 0..100, 0 = off
   posterize?: number;          // 0..6, 0 = off
   remove_white?: boolean;
-  remove_white_tolerance?: number;     // 5..55
+  remove_white_tolerance?: number;     // 5..55, decimals allowed for fine control
   color_pop?: boolean;
   color_pop_color?: string;            // hex
-  color_pop_tolerance?: number;        // 5..85
+  color_pop_tolerance?: number;        // 5..85, decimals allowed for fine control
   color_pop_background?: number;       // 50..100
 }
 

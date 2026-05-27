@@ -1,6 +1,9 @@
 import type { Asset } from "./document";
 import type { ContentTransform, FrameLayer } from "./layers";
 import type { FitMode, ID, JsonValue, Metadata, VersionedEntity } from "./primitives";
+import type { VisualEffectStack } from "./visualEffects";
+
+export type PhotoPrintImageEditParams = Record<string, number | boolean | string>;
 
 export type PhotoPrintAutoRotatePolicy = "none" | "rotateToSlotOrientation";
 
@@ -27,6 +30,8 @@ export interface PhotoPrintImageAssignment extends VersionedEntity {
   copyIndex: number;
   manualContentTransform?: ContentTransform;
   manualFitModeOverride?: FitMode;
+  imageEditParams?: PhotoPrintImageEditParams;
+  visualEffects?: VisualEffectStack;
   hasManualCropOverride?: boolean;
   hasManualRotationOverride?: boolean;
   passportState?: PhotoPrintPassportAssignmentState;
@@ -110,6 +115,8 @@ export interface PhotoPrintImageInput {
   copies?: number;
   manualContentTransform?: ContentTransform;
   manualFitModeOverride?: FitMode;
+  imageEditParams?: PhotoPrintImageEditParams;
+  visualEffects?: VisualEffectStack;
 }
 
 export interface PrintSizePreset {

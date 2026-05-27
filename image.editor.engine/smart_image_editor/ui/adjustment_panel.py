@@ -61,6 +61,7 @@ CATEGORY_COLORS = {
     "Light": "#ffcf5c",
     "Color": "#69f0d5",
     "Portrait": "#ff6b9d",
+    "Crop": "#8bd450",
     "Effects": "#7aa7ff",
     "Print": "#ff9f5c",
     "Advanced": "#aeb3c7",
@@ -81,6 +82,7 @@ CATEGORIES = [
     CategorySpec("Light", "💡", "Shape exposure, shadow detail and tonal depth."),
     CategorySpec("Color", "🎨", "Adjust color temperature, saturation and HSL channels."),
     CategorySpec("Portrait", "👤", "Face, skin and subject-aware AI controls."),
+    CategorySpec("Crop", "✂", "Crop and compose the image."),
     CategorySpec("Effects", "✨", "Blur, vignette, grain and visual focus tools."),
     CategorySpec("Print", "🖨️", "Print-safe corrections and output compensation."),
     CategorySpec("Advanced", "⚙️", "Detail, noise reduction and deeper controls."),
@@ -300,6 +302,10 @@ class AdjustmentPanel(QFrame):
     auto_enhance_requested = Signal()
     smart_auto_fix_requested = Signal()
     detect_faces_requested = Signal()
+    face_restore_requested = Signal(int)
+    crop_mode_requested = Signal()
+    crop_reset_requested = Signal()
+    crop_ratio_requested = Signal(object)
     hsl_preview_requested = Signal(str)
     hsl_preview_hide_requested = Signal()
     dynamic_hsl_preview_requested = Signal(str)
@@ -429,6 +435,11 @@ class AdjustmentPanel(QFrame):
         self.print_mode.blockSignals(True)
         self.print_mode.setCurrentText(str(params.get("print_mode", "None")))
         self.print_mode.blockSignals(False)
+        if hasattr(self, "upscale_factor"):
+            index = self.upscale_factor.findData(int(params.get("ai_upscale_factor", 0)))
+            self.upscale_factor.blockSignals(True)
+            self.upscale_factor.setCurrentIndex(max(0, index))
+            self.upscale_factor.blockSignals(False)
 
     def _build_nav(self) -> QHBoxLayout:
         nav = QHBoxLayout()
@@ -470,6 +481,7 @@ class AdjustmentPanel(QFrame):
         self._add_light_page()
         self._add_color_page()
         self._add_portrait_page()
+        self._add_crop_page()
         self._add_effects_page()
         self._add_print_page()
         self._add_advanced_page()
@@ -565,15 +577,41 @@ class AdjustmentPanel(QFrame):
         page.add_action("Detect Faces", self.detect_faces_requested.emit)
         page.add_action("Smart Auto", self.smart_auto_fix_requested.emit)
         face = page.add_section("Face")
+        restore_row = QWidget()
+        restore_layout = QHBoxLayout(restore_row)
+        restore_layout.setContentsMargins(8, 4, 8, 4)
+        restore_layout.addWidget(QLabel("Face Restore"))
+        for label, strength in [("Low", 35), ("Medium", 65), ("High", 100)]:
+            button = QPushButton(label)
+            button.setObjectName("MiniButton")
+            button.clicked.connect(lambda checked=False, value=strength: self.face_restore_requested.emit(value))
+            restore_layout.addWidget(button)
+        face.addWidget(restore_row)
         for spec in [
             ("ai_face_brighten", "Face Brighten", 0, 100, 0),
-            ("ai_face_restore", "Face Restore", 0, 100, 0),
             ("ai_skin_tone_protection", "Skin Tone Protection", 0, 100, 0),
             ("print_reduce_red_skin", "Reduce Red Skin", 0, 100, 0),
         ]:
             self._add_slider(face, "Portrait", "Face", *spec)
         subject = page.add_section("Subject")
         self._add_slider(subject, "Portrait", "Subject", "ai_subject_enhance", "Subject Enhance", 0, 100, 0)
+        page.finish()
+
+    def _add_crop_page(self) -> None:
+        page = self._make_page("Crop")
+        page.add_action("Start Crop", self.crop_mode_requested.emit)
+        page.add_action("Reset Crop", self.crop_reset_requested.emit)
+        section = page.add_section("Crop")
+        section.addWidget(QLabel("Aspect Ratio"))
+        ratio_row = QWidget()
+        ratio_layout = QHBoxLayout(ratio_row)
+        ratio_layout.setContentsMargins(8, 4, 8, 4)
+        for label, ratio in [("Free", None), ("1:1", 1.0), ("4:5", 4 / 5), ("3:2", 3 / 2), ("16:9", 16 / 9)]:
+            button = QPushButton(label)
+            button.setObjectName("MiniButton")
+            button.clicked.connect(lambda checked=False, value=ratio: self.crop_ratio_requested.emit(value))
+            ratio_layout.addWidget(button)
+        section.addWidget(ratio_row)
         page.finish()
 
     def _add_effects_page(self) -> None:
@@ -632,11 +670,16 @@ class AdjustmentPanel(QFrame):
         ]:
             self._add_slider(detail, "Advanced", "Detail", *spec)
         upscale = page.add_section("Upscale")
-        for spec in [
-            ("ai_upscale_factor", "Upscale Factor", 0, 4, 0),
-            ("ai_upscale_strength", "Upscale Strength", 0, 100, 100),
-        ]:
-            self._add_slider(upscale, "Advanced", "Upscale", *spec)
+        self.upscale_factor = QComboBox()
+        for label, factor in [("Off", 0), ("2x", 2), ("4x", 4)]:
+            self.upscale_factor.addItem(label, factor)
+        self.upscale_factor.currentIndexChanged.connect(
+            lambda _index: self.param_changed.emit("ai_upscale_factor", int(self.upscale_factor.currentData() or 0))
+        )
+        self.control_locations["ai_upscale_factor"] = ("Advanced", "Upscale")
+        upscale.addWidget(QLabel("Upscale Factor"))
+        upscale.addWidget(self.upscale_factor)
+        self._add_slider(upscale, "Advanced", "Upscale", "ai_upscale_strength", "Upscale Strength", 0, 100, 100)
         page.finish()
 
     def _add_slider(

@@ -75,6 +75,36 @@ describe("Photo Print Mode", () => {
     expect(matching?.manualContentTransform?.offsetX).toBe(12);
     expect(matching?.manualContentTransform?.offsetY).toBe(-8);
   });
+
+  it("preserves image adjustment params and visual effects across regenerate", () => {
+    const setup = pageSetupFromPreset(getPagePreset("photo_10x15"));
+    const visualEffects = {
+      version: 1 as const,
+      enabled: true,
+      effects: [{ version: 1 as const, id: "fx-photo-shadow", enabled: true, params: { type: "dropShadow" as const, color: "#000000", blur: 6, offsetX: 0, offsetY: 2, opacity: 0.35, spread: 0 } }]
+    };
+    const document = createPhotoPrintModeDocument(
+      "Photo print image edits",
+      setup,
+      [{ ...imageInputs(1)[0], imageEditParams: { saturation: 0.5, hue: 1.3 }, visualEffects }],
+      {
+        printWidthMm: 100,
+        printHeightMm: 150,
+        targetsPerPage: 1,
+        globalCopies: 1,
+        fitMode: "fill"
+      }
+    );
+
+    const regenerated = regeneratePhotoPrint(document, document.photoPrintRules[0]!.id, { frameBorderMm: 4 });
+    const assignment = regenerated.photoPrintImageAssignments[0];
+    const frame = regenerated.pages.flatMap((page) => page.layers).find((layer) => layer.type === "frame" && layer.id === assignment?.frameId);
+
+    expect(assignment?.imageEditParams).toMatchObject({ saturation: 0.5, hue: 1.3 });
+    expect(frame?.type === "frame" ? frame.metadata.imageEditParams : undefined).toMatchObject({ saturation: 0.5, hue: 1.3 });
+    expect(frame?.type === "frame" ? frame.visualEffects?.effects.some((effect) => effect.id === "fx-photo-shadow") : false).toBe(true);
+    expect(frame?.type === "frame" ? frame.visualEffects?.effects.some((effect) => effect.params.type === "stroke") : false).toBe(true);
+  });
 });
 
 function imageInputs(count: number): Array<{ asset: Asset }> {

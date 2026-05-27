@@ -530,10 +530,41 @@ function runProductPython(args: string[]): Promise<{ success: boolean; stdout: s
   });
 }
 
+function productMaskMimeType(maskPath: string): string {
+  const lower = maskPath.toLowerCase();
+  if (lower.endsWith(".svg")) return "image/svg+xml";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".gif")) return "image/gif";
+  return "image/png";
+}
+
+function enrichProductMaskData(product: any): any {
+  const maskPath = typeof product?.mask_path === "string" ? product.mask_path : "";
+  if (!maskPath) return product;
+  const resolved = path.isAbsolute(maskPath)
+    ? maskPath
+    : path.join(getProductLibraryDir(), maskPath);
+  try {
+    if (!fs.existsSync(resolved)) return product;
+    return {
+      ...product,
+      mask_data_base64: fs.readFileSync(resolved).toString("base64"),
+      mask_mime_type: productMaskMimeType(resolved),
+      mask_file_name: path.basename(resolved)
+    };
+  } catch {
+    return product;
+  }
+}
+
 ipcMain.handle("spp:product-library:get-all", async () => {
   const result = await runProductPython(["--action", "get-all"]);
   if (!result.success) return { success: false, error: result.error };
-  try { return { success: true, products: JSON.parse(result.stdout) }; }
+  try {
+    const products = JSON.parse(result.stdout);
+    return { success: true, products: Array.isArray(products) ? products.map(enrichProductMaskData) : products };
+  }
   catch (err) { return { success: false, error: `Invalid JSON: ${(err as Error).message}` }; }
 });
 
@@ -569,7 +600,10 @@ ipcMain.handle("spp:product-library:upload-mask", async (_event, productId: stri
 ipcMain.handle("spp:product-library:reload-one", async (_event, productId: string) => {
   const result = await runProductPython(["--action", "reload-one", "--product-id", String(productId)]);
   if (!result.success) return { success: false, error: result.error };
-  try { return { success: true, product: JSON.parse(result.stdout) }; }
+  try {
+    const product = JSON.parse(result.stdout);
+    return { success: true, product: product ? enrichProductMaskData(product) : product };
+  }
   catch (err) { return { success: false, error: `Invalid JSON: ${(err as Error).message}` }; }
 });
 

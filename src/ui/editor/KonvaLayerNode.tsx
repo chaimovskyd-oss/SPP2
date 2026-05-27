@@ -847,7 +847,7 @@ function ImageNode({
   // Lock layer & use live crop preview during image-edit mode
   const isBeingEdited = useImageEditStore((s) => s.imageEditMode && s.editingLayerId === layer.id);
   const cropPreviewFromStore = useImageEditStore((s) =>
-    s.imageEditMode && s.editingLayerId === layer.id ? s.cropPreview : null
+    s.imageEditMode && s.editingLayerId === layer.id && s.activeTool !== "crop" ? s.cropPreview : null
   );
 
   // Mask content edit mode (internal image repositioning)

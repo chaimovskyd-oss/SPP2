@@ -43,7 +43,6 @@ HEBREW: dict[str, str] = {
     "Sketch": "סקיצה",
     "Coloring Page": "דף צביעה",
     "Posterize": "פוסטריזציה",
-    "Anime Style (AI)": "סגנון אנימה (AI)",
     "Clear AI Effect": "נקה אפקט AI",
     "Preset Intensity": "עוצמת פריסט",
     "Apply Preset": "החל פריסט",
@@ -167,7 +166,21 @@ HEBREW: dict[str, str] = {
     "Print Setup": "הגדרות הדפסה",
     "Detail": "פרטים",
     "Upscale": "הגדלה",
-    "AI Styles": "סגנונות AI",
+    "Crop": "חיתוך",
+    "Crop and compose the image.": "חיתוך וקומפוזיציה לתמונה.",
+    "Start Crop": "התחל חיתוך",
+    "Reset Crop": "אפס חיתוך",
+    "Aspect Ratio": "יחס חיתוך",
+    "Free": "חופשי",
+    "Low": "נמוך",
+    "Medium": "בינוני",
+    "High": "גבוה",
+    "Off": "כבוי",
+    "Restoring faces...": "משחזר פנים...",
+    "Face restore is already running": "שחזור פנים כבר פועל",
+    "Face restore failed": "שחזור הפנים נכשל",
+    "Face restore applied": "שחזור הפנים הוחל",
+    "Drag on the preview to crop": "גרור על התצוגה כדי לחתוך",
     "Artistic Effects": "אפקטים אמנותיים",
     "Controls": "פקדים",
     "Strength": "עוצמה",
@@ -228,14 +241,10 @@ HEBREW: dict[str, str] = {
     "Clarity": "צלילות",
     "Upscale Factor": "מקדם הגדלה",
     "Upscale Strength": "עוצמת הגדלה",
-    "Anime Style": "סגנון אנימה",
-    "Soft Cartoon": "קריקטורה רכה",
-    "Comic Style": "סגנון קומיקס",
     "Smooth colours with bold outlines": "צבעים חלקים עם קווי מתאר חזקים",
     "Pencil drawing on white paper": "ציור עיפרון על נייר לבן",
     "Clean black outlines for hand-colouring": "קווי מתאר שחורים נקיים לצביעה ידנית",
     "Reduce colour levels for a poster look": "הפחתת רמות צבע למראה פוסטר",
-    "AnimeGAN neural style transfer": "העברת סגנון עצבית AnimeGAN",
     "Red": "אדום",
     "Orange": "כתום",
     "Yellow": "צהוב",
@@ -273,7 +282,7 @@ _REVERSE: dict[str, str] = {value: key for key, value in HEBREW.items()}
 
 
 class Translator:
-    def __init__(self, language: str = LANG_EN):
+    def __init__(self, language: str = LANG_HE):
         self.language = language if language in {LANG_EN, LANG_HE} else LANG_EN
 
     def set_language(self, language: str) -> None:

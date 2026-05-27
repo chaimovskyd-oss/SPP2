@@ -263,7 +263,13 @@ export function regeneratePhotoPrint(document: Document, ruleId: string, patch: 
     .sort((a, b) => a.globalIndex - b.globalIndex);
   const inputs: PhotoPrintImageInput[] = existing.flatMap((a): PhotoPrintImageInput[] => {
     const asset = document.assets.find((asset) => asset.id === a.assetId);
-    return asset === undefined ? [] : [{ asset, manualContentTransform: a.manualContentTransform, manualFitModeOverride: a.manualFitModeOverride }];
+    return asset === undefined ? [] : [{
+      asset,
+      manualContentTransform: a.manualContentTransform,
+      manualFitModeOverride: a.manualFitModeOverride,
+      imageEditParams: a.imageEditParams,
+      visualEffects: a.visualEffects
+    }];
   });
   const uniqueInputs = deduplicateByAssetId(inputs);
   return fillPhotoPrintWithImages({ ...document, photoPrintRules: document.photoPrintRules.map((r) => r.id === ruleId ? nextRule : r) }, ruleId, uniqueInputs);
@@ -324,6 +330,8 @@ interface ExpandedInput {
   copyIndex: number;
   manualContentTransform?: PhotoPrintImageInput["manualContentTransform"];
   manualFitModeOverride?: FitMode;
+  imageEditParams?: PhotoPrintImageInput["imageEditParams"];
+  visualEffects?: VisualEffectStack;
 }
 
 function expandInputsWithCopies(inputs: PhotoPrintImageInput[], rule: PhotoPrintRule): ExpandedInput[] {
@@ -336,11 +344,24 @@ function expandInputsWithCopies(inputs: PhotoPrintImageInput[], rule: PhotoPrint
         sourceImageIndex: sourceIndex,
         copyIndex: copy,
         manualContentTransform: inp.manualContentTransform,
-        manualFitModeOverride: inp.manualFitModeOverride
+        manualFitModeOverride: inp.manualFitModeOverride,
+        imageEditParams: inp.imageEditParams,
+        visualEffects: inp.visualEffects
       });
     }
   });
   return result;
+}
+
+function mergePhotoPrintVisualEffects(userEffects: VisualEffectStack | undefined, cutLineEffects: VisualEffectStack | undefined): VisualEffectStack | undefined {
+  if (userEffects === undefined) return cutLineEffects;
+  if (cutLineEffects === undefined) return userEffects;
+  const hasStroke = userEffects.effects.some((effect) => effect.params.type === "stroke");
+  return {
+    ...userEffects,
+    enabled: userEffects.enabled || cutLineEffects.enabled,
+    effects: hasStroke ? userEffects.effects : [...userEffects.effects, ...cutLineEffects.effects]
+  };
 }
 
 function buildPhotoPrintPages(
@@ -415,7 +436,7 @@ function buildPhotoPrintPages(
         ? { version: 1, color: rule.frameBorderColor, opacity: 1 }
         : undefined;
 
-      const visualEffects: VisualEffectStack | undefined = rule.cutLineEnabled ? {
+      const cutLineEffects: VisualEffectStack | undefined = rule.cutLineEnabled ? {
         version: 1,
         enabled: true,
         effects: [{
@@ -425,6 +446,7 @@ function buildPhotoPrintPages(
           params: { type: "stroke", color: rule.cutLineColor, width: rule.cutLineWidthPx * 2, position: "outside", opacity: 1 }
         }]
       } : undefined;
+      const visualEffects = mergePhotoPrintVisualEffects(input?.visualEffects, cutLineEffects);
 
       const frame = createFrameLayer({
         name: `הדפסה ${globalIndex + 1}`,
@@ -438,7 +460,10 @@ function buildPhotoPrintPages(
         padding: borderPx,
         lockedFrame: false,
         zIndex: globalIndex,
-        metadata: { photoPrintSlot: metadata }
+        metadata: {
+          photoPrintSlot: metadata,
+          ...(input?.imageEditParams !== undefined ? { imageEditParams: input.imageEditParams as unknown as import("@/types/primitives").JsonValue } : {})
+        }
       });
 
       const smartCropMode = rule.faceDetectionEnabled ? "face" : "center";
@@ -480,6 +505,8 @@ function buildAssignments(pages: Page[], rule: PhotoPrintRule, expandedInputs: E
         copyIndex: input.copyIndex,
         manualContentTransform: input.manualContentTransform,
         manualFitModeOverride: input.manualFitModeOverride,
+        imageEditParams: input.imageEditParams,
+        visualEffects: input.visualEffects,
         hasManualCropOverride: input.manualContentTransform !== undefined,
         hasManualRotationOverride: false,
         passportState: rule.passportRequirementId === undefined ? undefined : {

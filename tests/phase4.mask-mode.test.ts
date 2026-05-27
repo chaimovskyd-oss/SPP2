@@ -111,6 +111,33 @@ describe("Phase 4 Mask Mode", () => {
     expect(regenerated.maskRules[0].spacingX).toBe(40);
   });
 
+  it("preserves image adjustment params and visual effects across regenerate", () => {
+    const base = createMaskDocument();
+    const filled = fillMaskWithImages(base, maskId(base), imageInputs(3));
+    const first = filled.maskImageAssignments[0];
+    const visualEffects = {
+      version: 1 as const,
+      enabled: true,
+      effects: [{ version: 1 as const, id: "fx-mask-stroke", enabled: true, params: { type: "stroke" as const, color: "#2255ff", width: 3, position: "outside" as const, opacity: 0.7 } }]
+    };
+    const withImageEdits = {
+      ...filled,
+      maskImageAssignments: filled.maskImageAssignments.map((assignment) =>
+        assignment.id === first.id
+          ? { ...assignment, imageEditParams: { contrast: 2.1, luminance: -0.6 }, visualEffects }
+          : assignment
+      )
+    };
+
+    const regenerated = regenerateMaskLayout(withImageEdits, maskId(withImageEdits), { spacingX: 40, spacingY: 40, maskWidth: 160, maskHeight: 160 });
+    const preserved = regenerated.maskImageAssignments.find((assignment) => assignment.assetId === first.assetId);
+    const frame = findFrame(regenerated, preserved?.frameId ?? "");
+
+    expect(preserved?.imageEditParams).toMatchObject({ contrast: 2.1, luminance: -0.6 });
+    expect(frame?.type === "frame" ? frame.metadata.imageEditParams : undefined).toMatchObject({ contrast: 2.1, luminance: -0.6 });
+    expect(frame?.type === "frame" ? frame.visualEffects : undefined).toMatchObject(visualEffects);
+  });
+
   it("applies text overlays through normal TextLayer objects and round-trips through save/load", () => {
     const base = createMaskDocument();
     const filled = fillMaskWithImages(base, maskId(base), [

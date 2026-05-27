@@ -17,13 +17,20 @@ import type {
   MaskShape,
   MaskTextOverlayRule
 } from "@/types/mask";
-import type { FitMode, Margins, PageSetup, Rect } from "@/types/primitives";
+import type { FitMode, JsonValue, Margins, Metadata, PageSetup, Rect } from "@/types/primitives";
 import type { ProjectMetadataInput } from "@/types/project";
 
 export const DEFAULT_MASK_SIZE = 220;
 export const DEFAULT_MASK_SPACING = 24;
 export const MIN_MASK_CANVAS_INSET = 8;
 export const DEFAULT_MASK_CELL_LOCKED = false;
+
+function metadataWithImageEditParams(metadata: Metadata, imageEditParams: MaskImageInput["imageEditParams"]): Metadata {
+  const { imageEditParams: _discarded, ...rest } = metadata;
+  return imageEditParams === undefined
+    ? rest
+    : { ...rest, imageEditParams: imageEditParams as unknown as JsonValue };
+}
 
 interface MaskFrameLockState {
   locked: boolean;
@@ -243,7 +250,9 @@ export function fillMaskWithImages(document: Document, maskId: string, inputs: M
           imageAssetId: input.asset.id,
           fitMode: input.manualFitModeOverride ?? workingRule.fitMode,
           contentTransform: input.manualContentTransform ?? { ...defaultContentTransform },
-          smartCropMode: workingRule.smartCropEnabled ? "face" : "center"
+          smartCropMode: workingRule.smartCropEnabled ? "face" : "center",
+          visualEffects: input.visualEffects ?? layer.visualEffects,
+          metadata: metadataWithImageEditParams(layer.metadata, input.imageEditParams)
         };
       })
     })),
@@ -263,7 +272,13 @@ export function addImagesToMask(document: Document, maskId: string, inputs: Mask
     .sort((a, b) => a.globalIndex - b.globalIndex)
     .flatMap((assignment): MaskImageInput[] => {
       const asset = document.assets.find((item) => item.id === assignment.assetId);
-      return asset === undefined ? [] : [{ asset, manualContentTransform: assignment.manualContentTransform, manualFitModeOverride: assignment.manualFitModeOverride }];
+      return asset === undefined ? [] : [{
+        asset,
+        manualContentTransform: assignment.manualContentTransform,
+        manualFitModeOverride: assignment.manualFitModeOverride,
+        imageEditParams: assignment.imageEditParams,
+        visualEffects: assignment.visualEffects
+      }];
     });
   return fillMaskWithImages(document, maskId, [...existingInputs, ...inputs]);
 }
@@ -290,7 +305,9 @@ export function regenerateMaskLayout(document: Document, maskId: string, patch: 
     return asset === undefined ? [] : [{
       asset,
       manualContentTransform: assignment.hasManualCropOverride || assignment.hasManualRotationOverride ? assignment.manualContentTransform : undefined,
-      manualFitModeOverride: assignment.manualFitModeOverride
+      manualFitModeOverride: assignment.manualFitModeOverride,
+      imageEditParams: assignment.imageEditParams,
+      visualEffects: assignment.visualEffects
     }];
   });
   return fillMaskWithImages(ensured, maskId, inputs);
@@ -360,7 +377,13 @@ export function deleteMaskImageAndCompactFromEnd(document: Document, maskId: str
   compacted.pop();
   return fillMaskWithImages(document, maskId, compacted.flatMap((assignment) => {
     const asset = document.assets.find((item) => item.id === assignment.assetId);
-    return asset === undefined ? [] : [{ asset, manualContentTransform: assignment.manualContentTransform, manualFitModeOverride: assignment.manualFitModeOverride }];
+    return asset === undefined ? [] : [{
+      asset,
+      manualContentTransform: assignment.manualContentTransform,
+      manualFitModeOverride: assignment.manualFitModeOverride,
+      imageEditParams: assignment.imageEditParams,
+      visualEffects: assignment.visualEffects
+    }];
   }));
 }
 
@@ -663,7 +686,9 @@ function applyAssignmentsToFrames(document: Document, maskId: string): Document 
           imageAssetId: assignment.assetId,
           contentType: "image",
           contentTransform: assignment.manualContentTransform ?? layer.contentTransform,
-          fitMode: assignment.manualFitModeOverride ?? layer.fitMode
+          fitMode: assignment.manualFitModeOverride ?? layer.fitMode,
+          visualEffects: assignment.visualEffects ?? layer.visualEffects,
+          metadata: metadataWithImageEditParams(layer.metadata, assignment.imageEditParams)
         };
       })
     }))
@@ -793,6 +818,8 @@ function createAssignment(maskId: string, assetId: string, frameId: string, glob
     maskIndexOnPage,
     manualContentTransform: input.manualContentTransform,
     manualFitModeOverride: input.manualFitModeOverride,
+    imageEditParams: input.imageEditParams,
+    visualEffects: input.visualEffects,
     hasManualCropOverride: input.manualContentTransform !== undefined,
     hasManualRotationOverride: input.manualContentTransform !== undefined && input.manualContentTransform.rotation !== 0
   };

@@ -564,6 +564,11 @@ function makePersonFrameLayer(
     faceAnchor: pos.record.faceData,
     visualEffects: pos.record.visualEffectsOverride ?? prevFrame?.visualEffects ?? buildFrameVisualEffects(style),
     metadata: {
+      ...(pos.record.imageEditParams !== undefined
+        ? { imageEditParams: pos.record.imageEditParams as unknown as import("@/types/primitives").JsonValue }
+        : prevFrame?.metadata["imageEditParams"] !== undefined
+          ? { imageEditParams: prevFrame.metadata["imageEditParams"] }
+          : {}),
       classPhotoFrame: {
         ruleId,
         personId: pos.record.id,
@@ -808,6 +813,7 @@ export function syncClassPhotoToPage(
       ...pos.record,
       frameLayerId: frame.id,
       nameTextLayerId: name.id,
+      imageEditParams: pos.record.imageEditParams ?? (prevFrame?.metadata["imageEditParams"] as Record<string, number | boolean | string> | undefined),
       visualEffectsOverride: promotedOverride,
     });
   }
@@ -827,6 +833,7 @@ export function syncClassPhotoToPage(
       ...pos.record,
       frameLayerId: frame.id,
       nameTextLayerId: name.id,
+      imageEditParams: pos.record.imageEditParams ?? (prevChildFrame?.metadata["imageEditParams"] as Record<string, number | boolean | string> | undefined),
       visualEffectsOverride: promotedOverride,
     });
   }

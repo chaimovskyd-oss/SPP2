@@ -2,6 +2,9 @@ import type { Asset } from "./document";
 import type { ContentTransform, FrameLayer } from "./layers";
 import type { CropRect, FitMode, ID, JsonValue, Margins, Metadata, Rect, VersionedEntity } from "./primitives";
 import type { TextAlignment, TextDirection, TextStylePatch } from "./text";
+import type { VisualEffectStack } from "./visualEffects";
+
+export type GridImageEditParams = Record<string, number | boolean | string>;
 
 export type GridFillDirection = "rtl" | "ltr";
 export type GridFillOrder = "rowMajor";
@@ -61,6 +64,8 @@ export interface GridImageAssignment extends VersionedEntity {
   manualCrop?: CropRect;
   manualContentTransform?: ContentTransform;
   manualFitModeOverride?: FitMode;
+  imageEditParams?: GridImageEditParams;
+  visualEffects?: VisualEffectStack;
   hasManualCropOverride?: boolean;
   hasManualRotationOverride?: boolean;
 }
@@ -148,6 +153,8 @@ export interface GridImageInput {
   asset: Asset;
   manualContentTransform?: ContentTransform;
   manualFitModeOverride?: FitMode;
+  imageEditParams?: GridImageEditParams;
+  visualEffects?: VisualEffectStack;
 }
 
 export type GridFrameLayer = FrameLayer & {

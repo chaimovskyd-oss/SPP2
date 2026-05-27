@@ -164,6 +164,87 @@
   gap: 8px;
 }
 
+.prod-edit-mask-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-base);
+}
+
+.prod-edit-mask-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.prod-edit-mask-status svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.prod-edit-mask-status div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.prod-edit-mask-status strong {
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.prod-edit-mask-status span {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: ltr;
+  text-align: right;
+}
+
+.prod-edit-mask-actions,
+.prod-edit-threshold-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.prod-edit-upload-btn {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.prod-edit-upload-btn input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.prod-edit-upload-btn.disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.prod-edit-range {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.prod-edit-threshold-input {
+  width: 72px;
+  direction: ltr;
+  text-align: center;
+}
+
 /* ── Collapsible ── */
 
 .prod-edit-collapsible {

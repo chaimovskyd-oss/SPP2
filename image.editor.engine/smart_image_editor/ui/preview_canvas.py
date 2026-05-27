@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QPoint, QRect, Qt, Signal
 from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QLabel, QRubberBand, QVBoxLayout
 from PIL.ImageQt import ImageQt
 
 
 class PreviewCanvas(QFrame):
     image_clicked = Signal(int, int)
+    crop_selected = Signal(list)
 
     def __init__(self):
         super().__init__()
@@ -25,10 +26,23 @@ class PreviewCanvas(QFrame):
         self.overlay_image = None
         self.before_after_mode = "edited"
         self.zoom = 1.0
+        self.crop_mode = False
+        self.crop_aspect_ratio: float | None = None
+        self._crop_origin: QPoint | None = None
+        self._rubber_band = QRubberBand(QRubberBand.Rectangle, self.label)
         layout = QVBoxLayout(self)
         layout.addWidget(self.overlay_label)
         layout.addWidget(self.label)
         self.label.mousePressEvent = self._label_mouse_press
+        self.label.mouseMoveEvent = self._label_mouse_move
+        self.label.mouseReleaseEvent = self._label_mouse_release
+
+    def set_crop_mode(self, enabled: bool) -> None:
+        self.crop_mode = enabled
+        self._rubber_band.hide()
+
+    def set_crop_aspect_ratio(self, ratio: float | None) -> None:
+        self.crop_aspect_ratio = ratio if ratio and ratio > 0 else None
 
     def set_image(self, pil_image, original_image=None):
         self.current_image = pil_image
@@ -73,18 +87,85 @@ class PreviewCanvas(QFrame):
     def _label_mouse_press(self, event):
         if self.current_image is None or self.label.pixmap() is None:
             return
+        if self.crop_mode:
+            self._crop_origin = event.position().toPoint()
+            self._rubber_band.setGeometry(QRect(self._crop_origin, self._crop_origin))
+            self._rubber_band.show()
+            return
+        image_point = self._label_point_to_image(event.position().toPoint())
+        if image_point is None:
+            return
+        self.image_clicked.emit(*image_point)
+
+    def _label_mouse_move(self, event):
+        if not self.crop_mode or self._crop_origin is None:
+            return
+        rect = QRect(self._crop_origin, event.position().toPoint()).normalized()
+        rect = self._constrain_rect_to_pixmap(rect)
+        self._rubber_band.setGeometry(rect)
+
+    def _label_mouse_release(self, event):
+        if not self.crop_mode or self._crop_origin is None:
+            return
+        rect = self._rubber_band.geometry().normalized()
+        self._rubber_band.hide()
+        self._crop_origin = None
+        if rect.width() < 8 or rect.height() < 8:
+            return
+        crop = self._label_rect_to_image_crop(rect)
+        if crop is not None:
+            self.crop_selected.emit(crop)
+
+    def _label_point_to_image(self, point: QPoint) -> tuple[int, int] | None:
+        if self.current_image is None or self.label.pixmap() is None:
+            return None
         pixmap = self.label.pixmap()
         label_size = self.label.size()
         pixmap_size = pixmap.size()
         offset_x = max(0, (label_size.width() - pixmap_size.width()) // 2)
         offset_y = max(0, (label_size.height() - pixmap_size.height()) // 2)
-        x = event.position().x() - offset_x
-        y = event.position().y() - offset_y
+        x = point.x() - offset_x
+        y = point.y() - offset_y
         if x < 0 or y < 0 or x > pixmap_size.width() or y > pixmap_size.height():
-            return
+            return None
         image_x = int(x / max(1, pixmap_size.width()) * self.current_image.width)
         image_y = int(y / max(1, pixmap_size.height()) * self.current_image.height)
-        self.image_clicked.emit(image_x, image_y)
+        return image_x, image_y
+
+    def _constrain_rect_to_pixmap(self, rect: QRect) -> QRect:
+        if self.label.pixmap() is None:
+            return rect
+        pixmap_size = self.label.pixmap().size()
+        label_size = self.label.size()
+        bounds = QRect(
+            max(0, (label_size.width() - pixmap_size.width()) // 2),
+            max(0, (label_size.height() - pixmap_size.height()) // 2),
+            pixmap_size.width(),
+            pixmap_size.height(),
+        )
+        rect = rect.intersected(bounds)
+        if self.crop_aspect_ratio and rect.width() > 0 and rect.height() > 0:
+            width = rect.width()
+            height = round(width / self.crop_aspect_ratio)
+            if height > rect.height():
+                height = rect.height()
+                width = round(height * self.crop_aspect_ratio)
+            rect.setSize(rect.size().scaled(width, height, Qt.IgnoreAspectRatio))
+            rect = rect.intersected(bounds)
+        return rect
+
+    def _label_rect_to_image_crop(self, rect: QRect) -> list[int] | None:
+        top_left = self._label_point_to_image(rect.topLeft())
+        bottom_right = self._label_point_to_image(rect.bottomRight())
+        if top_left is None or bottom_right is None:
+            return None
+        left, top = top_left
+        right, bottom = bottom_right
+        left, right = sorted((left, right))
+        top, bottom = sorted((top, bottom))
+        if right - left < 2 or bottom - top < 2:
+            return None
+        return [left, top, right, bottom]
 
     def _render(self):
         if self.current_image is None:

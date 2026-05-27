@@ -7,12 +7,19 @@ import type { Asset, Document, Page } from "@/types/document";
 import type { FrameLayer, TextLayer, VisualLayer } from "@/types/layers";
 import type { ContentTransform } from "@/types/layers";
 import type { GridCellMetadata, GridCellRect, GridCreateOptions, GridImageAssignment, GridImageInput, GridLayoutRule, GridTextOverlayRule } from "@/types/grid";
-import type { FitMode, Margins, PageSetup, Rect } from "@/types/primitives";
+import type { FitMode, JsonValue, Margins, Metadata, PageSetup, Rect } from "@/types/primitives";
 import type { ProjectMetadataInput } from "@/types/project";
 
 export const DEFAULT_GRID_ROWS = 2;
 export const DEFAULT_GRID_COLUMNS = 3;
 export const DEFAULT_GRID_SPACING = 24;
+
+function metadataWithImageEditParams(metadata: Metadata, imageEditParams: GridImageInput["imageEditParams"]): Metadata {
+  const { imageEditParams: _discarded, ...rest } = metadata;
+  return imageEditParams === undefined
+    ? rest
+    : { ...rest, imageEditParams: imageEditParams as unknown as JsonValue };
+}
 
 export function createGridModeDocument(name: string, setup: PageSetup, options: Partial<GridCreateOptions> = {}, projectMetadata: ProjectMetadataInput = {}): Document {
   const gridOptions = normalizeGridCreateOptions(options);
@@ -97,7 +104,9 @@ export function fillGridWithImages(document: Document, gridId: string, inputs: G
           contentType: "image",
           imageAssetId: input.asset.id,
           fitMode: input.manualFitModeOverride ?? workingRule.fitMode,
-          contentTransform: input.manualContentTransform ?? autoRotationTransform(input.asset, layer, workingRule.autoRotatePolicy)
+          contentTransform: input.manualContentTransform ?? autoRotationTransform(input.asset, layer, workingRule.autoRotatePolicy),
+          visualEffects: input.visualEffects ?? layer.visualEffects,
+          metadata: metadataWithImageEditParams(layer.metadata, input.imageEditParams)
         };
       })
     })),
@@ -121,7 +130,9 @@ export function addImagesToGrid(document: Document, gridId: string, inputs: Grid
       return [{
         asset,
         manualContentTransform: assignment.manualContentTransform,
-        manualFitModeOverride: assignment.manualFitModeOverride
+        manualFitModeOverride: assignment.manualFitModeOverride,
+        imageEditParams: assignment.imageEditParams,
+        visualEffects: assignment.visualEffects
       }];
     });
 
@@ -158,7 +169,9 @@ export function regenerateGrid(document: Document, gridId: string, patch: Partia
     return asset === undefined ? null : {
       asset,
       manualContentTransform: assignment.hasManualCropOverride || assignment.hasManualRotationOverride ? assignment.manualContentTransform : undefined,
-      manualFitModeOverride: assignment.manualFitModeOverride
+      manualFitModeOverride: assignment.manualFitModeOverride,
+      imageEditParams: assignment.imageEditParams,
+      visualEffects: assignment.visualEffects
     };
   });
   return fillGridWithImages(ensured, gridId, inputs.filter((input): input is GridImageInput => input !== null));
@@ -193,7 +206,9 @@ export function deleteGridImageAndCompactFromEnd(document: Document, gridId: str
     return asset === undefined ? [] : [{
       asset,
       manualContentTransform: assignment.manualContentTransform,
-      manualFitModeOverride: assignment.manualFitModeOverride
+      manualFitModeOverride: assignment.manualFitModeOverride,
+      imageEditParams: assignment.imageEditParams,
+      visualEffects: assignment.visualEffects
     }];
   }));
 }
@@ -551,7 +566,9 @@ function applyAssignmentsToFrames(document: Document, gridId: string): Document 
           imageAssetId: assignment.assetId,
           contentType: "image",
           contentTransform: assignment.manualContentTransform ?? layer.contentTransform,
-          fitMode: assignment.manualFitModeOverride ?? layer.fitMode
+          fitMode: assignment.manualFitModeOverride ?? layer.fitMode,
+          visualEffects: assignment.visualEffects ?? layer.visualEffects,
+          metadata: metadataWithImageEditParams(layer.metadata, assignment.imageEditParams)
         };
       })
     }))
@@ -663,6 +680,8 @@ function createAssignment(gridId: string, assetId: string, frameId: string, glob
     cellIndexOnPage,
     manualContentTransform: input.manualContentTransform,
     manualFitModeOverride: input.manualFitModeOverride,
+    imageEditParams: input.imageEditParams,
+    visualEffects: input.visualEffects,
     hasManualCropOverride: input.manualContentTransform !== undefined,
     hasManualRotationOverride: input.manualContentTransform !== undefined && input.manualContentTransform.rotation !== 0,
     manualRotation: input.manualContentTransform?.rotation

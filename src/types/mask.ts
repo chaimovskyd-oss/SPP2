@@ -3,6 +3,9 @@ import type { ContentTransform, FrameLayer } from "./layers";
 import type { CropRect, FitMode, ID, Margins, Metadata, Rect, Size, Unit, VersionedEntity } from "./primitives";
 import type { GridTextAnchor, GridTextOverlayOverride, GridTextSource } from "./grid";
 import type { TextAlignment, TextDirection, TextStylePatch } from "./text";
+import type { VisualEffectStack } from "./visualEffects";
+
+export type MaskImageEditParams = Record<string, number | boolean | string>;
 
 export interface MaskStyleBorder {
   enabled: boolean;
@@ -117,6 +120,8 @@ export interface MaskImageAssignment extends VersionedEntity {
   manualCrop?: CropRect;
   manualContentTransform?: ContentTransform;
   manualFitModeOverride?: FitMode;
+  imageEditParams?: MaskImageEditParams;
+  visualEffects?: VisualEffectStack;
   hasManualCropOverride?: boolean;
   hasManualRotationOverride?: boolean;
 }
@@ -174,6 +179,8 @@ export interface MaskImageInput {
   asset: Asset;
   manualContentTransform?: ContentTransform;
   manualFitModeOverride?: FitMode;
+  imageEditParams?: MaskImageEditParams;
+  visualEffects?: VisualEffectStack;
 }
 
 export type MaskFrameLayer = FrameLayer & {

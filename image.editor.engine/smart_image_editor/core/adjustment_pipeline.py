@@ -52,7 +52,7 @@ def load_image(path: str) -> Image.Image:
     return image.convert("RGB")
 
 
-def apply_adjustments(image: Image.Image, params: dict) -> Image.Image:
+def apply_adjustments(image: Image.Image, params: dict, *, include_heavy_ai: bool = True) -> Image.Image:
     """Basic non-destructive adjustment pipeline.
 
     This is intentionally conservative. Replace/upgrade each step over time
@@ -133,7 +133,7 @@ def apply_adjustments(image: Image.Image, params: dict) -> Image.Image:
     if face_brighten:
         out = brighten_faces(out, face_brighten)
 
-    face_restore = int(params.get("ai_face_restore", 0))
+    face_restore = int(params.get("ai_face_restore", 0)) if include_heavy_ai else 0
     if face_restore:
         out = restore_faces(out, face_restore)
 
@@ -187,7 +187,7 @@ def apply_adjustments(image: Image.Image, params: dict) -> Image.Image:
         except RuntimeError:
             pass  # model unavailable — skip silently; UI surfaces the message
 
-    upscale_factor = int(params.get("ai_upscale_factor", 0))
+    upscale_factor = int(params.get("ai_upscale_factor", 0)) if include_heavy_ai else 0
     upscale_strength = int(params.get("ai_upscale_strength", 100))
     if upscale_factor > 1:
         out = upscale_image(out, upscale_factor, upscale_strength)

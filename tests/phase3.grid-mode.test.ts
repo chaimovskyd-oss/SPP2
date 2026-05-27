@@ -119,6 +119,33 @@ describe("Phase 3 Grid Mode", () => {
     expect(preserved?.manualContentTransform?.offsetX).toBe(8);
   });
 
+  it("preserves image adjustment params and visual effects across regenerate", () => {
+    const base = createGridDocument(3, 2);
+    const filled = fillGridWithImages(base, gridId(base), imageInputs(3));
+    const first = filled.gridImageAssignments[0];
+    const visualEffects = {
+      version: 1 as const,
+      enabled: true,
+      effects: [{ version: 1 as const, id: "fx-grid-shadow", enabled: true, params: { type: "dropShadow" as const, color: "#111111", blur: 8, offsetX: 1, offsetY: 2, opacity: 0.4, spread: 0 } }]
+    };
+    const withImageEdits = {
+      ...filled,
+      gridImageAssignments: filled.gridImageAssignments.map((assignment) =>
+        assignment.id === first.id
+          ? { ...assignment, imageEditParams: { brightness: 1.3, hue: -2.7 }, visualEffects }
+          : assignment
+      )
+    };
+
+    const regenerated = regenerateGrid(withImageEdits, gridId(withImageEdits), { spacingX: 40, spacingY: 40 });
+    const preserved = regenerated.gridImageAssignments.find((assignment) => assignment.assetId === first.assetId);
+    const frame = findFrame(regenerated, preserved?.frameId ?? "");
+
+    expect(preserved?.imageEditParams).toMatchObject({ brightness: 1.3, hue: -2.7 });
+    expect(frame?.type === "frame" ? frame.metadata.imageEditParams : undefined).toMatchObject({ brightness: 1.3, hue: -2.7 });
+    expect(frame?.type === "frame" ? frame.visualEffects : undefined).toMatchObject(visualEffects);
+  });
+
   it("applies fit mode without resetting manual crop, then resets crops explicitly", () => {
     const base = createGridDocument(3, 2);
     const filled = fillGridWithImages(base, gridId(base), imageInputs(6));

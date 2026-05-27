@@ -55,6 +55,34 @@ describe("Class Photo layout utilization", () => {
     expect(allInsideBand(people, contentBand.top, contentBand.bottom)).toBe(true);
     expect(hasOverlaps(people)).toBe(false);
   });
+
+  it("promotes edited person image params from frames and restores them on regenerate", () => {
+    const { page, rule } = buildSyncedClassPhoto("portrait", 2, 1);
+    const targetRecord = rule.personRecords.find((record) => record.role === "child");
+    const targetFrame = page.layers.find((layer) => layer.type === "frame" && layer.id === targetRecord?.frameLayerId);
+    expect(targetRecord).toBeDefined();
+    expect(targetFrame?.type).toBe("frame");
+
+    const editedPage = {
+      ...page,
+      layers: page.layers.map((layer) => layer.id === targetFrame?.id
+        ? {
+            ...layer,
+            metadata: {
+              ...layer.metadata,
+              imageEditParams: { brightness: 1.3, contrast: -0.8 }
+            }
+          }
+        : layer)
+    };
+
+    const regenerated = syncClassPhotoToPage(editedPage, rule);
+    const record = regenerated.rule.personRecords.find((person) => person.id === targetRecord?.id);
+    const frame = regenerated.page.layers.find((layer) => layer.type === "frame" && layer.id === record?.frameLayerId);
+
+    expect(record?.imageEditParams).toMatchObject({ brightness: 1.3, contrast: -0.8 });
+    expect(frame?.type === "frame" ? frame.metadata.imageEditParams : undefined).toMatchObject({ brightness: 1.3, contrast: -0.8 });
+  });
 });
 
 function buildSyncedClassPhoto(orientation: "portrait" | "landscape", childCount: number, staffCount: number) {

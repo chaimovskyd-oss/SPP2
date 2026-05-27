@@ -20,6 +20,7 @@ class Product:
     image_url: str = ""
     mockup_image_url: str = ""
     mask_path: str = ""
+    mask_threshold: int = 28
     active: bool = True
     # Phase 7 — product canvas & print metadata
     bleed_mm: float = 2.0

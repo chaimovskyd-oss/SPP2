@@ -31,6 +31,10 @@ export interface PythonProduct {
   image_url: string;
   mockup_image_url: string;
   mask_path: string;
+  mask_threshold?: number | null;
+  mask_data_base64?: string | null;
+  mask_mime_type?: string | null;
+  mask_file_name?: string | null;
   active: boolean;
   // Phase 7
   bleed_mm: number;
@@ -46,6 +50,7 @@ export interface PythonProduct {
 
 const DEFAULT_DPI = 300;
 const DEFAULT_SAFE_AREA_INSET_MM = 3;
+const DEFAULT_MASK_THRESHOLD = 28;
 
 function makeBleedMargins(bleedMm: number): Margins {
   return { top: bleedMm, right: bleedMm, bottom: bleedMm, left: bleedMm };
@@ -86,6 +91,11 @@ export function pythonProductToDefinition(p: PythonProduct): ProductDefinition {
   const bleed = makeBleedMargins(p.bleed_mm ?? 2);
   const safeArea = makeSafeAreaRect(p.safe_area, trimSizeMm);
   const dpi = p.recommended_dpi ?? DEFAULT_DPI;
+  const maskThreshold = typeof p.mask_threshold === "number" ? p.mask_threshold : DEFAULT_MASK_THRESHOLD;
+  const maskMimeType = p.mask_mime_type || mimeTypeFromPath(p.mask_path);
+  const maskDataUrl = p.mask_data_base64
+    ? `data:${maskMimeType};base64,${p.mask_data_base64}`
+    : undefined;
 
   const printSpec: PrintSpec = {
     version: 1,
@@ -102,9 +112,18 @@ export function pythonProductToDefinition(p: PythonProduct): ProductDefinition {
       ? [
           {
             id: `mask_${p.id}`,
-            name: "Product mask",
-            type: p.mask_path.endsWith(".svg") ? "svg" : "png",
+            name: p.mask_file_name || "Product mask",
+            type: p.mask_path.toLowerCase().endsWith(".svg") ? "svg" : "pngThreshold",
             assetData: p.mask_path,
+            assetPath: p.mask_path,
+            assetDataUrl: maskDataUrl,
+            originalFileName: p.mask_file_name ?? undefined,
+            thresholdSettings: {
+              version: 1,
+              enabled: true,
+              color: "white",
+              tolerance: maskThreshold
+            },
             appliesTo: []
           }
         ]
@@ -149,13 +168,22 @@ export function pythonProductToDefinition(p: PythonProduct): ProductDefinition {
     recommendedDPI: p.recommended_dpi ?? undefined,
     tags: p.tags,
     printZones,
-    productMasks
+    productMasks,
+    maskThreshold
   };
 }
 
 /** Convert a TypeScript ProductDefinition back to the Python wire format. */
 export function definitionToPythonProduct(def: ProductDefinition): PythonProduct {
   const meta = def.metadata as Record<string, unknown>;
+  const primaryMask = def.productMasks?.[0];
+  const persistedMaskPath =
+    primaryMask?.assetPath ??
+    (primaryMask?.assetData && !primaryMask.assetData.startsWith("data:") ? primaryMask.assetData : "");
+  const maskThreshold =
+    def.maskThreshold ??
+    primaryMask?.thresholdSettings?.tolerance ??
+    DEFAULT_MASK_THRESHOLD;
   const bleedMm =
     def.bleed
       ? (def.bleed.top + def.bleed.right + def.bleed.bottom + def.bleed.left) / 4
@@ -184,7 +212,8 @@ export function definitionToPythonProduct(def: ProductDefinition): PythonProduct
     tips: (meta.tips as string) ?? "",
     image_url: (meta.imageUrl as string) ?? "",
     mockup_image_url: (meta.mockupImageUrl as string) ?? "",
-    mask_path: def.productMasks?.[0]?.assetData ?? "",
+    mask_path: persistedMaskPath,
+    mask_threshold: maskThreshold,
     active: (meta.active as boolean) ?? true,
     bleed_mm: bleedMm,
     safe_area: safeAreaDict,
@@ -194,6 +223,15 @@ export function definitionToPythonProduct(def: ProductDefinition): PythonProduct
     recommended_dpi: def.recommendedDPI ?? null,
     tags: def.tags ?? []
   };
+}
+
+function mimeTypeFromPath(path: string): string {
+  const lower = path.toLowerCase();
+  if (lower.endsWith(".svg")) return "image/svg+xml";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".gif")) return "image/gif";
+  return "image/png";
 }
 
 // ── Bridge functions ──────────────────────────────────────────────────────────

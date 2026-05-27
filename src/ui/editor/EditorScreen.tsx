@@ -165,7 +165,7 @@ import { ImageEditFloatingBar } from "./ImageEditFloatingBar";
 import { CropUI } from "./CropUI";
 import { useViewportStore, type ViewportStore } from "@/state/viewportStore";
 import type { Asset, Document } from "@/types/document";
-import type { BlendMode, FrameLayer, ImageLayer, ImageLayerEffects, TextLayer, VisualLayer } from "@/types/layers";
+import type { BlendMode, ContentTransform, FrameLayer, ImageLayer, ImageLayerEffects, TextLayer, VisualLayer } from "@/types/layers";
 import { DEFAULT_IMAGE_LAYER_EFFECTS } from "@/types/layers";
 import type { GridLayoutRule } from "@/types/grid";
 import type { MaskLayoutRule } from "@/types/mask";
@@ -326,6 +326,30 @@ function hasLayerFx(layer: VisualLayer): boolean {
     return layer.effects.some((effect) => effect.enabled) || layer.shadow !== undefined || layer.stroke !== undefined;
   }
   return false;
+}
+
+function sameContentTransform(a: ContentTransform | undefined, b: ContentTransform | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return a.offsetX === b.offsetX && a.offsetY === b.offsetY && a.scale === b.scale && a.rotation === b.rotation;
+}
+
+function frameImageEditParams(layer: FrameLayer): Record<string, number | boolean | string> | undefined {
+  const params = layer.metadata["imageEditParams"];
+  if (typeof params !== "object" || params === null || Array.isArray(params)) return undefined;
+  const entries = Object.entries(params).filter(([, value]) =>
+    typeof value === "number" || typeof value === "boolean" || typeof value === "string"
+  );
+  return entries.length === 0 ? undefined : Object.fromEntries(entries) as Record<string, number | boolean | string>;
+}
+
+function hasManagedModeMetadata(layer: VisualLayer | null): layer is FrameLayer {
+  return layer?.type === "frame" && (
+    layer.metadata["gridCell"] !== undefined ||
+    layer.metadata["maskFrame"] !== undefined ||
+    layer.metadata["collageFrame"] !== undefined ||
+    layer.metadata["classPhotoFrame"] !== undefined ||
+    layer.metadata["photoPrintSlot"] !== undefined
+  );
 }
 
 interface EditorScreenProps {
@@ -502,6 +526,11 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
   const addCollageShapeTemplate = useCollageShapeTemplateStore((s) => s.addTemplate);
   const viewport = useViewportStore();
   const lifecycle = useProjectLifecycleStore();
+  const [managedImageInspectorTab, setManagedImageInspectorTab] = useState<"image" | "mode">("image");
+
+  useEffect(() => {
+    setManagedImageInspectorTab("image");
+  }, [selectedLayerId]);
 
   const activePage = useMemo(
     () => document?.pages.find((page) => page.id === activePageId) ?? document?.pages[0] ?? null,
@@ -1806,6 +1835,9 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     if (isGridMode && activeGridRule !== null && layer.type === "frame" && layer.metadata["gridCell"] !== undefined) {
       const asset = currentDocument.assets.find((item) => item.id === layer.imageAssetId);
       const nextLayer = clampFrameLayerToAssetCrop(layer, asset);
+      const contentChanged = !sameContentTransform(nextLayer.contentTransform, selectedLayer?.type === "frame" ? selectedLayer.contentTransform : undefined) ||
+        nextLayer.fitMode !== (selectedLayer?.type === "frame" ? selectedLayer.fitMode : nextLayer.fitMode);
+      const editParams = frameImageEditParams(nextLayer);
       applyDocumentChange(
         "UpdateGridCellContentCommand",
         (doc) => ({
@@ -1816,10 +1848,12 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
           gridImageAssignments: doc.gridImageAssignments.map((assignment) => assignment.gridId === activeGridRule.id && assignment.frameId === nextLayer.id
             ? {
                 ...assignment,
-                manualContentTransform: nextLayer.contentTransform,
-                manualFitModeOverride: nextLayer.fitMode,
-                hasManualCropOverride: true,
-                hasManualRotationOverride: nextLayer.contentTransform.rotation !== 0
+                manualContentTransform: contentChanged ? nextLayer.contentTransform : assignment.manualContentTransform,
+                manualFitModeOverride: contentChanged ? nextLayer.fitMode : assignment.manualFitModeOverride,
+                imageEditParams: editParams,
+                visualEffects: nextLayer.visualEffects,
+                hasManualCropOverride: assignment.hasManualCropOverride || contentChanged,
+                hasManualRotationOverride: assignment.hasManualRotationOverride || (contentChanged && nextLayer.contentTransform.rotation !== 0)
               }
             : assignment)
         }),
@@ -1834,8 +1868,45 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
       if (collageMeta?.slotId) {
         const asset = currentDocument.assets.find((item) => item.id === layer.imageAssetId);
         const nextLayer = clampFrameLayerToAssetCrop(layer, asset);
-        updateCollageImageTransform(activeCollageRule.id, collageMeta.slotId, nextLayer.contentTransform);
-        updateLayer(currentPage.id, nextLayer);
+        const editParams = frameImageEditParams(nextLayer);
+        applyDocumentChange(
+          "UpdateCollageFrameImageToolsCommand",
+          (doc) => ({
+            ...doc,
+            pages: doc.pages.map((page) => page.id === currentPage.id
+              ? {
+                  ...page,
+                  layers: page.layers.map((item) => item.id === nextLayer.id
+                    ? {
+                        ...nextLayer,
+                        metadata: (() => {
+                          const { collageImageEditParams: _discarded, ...metadata } = nextLayer.metadata;
+                          return editParams === undefined
+                            ? metadata
+                            : { ...metadata, collageImageEditParams: editParams as unknown as import("@/types/primitives").JsonValue };
+                        })()
+                      }
+                    : item)
+                }
+              : page),
+            collageRules: doc.collageRules.map((rule) => rule.id === activeCollageRule.id
+              ? {
+                  ...rule,
+                  imageAssignments: rule.imageAssignments.map((assignment) => assignment.slotId === collageMeta.slotId
+                    ? {
+                        ...assignment,
+                        contentTransform: nextLayer.contentTransform,
+                        fitMode: nextLayer.fitMode,
+                        hasManualTransform: true,
+                        imageEditParams: editParams,
+                        visualEffects: nextLayer.visualEffects
+                      }
+                    : assignment)
+                }
+              : rule)
+          }),
+          currentPage.id
+        );
       }
       return;
     }
@@ -1843,6 +1914,9 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     if (isPhotoPrintMode && activePhotoPrintRule !== null && layer.type === "frame" && layer.metadata["photoPrintSlot"] !== undefined) {
       const asset = currentDocument.assets.find((item) => item.id === layer.imageAssetId);
       const nextLayer = clampFrameLayerToAssetCrop(layer, asset);
+      const contentChanged = !sameContentTransform(nextLayer.contentTransform, selectedLayer?.type === "frame" ? selectedLayer.contentTransform : undefined) ||
+        nextLayer.fitMode !== (selectedLayer?.type === "frame" ? selectedLayer.fitMode : nextLayer.fitMode);
+      const editParams = frameImageEditParams(nextLayer);
       applyDocumentChange(
         "UpdatePhotoPrintFrameContentCommand",
         (doc) => ({
@@ -1853,10 +1927,12 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
           photoPrintImageAssignments: doc.photoPrintImageAssignments.map((assignment) => assignment.photoPrintId === activePhotoPrintRule.id && assignment.frameId === nextLayer.id
             ? {
                 ...assignment,
-                manualContentTransform: nextLayer.contentTransform,
-                manualFitModeOverride: nextLayer.fitMode,
-                hasManualCropOverride: true,
-                hasManualRotationOverride: nextLayer.contentTransform.rotation !== 0
+                manualContentTransform: contentChanged ? nextLayer.contentTransform : assignment.manualContentTransform,
+                manualFitModeOverride: contentChanged ? nextLayer.fitMode : assignment.manualFitModeOverride,
+                imageEditParams: editParams,
+                visualEffects: nextLayer.visualEffects,
+                hasManualCropOverride: assignment.hasManualCropOverride || contentChanged,
+                hasManualRotationOverride: assignment.hasManualRotationOverride || (contentChanged && nextLayer.contentTransform.rotation !== 0)
               }
             : assignment)
         }),
@@ -1868,6 +1944,9 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     if (isMaskMode && activeMaskRule !== null && layer.type === "frame" && layer.metadata["maskFrame"] !== undefined) {
       const asset = currentDocument.assets.find((item) => item.id === layer.imageAssetId);
       const nextLayer = clampFrameLayerToAssetCrop(layer, asset);
+      const contentChanged = !sameContentTransform(nextLayer.contentTransform, selectedLayer?.type === "frame" ? selectedLayer.contentTransform : undefined) ||
+        nextLayer.fitMode !== (selectedLayer?.type === "frame" ? selectedLayer.fitMode : nextLayer.fitMode);
+      const editParams = frameImageEditParams(nextLayer);
       applyDocumentChange(
         "UpdateMaskFrameContentCommand",
         (doc) => ({
@@ -1878,12 +1957,43 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
           maskImageAssignments: doc.maskImageAssignments.map((assignment) => assignment.maskId === activeMaskRule.id && assignment.frameId === nextLayer.id
             ? {
                 ...assignment,
-                manualContentTransform: nextLayer.contentTransform,
-                manualFitModeOverride: nextLayer.fitMode,
-                hasManualCropOverride: true,
-                hasManualRotationOverride: nextLayer.contentTransform.rotation !== 0
+                manualContentTransform: contentChanged ? nextLayer.contentTransform : assignment.manualContentTransform,
+                manualFitModeOverride: contentChanged ? nextLayer.fitMode : assignment.manualFitModeOverride,
+                imageEditParams: editParams,
+                visualEffects: nextLayer.visualEffects,
+                hasManualCropOverride: assignment.hasManualCropOverride || contentChanged,
+                hasManualRotationOverride: assignment.hasManualRotationOverride || (contentChanged && nextLayer.contentTransform.rotation !== 0)
               }
             : assignment)
+        }),
+        currentPage.id
+      );
+      return;
+    }
+
+    if (isClassPhotoMode && activeClassPhotoRule !== null && layer.type === "frame" && layer.metadata["classPhotoFrame"] !== undefined) {
+      const classMeta = layer.metadata["classPhotoFrame"] as { personId?: string; ruleId?: string } | undefined;
+      const nextLayer = clampFrameLayerToAssetCrop(layer, currentDocument.assets.find((item) => item.id === layer.imageAssetId));
+      const editParams = frameImageEditParams(nextLayer);
+      applyDocumentChange(
+        "UpdateClassPhotoFrameImageToolsCommand",
+        (doc) => ({
+          ...doc,
+          pages: doc.pages.map((page) => page.id === currentPage.id
+            ? { ...page, layers: page.layers.map((item) => (item.id === nextLayer.id ? nextLayer : item)) }
+            : page),
+          classPhotoRules: doc.classPhotoRules.map((rule) => rule.id === activeClassPhotoRule.id
+            ? {
+                ...rule,
+                personRecords: rule.personRecords.map((record) => record.id === classMeta?.personId
+                  ? {
+                      ...record,
+                      imageEditParams: editParams,
+                      visualEffectsOverride: nextLayer.visualEffects
+                    }
+                  : record)
+              }
+            : rule)
         }),
         currentPage.id
       );
@@ -1904,16 +2014,46 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     if (ids.size === 0) return;
     applyDocumentChange(
       mode === "apply" ? "ApplySmartScreenshotCropCommand" : mode === "ignore" ? "IgnoreSmartScreenshotCropCommand" : "ResetSmartScreenshotCropCommand",
-      (doc) => ({
-        ...doc,
-        assets: doc.assets.map((asset) => {
+      (doc) => {
+        const appliedCropByAssetId = new Map<string, ScreenshotCropSuggestionMetadata>();
+        const assets = doc.assets.map((asset) => {
           if (!ids.has(asset.id)) return asset;
           if (mode === "reset") return resetScreenshotCropForAsset(asset);
           if (mode === "ignore") return ignoreScreenshotCropForAsset(asset);
           const suggestion = getScreenshotCropSuggestion(asset);
+          if (suggestion !== null) appliedCropByAssetId.set(asset.id, suggestion);
           return suggestion === null ? asset : applyScreenshotCropToAsset(asset, suggestion);
-        })
-      }),
+        });
+        if (mode !== "apply" || appliedCropByAssetId.size === 0) return { ...doc, assets };
+
+        return {
+          ...doc,
+          assets,
+          pages: doc.pages.map((page) => ({
+            ...page,
+            layers: page.layers.map((layer) => {
+              if (layer.type === "image") {
+                const suggestion = appliedCropByAssetId.get(layer.assetId);
+                const cropRect = suggestion?.cropRect ?? null;
+                if (cropRect === null || cropRect.height <= 0) return layer;
+                const nextAspect = cropRect.width / cropRect.height;
+                return {
+                  ...layer,
+                  height: Math.max(1, layer.width / Math.max(0.001, nextAspect)),
+                  crop: { x: 0, y: 0, width: 1, height: 1 }
+                };
+              }
+              if (layer.type === "frame" && layer.imageAssetId !== undefined && appliedCropByAssetId.has(layer.imageAssetId)) {
+                return {
+                  ...layer,
+                  crop: { x: 0, y: 0, width: 1, height: 1 }
+                };
+              }
+              return layer;
+            })
+          }))
+        };
+      },
       currentPage.id
     );
     setDismissedScreenshotCropAssetIds((previous) => {
@@ -3238,6 +3378,33 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     updateLayer(currentPage.id, updatedLayer);
   }
 
+  function applySimpleImageCrop(layer: ImageLayer, crop: { x: number; y: number; width: number; height: number }): ImageLayer {
+    const cropX = Math.max(0, Math.min(1, crop.x));
+    const cropY = Math.max(0, Math.min(1, crop.y));
+    const cropW = Math.max(0.001, Math.min(1 - cropX, crop.width));
+    const cropH = Math.max(0.001, Math.min(1 - cropY, crop.height));
+    const nextCrop = {
+      x: layer.crop.x + cropX * layer.crop.width,
+      y: layer.crop.y + cropY * layer.crop.height,
+      width: cropW * layer.crop.width,
+      height: cropH * layer.crop.height
+    };
+    const localX = cropX * layer.width;
+    const localY = cropY * layer.height;
+    const rotation = ((layer.rotation ?? 0) * Math.PI) / 180;
+    const rotatedX = localX * Math.cos(rotation) - localY * Math.sin(rotation);
+    const rotatedY = localX * Math.sin(rotation) + localY * Math.cos(rotation);
+
+    return {
+      ...layer,
+      x: layer.x + rotatedX,
+      y: layer.y + rotatedY,
+      width: Math.max(1, layer.width * cropW),
+      height: Math.max(1, layer.height * cropH),
+      crop: nextCrop
+    };
+  }
+
   function handleImageEditApply(): void {
     if (imageEditLayerId === null || activePage === null) {
       exitImageEditMode();
@@ -3249,7 +3416,8 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
       return;
     }
     if (imageActiveTool === "crop" && cropPreview !== null) {
-      updateLayer(activePage.id, { ...layer, crop: cropPreview });
+      updateLayer(activePage.id, applySimpleImageCrop(layer, cropPreview));
+      setStatus("התמונה נחתכה בלי עיוות");
       exitImageEditMode();
       return;
     }
@@ -3651,6 +3819,106 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     applyDocumentChange("DeleteMaskImageAndCompactFromEndCommand", (doc) => deleteMaskImageAndCompactFromEnd(doc, rule.id, maskIndexGlobal), currentPage.id);
   }
 
+  function renderModeSpecificPanel(): ReactNode {
+    if (isProductMode) {
+      return (
+        <div className="rs-mode-section">
+          <div className="rs-mode-label"><Boxes size={11} />׳׳¦׳‘ ׳׳•׳¦׳¨</div>
+          <ProductDefinitionPanel />
+        </div>
+      );
+    }
+    if (isCollageMode && activeCollageRule !== null) {
+      return (
+        <div className="rs-mode-section">
+          <div className="rs-mode-label"><SlidersHorizontal size={11} />׳׳¦׳‘ ׳§׳•׳׳׳–׳³</div>
+          <CollageModePanel rule={activeCollageRule} selectedLayer={selectedLayer} onReplaceImage={() => replaceImageInputRef.current?.click()} />
+        </div>
+      );
+    }
+    if (isGridMode && activeGridRule !== null) {
+      return (
+        <div className="rs-mode-section">
+          <div className="rs-mode-label"><SlidersHorizontal size={11} />׳׳¦׳‘ ׳’׳¨׳™׳“</div>
+          <GridModePanel
+            assignmentCount={currentDocument.gridImageAssignments.filter((assignment) => assignment.gridId === activeGridRule.id).length}
+            rule={activeGridRule}
+            selectedLayer={selectedLayer}
+            onAddImages={() => imageInputRef.current?.click()}
+            onAddFilenameText={() => handleAddGridFilenameText(activeGridRule)}
+            onApplyFit={handleApplyGridFit}
+            onApplySelectedText={() => handleApplySelectedTextToGrid(activeGridRule)}
+            onDeleteSelectedImage={() => handleDeleteGridImage(activeGridRule)}
+            onRegenerate={handleRegenerateGrid}
+            onResetCrops={() => handleResetGridCrops(activeGridRule)}
+          />
+        </div>
+      );
+    }
+    if (isMaskMode && activeMaskRule !== null) {
+      return (
+        <div className="rs-mode-section">
+          <div className="rs-mode-label"><SlidersHorizontal size={11} />׳׳¦׳‘ ׳׳¡׳›׳”</div>
+          <MaskModePanel
+            assignmentCount={currentDocument.maskImageAssignments.filter((assignment) => assignment.maskId === activeMaskRule.id).length}
+            dpi={currentPage.setup.dpi}
+            rule={activeMaskRule}
+            selectedLayer={selectedLayer}
+            onAddImages={() => imageInputRef.current?.click()}
+            onAddFilenameText={() => handleAddMaskFilenameText(activeMaskRule)}
+            onApplyFit={handleApplyMaskFit}
+            onApplySelectedText={() => handleApplySelectedTextToMask(activeMaskRule)}
+            onDeleteSelectedImage={() => handleDeleteMaskImage(activeMaskRule)}
+            onRegenerate={handleRegenerateMask}
+            onResetCrops={() => handleResetMaskCrops(activeMaskRule)}
+            onChangePreset={(entry) => void handleChangeMaskPreset(activeMaskRule, entry)}
+          />
+        </div>
+      );
+    }
+    if (isPhotoPrintMode && activePhotoPrintRule !== null) {
+      return (
+        <div className="rs-mode-section">
+          <div className="rs-mode-label"><SlidersHorizontal size={11} />׳₪׳™׳×׳•׳— ׳×׳׳•׳ ׳•׳×</div>
+          <PhotoPrintModePanel
+            rule={activePhotoPrintRule}
+            document={currentDocument}
+            onRegenerate={(patch) => {
+              clearSelection();
+              const updated = regeneratePhotoPrint(currentDocument, activePhotoPrintRule.id, patch);
+              setDocument(updated);
+            }}
+          />
+        </div>
+      );
+    }
+    if (isClassPhotoMode && activeClassPhotoRule !== null) {
+      return (
+        <div className="rs-mode-section">
+          <div className="rs-mode-label"><SlidersHorizontal size={11} />׳×׳׳•׳ ׳× ׳׳—׳–׳•׳¨</div>
+          <ClassPhotoModePanel
+            rule={activeClassPhotoRule}
+            selectedLayer={selectedLayer}
+            onBackToWizard={() => onOpenClassPhotoWizard?.()}
+          />
+        </div>
+      );
+    }
+    if (isBlessingMode && activeBlessingRule !== null) {
+      return (
+        <div className="rs-mode-section">
+          <div className="rs-mode-label"><SlidersHorizontal size={11} />׳׳¦׳‘ ׳‘׳¨׳›׳•׳×</div>
+          <BlessingModePanel rule={activeBlessingRule} selectedLayer={selectedLayer} />
+        </div>
+      );
+    }
+    return null;
+  }
+
+  const modeSpecificPanel = renderModeSpecificPanel();
+  const selectedFrameHasImage = selectedLayer?.type === "frame" && selectedLayer.imageAssetId !== undefined;
+  const selectedUsesManagedModeTabs = selectedFrameHasImage && (hasManagedModeMetadata(selectedLayer) || modeSpecificPanel !== null);
+
   return (
     <main className="canvas-shell" data-testid="editor-screen">
       {/* Save as Batch Template modal */}
@@ -3990,7 +4258,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
         onEnterImageEditMode={() => {
           if (selectedLayer?.type === "image") {
             setWhiteBackgroundThreshold(selectedLayer.effects.remove_white_tolerance ?? 22);
-            enterImageEditMode(selectedLayer.id, selectedLayer.crop ?? undefined);
+            enterImageEditMode(selectedLayer.id, { x: 0, y: 0, width: 1, height: 1 });
           }
         }}
         onEnterMaskContentEditMode={() => {
@@ -4537,6 +4805,8 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
         <aside className="right-sidebar">
           <ColorPanel getStageCanvas={() => stageRef.current?.toCanvas({ pixelRatio: 1 }) ?? null} />
           {/* Mode-specific panel at top */}
+          {!selectedUsesManagedModeTabs && (
+            <>
           {isProductMode ? (
             <div className="rs-mode-section">
               <div className="rs-mode-label"><Boxes size={11} />מצב מוצר</div>
@@ -4625,6 +4895,8 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
               />
             </div>
           ) : null}
+            </>
+          )}
 
           {/* Contextual inspector body */}
           <div className="rs-body">
@@ -4715,16 +4987,31 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                     </button>
                   </div>
                 )}
-                <ImageStudio
-                  layer={selectedLayer}
-                  assets={currentDocument.assets}
-                  batchField={(selectedLayer.type === "frame" || selectedLayer.type === "image") ? batchProductionMeta?.variableFields.find((f) => f.layerId === selectedLayer.id) : undefined}
-                  onBatchFieldChange={(selectedLayer.type === "frame" || selectedLayer.type === "image") ? (field) => handleBatchFieldChange(selectedLayer.id, field) : undefined}
-                  onConvertAlphaToFrame={selectedLayer.type === "image" ? handleConvertAlphaToFrameMask : undefined}
-                  onDelete={handleDeleteSelected}
-                  onPatch={patchSelectedLayer}
-                  onUpdateAsset={updateAsset}
-                />
+                {selectedUsesManagedModeTabs && selectedLayer.type === "frame" ? (
+                  <ManagedImageFrameInspector
+                    activeTab={managedImageInspectorTab}
+                    assets={currentDocument.assets}
+                    batchField={batchProductionMeta?.variableFields.find((f) => f.layerId === selectedLayer.id)}
+                    layer={selectedLayer}
+                    modePanel={modeSpecificPanel}
+                    onBatchFieldChange={(field) => handleBatchFieldChange(selectedLayer.id, field)}
+                    onDelete={handleDeleteSelected}
+                    onPatch={patchSelectedLayer}
+                    onTabChange={setManagedImageInspectorTab}
+                    onUpdateAsset={updateAsset}
+                  />
+                ) : (
+                  <ImageStudio
+                    layer={selectedLayer}
+                    assets={currentDocument.assets}
+                    batchField={(selectedLayer.type === "frame" || selectedLayer.type === "image") ? batchProductionMeta?.variableFields.find((f) => f.layerId === selectedLayer.id) : undefined}
+                    onBatchFieldChange={(selectedLayer.type === "frame" || selectedLayer.type === "image") ? (field) => handleBatchFieldChange(selectedLayer.id, field) : undefined}
+                    onConvertAlphaToFrame={selectedLayer.type === "image" ? handleConvertAlphaToFrameMask : undefined}
+                    onDelete={handleDeleteSelected}
+                    onPatch={patchSelectedLayer}
+                    onUpdateAsset={updateAsset}
+                  />
+                )}
               </>
             ) : (
               <>
@@ -6725,6 +7012,7 @@ type QuickSliderParam = {
   max: number;
   step: number;
   default: number;
+  decimals?: number;
   hint: string;
 };
 
@@ -6734,7 +7022,7 @@ const QUICK_LIGHT_PARAMS: QuickSliderParam[] = [
     label: "חשיפה",
     min: -25,
     max: 25,
-    step: 1,
+    step: 0.1,
     default: 0,
     hint: "תיקון חשיפה עדין — לא שורף לבן ולא מחשיך מדי"
   },
@@ -6743,7 +7031,7 @@ const QUICK_LIGHT_PARAMS: QuickSliderParam[] = [
     label: "בהירות",
     min: -28,
     max: 28,
-    step: 1,
+    step: 0.1,
     default: 0,
     hint: "בהירות כללית בטווח נורמלי להדפסה"
   },
@@ -6752,7 +7040,7 @@ const QUICK_LIGHT_PARAMS: QuickSliderParam[] = [
     label: "קונטרסט",
     min: -35,
     max: 35,
-    step: 1,
+    step: 0.1,
     default: 0,
     hint: "קונטרסט מתון, בלי תוצאה שרופה או קשה מדי"
   },
@@ -6761,7 +7049,7 @@ const QUICK_LIGHT_PARAMS: QuickSliderParam[] = [
     label: "לומיננס",
     min: -25,
     max: 25,
-    step: 1,
+    step: 0.1,
     default: 0,
     hint: "הבהרה/הכהיה עדינה דרך HSL"
   }
@@ -6773,7 +7061,7 @@ const QUICK_COLOR_PARAMS: QuickSliderParam[] = [
     label: "רוויה",
     min: -40,
     max: 40,
-    step: 1,
+    step: 0.1,
     default: 0,
     hint: "חיזוק או החלשה מתונה של צבעים"
   },
@@ -6782,7 +7070,7 @@ const QUICK_COLOR_PARAMS: QuickSliderParam[] = [
     label: "גוון",
     min: -25,
     max: 25,
-    step: 1,
+    step: 0.1,
     default: 0,
     hint: "הסטת גוון עדינה בלבד"
   },
@@ -6791,7 +7079,7 @@ const QUICK_COLOR_PARAMS: QuickSliderParam[] = [
     label: "טשטוש קל",
     min: 0,
     max: 5,
-    step: 0.5,
+    step: 0.1,
     default: 0,
     hint: "טשטוש קל ומהיר — לטשטוש חזק עדיף עורך מתקדם"
   }
@@ -6840,6 +7128,21 @@ function imageParamString(params: EngineParams, key: string, fallback: string): 
   return typeof value === "string" ? value : fallback;
 }
 
+function clampQuickValue(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function decimalsFromStep(step: number): number {
+  const text = String(step);
+  const dot = text.indexOf(".");
+  return dot === -1 ? 0 : text.length - dot - 1;
+}
+
+function formatQuickValue(value: number, decimals: number): string {
+  const fixed = value.toFixed(decimals);
+  return fixed.replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
+}
+
 function cleanImageParams(params: EngineParams): EngineParams {
   const cleaned: EngineParams = {};
   for (const [key, value] of Object.entries(params)) {
@@ -6871,6 +7174,25 @@ function QuickSlider({
 }): ReactElement {
   const value = imageParamValue(params, param.key, param.default);
   const isDirty = value !== param.default;
+  const decimals = param.decimals ?? decimalsFromStep(param.step);
+  const displayValue = formatQuickValue(value, decimals);
+  const [manualDraft, setManualDraft] = useState(displayValue);
+  const [manualEditing, setManualEditing] = useState(false);
+
+  useEffect(() => {
+    if (!manualEditing) setManualDraft(displayValue);
+  }, [displayValue, manualEditing]);
+
+  function commitManualValue(raw: string): void {
+    const parsed = Number(raw.replace(",", "."));
+    if (!Number.isFinite(parsed)) {
+      setManualDraft(displayValue);
+      return;
+    }
+    const nextValue = Number(clampQuickValue(parsed, param.min, param.max).toFixed(decimals));
+    setManualDraft(formatQuickValue(nextValue, decimals));
+    onChange(param.key, nextValue);
+  }
 
   return (
     <div style={{ marginBottom: 10 }}>
@@ -6879,7 +7201,39 @@ function QuickSlider({
           {param.label}
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 4, opacity: 0.7 }}>
-          {value}
+          <input
+            aria-label={`${param.label} value`}
+            max={param.max}
+            min={param.min}
+            onBlur={() => {
+              setManualEditing(false);
+              commitManualValue(manualDraft);
+            }}
+            onChange={(event) => setManualDraft(event.target.value)}
+            onFocus={() => setManualEditing(true)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.currentTarget.blur();
+              } else if (event.key === "Escape") {
+                setManualDraft(displayValue);
+                event.currentTarget.blur();
+              }
+            }}
+            step={param.step}
+            style={{
+              width: 54,
+              minWidth: 54,
+              padding: "2px 5px",
+              borderRadius: 4,
+              border: "1px solid var(--color-border,#2a2a3e)",
+              background: "var(--color-panel,#15151f)",
+              color: "inherit",
+              fontSize: 11,
+              textAlign: "center"
+            }}
+            type="number"
+            value={manualDraft}
+          />
           {isDirty && onReset !== undefined && (
             <button
               aria-label="אפס ערך"
@@ -6902,6 +7256,59 @@ function QuickSlider({
         onChange={(event) => onChange(param.key, Number(event.target.value))}
         style={{ width: "100%", accentColor: isDirty ? "#7C6FE0" : undefined }}
       />
+    </div>
+  );
+}
+
+function ManagedImageFrameInspector({
+  activeTab,
+  assets,
+  batchField,
+  layer,
+  modePanel,
+  onBatchFieldChange,
+  onDelete,
+  onPatch,
+  onTabChange,
+  onUpdateAsset
+}: {
+  activeTab: "image" | "mode";
+  assets: Asset[];
+  batchField?: BatchVariableField;
+  layer: Extract<VisualLayer, { type: "frame" }>;
+  modePanel: ReactNode;
+  onBatchFieldChange?: (field: BatchVariableField | null) => void;
+  onDelete: () => void;
+  onPatch: (patch: Partial<VisualLayer>) => void;
+  onTabChange: (tab: "image" | "mode") => void;
+  onUpdateAsset: (asset: Asset) => void;
+}): ReactElement {
+  return (
+    <div className="text-pro-controls managed-image-inspector">
+      <div className="text-tabs" role="tablist" aria-label="Managed image tools">
+        <button className={activeTab === "image" ? "on" : ""} onClick={() => onTabChange("image")} type="button">
+          כוונון תמונה
+        </button>
+        <button className={activeTab === "mode" ? "on" : ""} onClick={() => onTabChange("mode")} type="button">
+          כלי מצב
+        </button>
+      </div>
+
+      {activeTab === "image" ? (
+        <ImageStudio
+          layer={layer}
+          assets={assets}
+          batchField={batchField}
+          onBatchFieldChange={onBatchFieldChange}
+          onDelete={onDelete}
+          onPatch={onPatch}
+          onUpdateAsset={onUpdateAsset}
+        />
+      ) : (
+        <div className="text-tab-panel managed-mode-panel">
+          {modePanel ?? <p className="empty-panel-note">אין כלי מצב זמינים לשכבה הזו.</p>}
+        </div>
+      )}
     </div>
   );
 }
@@ -6953,7 +7360,7 @@ function ImageStudio({
         color_pop_background: e.color_pop_background ?? 100
       };
     }
-    return (layer.metadata["imageEditParams"] ?? {}) as EngineParams;
+    return ((layer.metadata["imageEditParams"] ?? layer.metadata["collageImageEditParams"]) ?? {}) as EngineParams;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layer]);
 
@@ -6992,7 +7399,9 @@ function ImageStudio({
       const defaultVal = DEFAULT_IMAGE_LAYER_EFFECTS[effectsKey as keyof ImageLayerEffects];
       onPatch({ effects: { ...layer.effects, [effectsKey]: defaultVal } } as Partial<VisualLayer>);
     } else {
-      patchQuickParams({ ...savedParams, [key]: 0 });
+      const nextParams = { ...savedParams };
+      delete nextParams[key];
+      patchQuickParams(nextParams);
     }
   }
 
@@ -7017,6 +7426,9 @@ function ImageStudio({
   const hasAnyQuickAdjustments = layer.type === "image"
     ? (layer.effects.brightness !== 0 || layer.effects.contrast !== 0 || layer.effects.saturation !== 0 ||
        layer.effects.exposure !== 0 || layer.effects.hue !== 0 || layer.effects.grayscale || layer.effects.blur > 0 ||
+       (layer.effects.luminance ?? 0) !== 0 || (layer.effects.sepia ?? false) || (layer.effects.invert ?? false) ||
+       (layer.effects.threshold ?? 0) !== 0 || (layer.effects.posterize ?? 0) !== 0 ||
+       (layer.effects.remove_white ?? false) || (layer.effects.color_pop ?? false) ||
        layer.effects.shadow !== null || layer.effects.outline !== null)
     : Object.values(savedParams).some((value) => value !== 0 && value !== false && value !== "");
   const colorPopEnabled = imageParamBool(savedParams, "color_pop");
@@ -7119,7 +7531,7 @@ function ImageStudio({
             })}
 
             {QUICK_EFFECT_PARAMS.map((param) => (
-              <QuickSlider key={param.key} param={param} params={savedParams} onChange={updateParam} />
+              <QuickSlider key={param.key} param={param} params={savedParams} onChange={updateParam} onReset={resetSingleParam} />
             ))}
 
             {removeWhiteEnabled && (
@@ -7129,12 +7541,13 @@ function ImageStudio({
                   label: "רגישות רקע לבן",
                   min: 5,
                   max: 55,
-                  step: 1,
+                  step: 0.1,
                   default: 22,
                   hint: "כמה גוונים בהירים יוסרו. לשמור מתון כדי לא לפגוע בפרטים בהירים"
                 }}
                 params={savedParams}
                 onChange={updateParam}
+                onReset={resetSingleParam}
               />
             )}
 
@@ -7155,12 +7568,13 @@ function ImageStudio({
                     label: "רגישות צבע",
                     min: 5,
                     max: 85,
-                    step: 1,
+                    step: 0.1,
                     default: 28,
                     hint: "כמה צבעים קרובים לצבע הנבחר יישארו צבעוניים"
                   }}
                   params={savedParams}
                   onChange={updateParam}
+                  onReset={resetSingleParam}
                 />
                 <QuickSlider
                   param={{
@@ -7168,12 +7582,13 @@ function ImageStudio({
                     label: "דהיית שאר הצבעים",
                     min: 50,
                     max: 100,
-                    step: 5,
+                    step: 1,
                     default: 100,
                     hint: "100 = שאר התמונה שחור־לבן מלא, ערך נמוך משאיר מעט צבע"
                   }}
                   params={savedParams}
                   onChange={updateParam}
+                  onReset={resetSingleParam}
                 />
               </div>
             )}

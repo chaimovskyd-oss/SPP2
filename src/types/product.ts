@@ -52,8 +52,13 @@ export interface ProductMaskDefinition {
   id: ID;
   name: string;
   type: "svg" | "png" | "pngThreshold" | "builtInShape";
-  /** Base64-encoded asset data or file path. */
+  /** Backwards-compatible stored asset reference. Prefer assetPath for persisted paths. */
   assetData?: string;
+  /** Persisted product_library-relative mask path. */
+  assetPath?: string;
+  /** Transient renderer-ready data URL returned by the Electron bridge. Not persisted. */
+  assetDataUrl?: string;
+  originalFileName?: string;
   thresholdSettings?: MaskThresholdSettings;
   /** Print zone IDs this mask applies to. Empty = applies to all zones. */
   appliesTo?: ID[];
@@ -103,4 +108,6 @@ export interface ProductDefinition extends VersionedEntity {
   tags?: string[];
   /** Product-level clip/shape masks (distinct from per-frame MaskLayer masks). */
   productMasks?: ProductMaskDefinition[];
+  /** Default white-threshold used when creating product-level masks. */
+  maskThreshold?: number;
 }

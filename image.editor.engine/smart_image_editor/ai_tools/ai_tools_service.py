@@ -58,15 +58,6 @@ class EffectSpec:
 
 
 # ---------------------------------------------------------------------------
-# Lazy loader for AnimeGAN (avoids importing onnxruntime at startup)
-# ---------------------------------------------------------------------------
-
-def _lazy_animegan(image: Image.Image, params: dict) -> Image.Image:
-    from smart_image_editor.ai_tools.ai.animegan import apply_animegan
-    return apply_animegan(image, params)
-
-
-# ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
 
@@ -103,31 +94,6 @@ EFFECT_REGISTRY: dict[str, EffectSpec] = {
         apply=apply_posterize,
         uses_edge_thickness=False,
         description="Reduce colour levels for a poster look",
-    ),
-    # ── AI Styles ────────────────────────────────────────────────────────────
-    "anime": EffectSpec(
-        label="Anime Style",
-        icon="🌸",
-        category="ai",
-        apply=_lazy_animegan,
-        uses_edge_thickness=False,
-        description="AnimeGAN neural style transfer",
-    ),
-    "soft_cartoon": EffectSpec(
-        label="Soft Cartoon",
-        icon="✨",
-        category="ai",
-        apply=None,          # placeholder — coming soon
-        uses_edge_thickness=False,
-        description="Coming soon",
-    ),
-    "comic": EffectSpec(
-        label="Comic Style",
-        icon="💬",
-        category="ai",
-        apply=None,          # placeholder — coming soon
-        uses_edge_thickness=False,
-        description="Coming soon",
     ),
 }
 

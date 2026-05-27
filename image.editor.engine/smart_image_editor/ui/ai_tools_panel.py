@@ -3,7 +3,6 @@
 Sections
 ────────
   Artistic Effects   Cartoon · Sketch · Coloring Page · Posterize
-  AI Styles          Anime Style · Soft Cartoon (soon) · Comic (soon)
   Controls           Strength · Detail · Edge Thickness  + Apply / Clear
 
 Signals emitted
@@ -225,12 +224,6 @@ class AiToolsPanel(QWidget):
         content_layout.addWidget(_make_section_label("Artistic Effects", "#69f0d5"))
         content_layout.addWidget(self._build_effect_grid(
             [eid for eid, s in EFFECT_REGISTRY.items() if s.category == "artistic"]
-        ))
-
-        # ── AI Styles ────────────────────────────────────────────────────────
-        content_layout.addWidget(_make_section_label("AI Styles", "#ff6b9d"))
-        content_layout.addWidget(self._build_effect_grid(
-            [eid for eid, s in EFFECT_REGISTRY.items() if s.category == "ai"]
         ))
 
         # ── Controls ─────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QCursor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from smart_image_editor.ai.face_detection_service import detect_faces, has_mediapipe_face_detection
+from smart_image_editor.ai.face_restore_service import restore_faces
 from smart_image_editor.ai.segmentation_service import has_mediapipe_segmentation
 from smart_image_editor.ai.smart_auto_fix_service import suggest_smart_auto_fix
 from smart_image_editor.ai_tools.ai_tools_service import (
@@ -104,7 +105,8 @@ SECTION_KEYS = {
         "grain_amount",
         "grain_size",
     ],
-    "Face": ["ai_face_brighten", "ai_face_restore", "ai_skin_tone_protection", "print_reduce_red_skin"],
+    "Face": ["ai_face_brighten", "ai_skin_tone_protection", "print_reduce_red_skin"],
+    "Crop": ["crop"],
     "Subject": ["ai_subject_enhance"],
     "Print Setup": ["print_mode", "print_boost_shadows", "print_protect_highlights", "print_safe_sharpness"],
     "AI Tools": ["ai_tools"],
@@ -117,6 +119,21 @@ COMPARE_MODES = [
     ("split", "Split"),
     ("side_by_side", "Side by Side"),
 ]
+
+
+class FaceRestoreWorker(QObject):
+    finished = Signal(object, str)
+
+    def __init__(self, image, strength: int):
+        super().__init__()
+        self.image = image
+        self.strength = strength
+
+    def run(self) -> None:
+        try:
+            self.finished.emit(restore_faces(self.image, self.strength), "")
+        except Exception as exc:
+            self.finished.emit(None, str(exc))
 
 
 class EditorWindow(QMainWindow):
@@ -133,6 +150,12 @@ class EditorWindow(QMainWindow):
         self.presets = self.preset_service.load_presets()
         self.preview_cache = PreviewCache(max_items=24)
         self.target_pick_mode: str | None = None
+        self._face_restore_thread: QThread | None = None
+        self._face_restore_worker: FaceRestoreWorker | None = None
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(320)
+        self._preview_timer.timeout.connect(self.refresh_preview)
         self._build_ui()
         self._build_menu()
         self._build_shortcuts()
@@ -176,6 +199,7 @@ class EditorWindow(QMainWindow):
         splitter.addWidget(self._build_left_panel())
         self.preview = PreviewCanvas()
         self.preview.image_clicked.connect(self.handle_preview_click)
+        self.preview.crop_selected.connect(self.apply_crop_rect)
         splitter.addWidget(self.preview)
         self.adjustments = AdjustmentPanel()
         self.adjustments.param_changed.connect(self.update_param)
@@ -186,6 +210,10 @@ class EditorWindow(QMainWindow):
         self.adjustments.auto_contrast_requested.connect(self.auto_contrast)
         self.adjustments.smart_auto_fix_requested.connect(self.smart_auto_fix)
         self.adjustments.detect_faces_requested.connect(self.detect_faces)
+        self.adjustments.face_restore_requested.connect(self.apply_face_restore_strength)
+        self.adjustments.crop_mode_requested.connect(self.start_crop_mode)
+        self.adjustments.crop_reset_requested.connect(self.reset_crop)
+        self.adjustments.crop_ratio_requested.connect(self.set_crop_ratio)
         self.adjustments.hsl_preview_requested.connect(self.show_hsl_affected_preview)
         self.adjustments.hsl_preview_hide_requested.connect(self.hide_hsl_affected_preview)
         self.adjustments.dynamic_hsl_preview_requested.connect(self.show_dynamic_hsl_preview)
@@ -260,6 +288,7 @@ class EditorWindow(QMainWindow):
         self.tips_panel = SmartTipsPanel()
         self.tips_panel.apply_fix_requested.connect(self.apply_tip_params)
         tabs.addTab(self.tips_panel, "Tips")
+        tabs.setCurrentWidget(self.tips_panel)
 
         self.history_panel = HistoryPanel()
         self.history_panel.undo_requested.connect(self.undo)
@@ -329,8 +358,6 @@ class EditorWindow(QMainWindow):
         ai_menu.addAction(self.tr_ui("Sketch"), lambda: self._apply_ai_effect_from_menu("sketch"))
         ai_menu.addAction(self.tr_ui("Coloring Page"), lambda: self._apply_ai_effect_from_menu("coloring_page"))
         ai_menu.addAction(self.tr_ui("Posterize"), lambda: self._apply_ai_effect_from_menu("posterize"))
-        ai_menu.addSeparator()
-        ai_menu.addAction(self.tr_ui("Anime Style (AI)"), lambda: self._apply_ai_effect_from_menu("anime"))
         ai_menu.addAction(self.tr_ui("Clear AI Effect"), self._on_ai_tools_effect_clear)
 
         preset_menu = self.menuBar().addMenu(self.tr_ui("Presets"))
@@ -431,7 +458,7 @@ class EditorWindow(QMainWindow):
             QMessageBox.critical(self, self.tr_ui("Open failed"), str(exc))
             return
         self.state.set_source(path, self.original_image.size)
-        self.preview_base = create_preview(self.original_image)
+        self.preview_base = create_preview(self.original_image, max_size=1024)
         self.preview_cache.clear()
         clear_hsl_preview_cache()
         clear_target_color_cache()
@@ -465,7 +492,11 @@ class EditorWindow(QMainWindow):
                 target["enabled"] = True
             value = target
         self.state.update_param(key, value)
-        self.refresh_preview()
+        self._schedule_preview_refresh()
+
+    def _schedule_preview_refresh(self) -> None:
+        if self.preview_base is not None:
+            self._preview_timer.start()
 
     def reset_param(self, key: str):
         if self.original_image is None:
@@ -605,7 +636,7 @@ class EditorWindow(QMainWindow):
         key = self.preview_cache.make_key(self.state.source_path, self.state.edit_params, self.preview_base.size)
         image = self.preview_cache.get(key)
         if image is None:
-            image = apply_adjustments(self.preview_base, self.state.edit_params)
+            image = apply_adjustments(self.preview_base, self.state.edit_params, include_heavy_ai=False)
             self.preview_cache.put(key, image)
         self.preview.set_image(image, self.preview_base)
         stats = calculate_histogram(image)
@@ -802,9 +833,24 @@ class EditorWindow(QMainWindow):
             return
         self._export_copy(self._next_available_save_copy_path(), show_message=True)
 
+    def _export_params(self) -> dict:
+        params = dict(self.state.edit_params)
+        crop = params.get("crop")
+        if crop and self.original_image is not None and self.preview_base is not None:
+            sx = self.original_image.width / max(1, self.preview_base.width)
+            sy = self.original_image.height / max(1, self.preview_base.height)
+            left, top, right, bottom = [float(v) for v in crop]
+            params["crop"] = [
+                round(left * sx),
+                round(top * sy),
+                round(right * sx),
+                round(bottom * sy),
+            ]
+        return params
+
     def _export_copy(self, path: Path, *, show_message: bool):
         try:
-            exported = export_image(self.original_image, self.state.edit_params, path)
+            exported = export_image(self.original_image, self._export_params(), path)
         except Exception as exc:
             QMessageBox.critical(self, self.tr_ui("Export failed"), str(exc))
             return
@@ -837,6 +883,65 @@ class EditorWindow(QMainWindow):
     def _preview_preset_name(self, row: int):
         if 0 <= row < len(self.presets):
             self.status_label.setText(f"{self.tr_ui('Preset selected')}: {self.presets[row].get('name')}")
+
+    def apply_face_restore_strength(self, strength: int) -> None:
+        if self.original_image is None or self.preview_base is None:
+            QMessageBox.information(self, self.tr_ui("No image"), self.tr_ui("Open an image before applying an effect."))
+            return
+        if self._face_restore_thread is not None:
+            self.status_label.setText(self.tr_ui("Face restore is already running"))
+            return
+        self.status_label.setText(self.tr_ui("Restoring faces..."))
+        self._face_restore_thread = QThread(self)
+        self._face_restore_worker = FaceRestoreWorker(self.original_image.copy(), strength)
+        self._face_restore_worker.moveToThread(self._face_restore_thread)
+        self._face_restore_thread.started.connect(self._face_restore_worker.run)
+        self._face_restore_worker.finished.connect(self._finish_face_restore)
+        self._face_restore_worker.finished.connect(self._face_restore_thread.quit)
+        self._face_restore_worker.finished.connect(self._face_restore_worker.deleteLater)
+        self._face_restore_thread.finished.connect(self._face_restore_thread.deleteLater)
+        self._face_restore_thread.start()
+
+    def _finish_face_restore(self, image: object, error: str) -> None:
+        self._face_restore_thread = None
+        self._face_restore_worker = None
+        if error or image is None:
+            self.status_label.setText(error or self.tr_ui("Face restore failed"))
+            return
+        self.original_image = image
+        self.preview_base = create_preview(self.original_image, max_size=1024)
+        self.state.update_param("ai_face_restore", 0)
+        self.preview_cache.clear()
+        self.refresh_preview()
+        self.status_label.setText(self.tr_ui("Face restore applied"))
+
+    def start_crop_mode(self) -> None:
+        if self.preview_base is None:
+            return
+        self.preview.set_crop_mode(True)
+        self.status_label.setText(self.tr_ui("Drag on the preview to crop"))
+
+    def set_crop_ratio(self, ratio: object) -> None:
+        self.preview.set_crop_aspect_ratio(ratio if isinstance(ratio, float) else None)
+        self.start_crop_mode()
+
+    def apply_crop_rect(self, crop: list[int]) -> None:
+        if self.preview_base is None:
+            return
+        self.preview.set_crop_mode(False)
+        self.state.update_param("crop", crop)
+        self.preview_cache.clear()
+        self.refresh_preview()
+        self.adjustments.sync_from_params(self.state.edit_params)
+
+    def reset_crop(self) -> None:
+        if self.original_image is None:
+            return
+        self.preview.set_crop_mode(False)
+        self.state.reset_param("crop")
+        self.preview_cache.clear()
+        self.refresh_preview()
+        self.adjustments.sync_from_params(self.state.edit_params)
 
     def _sync_ui_state(self):
         has_image = self.original_image is not None

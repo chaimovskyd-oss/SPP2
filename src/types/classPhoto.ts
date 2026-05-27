@@ -75,6 +75,7 @@ export interface ClassPhotoPersonRecord extends VersionedEntity {
   manualImageRotation?: number;
   hasManualCropOverride?: boolean;
   hasManualRotationOverride?: boolean;
+  imageEditParams?: Record<string, number | boolean | string>;
 
   /**
    * Per-person override for the frame's VisualEffectStack. When present, the

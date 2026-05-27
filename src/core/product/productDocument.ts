@@ -2,15 +2,17 @@ import { createDocument, createPage } from "../document/factory";
 import { createFrameLayer, createShapeLayer } from "../layers/factory";
 import { createId } from "../ids";
 import { mmToPx } from "../units/conversion";
-import type { Document } from "@/types/document";
+import type { Asset, Document } from "@/types/document";
 import type {
   ProductDefinition,
+  ProductMaskDefinition,
   ProductPageContext,
   ProductPrintZone
 } from "@/types/product";
 import type { Margins, Rect, Size } from "@/types/primitives";
 
 const DEFAULT_BLEED: Margins = { top: 2, right: 2, bottom: 2, left: 2 };
+const DEFAULT_MASK_THRESHOLD = 28;
 
 function resolveBleed(bleed: Margins | undefined): Margins {
   if (!bleed) return DEFAULT_BLEED;
@@ -37,6 +39,75 @@ function safeAreaToPx(safeArea: Rect, bleed: Margins, dpi: number): Rect {
     y: mmToPx(safeArea.y + bleed.top, dpi),
     width: mmToPx(safeArea.width, dpi),
     height: mmToPx(safeArea.height, dpi)
+  };
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function thresholdTableValues(tolerance: number): string {
+  const threshold = Math.max(0, Math.min(255, tolerance)) / 255;
+  const steps = 32;
+  const values: string[] = [];
+  for (let index = 0; index <= steps; index += 1) {
+    values.push(index / steps <= threshold ? "0" : "1");
+  }
+  return values.join(" ");
+}
+
+function base64EncodeUtf8(value: string): string {
+  if (typeof btoa === "function") {
+    return btoa(unescape(encodeURIComponent(value)));
+  }
+  return Buffer.from(value, "utf-8").toString("base64");
+}
+
+function createMaskSvgDataUrl(mask: ProductMaskDefinition, width: number, height: number): string {
+  const source = mask.assetDataUrl ?? mask.assetData ?? mask.assetPath ?? "";
+  const tolerance = mask.thresholdSettings?.tolerance ?? DEFAULT_MASK_THRESHOLD;
+  if (source.startsWith("data:")) {
+    const svg = [
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
+      "<defs>",
+      `<filter id="white-threshold" color-interpolation-filters="sRGB">`,
+      `<feColorMatrix in="SourceGraphic" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.333 -0.333 -0.333 1 0" result="alpha"/>`,
+      `<feComponentTransfer in="alpha"><feFuncA type="discrete" tableValues="${thresholdTableValues(tolerance)}"/></feComponentTransfer>`,
+      "</filter>",
+      "</defs>",
+      `<image href="${escapeXml(source)}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" filter="url(#white-threshold)"/>`,
+      "</svg>"
+    ].join("");
+    return `data:image/svg+xml;base64,${base64EncodeUtf8(svg)}`;
+  }
+  return source;
+}
+
+function createProductMaskAsset(mask: ProductMaskDefinition, width: number, height: number): Asset {
+  const dataUrl = createMaskSvgDataUrl(mask, width, height);
+  return {
+    version: 1,
+    id: createId("asset"),
+    name: mask.name || "Product mask",
+    kind: "image",
+    status: "ready",
+    originalPath: dataUrl,
+    previewPath: dataUrl,
+    thumbnailPath: dataUrl,
+    mimeType: dataUrl.startsWith("data:image/svg") ? "image/svg+xml" : "image/png",
+    width,
+    height,
+    fileSize: dataUrl.length,
+    metadata: {
+      isMask: true,
+      productMaskId: mask.id,
+      sourcePath: mask.assetPath ?? mask.assetData ?? "",
+      threshold: mask.thresholdSettings?.tolerance ?? DEFAULT_MASK_THRESHOLD
+    }
   };
 }
 
@@ -82,21 +153,47 @@ export function createDocumentFromProduct(
     shape: "rect",
     locked: true,
     rect: safeAreaPx,
+    zIndex: 1,
     metadata: {
       role: "safeAreaGuide",
       productId: product.id
     }
   });
 
+  const primaryProductMask = product.productMasks?.[0];
+  const productMaskAsset = primaryProductMask
+    ? createProductMaskAsset(primaryProductMask, canvasSizePx.width, canvasSizePx.height)
+    : null;
+  const editableFrameRect = productMaskAsset
+    ? { x: 0, y: 0, width: canvasSizePx.width, height: canvasSizePx.height }
+    : safeAreaPx;
+
   const editableFrame = createFrameLayer({
     name: "Editable product zone",
-    rect: safeAreaPx,
+    rect: editableFrameRect,
     contentType: "empty",
     fitMode: "fill",
     lockedFrame: false,
+    shape: productMaskAsset ? "customMask" : "rect",
+    maskSource: productMaskAsset
+      ? {
+          version: 1,
+          type: "alphaAsset",
+          assetId: productMaskAsset.id,
+          width: canvasSizePx.width,
+          height: canvasSizePx.height
+        }
+      : undefined,
     metadata: {
       role: "editableZone",
-      productId: product.id
+      productId: product.id,
+      ...(productMaskAsset && primaryProductMask ? {
+        productMask: {
+          maskId: primaryProductMask.id,
+          threshold: primaryProductMask.thresholdSettings?.tolerance ?? DEFAULT_MASK_THRESHOLD,
+          targetArea: "canvasWithBleed"
+        }
+      } : {})
     }
   });
 
@@ -162,7 +259,7 @@ export function createDocumentFromProduct(
         left: safeAreaPx.x
       }
     },
-    layers: [safeAreaGuide, editableFrame],
+    layers: [editableFrame, safeAreaGuide],
     metadata: {
       productId: product.id,
       printSpec: product.printSpec.id,
@@ -184,6 +281,7 @@ export function createDocumentFromProduct(
       }
     }),
     pages: [page],
+    assets: productMaskAsset ? [productMaskAsset] : [],
     presets: []
   };
 }

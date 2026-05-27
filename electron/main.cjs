@@ -918,6 +918,34 @@ function runProductPython(args) {
   });
 }
 
+function productMaskMimeType(maskPath) {
+  const lower = maskPath.toLowerCase();
+  if (lower.endsWith(".svg")) return "image/svg+xml";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".gif")) return "image/gif";
+  return "image/png";
+}
+
+function enrichProductMaskData(product) {
+  const maskPath = typeof product?.mask_path === "string" ? product.mask_path : "";
+  if (!maskPath) return product;
+  const resolved = path.isAbsolute(maskPath)
+    ? maskPath
+    : path.join(getProductLibraryDir(), maskPath);
+  try {
+    if (!fs.existsSync(resolved)) return product;
+    return {
+      ...product,
+      mask_data_base64: fs.readFileSync(resolved).toString("base64"),
+      mask_mime_type: productMaskMimeType(resolved),
+      mask_file_name: path.basename(resolved)
+    };
+  } catch {
+    return product;
+  }
+}
+
 /** Load all products from the library JSON and return them as an array. */
 ipcMain.handle("spp:product-library:get-all", async () => {
   const result = await runProductPython(["--action", "get-all"]);
@@ -926,7 +954,7 @@ ipcMain.handle("spp:product-library:get-all", async () => {
   }
   try {
     const products = JSON.parse(result.stdout);
-    return { success: true, products };
+    return { success: true, products: Array.isArray(products) ? products.map(enrichProductMaskData) : products };
   } catch (err) {
     return { success: false, error: `Invalid JSON from product handler: ${err.message}` };
   }
@@ -1000,7 +1028,7 @@ ipcMain.handle("spp:product-library:reload-one", async (_event, productId) => {
   }
   try {
     const product = JSON.parse(result.stdout); // null when not found, object otherwise
-    return { success: true, product };
+    return { success: true, product: product ? enrichProductMaskData(product) : product };
   } catch (err) {
     return { success: false, error: `Invalid JSON from reload handler: ${err.message}` };
   }

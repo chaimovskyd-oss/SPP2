@@ -9,11 +9,14 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  FileImage,
   RotateCw,
+  Trash2,
+  Upload,
   X
 } from "lucide-react";
 import { useEffect, useState, type ReactElement } from "react";
-import { saveProductDefinition } from "@/services/python_bridge/productBridge";
+import { saveProductDefinition, uploadProductMask } from "@/services/python_bridge/productBridge";
 import type { ProductDefinition, ProductInstructionSet } from "@/types/product";
 
 interface ProductEditModalProps {
@@ -40,6 +43,22 @@ const ORIENTATIONS = [
   { value: "portrait", label: "עומד (Portrait)" }
 ];
 
+const DEFAULT_MASK_THRESHOLD = 28;
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("Cannot read mask file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function base64FromDataUrl(dataUrl: string): string {
+  const comma = dataUrl.indexOf(",");
+  return comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+}
+
 export function ProductEditModal({ product, onClose, onSaved }: ProductEditModalProps): ReactElement {
   // Basic fields
   const [name, setName] = useState(product.name);
@@ -55,6 +74,12 @@ export function ProductEditModal({ product, onClose, onSaved }: ProductEditModal
   const [price, setPrice] = useState(String((product.metadata as Record<string, unknown>).price ?? "0"));
   const [tips, setTips] = useState(String((product.metadata as Record<string, unknown>).tips ?? ""));
   const [tags, setTags] = useState((product.tags ?? []).join(", "));
+  const primaryMask = product.productMasks?.[0];
+  const [maskPath, setMaskPath] = useState(primaryMask?.assetPath ?? primaryMask?.assetData ?? "");
+  const [maskName, setMaskName] = useState(primaryMask?.originalFileName ?? primaryMask?.name ?? "");
+  const [maskDataUrl, setMaskDataUrl] = useState(primaryMask?.assetDataUrl ?? "");
+  const [maskThreshold, setMaskThreshold] = useState(String(product.maskThreshold ?? primaryMask?.thresholdSettings?.tolerance ?? DEFAULT_MASK_THRESHOLD));
+  const [maskUploading, setMaskUploading] = useState(false);
 
   // Instructions
   const ins = product.instructions ?? {};
@@ -109,6 +134,28 @@ export function ProductEditModal({ product, onClose, onSaved }: ProductEditModal
     } : undefined;
 
     const parsedTags = tags.split(",").map(t => t.trim()).filter(Boolean);
+    const parsedMaskThreshold = Math.max(0, Math.min(255, parseInt(maskThreshold, 10) || DEFAULT_MASK_THRESHOLD));
+    const nextProductMasks = maskPath
+      ? [
+          {
+            version: 1 as const,
+            id: primaryMask?.id ?? `mask_${product.id}`,
+            name: maskName || "Product mask",
+            type: maskPath.toLowerCase().endsWith(".svg") ? "svg" as const : "pngThreshold" as const,
+            assetData: maskPath,
+            assetPath: maskPath,
+            assetDataUrl: maskDataUrl || primaryMask?.assetDataUrl,
+            originalFileName: maskName || undefined,
+            thresholdSettings: {
+              version: 1 as const,
+              enabled: true,
+              color: "white" as const,
+              tolerance: parsedMaskThreshold
+            },
+            appliesTo: []
+          }
+        ]
+      : undefined;
 
     return {
       ...product,
@@ -126,6 +173,8 @@ export function ProductEditModal({ product, onClose, onSaved }: ProductEditModal
       productionType: (productionType as ProductDefinition["productionType"]) || undefined,
       instructions,
       tags: parsedTags,
+      maskThreshold: parsedMaskThreshold,
+      productMasks: nextProductMasks,
       metadata: {
         ...product.metadata,
         orientation,
@@ -150,6 +199,29 @@ export function ProductEditModal({ product, onClose, onSaved }: ProductEditModal
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleMaskFileSelected(file: File | null): Promise<void> {
+    if (file === null) return;
+    setMaskUploading(true);
+    setSaveError(null);
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      const uploadedPath = await uploadProductMask(product.id, base64FromDataUrl(dataUrl), file.name);
+      setMaskPath(uploadedPath);
+      setMaskName(file.name);
+      setMaskDataUrl(dataUrl);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "׳©׳’׳™׳׳” ׳‘׳”׳¢׳׳׳× ׳׳¡׳™׳›׳”");
+    } finally {
+      setMaskUploading(false);
+    }
+  }
+
+  function handleRemoveMask(): void {
+    setMaskPath("");
+    setMaskName("");
+    setMaskDataUrl("");
   }
 
   return (
@@ -308,6 +380,63 @@ export function ProductEditModal({ product, onClose, onSaved }: ProductEditModal
           </section>
 
           {/* ── הוראות ייצור / כבישה ── */}
+          <section className="prod-edit-section">
+            <div className="prod-edit-section-title">Product Mask</div>
+
+            <div className="prod-edit-mask-card">
+              <div className="prod-edit-mask-status">
+                <FileImage size={16} />
+                <div>
+                  <strong>{maskPath ? (maskName || "Product mask") : "׳׳™׳ ׳׳¡׳™׳›׳”"}</strong>
+                  <span>{maskPath || "SVG / PNG / JPG / WebP"}</span>
+                </div>
+              </div>
+
+              <div className="prod-edit-mask-actions">
+                <label className={`btn btn-ghost prod-edit-upload-btn${maskUploading ? " disabled" : ""}`}>
+                  {maskUploading ? <RotateCw className="spin" size={13} /> : <Upload size={13} />}
+                  {maskPath ? "׳”׳—׳׳£" : "׳”׳¢׳׳”"}
+                  <input
+                    accept="image/svg+xml,image/png,image/jpeg,image/webp,image/*"
+                    disabled={maskUploading}
+                    onChange={(e) => void handleMaskFileSelected(e.target.files?.[0] ?? null)}
+                    type="file"
+                  />
+                </label>
+                {maskPath && (
+                  <button className="btn btn-ghost" onClick={handleRemoveMask} type="button">
+                    <Trash2 size={13} />
+                    ׳”׳¡׳¨
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="prod-edit-field">
+              <label>White Threshold</label>
+              <div className="prod-edit-threshold-row">
+                <input
+                  className="prod-edit-range"
+                  max="255"
+                  min="0"
+                  onChange={(e) => setMaskThreshold(e.target.value)}
+                  step="1"
+                  type="range"
+                  value={maskThreshold}
+                />
+                <input
+                  className="prod-edit-input prod-edit-threshold-input"
+                  max="255"
+                  min="0"
+                  onChange={(e) => setMaskThreshold(e.target.value)}
+                  step="1"
+                  type="number"
+                  value={maskThreshold}
+                />
+              </div>
+            </div>
+          </section>
+
           <section className="prod-edit-section">
             <button
               className="prod-edit-collapsible"

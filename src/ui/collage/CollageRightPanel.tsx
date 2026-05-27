@@ -22,7 +22,7 @@ interface CollageRightPanelProps {
 }
 
 type EmptyTab = "layout" | "style" | "canvas";
-type ImageTab = "adjust" | "tips" | "edge";
+type ImageTab = "cell" | "tips" | "edge";
 
 const DEFAULT_TRANSFORM: ContentTransform = {
   version: 1,
@@ -36,10 +36,6 @@ function isCollageFrame(layer: VisualLayer | null | undefined): layer is Extract
   if (layer?.type !== "frame") return false;
   const meta = layer.metadata["collageFrame"] as { isCollageFrame?: boolean } | undefined;
   return meta?.isCollageFrame === true;
-}
-
-function asEditNumber(value: number | boolean | string | undefined): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function selectedSlotFromLayer(layer: VisualLayer | null | undefined): ID | null {
@@ -73,8 +69,6 @@ function shapeLabel(shape: CollageSlotShape): string {
 export function CollageRightPanel({ rule, selectedSlotId, selectedLayer, onReplaceImage }: CollageRightPanelProps): ReactElement {
   const document = useDocumentStore((s) => s.document);
   const applyDocumentChange = useDocumentStore((s) => s.applyDocumentChange);
-  const updateAdjustments = useDocumentStore((s) => s.updateCollageImageAdjustments);
-  const updateEditParams = useDocumentStore((s) => s.updateCollageImageEditParams);
   const updateEdgeConfig = useDocumentStore((s) => s.updateCollageEdgeConfig);
   const applyEdgeToAll = useDocumentStore((s) => s.applyCollageEdgeConfigToAll);
   const updateCanvasSettings = useDocumentStore((s) => s.updateCollageCanvasSettings);
@@ -86,7 +80,7 @@ export function CollageRightPanel({ rule, selectedSlotId, selectedLayer, onRepla
   const isImageSelected = Boolean(resolvedSlotId && assignment);
 
   const [emptyTab, setEmptyTab] = useState<EmptyTab>("layout");
-  const [imageTab, setImageTab] = useState<ImageTab>("adjust");
+  const [imageTab, setImageTab] = useState<ImageTab>("cell");
   const [spacingDraft, setSpacingDraft] = useState(String(rule.spacingMM));
   const [marginDraft, setMarginDraft] = useState(String(rule.marginMM));
 
@@ -95,7 +89,6 @@ export function CollageRightPanel({ rule, selectedSlotId, selectedLayer, onRepla
 
   const page = useMemo(() => document?.pages.find((p) => p.id === rule.pageId) ?? null, [document, rule.pageId]);
   const asset = useMemo(() => document?.assets.find((a) => a.id === assignment?.assetId) ?? null, [document, assignment?.assetId]);
-  const adj = assignment?.colorAdjustments;
 
   function reflowWithPatch(patch: Partial<CollageRule>): void {
     const doc = useDocumentStore.getState().document;
@@ -238,12 +231,12 @@ export function CollageRightPanel({ rule, selectedSlotId, selectedLayer, onRepla
     return (
       <div className="collage-right-panel collage-mode-panel">
         <div className="panel-tabs">
-          <button type="button" className={`panel-tab${imageTab === "adjust" ? " active" : ""}`} onClick={() => setImageTab("adjust")}>כוונון</button>
+          <button type="button" className={`panel-tab${imageTab === "cell" ? " active" : ""}`} onClick={() => setImageTab("cell")}>תא</button>
           <button type="button" className={`panel-tab${imageTab === "tips" ? " active" : ""}`} onClick={() => setImageTab("tips")}>טיפים</button>
           <button type="button" className={`panel-tab${imageTab === "edge" ? " active" : ""}`} onClick={() => setImageTab("edge")}>שוליים</button>
         </div>
 
-        {imageTab === "adjust" && (
+        {imageTab === "cell" && (
           <div className="panel-section">
             <div className="panel-title">עריכת תמונה בתא</div>
             {onReplaceImage && (
@@ -262,21 +255,9 @@ export function CollageRightPanel({ rule, selectedSlotId, selectedLayer, onRepla
             </div>
             <button type="button" className="btn btn-ghost btn-full" onClick={resetImagePosition}>איפוס מיקום / זום</button>
 
-            <Slider label="בהירות" value={adj?.brightness ?? 1} min={0.2} max={2} step={0.05} format={(v) => v.toFixed(2)} onChange={(v) => updateAdjustments(rule.id, resolvedSlotId, { brightness: v })} />
-            <Slider label="ניגודיות" value={adj?.contrast ?? 1} min={0.2} max={2} step={0.05} format={(v) => v.toFixed(2)} onChange={(v) => updateAdjustments(rule.id, resolvedSlotId, { contrast: v })} />
-            <Slider label="רוויה" value={adj?.saturation ?? 1} min={0} max={2} step={0.05} format={(v) => v.toFixed(2)} onChange={(v) => updateAdjustments(rule.id, resolvedSlotId, { saturation: v })} />
-            <Slider label="חשיפה EV" value={adj?.exposureEV ?? 0} min={-3} max={3} step={0.1} format={(v) => v.toFixed(1)} onChange={(v) => updateAdjustments(rule.id, resolvedSlotId, { exposureEV: v })} />
-            <Slider label="חדות" value={adj?.sharpness ?? 1} min={0.2} max={2} step={0.05} format={(v) => v.toFixed(2)} onChange={(v) => updateAdjustments(rule.id, resolvedSlotId, { sharpness: v })} />
-            <Slider label="וינייטה" value={adj?.vignette ?? 0} min={0} max={1} step={0.05} format={(v) => v.toFixed(2)} onChange={(v) => updateAdjustments(rule.id, resolvedSlotId, { vignette: v })} />
-            <label className="panel-checkbox">
-              <input type="checkbox" checked={adj?.isBlackAndWhite ?? false} onChange={(e) => updateAdjustments(rule.id, resolvedSlotId, { isBlackAndWhite: e.target.checked })} />
-              שחור־לבן
-            </label>
-
-            <div className="panel-subtitle">תיקוני תמונה מהירים</div>
-            <Slider label="חום / קור" value={asEditNumber(assignment.imageEditParams?.temperature)} min={-100} max={100} step={1} onChange={(v) => updateEditParams(rule.id, resolvedSlotId, { temperature: v })} />
-            <Slider label="היילייטים" value={asEditNumber(assignment.imageEditParams?.highlights)} min={-100} max={100} step={1} onChange={(v) => updateEditParams(rule.id, resolvedSlotId, { highlights: v })} />
-            <Slider label="צללים" value={asEditNumber(assignment.imageEditParams?.shadows)} min={-100} max={100} step={1} onChange={(v) => updateEditParams(rule.id, resolvedSlotId, { shadows: v })} />
+            <p className="panel-hint">
+              כוונוני תאורה/צבע, אפקטים מהירים ו-FX נמצאים בלשונית כוונון תמונה.
+            </p>
           </div>
         )}
 

@@ -26,7 +26,15 @@ import { useProductStore } from "@/state/productStore";
 import { useDocumentStore } from "@/state/documentStore";
 import { useProjectLifecycleStore } from "@/state/projectLifecycleStore";
 import { saveProductDefinition } from "@/services/python_bridge/productBridge";
+import type { Asset } from "@/types/document";
 import type { FrameLayer, ShapeLayer } from "@/types/layers";
+
+function mergeAssetsById(existing: Asset[], added: Asset[]): Asset[] {
+  const byId = new Map<string, Asset>();
+  for (const asset of existing) byId.set(asset.id, asset);
+  for (const asset of added) byId.set(asset.id, asset);
+  return Array.from(byId.values());
+}
 
 export function ProductDefinitionPanel(): ReactElement | null {
   const activeProduct = useProductStore((s) => s.activeProduct);
@@ -146,7 +154,7 @@ export function ProductDefinitionPanel(): ReactElement | null {
       id: currentDoc.id,
       name: currentDoc.name,
       createdAt: currentDoc.createdAt,
-      assets: currentDoc.assets,
+      assets: mergeAssetsById(currentDoc.assets, newDoc.assets),
       pages: finalPages
     });
   }
