@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import React, {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -32,7 +33,7 @@ import {
 import { computeOptimalClassPhotoLayout } from "@/core/classPhoto/classPhotoLayoutEngine";
 import { BUILTIN_TEXT_PRESETS } from "@/core/text/presets";
 import { HEIC_CONVERSION_ERROR_MESSAGE, SUPPORTED_IMAGE_ACCEPT, normalizeIncomingImage, normalizeIncomingImages } from "@/core/image/normalizeIncomingImage";
-import { FONT_LIST } from "@/ui/editor/fonts";
+import { getAllFonts, loadSystemFonts } from "@/ui/editor/fonts";
 import { GlobalWizardDropTarget, isImageDropFile } from "@/ui/wizard/GlobalWizardDropTarget";
 import type {
   ClassPhotoFrameStyle,
@@ -54,11 +55,6 @@ const CLASS_PHOTO_PRESETS = [
   ),
   { id: "custom", name: "מותאם אישית", category: "custom" as const, width: 300, height: 400, units: "mm" as Unit, dpi: 300, printIntent: "photo" as const }
 ];
-
-// Hebrew fonts first for the dropdown
-const WIZARD_FONTS = FONT_LIST.filter((f) => f.lang === "he" || f.lang === "both").concat(
-  FONT_LIST.filter((f) => f.lang === "la")
-);
 
 const SHAPE_OPTIONS: Array<{ value: ClassPhotoFrameStyle["shape"]; label: string }> = [
   { value: "circle", label: "עיגול" },
@@ -115,6 +111,7 @@ interface ClassPhotoSetupWizardProps {
 export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: ClassPhotoSetupWizardProps): ReactElement {
   const [step, setStep] = useState<WizardStep>(1);
   const [dragging, setDragging] = useState(false);
+  const [fontRevision, setFontRevision] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bgInputRef = useRef<HTMLInputElement>(null);
 
@@ -136,6 +133,12 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
   const [footerText, setFooterText] = useState(initialState?.footerText ?? "");
   const [titleFontFamily, setTitleFontFamily] = useState(initialState?.titleFontFamily ?? "Heebo");
   const [footerFontFamily, setFooterFontFamily] = useState(initialState?.footerFontFamily ?? "Assistant");
+  const wizardFonts = useMemo(() => {
+    const allFonts = getAllFonts();
+    return allFonts.filter((f) => f.lang === "he" || f.lang === "both").concat(
+      allFonts.filter((f) => f.lang === "la")
+    );
+  }, [fontRevision]);
   const [titlePresetId, setTitlePresetId] = useState<string | undefined>();
   const [footerPresetId, setFooterPresetId] = useState<string | undefined>();
 
@@ -190,6 +193,14 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
   }, []);
 
   // ─── Page setup ──────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadSystemFonts().then(() => {
+      if (!cancelled) setFontRevision((revision) => revision + 1);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   function buildPageSetup(): PageSetup {
     const preset = CLASS_PHOTO_PRESETS.find((p) => p.id === presetId);
@@ -526,7 +537,7 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
               <label className="cp-field">
                 <span>גופן כותרת</span>
                 <select onChange={(e) => setTitleFontFamily(e.target.value)} style={{ fontFamily: `"${titleFontFamily}", sans-serif` }} value={titleFontFamily}>
-                  {WIZARD_FONTS.map((f) => (
+                  {wizardFonts.map((f) => (
                     <option key={f.family} style={{ fontFamily: `"${f.family}", sans-serif` }} value={f.family}>{f.label}</option>
                   ))}
                 </select>
@@ -551,7 +562,7 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
               <label className="cp-field">
                 <span>גופן תחתית</span>
                 <select onChange={(e) => setFooterFontFamily(e.target.value)} style={{ fontFamily: `"${footerFontFamily}", sans-serif` }} value={footerFontFamily}>
-                  {WIZARD_FONTS.map((f) => (
+                  {wizardFonts.map((f) => (
                     <option key={f.family} style={{ fontFamily: `"${f.family}", sans-serif` }} value={f.family}>{f.label}</option>
                   ))}
                 </select>

@@ -9,8 +9,17 @@ contextBridge.exposeInMainWorld("spp", {
   getMemoryUsage: () =>
     ipcRenderer.invoke("spp:get-memory-usage"),
 
+  listSystemFonts: () =>
+    ipcRenderer.invoke("spp:list-system-fonts"),
+
   readFileBase64: (filePath) =>
     ipcRenderer.invoke("spp:read-file-base64", filePath),
+
+  choosePsdFile: () =>
+    ipcRenderer.invoke("spp:choose-psd-file"),
+
+  importPsd: (filePath) =>
+    ipcRenderer.invoke("spp:import-psd", filePath),
 
   savePdfDialog: (pdfBase64, suggestedName) =>
     ipcRenderer.invoke("spp:save-pdf-dialog", pdfBase64, suggestedName),

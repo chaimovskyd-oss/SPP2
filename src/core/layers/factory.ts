@@ -1,5 +1,7 @@
 import { createId } from "../ids";
 import type {
+  AdjustmentLayer,
+  AdjustmentTargetMode,
   BaseLayer,
   ContentTransform,
   FrameBehaviorMode,
@@ -212,6 +214,41 @@ export function createShapeLayer(options: {
     }),
     type: "shape",
     shape: options.shape
+  };
+}
+
+export function createAdjustmentLayer(options: {
+  id?: string;
+  name?: string;
+  rect?: Rect;
+  zIndex?: number;
+  targetMode?: AdjustmentTargetMode;
+  targetLayerId?: string;
+  groupId?: string;
+  brightness?: number;
+  contrast?: number;
+  metadata?: Metadata;
+} = {}): AdjustmentLayer {
+  return {
+    ...baseLayer({
+      id: options.id,
+      type: "adjustment-layer",
+      name: options.name ?? "בהירות/ניגודיות 1",
+      rect: options.rect ?? { x: 0, y: 0, width: 1, height: 1 },
+      zIndex: options.zIndex,
+      metadata: options.metadata
+    }),
+    type: "adjustment-layer",
+    targetMode: options.targetMode ?? "below",
+    targetLayerId: options.targetLayerId,
+    groupId: options.groupId,
+    adjustments: [
+      {
+        type: "brightnessContrast",
+        brightness: options.brightness ?? 0,
+        contrast: options.contrast ?? 0
+      }
+    ]
   };
 }
 

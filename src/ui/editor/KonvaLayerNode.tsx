@@ -42,6 +42,7 @@ interface KonvaLayerNodeProps {
   onSelect: (layerId: string) => void;
   onChange: (layer: VisualLayer) => void;
   onBeginTextEdit: (layerId: string) => void;
+  onImageDoubleClick?: (layerId: string) => void;
   onContextMenu?: (target: CanvasContextMenuTarget) => void;
   reduceImageEffects?: boolean;
 }
@@ -54,6 +55,7 @@ export function KonvaLayerNode({
   onSelect,
   onChange,
   onBeginTextEdit,
+  onImageDoubleClick,
   onContextMenu,
   reduceImageEffects = false
 }: KonvaLayerNodeProps): React.ReactElement | null {
@@ -64,7 +66,7 @@ export function KonvaLayerNode({
   }
 
   if (layer.type === "image") {
-    return <ImageNode layer={layer} assets={assets} selected={selected} reduceImageEffects={reduceImageEffects} onChange={onChange} onSelect={onSelect} onContextMenu={onContextMenu} />;
+    return <ImageNode layer={layer} assets={assets} selected={selected} reduceImageEffects={reduceImageEffects} onChange={onChange} onSelect={onSelect} onContextMenu={onContextMenu} onImageDoubleClick={onImageDoubleClick} />;
   }
 
   if (layer.type === "frame") {
@@ -834,6 +836,7 @@ function ImageNode({
   onSelect,
   onChange,
   onContextMenu,
+  onImageDoubleClick,
   reduceImageEffects
 }: {
   layer: ImageLayer;
@@ -842,6 +845,7 @@ function ImageNode({
   onSelect: (layerId: string) => void;
   onChange: (layer: VisualLayer) => void;
   onContextMenu?: (target: CanvasContextMenuTarget) => void;
+  onImageDoubleClick?: (layerId: string) => void;
   reduceImageEffects: boolean;
 }): React.ReactElement {
   // Lock layer & use live crop preview during image-edit mode
@@ -1008,6 +1012,10 @@ function ImageNode({
     onClick: () => { if (!isBeingEdited && !isMaskContentEditMode) onSelect(layer.id); },
     onTap: () => { if (!isBeingEdited && !isMaskContentEditMode) onSelect(layer.id); },
     onDblClick: () => {
+      if (onImageDoubleClick !== undefined && layer.metadata["psdText"] !== undefined) {
+        onImageDoubleClick(layer.id);
+        return;
+      }
       if (!isBeingEdited && hasAnyMask) {
         enterMaskContentEdit(layer.id);
         onSelect(layer.id);

@@ -89,6 +89,88 @@ function getPythonEnvBase() {
   };
 }
 
+function runBufferedCommand(command, args, timeoutMs = 12000) {
+  return new Promise((resolve) => {
+    const proc = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      proc.kill();
+      resolve({ success: false, stdout, stderr: stderr || "Command timed out" });
+    }, timeoutMs);
+
+    proc.stdout?.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
+    proc.stderr?.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
+    proc.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ success: code === 0, stdout, stderr });
+    });
+    proc.on("error", (err) => {
+      clearTimeout(timer);
+      resolve({ success: false, stdout, stderr: err.message });
+    });
+  });
+}
+
+function cleanFontFamilies(values) {
+  const seen = new Set();
+  const families = [];
+  for (const value of Array.isArray(values) ? values : []) {
+    const family = String(value || "").trim().replace(/\s+/g, " ");
+    if (!family) continue;
+    const key = family.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    families.push(family);
+  }
+  return families.sort((a, b) => a.localeCompare(b, ["he", "en"], { sensitivity: "base" }));
+}
+
+async function listWindowsFontFamilies() {
+  const script = [
+    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+    "Add-Type -AssemblyName System.Drawing",
+    "$fonts = New-Object System.Drawing.Text.InstalledFontCollection",
+    "$fonts.Families | ForEach-Object { $_.Name } | Sort-Object -Unique | ConvertTo-Json -Compress"
+  ].join("; ");
+  const result = await runBufferedCommand("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]);
+  if (!result.success || !result.stdout.trim()) return [];
+  try {
+    const parsed = JSON.parse(result.stdout.trim());
+    return cleanFontFamilies(Array.isArray(parsed) ? parsed : [parsed]);
+  } catch {
+    return cleanFontFamilies(result.stdout.split(/\r?\n/));
+  }
+}
+
+async function listUnixFontFamilies() {
+  const result = await runBufferedCommand("fc-list", [":", "family"], 12000);
+  if (!result.success || !result.stdout.trim()) return [];
+  const names = [];
+  for (const line of result.stdout.split(/\r?\n/)) {
+    for (const name of line.split(",")) names.push(name.trim());
+  }
+  return cleanFontFamilies(names);
+}
+
+async function listMacFontFamilies() {
+  const result = await runBufferedCommand("system_profiler", ["SPFontsDataType", "-json"], 20000);
+  if (!result.success || !result.stdout.trim()) return [];
+  try {
+    const parsed = JSON.parse(result.stdout);
+    const items = Array.isArray(parsed?.SPFontsDataType) ? parsed.SPFontsDataType : [];
+    return cleanFontFamilies(items.map((item) => item?._name || item?.family || item?.fullname));
+  } catch {
+    return [];
+  }
+}
+
+async function listSystemFontFamilies() {
+  if (process.platform === "win32") return listWindowsFontFamilies();
+  if (process.platform === "darwin") return listMacFontFamilies();
+  return listUnixFontFamilies();
+}
+
 function runPython(scriptPath, args, options = {}) {
   return new Promise((resolve) => {
     const engineDir = getEngineDir();
@@ -276,9 +358,84 @@ ipcMain.handle("spp:write-temp-image", async (_event, dataUrl, ext) => {
 
 ipcMain.handle("spp:get-memory-usage", async () => process.memoryUsage());
 
+ipcMain.handle("spp:list-system-fonts", async () => listSystemFontFamilies());
+
 ipcMain.handle("spp:read-file-base64", async (_event, filePath) => {
   const buf = fs.readFileSync(filePath);
   return buf.toString("base64");
+});
+
+function getPsdImportBaseDir() {
+  return path.join(app.getPath("userData"), "temp", "psd-import");
+}
+
+function cleanupDirSafe(dirPath) {
+  try {
+    if (dirPath && fs.existsSync(dirPath)) fs.rmSync(dirPath, { recursive: true, force: true });
+  } catch (err) {
+    console.warn("[psd-import] cleanup failed", err instanceof Error ? err.message : String(err));
+  }
+}
+
+function parsePsdManifest(stdout) {
+  const trimmed = String(stdout || "").trim();
+  if (!trimmed) throw new Error("PSD importer returned no manifest.");
+  const lines = trimmed.split(/\r?\n/).filter(Boolean);
+  return JSON.parse(lines[lines.length - 1]);
+}
+
+ipcMain.handle("spp:choose-psd-file", async () => {
+  try {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    const result = await dialog.showOpenDialog(win, {
+      title: "ייבוא PSD",
+      properties: ["openFile"],
+      filters: [{ name: "Photoshop", extensions: ["psd", "psb"] }]
+    });
+    const filePath = result.filePaths[0];
+    if (result.canceled || !filePath) return { success: false, error: "בחירת קובץ בוטלה" };
+    const stat = fs.statSync(filePath);
+    return { success: true, filePath, fileSize: stat.size };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle("spp:import-psd", async (_event, filePath) => {
+  let outputDir = "";
+  try {
+    if (typeof filePath !== "string" || filePath.length === 0 || !fs.existsSync(filePath)) {
+      return { success: false, error: `PSD file not found: ${filePath || "missing"}` };
+    }
+    const lower = filePath.toLowerCase();
+    if (!lower.endsWith(".psd") && !lower.endsWith(".psb")) {
+      return { success: false, error: "Only PSD and PSB files are supported." };
+    }
+    const scriptPath = path.join(getEngineDir(), "psd_import_service.py");
+    const jobId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    outputDir = path.join(getPsdImportBaseDir(), jobId);
+    fs.mkdirSync(outputDir, { recursive: true });
+    const stat = fs.statSync(filePath);
+    const result = await runPython(scriptPath, ["--input", filePath, "--output-dir", outputDir], { timeout: 0 });
+    let manifest;
+    try {
+      manifest = parsePsdManifest(result.stdout);
+    } catch (parseErr) {
+      cleanupDirSafe(outputDir);
+      return { success: false, error: parseErr instanceof Error ? parseErr.message : String(parseErr) };
+    }
+    manifest.sourcePath = filePath;
+    manifest.outputDir = outputDir;
+    manifest.fileSize = stat.size;
+    if (!result.success && (!Array.isArray(manifest.layers) || manifest.layers.length === 0)) {
+      cleanupDirSafe(outputDir);
+      return { success: false, manifest, error: manifest.error || result.error || "PSD import failed." };
+    }
+    return { success: true, manifest };
+  } catch (err) {
+    cleanupDirSafe(outputDir);
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
 });
 
 ipcMain.handle("spp:save-pdf-dialog", async (_event, pdfBase64, suggestedName = "SPP2-PDF-Studio.pdf") => {

@@ -4,6 +4,7 @@ import { migrateProjectTextLayers } from "@/core/text/migration";
 import { APP_VERSION, PROJECT_FORMAT_VERSION, PROJECT_SCHEMA_VERSION, type ProjectEnvelope } from "@/types/project";
 import type { CollageRule } from "@/types/collage";
 import { DEFAULT_IMAGE_LAYER_EFFECTS } from "@/types/layers";
+import type { AdjustmentLayer } from "@/types/layers";
 
 export interface ProjectMigration {
   fromSchema: number;
@@ -229,6 +230,32 @@ export const PROJECT_MIGRATIONS: ProjectMigration[] = [
     })
   },
   {
+    fromSchema: 12,
+    toSchema: 13,
+    description: "Add non-destructive adjustment layer support",
+    migrate: (project) => ({
+      ...project,
+      schemaVersion: 13,
+      document: {
+        ...project.document,
+        pages: project.document.pages.map((page) => ({
+          ...page,
+          layers: page.layers.map((layer) => {
+            if (layer.type !== "adjustment-layer") return layer;
+            const adjustment = layer as Partial<AdjustmentLayer> & typeof layer;
+            return {
+              ...adjustment,
+              targetMode: adjustment.targetMode ?? "below",
+              adjustments: Array.isArray(adjustment.adjustments) && adjustment.adjustments.length > 0
+                ? adjustment.adjustments
+                : [{ type: "brightnessContrast", brightness: 0, contrast: 0 }]
+            } as AdjustmentLayer;
+          })
+        }))
+      }
+    })
+  },
+  {
     fromSchema: 10,
     toSchema: 11,
     description: "מצב מסיכה: הוספת spacingMM קנוני, spacingUnit ו-maskStyle (מסגרת/צל לכל המסיכות)",
@@ -288,6 +315,16 @@ export function normalizeProjectEnvelope(input: unknown): ProjectEnvelope {
       pages: input.document.pages.map((page) => ({
         ...page,
         layers: page.layers.map((layer) => {
+          if (layer.type === "adjustment-layer") {
+            const adjustment = layer as Partial<AdjustmentLayer> & typeof layer;
+            return {
+              ...adjustment,
+              targetMode: adjustment.targetMode ?? "below",
+              adjustments: Array.isArray(adjustment.adjustments) && adjustment.adjustments.length > 0
+                ? adjustment.adjustments
+                : [{ type: "brightnessContrast", brightness: 0, contrast: 0 }]
+            } as AdjustmentLayer;
+          }
           if (layer.type !== "image") return layer;
           const imgLayer = layer as typeof layer & { effects?: unknown };
           if (imgLayer.effects !== undefined) return layer;

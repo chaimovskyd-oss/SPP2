@@ -20,11 +20,97 @@ function getPrintPreviewEngineDir(): string {
   return path.join(getAppRoot(), "print.preview.engine");
 }
 
+function getImageEngineDir(): string {
+  return path.join(getAppRoot(), "image.editor.engine");
+}
+
 function getPythonCommand(): string {
   return process.platform === "win32" ? "python" : "python3";
 }
 
 // ─── Image Editor IPC ─────────────────────────────────────────────────────────
+
+function runBufferedCommand(command: string, args: string[], timeoutMs = 12000): Promise<{ success: boolean; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const proc = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      proc.kill();
+      resolve({ success: false, stdout, stderr: stderr || "Command timed out" });
+    }, timeoutMs);
+
+    proc.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+    proc.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
+    proc.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ success: code === 0, stdout, stderr });
+    });
+    proc.on("error", (err: Error) => {
+      clearTimeout(timer);
+      resolve({ success: false, stdout, stderr: err.message });
+    });
+  });
+}
+
+function cleanFontFamilies(values: unknown): string[] {
+  const seen = new Set<string>();
+  const families: string[] = [];
+  for (const value of Array.isArray(values) ? values : []) {
+    const family = String(value || "").trim().replace(/\s+/g, " ");
+    if (!family) continue;
+    const key = family.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    families.push(family);
+  }
+  return families.sort((a, b) => a.localeCompare(b, ["he", "en"], { sensitivity: "base" }));
+}
+
+async function listWindowsFontFamilies(): Promise<string[]> {
+  const script = [
+    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+    "Add-Type -AssemblyName System.Drawing",
+    "$fonts = New-Object System.Drawing.Text.InstalledFontCollection",
+    "$fonts.Families | ForEach-Object { $_.Name } | Sort-Object -Unique | ConvertTo-Json -Compress"
+  ].join("; ");
+  const result = await runBufferedCommand("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]);
+  if (!result.success || !result.stdout.trim()) return [];
+  try {
+    const parsed = JSON.parse(result.stdout.trim()) as unknown;
+    return cleanFontFamilies(Array.isArray(parsed) ? parsed : [parsed]);
+  } catch {
+    return cleanFontFamilies(result.stdout.split(/\r?\n/));
+  }
+}
+
+async function listUnixFontFamilies(): Promise<string[]> {
+  const result = await runBufferedCommand("fc-list", [":", "family"], 12000);
+  if (!result.success || !result.stdout.trim()) return [];
+  const names: string[] = [];
+  for (const line of result.stdout.split(/\r?\n/)) {
+    for (const name of line.split(",")) names.push(name.trim());
+  }
+  return cleanFontFamilies(names);
+}
+
+async function listMacFontFamilies(): Promise<string[]> {
+  const result = await runBufferedCommand("system_profiler", ["SPFontsDataType", "-json"], 20000);
+  if (!result.success || !result.stdout.trim()) return [];
+  try {
+    const parsed = JSON.parse(result.stdout) as { SPFontsDataType?: Array<{ _name?: string; family?: string; fullname?: string }> };
+    const items = Array.isArray(parsed?.SPFontsDataType) ? parsed.SPFontsDataType : [];
+    return cleanFontFamilies(items.map((item) => item?._name || item?.family || item?.fullname));
+  } catch {
+    return [];
+  }
+}
+
+async function listSystemFontFamilies(): Promise<string[]> {
+  if (process.platform === "win32") return listWindowsFontFamilies();
+  if (process.platform === "darwin") return listMacFontFamilies();
+  return listUnixFontFamilies();
+}
 
 /**
  * Write a data URL to a temp file and return the file path.
@@ -41,6 +127,8 @@ ipcMain.handle("spp:write-temp-image", async (_event, dataUrl: string, ext: stri
 
 ipcMain.handle("spp:get-memory-usage", async (): Promise<NodeJS.MemoryUsage> => process.memoryUsage());
 
+ipcMain.handle("spp:list-system-fonts", async (): Promise<string[]> => listSystemFontFamilies());
+
 /**
  * Read a file from disk and return it as a base64 string.
  * Used to bring the edited image back into the renderer.
@@ -48,6 +136,95 @@ ipcMain.handle("spp:get-memory-usage", async (): Promise<NodeJS.MemoryUsage> => 
 ipcMain.handle("spp:read-file-base64", async (_event, filePath: string): Promise<string> => {
   const buf = fs.readFileSync(filePath);
   return buf.toString("base64");
+});
+
+function getPsdImportBaseDir(): string {
+  return path.join(app.getPath("userData"), "temp", "psd-import");
+}
+
+function cleanupDirSafe(dirPath: string): void {
+  try {
+    if (dirPath && fs.existsSync(dirPath)) fs.rmSync(dirPath, { recursive: true, force: true });
+  } catch (err) {
+    console.warn("[psd-import] cleanup failed", err instanceof Error ? err.message : String(err));
+  }
+}
+
+function parsePsdManifest(stdout: string): unknown {
+  const trimmed = String(stdout || "").trim();
+  if (!trimmed) throw new Error("PSD importer returned no manifest.");
+  const lines = trimmed.split(/\r?\n/).filter(Boolean);
+  return JSON.parse(lines[lines.length - 1] ?? "{}");
+}
+
+function runPsdImport(scriptPath: string, inputPath: string, outputDir: string): Promise<{ success: boolean; stdout: string; stderr: string; error?: string }> {
+  return new Promise((resolve) => {
+    const proc = spawn(getPythonCommand(), [scriptPath, "--input", inputPath, "--output-dir", outputDir], {
+      cwd: getImageEngineDir(),
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: "utf-8",
+        PYTHONUTF8: "1",
+        SPP2_LOGS_DIR: path.join(app.getPath("userData"), "logs"),
+        SPP2_USER_DATA_DIR: app.getPath("userData"),
+        PYTHONPATH: [getImageEngineDir(), process.env.PYTHONPATH || ""].filter(Boolean).join(path.delimiter)
+      }
+    });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+    proc.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); console.warn("[psd-import]", chunk.toString().trim()); });
+    proc.on("close", (code) => resolve({ success: code === 0, stdout, stderr, error: code === 0 ? undefined : stderr || `Python exited with code ${code}` }));
+    proc.on("error", (err: Error) => resolve({ success: false, stdout, stderr, error: err.message }));
+  });
+}
+
+ipcMain.handle("spp:choose-psd-file", async (): Promise<{ success: boolean; filePath?: string; fileSize?: number; error?: string }> => {
+  try {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    const result = await dialog.showOpenDialog(win, {
+      title: "ייבוא PSD",
+      properties: ["openFile"],
+      filters: [{ name: "Photoshop", extensions: ["psd", "psb"] }]
+    });
+    const filePath = result.filePaths[0];
+    if (result.canceled || !filePath) return { success: false, error: "בחירת קובץ בוטלה" };
+    const stat = fs.statSync(filePath);
+    return { success: true, filePath, fileSize: stat.size };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle("spp:import-psd", async (_event, filePath: string): Promise<{ success: boolean; manifest?: unknown; error?: string }> => {
+  let outputDir = "";
+  try {
+    if (typeof filePath !== "string" || filePath.length === 0 || !fs.existsSync(filePath)) {
+      return { success: false, error: `PSD file not found: ${filePath || "missing"}` };
+    }
+    const lower = filePath.toLowerCase();
+    if (!lower.endsWith(".psd") && !lower.endsWith(".psb")) {
+      return { success: false, error: "Only PSD and PSB files are supported." };
+    }
+    const scriptPath = path.join(getImageEngineDir(), "psd_import_service.py");
+    const jobId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    outputDir = path.join(getPsdImportBaseDir(), jobId);
+    fs.mkdirSync(outputDir, { recursive: true });
+    const stat = fs.statSync(filePath);
+    const result = await runPsdImport(scriptPath, filePath, outputDir);
+    let manifest = parsePsdManifest(result.stdout) as Record<string, unknown>;
+    manifest = { ...manifest, sourcePath: filePath, outputDir, fileSize: stat.size };
+    if (!result.success && (!Array.isArray(manifest.layers) || manifest.layers.length === 0)) {
+      cleanupDirSafe(outputDir);
+      return { success: false, manifest, error: String(manifest.error || result.error || "PSD import failed.") };
+    }
+    return { success: true, manifest };
+  } catch (err) {
+    cleanupDirSafe(outputDir);
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
 });
 
 ipcMain.handle("spp:save-pdf-dialog", async (_event, pdfBase64: string, suggestedName = "SPP2-PDF-Studio.pdf"): Promise<{ success: boolean; filePath?: string; error?: string }> => {

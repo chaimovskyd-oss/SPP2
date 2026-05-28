@@ -5,6 +5,7 @@ export interface FontEntry {
   label: string;
   lang: "he" | "la" | "both";
   weights: number[];
+  source?: "bundled" | "system";
 }
 
 // Hebrew fonts come first, then Latin
@@ -44,6 +45,84 @@ export const FONT_LIST: FontEntry[] = [
 ];
 
 const FAVORITES_KEY = "spp2_font_favorites";
+const SYSTEM_FONT_WEIGHTS = [100, 200, 300, 400, 500, 600, 700, 800, 900];
+
+let systemFontsCache: FontEntry[] = [];
+let systemFontsRequest: Promise<FontEntry[]> | null = null;
+
+function looksHebrew(value: string): boolean {
+  return /[\u0590-\u05ff]/.test(value);
+}
+
+function normalizeFontFamily(family: string): string {
+  return family.trim().replace(/\s+/g, " ");
+}
+
+function makeSystemFontEntry(family: string): FontEntry | null {
+  const normalized = normalizeFontFamily(family);
+  if (normalized.length === 0) return null;
+  return {
+    family: normalized,
+    label: `${normalized} (System)`,
+    lang: looksHebrew(normalized) ? "he" : "both",
+    weights: SYSTEM_FONT_WEIGHTS,
+    source: "system"
+  };
+}
+
+function byFontName(a: FontEntry, b: FontEntry): number {
+  return a.family.localeCompare(b.family, ["he", "en"], { sensitivity: "base" });
+}
+
+function dedupeFonts(fonts: FontEntry[]): FontEntry[] {
+  const byFamily = new Map<string, FontEntry>();
+  for (const font of fonts) {
+    const key = normalizeFontFamily(font.family).toLowerCase();
+    if (!byFamily.has(key)) byFamily.set(key, font);
+  }
+  return [...byFamily.values()];
+}
+
+export function getSystemFonts(): FontEntry[] {
+  return systemFontsCache;
+}
+
+export function getAllFonts(): FontEntry[] {
+  const bundled = FONT_LIST.map((font) => ({ ...font, source: font.source ?? "bundled" as const }));
+  const bundledKeys = new Set(bundled.map((font) => normalizeFontFamily(font.family).toLowerCase()));
+  const extraSystemFonts = systemFontsCache
+    .filter((font) => !bundledKeys.has(normalizeFontFamily(font.family).toLowerCase()))
+    .sort(byFontName);
+  return dedupeFonts([...bundled, ...extraSystemFonts]);
+}
+
+export async function loadSystemFonts(): Promise<FontEntry[]> {
+  if (systemFontsRequest !== null) return systemFontsRequest;
+  const api = typeof window !== "undefined" ? window.spp : undefined;
+  if (api?.listSystemFonts === undefined) {
+    systemFontsCache = [];
+    return systemFontsCache;
+  }
+
+  systemFontsRequest = api.listSystemFonts()
+    .then((families) => {
+      systemFontsCache = dedupeFonts(
+        families
+          .map(makeSystemFontEntry)
+          .filter((entry): entry is FontEntry => entry !== null)
+      ).sort(byFontName);
+      return systemFontsCache;
+    })
+    .catch(() => {
+      systemFontsCache = [];
+      return systemFontsCache;
+    })
+    .finally(() => {
+      systemFontsRequest = null;
+    });
+
+  return systemFontsRequest;
+}
 
 export function getFontFavorites(): Set<string> {
   try {
@@ -83,7 +162,7 @@ export function getGroupedFonts(favorites: Set<string>, query = ""): GroupedFont
     f.family.toLowerCase().includes(q) ||
     f.label.toLowerCase().includes(q);
 
-  const all = FONT_LIST.filter(matches);
+  const all = getAllFonts().filter(matches);
   return {
     favorites: all.filter((f) => favorites.has(f.family)),
     hebrew: all.filter((f) => f.lang !== "la" && !favorites.has(f.family)),
@@ -92,5 +171,5 @@ export function getGroupedFonts(favorites: Set<string>, query = ""): GroupedFont
 }
 
 export function fontFamilyExists(family: string): boolean {
-  return FONT_LIST.some((f) => f.family === family);
+  return getAllFonts().some((f) => f.family === family);
 }

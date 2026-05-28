@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type ReactElement, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Circle, Group, Image as KonvaImage, Layer, Line, Path, Rect, Stage, Transformer } from "react-konva";
 import { useProductStore } from "@/state/productStore";
 import { ProductGuidesOverlay } from "./ProductGuidesOverlay";
@@ -13,7 +13,7 @@ import {
   maskResultToSelectionMask,
   runSmartPromptSelection
 } from "@/services/ai/smartSelectionService";
-import type Konva from "konva";
+import Konva from "konva";
 import { beginPointer, createInputState, endPointer, movePointer } from "@/core/input/inputSystem";
 import { normalizeRect } from "@/core/bounds/bounds";
 import { isGridCellLayer } from "@/core/grid/gridModeEngine";
@@ -34,7 +34,7 @@ import { createShapeLayer } from "@/core/layers/factory";
 import type { Asset, Page } from "@/types/document";
 import type { CollageRule, CollageSlot } from "@/types/collage";
 import type { Rect as RectType } from "@/types/primitives";
-import type { FrameLayer, ImageLayer, ShapeLayer, TextLayer, VisualLayer } from "@/types/layers";
+import type { AdjustmentLayer, FrameLayer, ImageLayer, ShapeLayer, TextLayer, VisualLayer } from "@/types/layers";
 import { SCREEN_HELPER_NODE_NAME } from "./canvasNodeNames";
 import { KonvaLayerNode, type CanvasContextMenuTarget } from "./KonvaLayerNode";
 import { PassportGuidelinesOverlay } from "@/ui/photoPrint/PassportGuidelinesOverlay";
@@ -45,6 +45,8 @@ import { markDebugEvent, registerKonvaStage, trackDebugMount } from "@/debug/spp
 // object extends beyond the canvas boundary.  Content is clipped to the canvas
 // area by a Konva Group clipFunc; only the Transformer sits outside that clip.
 const OVERFLOW_PAD = 200; // px
+
+const VISUAL_LAYER_TYPES = new Set<VisualLayer["type"]>(["image", "text", "shape", "frame", "mask", "background", "guide", "group"]);
 
 // AABB hit-test in canvas units, taking rotation into account.
 // Used for Alt+Click to bypass listening={false} on locked layers.
@@ -81,6 +83,20 @@ function isWheelZoomableFrame(layer: FrameLayer): boolean {
   return collageMeta?.slotType !== "empty" && layer.imageAssetId !== undefined && layer.lockedContent !== true;
 }
 
+function isRenderableLayer(layer: VisualLayer): boolean {
+  return VISUAL_LAYER_TYPES.has(layer.type) && layer.type !== "adjustment-layer";
+}
+
+function brightnessContrastAdjustment(layer: AdjustmentLayer): { brightness: number; contrast: number } | null {
+  const op = layer.adjustments.find((item) => item.type === "brightnessContrast");
+  if (op === undefined) return null;
+  const strength = Math.max(0, Math.min(1, layer.opacity));
+  const brightness = Math.max(-100, Math.min(100, op.brightness)) * strength;
+  const contrast = Math.max(-100, Math.min(100, op.contrast)) * strength;
+  if (Math.abs(brightness) < 0.001 && Math.abs(contrast) < 0.001) return null;
+  return { brightness, contrast };
+}
+
 // ─── Guide color palette ──────────────────────────────────────────────────────
 const GUIDE_COLORS: Partial<Record<SnapLineKind, string>> = {
   page:     "#7C6FE0",   // purple — page edges / center
@@ -105,6 +121,7 @@ interface CanvasStageProps {
   editingLayerId: string | null;
   onBeginTextEdit: (layerId: string) => void;
   onEndTextEdit: () => void;
+  onImageDoubleClick?: (layerId: string) => void;
   onLayerContextMenu?: (target: CanvasContextMenuTarget) => void;
   stageRef: React.RefObject<Konva.Stage | null>;
   onMaskPainted?: (layerId: string, maskDataUrl: string, width: number, height: number) => void;
@@ -126,6 +143,7 @@ export function CanvasStage({
   editingLayerId,
   onBeginTextEdit,
   onEndTextEdit,
+  onImageDoubleClick,
   onLayerContextMenu,
   stageRef,
   onMaskPainted,
@@ -1566,9 +1584,9 @@ export function CanvasStage({
               listening={false}
             />
           )) : null}
-          {[...page.layers]
-            .sort((a, b) => a.zIndex - b.zIndex)
-            .map((layer) => (
+          {renderAdjustmentAwareLayers(
+            [...page.layers].sort((a, b) => a.zIndex - b.zIndex),
+            (layer) => (
               <KonvaLayerNode
                 assets={assets}
                 key={layer.id}
@@ -1577,11 +1595,13 @@ export function CanvasStage({
                 layoutEditMode={layoutEditMode}
                 reduceImageEffects={reduceImageEffects}
                 onBeginTextEdit={onBeginTextEdit}
+                onImageDoubleClick={onImageDoubleClick}
                 onChange={handleLayerChange}
                 onSelect={(layerId) => onSelectLayer(layerId)}
                 onContextMenu={onLayerContextMenu}
               />
-            ))}
+            )
+          )}
           {marqueeRect !== null ? (
             <Rect
               name={SCREEN_HELPER_NODE_NAME}
@@ -2109,6 +2129,95 @@ function buildGridLines(page: Page, visible: boolean): Array<{ key: string; poin
     lines.push({ key: `gy-${y}`, points: [0, y, page.width, y] });
   }
   return lines;
+}
+
+function AdjustmentFilterGroup({
+  adjustment,
+  children
+}: {
+  adjustment: AdjustmentLayer;
+  children: ReactNode;
+}): ReactElement {
+  const groupRef = useRef<Konva.Group>(null);
+  const resolved = brightnessContrastAdjustment(adjustment);
+
+  useEffect(() => {
+    const node = groupRef.current;
+    if (node === null) return;
+    if (resolved === null || adjustment.visible === false) {
+      node.clearCache();
+      node.getLayer()?.batchDraw();
+      return;
+    }
+    try {
+      node.cache({ pixelRatio: 1 });
+      node.getLayer()?.batchDraw();
+    } catch (error) {
+      node.clearCache();
+      markDebugEvent("adjustment-layer:cache-failed", {
+        layerId: adjustment.id,
+        name: adjustment.name,
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+    return () => {
+      node.clearCache();
+    };
+  }, [adjustment.id, adjustment.name, adjustment.visible, resolved?.brightness, resolved?.contrast]);
+
+  if (resolved === null || adjustment.visible === false) {
+    return <Group>{children}</Group>;
+  }
+
+  return (
+    <Group
+      ref={groupRef}
+      filters={[Konva.Filters.Brighten, Konva.Filters.Contrast]}
+      brightness={resolved.brightness / 200}
+      contrast={resolved.contrast / 2}
+      listening
+    >
+      {children}
+    </Group>
+  );
+}
+
+function renderAdjustmentAwareLayers(
+  layers: VisualLayer[],
+  renderLayer: (layer: VisualLayer) => ReactNode
+): ReactNode[] {
+  let rendered: ReactNode[] = [];
+  for (const layer of layers) {
+    if (layer.type !== "adjustment-layer") {
+      if (isRenderableLayer(layer)) rendered.push(renderLayer(layer));
+      continue;
+    }
+
+    if (layer.visible === false || brightnessContrastAdjustment(layer) === null) {
+      continue;
+    }
+
+    if (layer.targetMode === "clipped-to-layer") {
+      const index = rendered.length - 1;
+      if (index >= 0) {
+        rendered[index] = (
+          <AdjustmentFilterGroup adjustment={layer} key={`adj-${layer.id}-clip`}>
+            {rendered[index]}
+          </AdjustmentFilterGroup>
+        );
+      }
+      continue;
+    }
+
+    if (rendered.length > 0) {
+      rendered = [
+        <AdjustmentFilterGroup adjustment={layer} key={`adj-${layer.id}-below`}>
+          {rendered}
+        </AdjustmentFilterGroup>
+      ];
+    }
+  }
+  return rendered;
 }
 
 function transformedNodeRect(node: Konva.Node): RectType {

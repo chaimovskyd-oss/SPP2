@@ -1920,6 +1920,61 @@ textarea {
   gap: 8px;
 }
 
+.layer-add-menu {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.layer-add-btn {
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.layer-add-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 3300;
+}
+
+.layer-add-popover {
+  position: absolute;
+  top: 30px;
+  inset-inline-end: 0;
+  z-index: 3301;
+  display: grid;
+  min-width: 176px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.layer-add-popover button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: start;
+}
+
+.layer-add-popover button:hover {
+  background: var(--bg-elevated);
+}
+
 .layer-list-header span,
 .layer-list-count {
   color: var(--text-tertiary);
@@ -2068,6 +2123,12 @@ textarea {
   line-height: 1;
 }
 
+.layer-thumb.adjustment {
+  border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--border-soft));
+  background: color-mix(in oklab, var(--accent) 16%, var(--bg-elevated));
+  color: var(--accent-hover);
+}
+
 .layer-thumb em {
   position: absolute;
   right: 1px;
@@ -2135,6 +2196,18 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.layer-blend-select {
+  flex: 0 0 auto;
+  width: 74px;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-tertiary);
+  font-size: 10px;
 }
 
 .layer-fx-pill {

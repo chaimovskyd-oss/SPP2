@@ -149,7 +149,7 @@ describe("Fix 4 — destructive screenshot crop produces a new bitmap with new d
 
 describe("Migration v10 → v11 — mask spacingMM backfill", () => {
   it("schema version is 11", () => {
-    expect(PROJECT_SCHEMA_VERSION).toBe(11);
+    expect(PROJECT_SCHEMA_VERSION).toBe(13);
   });
 
   it("backfills spacingMM from spacingX using DPI", () => {
@@ -181,7 +181,7 @@ describe("Migration v10 → v11 — mask spacingMM backfill", () => {
       batchJobs: []
     };
     const migrated = normalizeProjectEnvelope(envelope);
-    expect(migrated.schemaVersion).toBe(11);
+    expect(migrated.schemaVersion).toBe(PROJECT_SCHEMA_VERSION);
     const rule = migrated.document.maskRules[0];
     expect(rule.spacingMM).toBeCloseTo(7, 1);
     expect(rule.spacingUnit).toBe("mm");

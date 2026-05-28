@@ -25,6 +25,7 @@ export type LayerType =
   | "image"
   | "text"
   | "shape"
+  | "adjustment-layer"
   | "group"
   | "mask"
   | "background"
@@ -271,6 +272,19 @@ export interface ShapeLayer extends BaseLayer {
   visualEffects?: VisualEffectStack;
 }
 
+export type AdjustmentTargetMode = "below" | "clipped-to-layer" | "group-only" | "page-global";
+
+export type AdjustmentOperation =
+  | { type: "brightnessContrast"; brightness: number; contrast: number };
+
+export interface AdjustmentLayer extends BaseLayer {
+  type: "adjustment-layer";
+  targetMode: AdjustmentTargetMode;
+  targetLayerId?: ID;
+  groupId?: ID;
+  adjustments: AdjustmentOperation[];
+}
+
 export interface GroupLayer extends BaseLayer {
   type: "group";
   childIds: ID[];
@@ -300,6 +314,7 @@ export type VisualLayer =
   | TextLayer
   | ImageLayer
   | ShapeLayer
+  | AdjustmentLayer
   | GroupLayer
   | MaskLayer
   | BackgroundLayer

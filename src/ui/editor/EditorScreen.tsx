@@ -91,9 +91,12 @@ import {
   AutosaveManager,
   AUTOSAVE_TEMPORARILY_DISABLED,
   createGridTextOverlay,
+  createAdjustmentLayer,
   createFrameLayer,
   createImageLayer,
   createMaskTextOverlay,
+  createShapeLayer,
+  createTextLayer,
   createPage,
   createProjectEnvelope,
   checkMaskPageOverflow,
@@ -165,7 +168,7 @@ import { ImageEditFloatingBar } from "./ImageEditFloatingBar";
 import { CropUI } from "./CropUI";
 import { useViewportStore, type ViewportStore } from "@/state/viewportStore";
 import type { Asset, Document } from "@/types/document";
-import type { BlendMode, ContentTransform, FrameLayer, ImageLayer, ImageLayerEffects, TextLayer, VisualLayer } from "@/types/layers";
+import type { AdjustmentLayer, BlendMode, ContentTransform, FrameLayer, ImageLayer, ImageLayerEffects, TextLayer, VisualLayer } from "@/types/layers";
 import { DEFAULT_IMAGE_LAYER_EFFECTS } from "@/types/layers";
 import type { GridLayoutRule } from "@/types/grid";
 import type { MaskLayoutRule } from "@/types/mask";
@@ -244,6 +247,7 @@ import {
   fontFamilyExists,
   getFontFavorites,
   getGroupedFonts,
+  loadSystemFonts,
   toggleFontFavorite,
   type FontEntry
 } from "./fonts";
@@ -354,11 +358,12 @@ function hasManagedModeMetadata(layer: VisualLayer | null): layer is FrameLayer 
 
 interface EditorScreenProps {
   onBackHome: () => void;
+  onImportPsd?: () => void;
   onOpenClassPhotoWizard?: () => void;
   onOpenSettings?: () => void;
 }
 
-export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSettings }: EditorScreenProps): ReactElement {
+export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, onOpenSettings }: EditorScreenProps): ReactElement {
   const stageRef = useRef<Konva.Stage | null>(null);
   const canvasAreaRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -1140,6 +1145,122 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
     setSelection([layer.id]);
     setTool("text");
     setStatus("נוספה שכבת טקסט");
+  }
+
+  function layerZIndexAboveSelection(): number {
+    const selected = selectedLayerId === null ? null : currentPage.layers.find((layer) => layer.id === selectedLayerId) ?? null;
+    return selected === null
+      ? currentPage.layers.reduce((max, layer) => Math.max(max, layer.zIndex), -1) + 1
+      : selected.zIndex + 1;
+  }
+
+  function insertLayerAboveSelection(layer: VisualLayer, statusMessage: string): void {
+    const insertZ = layer.zIndex;
+    applyDocumentChange(
+      "InsertLayerAboveSelectionCommand",
+      (doc) => ({
+        ...doc,
+        pages: doc.pages.map((page) => page.id === currentPage.id
+          ? {
+              ...page,
+              layers: [
+                ...page.layers.map((item) => item.zIndex >= insertZ ? { ...item, zIndex: item.zIndex + 1 } : item),
+                layer
+              ]
+            }
+          : page)
+      }),
+      currentPage.id
+    );
+    setSelection([layer.id]);
+    setStatus(statusMessage);
+  }
+
+  function handleAddBrightnessContrastAdjustment(): void {
+    const layer = createAdjustmentLayer({
+      zIndex: layerZIndexAboveSelection(),
+      rect: { x: 0, y: 0, width: currentPage.width, height: currentPage.height }
+    });
+    insertLayerAboveSelection(layer, "נוספה שכבת התאמה: בהירות/ניגודיות");
+  }
+
+  function handleAddShapeLayer(): void {
+    const size = Math.max(80, Math.min(currentPage.width, currentPage.height) * 0.18);
+    const layer = createShapeLayer({
+      name: "צורה",
+      shape: "rect",
+      rect: {
+        x: currentPage.width / 2 - size / 2,
+        y: currentPage.height / 2 - size / 2,
+        width: size,
+        height: size
+      },
+      zIndex: layerZIndexAboveSelection()
+    });
+    insertLayerAboveSelection({
+      ...layer,
+      fill: { version: 1, color: useColorStore.getState().currentColor, opacity: 1 }
+    }, "נוספה שכבת צורה");
+  }
+
+  function convertPsdTextImageToEditable(layerId: string): void {
+    const sourceLayer = currentPage.layers.find((item): item is ImageLayer => item.id === layerId && item.type === "image");
+    if (sourceLayer === undefined) return;
+    const psdText = readPsdTextMetadata(sourceLayer.metadata["psdText"]);
+    if (psdText === null || psdText.text.trim().length === 0) {
+      setStatus("אין נתוני טקסט זמינים לשכבת PSD זו");
+      return;
+    }
+    const ok = window.confirm(
+      "להמיר את שכבת הטקסט מ-PSD לטקסט עריך?\n\n" +
+      "השכבה נראית כרגע כמו בפוטושופ בזכות PNG מיובא. אחרי המרה, אפקטים, עיוותים, פונט חסר או סגנונות Photoshop עשויים להשתנות."
+    );
+    if (!ok) return;
+    const convertedLayerId = crypto.randomUUID();
+    const fontSize = clampNumber(Math.max(12, sourceLayer.height * 0.42), 10, 220);
+    const textLayer = createTextLayer({
+      id: convertedLayerId,
+      name: `${sourceLayer.name} - editable`,
+      rect: {
+        x: sourceLayer.x,
+        y: sourceLayer.y,
+        width: sourceLayer.width,
+        height: sourceLayer.height
+      },
+      text: psdText.text,
+      zIndex: sourceLayer.zIndex,
+      metadata: {
+        ...sourceLayer.metadata,
+        source: "psd-import-text-converted",
+        rasterAssetId: sourceLayer.assetId,
+        rasterLayerId: sourceLayer.id,
+        originalPsdFontNames: psdText.fontNames,
+        convertedFromPsdTextAt: new Date().toISOString()
+      }
+    });
+    const converted: TextLayer = {
+      ...textLayer,
+      visible: sourceLayer.visible,
+      locked: sourceLayer.locked,
+      opacity: sourceLayer.opacity,
+      rotation: sourceLayer.rotation,
+      blendMode: sourceLayer.blendMode,
+      selected: false,
+      fontFamily: "DM Sans",
+      fontSize,
+      color: psdText.color ?? textLayer.color,
+      direction: "auto"
+    };
+    applyDocumentChange("ConvertPsdTextImageToEditableTextCommand", (doc) => ({
+      ...doc,
+      pages: doc.pages.map((page) => page.id === currentPage.id
+        ? { ...page, layers: page.layers.map((layer) => layer.id === layerId ? converted : layer) }
+        : page)
+    }), currentPage.id);
+    setSelection([converted.id]);
+    setEditingLayerId(null);
+    setTool("text");
+    setStatus("שכבת PSD הומרה לטקסט רגיל. לחץ פעמיים על הטקסט כדי לערוך.");
   }
 
   async function handleOpenImageEditor(target: CanvasContextMenuTarget): Promise<void> {
@@ -4083,6 +4204,12 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
             <FileUp size={14} />
             טעינה
           </button>
+          {onImportPsd !== undefined ? (
+            <button className="btn btn-ghost" onClick={onImportPsd} type="button">
+              <Layers size={14} />
+              ייבוא PSD
+            </button>
+          ) : null}
           {/* Save dropdown */}
           <div className="save-dropdown-wrapper" style={{ position: "relative" }}>
             <button
@@ -4395,11 +4522,16 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                 selectedLayerIds={selectedLayerIds}
                 selectedLayerId={selectedLayerId}
                 variableLayerIds={variableLayerIds}
+                onAddAdjustmentLayer={handleAddBrightnessContrastAdjustment}
+                onAddImageLayer={() => imageInputRef.current?.click()}
+                onAddShapeLayer={handleAddShapeLayer}
+                onAddTextLayer={handleAddText}
                 onRenameComplete={() => setRenamingLayerId(null)}
                 onStartRename={(layerId) => setRenamingLayerId(layerId)}
                 onReorder={(layerIdsTopToBottom) => reorderLayers(currentPage.id, layerIdsTopToBottom)}
                 onSelect={(layerId) => setSelection([layerId])}
                 onSelectMany={(layerIds) => setSelection(layerIds)}
+                onPatchLayer={(layer) => updateLayer(currentPage.id, layer)}
                 onRename={(layerId, name) => {
                   const layer = currentPage.layers.find((l) => l.id === layerId);
                   if (layer !== undefined) updateLayer(currentPage.id, { ...layer, name });
@@ -4495,6 +4627,7 @@ export function EditorScreen({ onBackHome, onOpenClassPhotoWizard, onOpenSetting
                 setTool("text");
               }}
               onEndTextEdit={() => setEditingLayerId(null)}
+              onImageDoubleClick={convertPsdTextImageToEditable}
               onLayerChange={handleCanvasLayerChange}
               onSelectLayer={(layerId) => (layerId === null ? clearSelection() : setSelection([layerId]))}
               onSelectLayers={(layerIds) => setSelection(layerIds)}
@@ -8631,6 +8764,70 @@ function SliderField({
 
 // ─── Font selector ────────────────────────────────────────────────────────────
 
+function getBrightnessContrastOperation(layer: AdjustmentLayer): { type: "brightnessContrast"; brightness: number; contrast: number } {
+  const operation = layer.adjustments.find((item) => item.type === "brightnessContrast");
+  return operation ?? { type: "brightnessContrast", brightness: 0, contrast: 0 };
+}
+
+function AdjustmentLayerControls({
+  layer,
+  onPatch
+}: {
+  layer: AdjustmentLayer;
+  onPatch: (patch: Partial<VisualLayer>) => void;
+}): ReactElement {
+  const operation = getBrightnessContrastOperation(layer);
+  const blendModeOptions: BlendMode[] = ["normal", "multiply", "screen", "overlay", "darken", "lighten"];
+
+  function patchOperation(patch: Partial<typeof operation>): void {
+    const nextOperation = { ...operation, ...patch };
+    onPatch({
+      adjustments: layer.adjustments.some((item) => item.type === "brightnessContrast")
+        ? layer.adjustments.map((item) => item.type === "brightnessContrast" ? nextOperation : item)
+        : [nextOperation, ...layer.adjustments]
+    } as Partial<VisualLayer>);
+  }
+
+  return (
+    <section className="adjustment-layer-controls">
+      <label className="field">
+        <span className="field-label">שם שכבה</span>
+        <input className="text-input" onChange={(event) => onPatch({ name: event.target.value } as Partial<VisualLayer>)} value={layer.name} />
+      </label>
+      <div className="quick-controls">
+        <button className={layer.visible ? "toggle on" : "toggle"} onClick={() => onPatch({ visible: !layer.visible } as Partial<VisualLayer>)} type="button">
+          {layer.visible ? <Eye size={14} /> : <EyeOff size={14} />}
+          תצוגה
+        </button>
+        <button className={layer.locked ? "toggle on" : "toggle"} onClick={() => onPatch({ locked: !layer.locked } as Partial<VisualLayer>)} type="button">
+          {layer.locked ? <Lock size={14} /> : <Unlock size={14} />}
+          נעילה
+        </button>
+      </div>
+      <SliderField label="אטימות שכבה" min={0} max={1} step={0.01} value={layer.opacity} onChange={(v) => onPatch({ opacity: v } as Partial<VisualLayer>)} decimals={2} />
+      <label className="field">
+        <span className="field-label">Blend mode</span>
+        <select className="text-input" onChange={(event) => onPatch({ blendMode: event.target.value as BlendMode } as Partial<VisualLayer>)} value={layer.blendMode}>
+          {blendModeOptions.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
+        </select>
+      </label>
+      <label className="field">
+        <span className="field-label">משפיעה על</span>
+        <select className="text-input" onChange={(event) => onPatch({ targetMode: event.target.value as AdjustmentLayer["targetMode"] } as Partial<VisualLayer>)} value={layer.targetMode}>
+          <option value="below">כל השכבות שמתחת</option>
+          <option value="clipped-to-layer">רק השכבה שמתחת</option>
+        </select>
+      </label>
+      <SliderField label="בהירות" min={-100} max={100} value={operation.brightness} onChange={(v) => patchOperation({ brightness: v })} />
+      <SliderField label="ניגודיות" min={-100} max={100} value={operation.contrast} onChange={(v) => patchOperation({ contrast: v })} />
+      <button className="mini-action" onClick={() => patchOperation({ brightness: 0, contrast: 0 })} type="button">
+        <RotateCcw size={13} />
+        איפוס
+      </button>
+    </section>
+  );
+}
+
 function FontSelector({
   value,
   onChange
@@ -8641,8 +8838,17 @@ function FontSelector({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [favorites, setFavorites] = useState<Set<string>>(() => getFontFavorites());
+  const [fontRevision, setFontRevision] = useState(0);
 
-  const groups = useMemo(() => getGroupedFonts(favorites, query), [favorites, query]);
+  const groups = useMemo(() => getGroupedFonts(favorites, query), [favorites, query, fontRevision]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadSystemFonts().then(() => {
+      if (!cancelled) setFontRevision((revision) => revision + 1);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   function handleSelect(family: string): void {
     onChange(family);
@@ -8760,6 +8966,7 @@ function LayerInspector({
   }
 
   const isText = selectedLayer.type === "text";
+  const isAdjustment = selectedLayer.type === "adjustment-layer";
   const isVisualNonText =
     selectedLayer.type === "frame" ||
     selectedLayer.type === "image" ||
@@ -8769,7 +8976,7 @@ function LayerInspector({
   return (
     <div className="inspector">
       {/* Metrics + quick controls shown at top ONLY for non-text layers */}
-      {!isText ? (
+      {!isText && !isAdjustment ? (
         <>
           <div className="field-grid">
             <Metric label="X" value={selectedLayer.x} />
@@ -8809,6 +9016,10 @@ function LayerInspector({
           onPatch={onPatch}
           onTextChange={onTextChange}
         />
+      ) : null}
+
+      {isAdjustment ? (
+        <AdjustmentLayerControls layer={selectedLayer} onPatch={onPatch} />
       ) : null}
 
       {isVisualNonText ? (
@@ -9971,10 +10182,15 @@ function LayerList({
   variableLayerIds,
   onRename,
   onRenameComplete,
+  onAddAdjustmentLayer,
+  onAddImageLayer,
+  onAddShapeLayer,
+  onAddTextLayer,
   onStartRename,
   onReorder,
   onSelect,
   onSelectMany,
+  onPatchLayer,
   onToggleLock,
   onToggleVisibility,
   onLayerContextMenu,
@@ -9989,10 +10205,15 @@ function LayerList({
   variableLayerIds: Set<string>;
   onRename: (layerId: string, name: string) => void;
   onRenameComplete: () => void;
+  onAddAdjustmentLayer: () => void;
+  onAddImageLayer: () => void;
+  onAddShapeLayer: () => void;
+  onAddTextLayer: () => void;
   onStartRename: (layerId: string) => void;
   onReorder: (layerIdsTopToBottom: string[]) => void;
   onSelect: (layerId: string) => void;
   onSelectMany: (layerIds: string[]) => void;
+  onPatchLayer: (layer: VisualLayer) => void;
   onToggleLock: (layerId: string) => void;
   onToggleVisibility: (layerId: string) => void;
   onLayerContextMenu: (layerId: string, screenX: number, screenY: number) => void;
@@ -10000,7 +10221,8 @@ function LayerList({
   onMoveImageIntoFrame?: (imageLayerId: string, frameId: string) => void;
 }): ReactElement {
   const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"all" | "images" | "text" | "frames" | "framesMasks" | "shapes" | "hidden" | "locked">("all");
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [filter, setFilter] = useState<"all" | "images" | "text" | "frames" | "framesMasks" | "shapes" | "adjustments" | "hidden" | "locked">("all");
   const [draftName, setDraftName] = useState("");
   const ordered = [...layers].sort((a, b) => b.zIndex - a.zIndex);
   const filtered = ordered.filter((layer) => {
@@ -10009,6 +10231,7 @@ function LayerList({
     if (filter === "frames") return layer.type === "frame" && !isFrameMaskLayer(layer);
     if (filter === "framesMasks") return isFrameMaskLayer(layer);
     if (filter === "shapes") return layer.type === "shape";
+    if (filter === "adjustments") return layer.type === "adjustment-layer";
     if (filter === "hidden") return !layer.visible;
     if (filter === "locked") return layer.locked;
     return true;
@@ -10089,12 +10312,38 @@ function LayerList({
     { id: "frames", label: "Frames" },
     { id: "framesMasks", label: "Frames-Masks" },
     { id: "shapes", label: "Shapes" },
+    { id: "adjustments", label: "Adj" },
     { id: "hidden", label: "Hidden" },
     { id: "locked", label: "Locked" }
   ];
+  const blendModeOptions: BlendMode[] = ["normal", "multiply", "screen", "overlay", "darken", "lighten"];
 
   return (
     <section className="layer-list" aria-label="שכבות">
+      <div className="layer-add-menu">
+        <button
+          aria-expanded={addMenuOpen}
+          aria-label="הוסף שכבה"
+          className="layer-add-btn"
+          onClick={() => setAddMenuOpen((open) => !open)}
+          title="הוסף שכבה"
+          type="button"
+        >
+          <Plus size={13} />
+        </button>
+        {addMenuOpen ? (
+          <>
+            <div className="layer-add-backdrop" onClick={() => setAddMenuOpen(false)} />
+            <div className="layer-add-popover">
+              <button onClick={() => { onAddImageLayer(); setAddMenuOpen(false); }} type="button"><ImagePlus size={12} />תמונה</button>
+              <button onClick={() => { onAddTextLayer(); setAddMenuOpen(false); }} type="button"><Type size={12} />טקסט</button>
+              <button onClick={() => { onAddShapeLayer(); setAddMenuOpen(false); }} type="button"><Square size={12} />צורה</button>
+              <div className="ctx-divider" />
+              <button onClick={() => { onAddAdjustmentLayer(); setAddMenuOpen(false); }} type="button"><SlidersHorizontal size={12} />בהירות/ניגודיות</button>
+            </div>
+          </>
+        ) : null}
+      </div>
       <h3>שכבות</h3>
       {ordered.length === 0 ? <p>אין שכבות עדיין.</p> : null}
       <div className="layer-filter-bar" aria-label="Layer filters">
@@ -10181,6 +10430,17 @@ function LayerList({
             {layer.blendMode !== "normal" ? <em className="layer-blend-badge">{layer.blendMode}</em> : null}
             {hasLayerFx(layer) ? <em className="layer-fx-pill">fx</em> : null}
             {variableLayerIds.has(layer.id) ? <em className="layer-var-pill">VAR</em> : null}
+            <select
+              aria-label="Blend mode"
+              className="layer-blend-select"
+              onChange={(event) => onPatchLayer({ ...layer, blendMode: event.target.value as BlendMode })}
+              onClick={(event) => event.stopPropagation()}
+              value={layer.blendMode}
+            >
+              {blendModeOptions.map((mode) => (
+                <option key={mode} value={mode}>{mode}</option>
+              ))}
+            </select>
           </div>
           <button
             aria-label={layer.visible ? "הסתר שכבה" : "הצג שכבה"}
@@ -10246,6 +10506,7 @@ function layerTypeIcon(layer: VisualLayer): ReactElement {
   if (layer.type === "text") return <Type size={12} />;
   if (layer.type === "frame") return <Frame size={12} />;
   if (layer.type === "shape") return <Square size={12} />;
+  if (layer.type === "adjustment-layer") return <SlidersHorizontal size={12} />;
   return <Layers size={12} />;
 }
 
@@ -10760,6 +11021,30 @@ function hasAnyImageEffect(effects: ImageLayerEffects): boolean {
   );
 }
 
+interface PsdTextMetadata {
+  text: string;
+  fontNames: string[];
+  fontSize: number | null;
+  color: string | null;
+}
+
+function readPsdTextMetadata(value: unknown): PsdTextMetadata | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const text = typeof record.text === "string" ? record.text : "";
+  const fontNames = Array.isArray(record.fontNames)
+    ? record.fontNames.filter((item): item is string => typeof item === "string" && item.length > 0)
+    : [];
+  const fontSize = typeof record.fontSize === "number" && Number.isFinite(record.fontSize) ? record.fontSize : null;
+  const color = typeof record.color === "string" && /^#[0-9a-f]{6}$/i.test(record.color) ? record.color : null;
+  return { text, fontNames, fontSize, color };
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
 function LayerThumbnail({ assets, layer }: { assets: Asset[]; layer: VisualLayer }): ReactElement {
   useEffect(() => trackDebugMount("LayerThumbnail", { layerId: layer.id, type: layer.type }), [layer.id, layer.type]);
 
@@ -10803,6 +11088,15 @@ function LayerThumbnail({ assets, layer }: { assets: Asset[]; layer: VisualLayer
         {layer.text.trim().charAt(0) || "T"}
         {effectCount > 0 ? <em>{effectCount}</em> : null}
         {hasWarp ? <em className="warp-badge">W</em> : null}
+      </span>
+    );
+  }
+
+  if (layer.type === "adjustment-layer") {
+    return (
+      <span className="layer-thumb adjustment">
+        <SlidersHorizontal size={15} />
+        <em>Adj</em>
       </span>
     );
   }

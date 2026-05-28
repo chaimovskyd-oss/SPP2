@@ -13,11 +13,12 @@ import { QuickSearchPanel } from "../utilities/QuickSearchPanel";
 interface HomeScreenProps {
   onOpenMode: (mode: ModeType) => void;
   onOpenProjectFile: (file: File) => void;
+  onImportPsd?: () => void;
   onOpenSettings?: () => void;
   onOpenBatchLibrary?: () => void;
 }
 
-export function HomeScreen({ onOpenMode, onOpenProjectFile, onOpenSettings, onOpenBatchLibrary }: HomeScreenProps): ReactElement {
+export function HomeScreen({ onOpenMode, onOpenProjectFile, onImportPsd, onOpenSettings, onOpenBatchLibrary }: HomeScreenProps): ReactElement {
   const projectInputRef = useRef<HTMLInputElement>(null);
   const [projects, setProjects] = useState<ProjectIndexEntry[]>(() => getProjectIndexEntries());
   const [query, setQuery] = useState("");
@@ -80,6 +81,12 @@ export function HomeScreen({ onOpenMode, onOpenProjectFile, onOpenSettings, onOp
             <FileUp size={15} />
             פתח פרויקט קיים
           </button>
+          {onImportPsd !== undefined ? (
+            <button className="btn btn-ghost" onClick={onImportPsd} type="button">
+              <Layers size={15} />
+              ייבוא PSD
+            </button>
+          ) : null}
           <label className="project-search">
             <Search size={15} />
             <input

@@ -11,9 +11,19 @@ contextBridge.exposeInMainWorld("spp", {
   getMemoryUsage: (): Promise<NodeJS.MemoryUsage> =>
     ipcRenderer.invoke("spp:get-memory-usage"),
 
+  /** List installed OS font families. */
+  listSystemFonts: (): Promise<string[]> =>
+    ipcRenderer.invoke("spp:list-system-fonts"),
+
   /** Read a file from disk as a base64 string. */
   readFileBase64: (filePath: string): Promise<string> =>
     ipcRenderer.invoke("spp:read-file-base64", filePath),
+
+  choosePsdFile: (): Promise<{ success: boolean; filePath?: string; fileSize?: number; error?: string }> =>
+    ipcRenderer.invoke("spp:choose-psd-file"),
+
+  importPsd: (filePath: string): Promise<{ success: boolean; manifest?: unknown; error?: string }> =>
+    ipcRenderer.invoke("spp:import-psd", filePath),
 
   /** Save a generated PDF through the native save dialog. */
   savePdfDialog: (pdfBase64: string, suggestedName?: string): Promise<{ success: boolean; filePath?: string; error?: string }> =>

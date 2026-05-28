@@ -51,7 +51,10 @@ interface SppElectronAPI {
     external: number;
     arrayBuffers: number;
   }>;
+  listSystemFonts?: () => Promise<string[]>;
   readFileBase64: (filePath: string) => Promise<string>;
+  choosePsdFile?: () => Promise<{ success: boolean; filePath?: string; fileSize?: number; error?: string }>;
+  importPsd?: (filePath: string) => Promise<{ success: boolean; manifest?: import("./services/psdImport").PsdImportManifest; error?: string }>;
   savePdfDialog?: (pdfBase64: string, suggestedName?: string) => Promise<{ success: boolean; filePath?: string; error?: string }>;
   convertOfficeToPdf?: (inputPath: string) => Promise<{ success: boolean; pdfBase64?: string; outputPath?: string; outputName?: string; error?: string }>;
   getFilePath?: (file: File) => string;

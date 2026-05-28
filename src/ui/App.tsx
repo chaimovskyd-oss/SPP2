@@ -34,6 +34,7 @@ import { useViewportStore } from "@/state/viewportStore";
 import { useProjectLifecycleStore } from "@/state/projectLifecycleStore";
 import { HomeScreen } from "./home/HomeScreen";
 import { createFreeModeDocument, loadProject } from "./projectActions";
+import { buildDocumentFromPsdManifest, createPsdProjectEnvelope, type PsdImportManifest } from "@/services/psdImport";
 import { DocumentSetupScreen } from "./setup/DocumentSetupScreen";
 import { CollageSetupWizard } from "./collage/CollageSetupWizard";
 import { PhotoPrintSetupWizard } from "./photoPrint/PhotoPrintSetupWizard";
@@ -53,6 +54,7 @@ import { getBatchProductionMeta } from "@/core/batchProduction/batchProductionMe
 import { generateBatchProduction } from "@/core/batchProduction/generateEngine";
 import type { BatchWizardResult } from "@/types/batchProduction";
 import type { BatchCollageAssetGroup } from "@/types/batchCollage";
+import { useAppSettings } from "@/settings";
 
 const EditorScreen = lazy(() =>
   import("./editor/EditorScreen").then((module) => ({
@@ -214,6 +216,9 @@ export function App(): ReactElement {
   const [creatingProgress, setCreatingProgress] = useState("");
   const [isCreatingBatch, setIsCreatingBatch] = useState(false);
   const [creatingBatchProgress, setCreatingBatchProgress] = useState("");
+  const [isImportingPsd, setIsImportingPsd] = useState(false);
+  const [psdImportProgress, setPsdImportProgress] = useState("");
+  const performanceSettings = useAppSettings((state) => state.settings.performance);
   const canShowEditor = useMemo(() => screen === "editor" && document !== null, [document, screen]);
 
   // Keep external file drops inside the app. Without this, Electron/Chromium can
@@ -1219,6 +1224,42 @@ export function App(): ReactElement {
     }
   }
 
+  async function handleImportPsd(): Promise<void> {
+    if (window.spp?.choosePsdFile === undefined || window.spp.importPsd === undefined) {
+      window.alert("ייבוא PSD זמין רק באפליקציית Electron.");
+      return;
+    }
+    const selected = await window.spp.choosePsdFile();
+    if (!selected.success || !selected.filePath) return;
+    const thresholdBytes = Math.max(1, performanceSettings.warnLargeFileMb) * 1024 * 1024;
+    if ((selected.fileSize ?? 0) > thresholdBytes) {
+      const mb = ((selected.fileSize ?? 0) / 1024 / 1024).toFixed(1);
+      const ok = window.confirm(`קובץ ה-PSD גדול (${mb} MB). הייבוא עלול לקחת זמן ולהשתמש בהרבה זיכרון.\n\nלהמשיך?`);
+      if (!ok) return;
+    }
+    setIsImportingPsd(true);
+    setPsdImportProgress("מייבא שכבות PSD...");
+    try {
+      const result = await window.spp.importPsd(selected.filePath);
+      if (!result.success || result.manifest === undefined) {
+        window.alert(result.error ?? "ייבוא PSD נכשל.");
+        return;
+      }
+      const { document: psdDocument, summary } = await buildDocumentFromPsdManifest(result.manifest as PsdImportManifest, window.spp.readFileBase64);
+      const envelope = beginProject(createPsdProjectEnvelope(psdDocument), selected.filePath);
+      setDocument(withProjectMetadata(envelope.document, envelope.metadata));
+      resetViewport();
+      clearSelection();
+      setScreen("editor");
+      window.alert(formatPsdImportSummary(summary.importedLayers, summary.skippedLayers, summary.warnings));
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "ייבוא PSD נכשל.");
+    } finally {
+      setIsImportingPsd(false);
+      setPsdImportProgress("");
+    }
+  }
+
   if (windowSnapshotLoading) {
     return <main className="loading-screen">טוען עותק עבודה לחלון נפרד...</main>;
   }
@@ -1297,6 +1338,16 @@ export function App(): ReactElement {
     );
   }
 
+  if (isImportingPsd) {
+    return (
+      <div className="pp-creating-screen">
+        <div className="pp-spinner" />
+        <div className="pp-creating-title">מייבא PSD...</div>
+        {psdImportProgress && <div className="pp-creating-sub">{psdImportProgress}</div>}
+      </div>
+    );
+  }
+
   if (screen === "batch-wizard" && batchWizardTemplate !== null) {
     return (
       <BatchProductionWizard
@@ -1365,6 +1416,7 @@ export function App(): ReactElement {
         <Suspense fallback={<main className="loading-screen">טוען את סביבת העריכה...</main>}>
           <EditorScreen
             onBackHome={backHome}
+            onImportPsd={() => void handleImportPsd()}
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenClassPhotoWizard={() => {
               setClassPhotoWizardInitialState(buildClassPhotoWizardStateFromDocument());
@@ -1384,6 +1436,7 @@ export function App(): ReactElement {
           <HomeScreen
             onOpenMode={openMode}
             onOpenProjectFile={(file) => void openProjectFile(file)}
+            onImportPsd={() => void handleImportPsd()}
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenBatchLibrary={handleOpenBatchLibrary}
           />
@@ -1396,4 +1449,10 @@ export function App(): ReactElement {
       {renderOrientationPicker()}
     </>
   );
+}
+
+function formatPsdImportSummary(imported: number, skipped: number, warnings: string[]): string {
+  const header = `ייבוא PSD הסתיים\n\nשכבות שיובאו: ${imported}\nשכבות שדולגו: ${skipped}`;
+  if (warnings.length === 0) return header;
+  return `${header}\n\nאזהרות:\n${warnings.slice(0, 10).join("\n")}${warnings.length > 10 ? `\nועוד ${warnings.length - 10}...` : ""}`;
 }
