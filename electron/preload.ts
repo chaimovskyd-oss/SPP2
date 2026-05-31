@@ -25,6 +25,16 @@ contextBridge.exposeInMainWorld("spp", {
   importPsd: (filePath: string): Promise<{ success: boolean; manifest?: unknown; error?: string }> =>
     ipcRenderer.invoke("spp:import-psd", filePath),
 
+  /** Harmonize a layer's colors/brightness to match the background. */
+  harmonizeLayer: (
+    layerPath: string,
+    bgPath: string,
+    bboxJson: string,
+    optionsJson: string,
+    outputPath: string
+  ): Promise<{ ok: boolean; diagnostics?: { brightnessAdj: number; saturationAdj: number; tempAdj: number; contrastAdj: number }; error?: string }> =>
+    ipcRenderer.invoke("spp:harmonize-layer", layerPath, bgPath, bboxJson, optionsJson, outputPath),
+
   /** Save a generated PDF through the native save dialog. */
   savePdfDialog: (pdfBase64: string, suggestedName?: string): Promise<{ success: boolean; filePath?: string; error?: string }> =>
     ipcRenderer.invoke("spp:save-pdf-dialog", pdfBase64, suggestedName),

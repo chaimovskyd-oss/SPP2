@@ -1,11 +1,13 @@
 import { createId } from "../ids";
 import type {
   AdjustmentLayer,
+  AdjustmentOperation,
   AdjustmentTargetMode,
   BaseLayer,
   ContentTransform,
   FrameBehaviorMode,
   FrameLayer,
+  GroupLayer,
   ImageLayer,
   LinkedGroup,
   ShapeLayer,
@@ -225,10 +227,16 @@ export function createAdjustmentLayer(options: {
   targetMode?: AdjustmentTargetMode;
   targetLayerId?: string;
   groupId?: string;
+  operation?: AdjustmentOperation;
   brightness?: number;
   contrast?: number;
   metadata?: Metadata;
 } = {}): AdjustmentLayer {
+  const operation = options.operation ?? {
+    type: "brightnessContrast" as const,
+    brightness: options.brightness ?? 0,
+    contrast: options.contrast ?? 0
+  };
   return {
     ...baseLayer({
       id: options.id,
@@ -236,19 +244,44 @@ export function createAdjustmentLayer(options: {
       name: options.name ?? "בהירות/ניגודיות 1",
       rect: options.rect ?? { x: 0, y: 0, width: 1, height: 1 },
       zIndex: options.zIndex,
+      locked: true,
       metadata: options.metadata
     }),
+    name: options.name ?? adjustmentLayerName(operation),
     type: "adjustment-layer",
     targetMode: options.targetMode ?? "below",
     targetLayerId: options.targetLayerId,
     groupId: options.groupId,
-    adjustments: [
-      {
-        type: "brightnessContrast",
-        brightness: options.brightness ?? 0,
-        contrast: options.contrast ?? 0
-      }
-    ]
+    adjustments: [operation]
+  };
+}
+
+function adjustmentLayerName(operation: AdjustmentOperation): string {
+  if (operation.type === "brightnessContrast") return "בהירות/ניגודיות 1";
+  if (operation.type === "exposure") return "חשיפה 1";
+  if (operation.type === "hueSaturation") return "גוון/רוויה 1";
+  if (operation.type === "blackWhite") return "שחור לבן 1";
+  if (operation.type === "invert") return "היפוך צבעים 1";
+  if (operation.type === "sepia") return "ספיה 1";
+  return "Levels 1";
+}
+
+export function createGroupLayer(options: {
+  id?: string;
+  name?: string;
+  zIndex?: number;
+}): GroupLayer {
+  return {
+    ...baseLayer({
+      id: options.id,
+      type: "group",
+      name: options.name ?? "קבוצה",
+      rect: { x: 0, y: 0, width: 0, height: 0 },
+      zIndex: options.zIndex
+    }),
+    type: "group",
+    childIds: [],
+    collapsed: false
   };
 }
 

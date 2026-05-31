@@ -5,7 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
-const { ensurePythonEnv, getVenvPythonExe } = require("./pythonBootstrap.cjs");
+const { ensurePythonEnv, ensureEditorAiDeps, getVenvPythonExe } = require("./pythonBootstrap.cjs");
 const { registerHealthCheckIpc } = require("./healthCheck.cjs");
 const diagnosticsEnabled = !app.isPackaged || process.env.NODE_ENV !== "production";
 
@@ -356,6 +356,189 @@ ipcMain.handle("spp:write-temp-image", async (_event, dataUrl, ext) => {
   return tmpPath;
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// LOCAL GRAPHICS LIBRARY IPC
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function getGlibBaseDir() {
+  return path.join(app.getPath("userData"), "SPP2", "Graphics");
+}
+function getGlibThumbDir() {
+  return path.join(getGlibBaseDir(), ".thumbnails");
+}
+function getGlibIndexPath() {
+  return path.join(getGlibBaseDir(), "graphics_index.json");
+}
+
+const GLIB_EXTS = new Set(["png", "jpg", "jpeg", "webp", "svg"]);
+const GLIB_MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", svg: "image/svg+xml" };
+
+function glibWalk(dir, baseDir) {
+  const results = [];
+  function walk(d) {
+    let entries;
+    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name.startsWith(".")) continue;
+      const full = path.join(d, e.name);
+      if (e.isDirectory()) { walk(full); continue; }
+      const ext = path.extname(e.name).toLowerCase().slice(1);
+      if (!GLIB_EXTS.has(ext)) continue;
+      try {
+        const stat = fs.statSync(full);
+        // Read companion JSON metadata if present
+        let companionMeta = null;
+        const jsonPath = full + ".json";
+        if (fs.existsSync(jsonPath)) {
+          try { companionMeta = JSON.parse(fs.readFileSync(jsonPath, "utf-8")); } catch {}
+        }
+        results.push({ filePath: full, fileName: e.name, size: stat.size, mtimeMs: stat.mtimeMs, companionMeta });
+      } catch {}
+    }
+  }
+  walk(dir);
+  return results;
+}
+
+ipcMain.handle("spp:glib:ensure-dirs", async () => {
+  const base = getGlibBaseDir();
+  const dirs = [
+    base, getGlibThumbDir(),
+    path.join(base, "Backgrounds"), path.join(base, "Elements"),
+    path.join(base, "Stickers"), path.join(base, "Frames"),
+    path.join(base, "Textures"), path.join(base, "Shapes"),
+    path.join(base, "Downloaded", "Pixabay"),
+  ];
+  dirs.forEach((d) => fs.mkdirSync(d, { recursive: true }));
+  return { baseDir: base };
+});
+
+ipcMain.handle("spp:glib:scan-dir", async () => {
+  const base = getGlibBaseDir();
+  fs.mkdirSync(base, { recursive: true });
+  return { files: glibWalk(base, base), baseDir: base };
+});
+
+ipcMain.handle("spp:glib:read-index", async () => {
+  try {
+    const raw = fs.readFileSync(getGlibIndexPath(), "utf-8");
+    return { success: true, index: JSON.parse(raw) };
+  } catch { return { success: true, index: [] }; }
+});
+
+ipcMain.handle("spp:glib:write-index", async (_event, assets) => {
+  try {
+    fs.writeFileSync(getGlibIndexPath(), JSON.stringify(assets, null, 2));
+    return { success: true };
+  } catch (err) { return { success: false, error: String(err) }; }
+});
+
+ipcMain.handle("spp:glib:save-thumbnail", async (_event, { id, base64, ext }) => {
+  try {
+    const dir = getGlibThumbDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const safeExt = (ext || "jpg").replace(/[^a-zA-Z]/g, "");
+    const thumbPath = path.join(dir, `${id}.${safeExt}`);
+    fs.writeFileSync(thumbPath, Buffer.from(base64, "base64"));
+    return { success: true, thumbnailPath: thumbPath };
+  } catch (err) { return { success: false, error: String(err) }; }
+});
+
+ipcMain.handle("spp:glib:read-file-b64", async (_event, filePath) => {
+  try {
+    const buf = fs.readFileSync(filePath);
+    const ext = path.extname(filePath).toLowerCase().slice(1);
+    const mime = GLIB_MIME[ext] || "application/octet-stream";
+    return { success: true, dataUrl: `data:${mime};base64,${buf.toString("base64")}` };
+  } catch (err) { return { success: false, error: String(err) }; }
+});
+
+ipcMain.handle("spp:glib:reveal-file", async (_event, filePath) => {
+  try { shell.showItemInFolder(filePath); return { success: true }; }
+  catch (err) { return { success: false, error: String(err) }; }
+});
+
+ipcMain.handle("spp:glib:delete-file", async (_event, filePath) => {
+  try {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    const json = filePath + ".json";
+    if (fs.existsSync(json)) fs.unlinkSync(json);
+    return { success: true };
+  } catch (err) { return { success: false, error: String(err) }; }
+});
+
+ipcMain.handle("spp:glib:move-file", async (_event, { fromPath, toDir, newName }) => {
+  try {
+    fs.mkdirSync(toDir, { recursive: true });
+    const dest = path.join(toDir, newName || path.basename(fromPath));
+    fs.renameSync(fromPath, dest);
+    return { success: true, newPath: dest };
+  } catch (err) { return { success: false, error: String(err) }; }
+});
+
+ipcMain.handle("spp:glib:save-asset", async (_event, { base64, ext, filename, category }) => {
+  try {
+    const safeExt = (ext || "png").replace(/[^a-zA-Z0-9]/g, "");
+    const safeName = String(filename || "graphic").replace(/[^a-zA-Z0-9_\-֐-׿]/g, "_").slice(0, 120);
+    const dir = path.join(getGlibBaseDir(), category || "Elements");
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, `${safeName}.${safeExt}`);
+    fs.writeFileSync(filePath, Buffer.from(base64, "base64"));
+    const stat = fs.statSync(filePath);
+    return { success: true, filePath, fileName: path.basename(filePath), mtimeMs: stat.mtimeMs, size: stat.size };
+  } catch (err) { return { success: false, error: String(err) }; }
+});
+
+ipcMain.handle("spp:glib:choose-import-folder", async () => {
+  try {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    const result = await dialog.showOpenDialog(win, { title: "בחר תיקייה לייבוא", properties: ["openDirectory"] });
+    if (result.canceled || !result.filePaths.length) return { success: false, canceled: true };
+    return { success: true, folderPath: result.filePaths[0] };
+  } catch (err) { return { success: false, error: String(err) }; }
+});
+
+ipcMain.handle("spp:glib:copy-folder", async (_event, { srcDir, category }) => {
+  try {
+    const destDir = path.join(getGlibBaseDir(), category);
+    fs.mkdirSync(destDir, { recursive: true });
+    const entries = fs.readdirSync(srcDir, { withFileTypes: true });
+    const copied = [];
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const ext = path.extname(entry.name).toLowerCase().slice(1);
+      if (!GLIB_EXTS.has(ext)) continue;
+      const src = path.join(srcDir, entry.name);
+      const dest = path.join(destDir, entry.name);
+      fs.copyFileSync(src, dest);
+      const stat = fs.statSync(dest);
+      copied.push({ filePath: dest, fileName: entry.name, size: stat.size, mtimeMs: stat.mtimeMs });
+    }
+    return { success: true, destDir, copied };
+  } catch (err) { return { success: false, error: String(err) }; }
+});
+
+ipcMain.handle("spp:glib:get-base-dir", async () => ({ baseDir: getGlibBaseDir() }));
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+ipcMain.handle("spp:pixabay-save-asset", async (_event, { imageBase64, filename, ext, metadata }) => {
+  try {
+    const safeExt = String(ext || "jpg").replace(/[^a-zA-Z0-9]/g, "") || "jpg";
+    const safeName = String(filename || "pixabay_asset").replace(/[^a-zA-Z0-9_\-]/g, "_").slice(0, 120);
+    const dir = path.join(app.getPath("userData"), "SPP2", "Graphics", "Downloaded", "Pixabay");
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, `${safeName}.${safeExt}`);
+    fs.writeFileSync(filePath, Buffer.from(imageBase64, "base64"));
+    if (metadata) {
+      fs.writeFileSync(filePath + ".json", JSON.stringify(metadata, null, 2));
+    }
+    return { success: true, filePath };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
 ipcMain.handle("spp:get-memory-usage", async () => process.memoryUsage());
 
 ipcMain.handle("spp:list-system-fonts", async () => listSystemFontFamilies());
@@ -435,6 +618,26 @@ ipcMain.handle("spp:import-psd", async (_event, filePath) => {
   } catch (err) {
     cleanupDirSafe(outputDir);
     return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle("spp:harmonize-layer", async (_event, layerPath, bgPath, bboxJson, optionsJson, outputPath) => {
+  try {
+    const scriptPath = path.join(getEngineDir(), "harmonize_service.py");
+    const result = await runPython(scriptPath, [
+      "--layer-path", layerPath,
+      "--bg-path", bgPath,
+      "--bbox", bboxJson,
+      "--options", optionsJson,
+      "--output-path", outputPath
+    ]);
+    if (!result.success && !result.stdout) {
+      return { ok: false, error: result.error || "harmonize failed" };
+    }
+    const lastLine = result.stdout.trim().split(/\r?\n/).pop() || "";
+    return JSON.parse(lastLine);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 });
 
@@ -605,15 +808,20 @@ ipcMain.handle("spp:convert-office-to-pdf", async (_event, inputPath) => {
 
 
 ipcMain.handle("spp:open-image-editor", async (_event, inputPath, outputPath) => {
-  const engineDir = getEngineDir();
+  // Ensure editor-only AI deps (gfpgan, realesrgan) are installed before opening.
+  const depsResult = await ensureEditorAiDeps();
+  if (!depsResult.ok) {
+    if (depsResult.cancelled) return { success: false, error: "cancelled" };
+    return { success: false, error: depsResult.error ?? "התקנת מודלים נכשלה" };
+  }
 
+  const engineDir = getEngineDir();
   const launcherPath = path.join(engineDir, "launch_editor.py");
   const standalonePath = path.join(engineDir, "standalone.py");
 
   if (fs.existsSync(launcherPath)) {
     return runPython(launcherPath, ["--input", inputPath, "--output", outputPath]);
   }
-
   // Fallback: opens standalone editor, but may not return output to SPP
   return runPython(standalonePath, []);
 });
@@ -1245,6 +1453,43 @@ function installFileDropNavigationGuard(win) {
   });
 }
 
+// ─── File-association helpers ─────────────────────────────────────────────────
+
+let pendingOpenFilePath = null;
+
+function extractFilePathFromArgv(argv) {
+  const exts = [".spp2", ".spp", ".psd", ".psb"];
+  // argv[0] is the executable; start from index 1.
+  for (let i = 1; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg && !arg.startsWith("-") && exts.some((e) => arg.toLowerCase().endsWith(e))) {
+      return arg;
+    }
+  }
+  return null;
+}
+
+// Single-instance lock — ensures only one SPP2 process runs at a time.
+// When a second instance starts (e.g. user double-clicks a .spp2 file while
+// the app is already open), we forward the file path to the first instance.
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on("second-instance", (_event, commandLine) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.focus();
+    const filePath = extractFilePathFromArgv(commandLine);
+    if (filePath) {
+      win.webContents.send("spp:open-file-path", filePath);
+    }
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1360,
@@ -1261,6 +1506,16 @@ function createWindow() {
 
   installFileDropNavigationGuard(win);
   win.loadFile(path.join(getAppRoot(), "dist", "index.html"));
+
+  // If the app was launched by double-clicking a file, send the path once
+  // the renderer is ready to receive it.
+  if (pendingOpenFilePath) {
+    const fileToOpen = pendingOpenFilePath;
+    pendingOpenFilePath = null;
+    win.webContents.once("did-finish-load", () => {
+      win.webContents.send("spp:open-file-path", fileToOpen);
+    });
+  }
 
   // לפתיחת DevTools זמנית אם צריך דיבוג:
   // win.webContents.openDevTools();
@@ -1329,6 +1584,9 @@ ipcMain.handle("spp:open-pdf-studio-window", async () => {
 });
 
 app.whenReady().then(async () => {
+  // Capture file path from launch arguments (file-association double-click).
+  pendingOpenFilePath = extractFilePathFromArgv(process.argv);
+
   try {
     seedProductLibraryIfNeeded();
   } catch (err) {

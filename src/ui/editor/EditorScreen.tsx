@@ -6,6 +6,7 @@ import {
   Bold,
   Boxes,
   ChevronDown,
+  ChevronRight,
   Circle,
   Clipboard,
   Copy,
@@ -14,6 +15,7 @@ import {
   FileDown,
   FileText,
   FileUp,
+  FolderPlus,
   ChevronsDown,
   ChevronsUp,
   FlipHorizontal,
@@ -93,6 +95,7 @@ import {
   createGridTextOverlay,
   createAdjustmentLayer,
   createFrameLayer,
+  createGroupLayer,
   createImageLayer,
   createMaskTextOverlay,
   createShapeLayer,
@@ -167,8 +170,8 @@ import { ImageEditToolbar } from "./ImageEditToolbar";
 import { ImageEditFloatingBar } from "./ImageEditFloatingBar";
 import { CropUI } from "./CropUI";
 import { useViewportStore, type ViewportStore } from "@/state/viewportStore";
-import type { Asset, Document } from "@/types/document";
-import type { AdjustmentLayer, BlendMode, ContentTransform, FrameLayer, ImageLayer, ImageLayerEffects, TextLayer, VisualLayer } from "@/types/layers";
+import type { Asset, Document, Page } from "@/types/document";
+import type { AdjustmentLayer, AdjustmentOperation, BlendMode, ContentTransform, FrameLayer, GroupLayer, ImageLayer, ImageLayerEffects, TextLayer, VisualLayer } from "@/types/layers";
 import { DEFAULT_IMAGE_LAYER_EFFECTS } from "@/types/layers";
 import type { GridLayoutRule } from "@/types/grid";
 import type { MaskLayoutRule } from "@/types/mask";
@@ -211,16 +214,20 @@ import { EditorStatusBar } from "./EditorStatusBar";
 import { ColorPanel } from "./ColorPanel";
 import { CanvasErrorBoundary } from "./CanvasErrorBoundary";
 import { renderTextToAlphaCanvas } from "./warpText";
+import { renderPageOffscreen, canRenderPageOffscreen } from "@/core/rendering/offscreenPageRenderer";
 import type { CanvasContextMenuTarget } from "./KonvaLayerNode";
 import { isImageEditorAvailable, openImageEditorForAsset } from "@/services/imageEditorService";
 import { isPrintPreviewAvailable, openPrintPreviewForRenderedPage, openPrintPreviewForPages } from "@/services/printPreviewService";
+import { preloadAssetsForPrint, waitForKonvaPageImages, type PrintImageStatus } from "@/services/printAssetLoader";
 import {
+  makeSmartSelectionInput,
   maskResultToSelectionMask,
   runSmartAutoSegment,
   runSmartInpaintRemove,
   runSmartRefineMask
 } from "@/services/ai/smartSelectionService";
 import { PrintRangeDialog } from "@/ui/print/PrintRangeDialog";
+import { PrintPreviewModal } from "@/ui/print/PrintPreviewModal";
 import type { PrintRangeMode } from "@/ui/print/printRangeUtils";
 import { getPagesForPrint } from "@/ui/print/printRangeUtils";
 import { loadLastPrintSettings, saveLastPrintSettings } from "@/ui/print/lastPrintSettings";
@@ -237,11 +244,27 @@ import type { PhotoPrintRule } from "@/types/photoPrint";
 import { CollageLayoutsPanel } from "@/ui/collage/CollageLayoutsPanel";
 import { UtilitiesMenu } from "@/ui/utilities/UtilitiesMenu";
 import { GoogleFontsBrowser } from "@/ui/utilities/GoogleFontsBrowser";
+import { HarmonizePanel } from "@/ui/editor/HarmonizePanel";
+import { ImageAdjustmentsPanel } from "@/ui/editor/ImageAdjustmentsPanel";
+import { AiToolsContainer } from "@/ui/aiTools/AiToolsContainer";
+import { useAiToolsStore } from "@/state/aiToolsStore";
+import { PageLookPanel } from "@/ui/editor/PageLookPanel";
+import { PageAdjustmentsSection } from "@/ui/editor/PageAdjustmentsSection";
+import { ToolLibrary } from "@/ui/editor/ToolLibrary";
+import type { LibraryItem, LibraryContext } from "@/core/presets/toolLibrary";
+import { createImageAdjustment, createPageLookLayer, type ImageAdjustmentTemplate } from "@/types/imageAdjustments";
+import { ENABLE_IMAGE_LEVEL_ADJUSTMENTS, ENABLE_PAGE_LOOK_LAYERS, ENABLE_LEGACY_ADJUSTMENT_LAYER_CREATION } from "@/core/features/adjustmentFlags";
+import { runWithBusy, useUiBusyStore } from "@/state/uiBusyStore";
+import { LoadingToast } from "@/ui/editor/LoadingToast";
+import { SmartArrangeControl } from "@/ui/editor/SmartArrangeControl";
+import { analyzeLayersForSmartArrange, runSmartArrange, type SmartArrangeMode } from "@/core/smartArrange";
 import { openInPhotoshop, stopPhotoshopWatch } from "@/integrations/photoshopIntegration";
 import { openInColorLab, stopColorLabWatch } from "@/integrations/colorLabIntegration";
 import { useUtilitiesSettings } from "@/utilities/settingsStore";
 import { isEditableShortcutTarget, matchShortcut, shortcutBindingsToShortcuts } from "@/core/input/inputSystem";
-import { createExportRenderOptions, getImportPreviewMaxSide, useAppSettings } from "@/settings";
+import { createExportRenderOptions, getExportPixelRatio, getImportPreviewMaxSide, useAppSettings } from "@/settings";
+import { safeFilename } from "@/core";
+import { downloadDataUrl } from "@/ui/file";
 import { syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import {
   fontFamilyExists,
@@ -252,6 +275,7 @@ import {
   type FontEntry
 } from "./fonts";
 import { GraphicsLibraryPanel } from "@/ui/emoji/EmojiLibraryPanel";
+import { useGraphicsLibraryStore } from "@/features/graphicsLibrary/store";
 import { getBatchProductionMeta, upsertVariableField, removeVariableFieldForLayer, setBatchProductionMeta } from "@/core/batchProduction/batchProductionMeta";
 import { saveTemplateToStore } from "@/core/batchProduction/batchTemplateStore";
 import { convertImageLayerToVariableFrame } from "@/core/batchProduction/imageToFrameConversion";
@@ -423,6 +447,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
 
   const [canvasContextMenu, setCanvasContextMenu] = useState<CanvasContextMenuTarget | null>(null);
   const [layerContextMenu, setLayerContextMenu] = useState<{ layerId: string; screenX: number; screenY: number } | null>(null);
+  const [harmonizeTarget, setHarmonizeTarget] = useState<{ layerId: string; bbox: { x: number; y: number; w: number; h: number } } | null>(null);
   const [effectsClipboard, setEffectsClipboard] = useState<LayerEffectsClipboard | null>(null);
   const [layerClipboard, setLayerClipboard] = useState<VisualLayer[] | null>(null);
   const [selectionClipboard, setSelectionClipboard] = useState<SelectionClipboard | null>(null);
@@ -434,6 +459,8 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
   const [showBackHomeDialog, setShowBackHomeDialog] = useState(false);
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   const [isPrintBusy, setIsPrintBusy] = useState(false);
+  const [showPrintPreviewModal, setShowPrintPreviewModal] = useState(false);
+  const [printPreviewPageIndices, setPrintPreviewPageIndices] = useState<number[]>([]);
   const [saveDropdownOpen, setSaveDropdownOpen] = useState(false);
   const [exportScope, setExportScope] = useState<"current" | "all">("all");
   const [fileDropActive, setFileDropActive] = useState(false);
@@ -464,9 +491,11 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
   const addLayer = useDocumentStore((state) => state.addLayer);
   const addAssetAndLayer = useDocumentStore((state) => state.addAssetAndLayer);
   const updateLayer = useDocumentStore((state) => state.updateLayer);
+  const applySmartArrange = useDocumentStore((state) => state.applySmartArrange);
   const removeLayer = useDocumentStore((state) => state.removeLayer);
   const moveLayer = useDocumentStore((state) => state.moveLayer);
   const reorderLayers = useDocumentStore((state) => state.reorderLayers);
+  const moveLayerIntoGroup = useDocumentStore((state) => state.moveLayerIntoGroup);
   const addPage = useDocumentStore((state) => state.addPage);
   const duplicatePage = useDocumentStore((state) => state.duplicatePage);
   const removePage = useDocumentStore((state) => state.removePage);
@@ -797,6 +826,114 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
   }, [maskContentEditActive, selectedLayer, document, activePage, updateLayer, exitMaskContentEdit]);
 
   useEffect(() => {
+    function nudgeSelectedLayers(dx: number, dy: number): void {
+      if (activePage === null || selectedLayerIds.length === 0) return;
+      const ids = new Set(selectedLayerIds);
+      let movedCount = 0;
+      applyDocumentChange(
+        "KeyboardNudgeSelectionCommand",
+        (doc) => ({
+          ...doc,
+          pages: doc.pages.map((page) => {
+            if (page.id !== activePage.id) return page;
+            return {
+              ...page,
+              layers: page.layers.map((layer) => {
+                if (!ids.has(layer.id) || layer.locked || layer.type === "guide" || layer.type === "background") return layer;
+                movedCount += 1;
+                return { ...layer, x: layer.x + dx, y: layer.y + dy } as VisualLayer;
+              })
+            };
+          })
+        }),
+        activePage.id
+      );
+      if (movedCount > 0) setStatus("Selection nudged");
+    }
+
+    function imageCanvasFitPatch(layer: Extract<VisualLayer, { type: "image" }>, mode: "fit" | "fill"): Partial<VisualLayer> | null {
+      if (activePage === null || layer.width <= 0 || layer.height <= 0) return null;
+      const scaleX = activePage.width / layer.width;
+      const scaleY = activePage.height / layer.height;
+      const scale = mode === "fill" ? Math.max(scaleX, scaleY) : Math.min(scaleX, scaleY);
+      const width = layer.width * scale;
+      const height = layer.height * scale;
+      return {
+        x: (activePage.width - width) / 2,
+        y: (activePage.height - height) / 2,
+        width,
+        height
+      } as Partial<VisualLayer>;
+    }
+
+    function isNearPatch(layer: VisualLayer, patch: Partial<VisualLayer>): boolean {
+      return Math.abs(layer.x - (patch.x ?? layer.x)) < 0.5 &&
+        Math.abs(layer.y - (patch.y ?? layer.y)) < 0.5 &&
+        Math.abs(layer.width - (patch.width ?? layer.width)) < 0.5 &&
+        Math.abs(layer.height - (patch.height ?? layer.height)) < 0.5;
+    }
+
+    function handleSpaceFit(): boolean {
+      if (selectedLayer === null || selectedLayerIds.length !== 1) return false;
+      if (selectedLayer.type === "frame" && selectedLayer.imageAssetId !== undefined) {
+        handleCanvasLayerChange({
+          ...selectedLayer,
+          fitMode: selectedLayer.fitMode === "fill" ? "fit" : "fill"
+        });
+        setStatus(selectedLayer.fitMode === "fill" ? "Frame image set to fit" : "Frame image set to fill");
+        return true;
+      }
+      if (selectedLayer.type === "image") {
+        const fitPatch = imageCanvasFitPatch(selectedLayer, "fit");
+        if (fitPatch === null) return false;
+        const mode = isNearPatch(selectedLayer, fitPatch) ? "fill" : "fit";
+        const patch = mode === "fit" ? fitPatch : imageCanvasFitPatch(selectedLayer, "fill");
+        if (patch === null) return false;
+        handleCanvasLayerChange({ ...selectedLayer, ...patch } as VisualLayer);
+        setStatus(mode === "fit" ? "Image fitted to canvas" : "Image filled canvas");
+        return true;
+      }
+      return false;
+    }
+
+    function onSelectionKey(event: KeyboardEvent): void {
+      if (document === null || activePage === null) return;
+      if (isEditableShortcutTarget(event.target)) return;
+      if (imageEditMode || maskContentEditActive || useDrawingToolsStore.getState().activeTool !== null) return;
+
+      const arrows: Record<string, [number, number]> = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1]
+      };
+      const direction = arrows[event.key];
+      if (direction !== undefined && selectedLayerIds.length > 0) {
+        const step = event.altKey ? 0.25 : event.shiftKey || event.ctrlKey || event.metaKey ? 10 : 1;
+        event.preventDefault();
+        nudgeSelectedLayers(direction[0] * step, direction[1] * step);
+        return;
+      }
+
+      if (event.code === "Space" && !event.repeat && handleSpaceFit()) {
+        event.preventDefault();
+      }
+    }
+
+    window.addEventListener("keydown", onSelectionKey);
+    return () => window.removeEventListener("keydown", onSelectionKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    activePage,
+    document,
+    imageEditMode,
+    maskContentEditActive,
+    selectedLayer,
+    selectedLayerIds,
+    applyDocumentChange
+  ]);
+
+  useEffect(() => {
     if (document === null) {
       return;
     }
@@ -1031,6 +1168,25 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
   const currentDocument = document;
   const currentPage = activePage;
   const currentPageIndex = Math.max(0, currentDocument.pages.findIndex((page) => page.id === currentPage.id));
+
+  const handleSmartArrange = useCallback(
+    (mode: SmartArrangeMode) => {
+      const context = analyzeLayersForSmartArrange({
+        page: currentPage,
+        selectedLayerIds,
+        mode
+      });
+      const result = runSmartArrange(context);
+      const flashToast = useUiBusyStore.getState().flashToast;
+      if (result.updates.length === 0) {
+        flashToast("לא נמצאו שכבות מתאימות לסידור");
+        return;
+      }
+      applySmartArrange(currentPage.id, result.updates, "SmartArrangeAction");
+      flashToast("הסידור החכם הוחל • Ctrl+Z לביטול");
+    },
+    [currentPage, selectedLayerIds, applySmartArrange]
+  );
   const suspiciousScreenshotCropAssets = currentDocument.assets.filter((asset) =>
     asset.kind === "image" &&
     getScreenshotCropSuggestion(asset) !== null &&
@@ -1176,12 +1332,92 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     setStatus(statusMessage);
   }
 
-  function handleAddBrightnessContrastAdjustment(): void {
+  function handleAddAdjustmentLayer(operation: AdjustmentOperation): void {
     const layer = createAdjustmentLayer({
+      name: adjustmentOperationLabel(operation),
       zIndex: layerZIndexAboveSelection(),
-      rect: { x: 0, y: 0, width: currentPage.width, height: currentPage.height }
+      rect: { x: 0, y: 0, width: currentPage.width, height: currentPage.height },
+      operation
     });
-    insertLayerAboveSelection(layer, "נוספה שכבת התאמה: בהירות/ניגודיות");
+    insertLayerAboveSelection(layer, `נוספה שכבת התאמה: ${adjustmentOperationLabel(operation)}`);
+  }
+
+  function handleAddGroup(): void {
+    const existingGroupCount = currentPage.layers.filter((l) => l.type === "group").length;
+    const layer = createGroupLayer({
+      name: `קבוצה ${existingGroupCount + 1}`,
+      zIndex: layerZIndexAboveSelection()
+    });
+    addLayer(currentPage.id, layer);
+  }
+
+  function handleDeleteGroup(groupId: string, deleteChildren: boolean): void {
+    const group = currentPage.layers.find((l) => l.id === groupId) as GroupLayer | undefined;
+    if (group === undefined) return;
+    if (deleteChildren) {
+      const toRemove = new Set([groupId, ...group.childIds]);
+      applyDocumentChange(
+        "DeleteGroupWithChildrenCommand",
+        (doc) => ({
+          ...doc,
+          pages: doc.pages.map((p) =>
+            p.id !== currentPage.id ? p : { ...p, layers: p.layers.filter((l) => !toRemove.has(l.id)) }
+          )
+        }),
+        currentPage.id
+      );
+    } else {
+      applyDocumentChange(
+        "DeleteGroupOnlyCommand",
+        (doc) => ({
+          ...doc,
+          pages: doc.pages.map((p) =>
+            p.id !== currentPage.id ? p : {
+              ...p,
+              layers: p.layers
+                .filter((l) => l.id !== groupId)
+                .map((l) => l.parentId === groupId ? { ...l, parentId: undefined } : l)
+            }
+          )
+        }),
+        currentPage.id
+      );
+    }
+  }
+
+  function handleDuplicateGroup(groupId: string): void {
+    const group = currentPage.layers.find((l) => l.id === groupId) as GroupLayer | undefined;
+    if (group === undefined) return;
+    const children = group.childIds
+      .map((id) => currentPage.layers.find((l) => l.id === id))
+      .filter((l): l is VisualLayer => l !== undefined);
+    const now = Date.now();
+    const newGroupId = `group-${now}`;
+    const newChildIds: string[] = [];
+    const newLayers: VisualLayer[] = [];
+    children.forEach((child, i) => {
+      const newId = `${child.type}-${now + i + 1}`;
+      newChildIds.push(newId);
+      newLayers.push({ ...child, id: newId, parentId: newGroupId, zIndex: child.zIndex - 1, selected: false });
+    });
+    const newGroup: GroupLayer = {
+      ...group,
+      id: newGroupId,
+      name: `${group.name} (עותק)`,
+      zIndex: group.zIndex - 1,
+      childIds: newChildIds,
+      selected: false
+    };
+    applyDocumentChange(
+      "DuplicateGroupCommand",
+      (doc) => ({
+        ...doc,
+        pages: doc.pages.map((p) =>
+          p.id !== currentPage.id ? p : { ...p, layers: [...p.layers, newGroup, ...newLayers] }
+        )
+      }),
+      currentPage.id
+    );
   }
 
   function handleAddShapeLayer(): void {
@@ -1489,9 +1725,49 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     requestAnimationFrame(() => replaceImageInputRef.current?.click());
   }
 
-  function handleCanvasMenuFavoritePlaceholder(): void {
+  function handleAddToLocalLibrary(): void {
+    if (!canvasContextMenu) return;
+    const layer = getCanvasMenuLayer(canvasContextMenu);
     setCanvasContextMenu(null);
-    setStatus("Favorites placeholder: element library folder is not connected yet");
+    if (layer === null || layer.type !== "image") {
+      setStatus("לא נמצאה תמונה לשמירה");
+      return;
+    }
+    const asset = currentDocument.assets.find((a) => a.id === layer.assetId);
+    if (!asset?.previewPath) {
+      setStatus("לא נמצאה תמונה לשמירה");
+      return;
+    }
+    const dataUrl = asset.previewPath;
+    const match = /^data:image\/(\w+);base64,(.+)$/.exec(dataUrl);
+    if (!match) {
+      setStatus("פורמט תמונה לא נתמך");
+      return;
+    }
+    const ext = match[1] === "jpeg" ? "jpg" : match[1];
+    const base64 = match[2];
+    const filename = (asset.name || layer.name || "graphic").replace(/\.[^.]+$/, "");
+    void (async () => {
+      try {
+        const result = await window.spp.glib?.saveAsset({ base64, ext, filename, category: "Elements" });
+        if (result?.success && result.filePath && result.fileName) {
+          await useGraphicsLibraryStore.getState().addFileToIndex({
+            filePath: result.filePath,
+            fileName: result.fileName,
+            mtimeMs: result.mtimeMs ?? Date.now(),
+            size: result.size ?? base64.length,
+          });
+          // Switch to graphics tab so user sees the saved file immediately
+          setLeftTab("emoji");
+          useGraphicsLibraryStore.getState().setFilter("category", "Elements");
+          setStatus(`"${filename}" נשמרה בספרייה המקומית`);
+        } else {
+          setStatus(result?.error ?? "שגיאה בשמירה לספרייה");
+        }
+      } catch {
+        setStatus("שגיאה בשמירה לספרייה");
+      }
+    })();
   }
 
   function addCollageTemplateFromDataUrl(input: {
@@ -2700,18 +2976,40 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     });
   }
 
-  async function renderPagesForExport(mimeType: "image/png" | "image/jpeg"): Promise<PrintableStageImage[]> {
+  async function renderPageForExport(page: Page, mimeType: "image/png" | "image/jpeg"): Promise<PrintableStageImage | null> {
+    if (canRenderPageOffscreen(page)) {
+      try {
+        const rendered = await renderPageOffscreen(page, currentDocument.assets, {
+          mimeType,
+          pixelRatio: getExportPixelRatio(page, performanceSettings),
+          jpegQuality: exportRenderOptions.jpgQuality
+        });
+        markDebugEvent("export:offscreen-render-used", { pageId: page.id, mimeType });
+        return rendered;
+      } catch (error) {
+        markDebugEvent("export:offscreen-render-failed", {
+          pageId: page.id,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+
     const stage = stageRef.current;
-    if (stage === null) return [];
+    if (stage === null) return null;
+    if (page.id !== useDocumentStore.getState().activePageId) {
+      setActivePage(page.id);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    }
+    return exportStagePrintImage(stage, page, mimeType, exportRenderOptions);
+  }
+
+  async function renderPagesForExport(mimeType: "image/png" | "image/jpeg"): Promise<PrintableStageImage[]> {
     const allPages = currentDocument.pages;
     const originalPageId = currentPage.id;
     const rendered: PrintableStageImage[] = [];
     for (const page of allPages) {
-      if (page.id !== useDocumentStore.getState().activePageId) {
-        setActivePage(page.id);
-        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-      }
-      rendered.push(exportStagePrintImage(stage, page, mimeType, exportRenderOptions));
+      const renderedPage = await renderPageForExport(page, mimeType);
+      if (renderedPage !== null) rendered.push(renderedPage);
     }
     if (useDocumentStore.getState().activePageId !== originalPageId) {
       setActivePage(originalPageId);
@@ -2721,40 +3019,55 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
   }
 
   async function handleExportPng(): Promise<void> {
-    const stage = stageRef.current;
-    if (stage === null) return;
     if (exportScope === "all" && currentDocument.pages.length > 1) {
       const pages = await renderPagesForExport("image/png");
       downloadRenderedPagesAsImages(pages, currentDocument.name);
       setStatus(`יוצאו ${pages.length} עמודי PNG`);
     } else {
-      exportStagePng(stage, currentDocument.name, currentPage, exportRenderOptions);
+      const rendered = await renderPageForExport(currentPage, "image/png");
+      if (rendered === null) {
+        const stage = stageRef.current;
+        if (stage === null) return;
+        exportStagePng(stage, currentDocument.name, currentPage, exportRenderOptions);
+      } else {
+        downloadDataUrl(`${safeFilename(currentDocument.name)}.png`, rendered.dataUrl);
+      }
       setStatus("PNG יוצא");
     }
   }
 
   async function handleExportPdf(): Promise<void> {
-    const stage = stageRef.current;
-    if (stage === null) return;
     if (exportScope === "all" && currentDocument.pages.length > 1) {
       const pages = await renderPagesForExport("image/png");
       await exportRenderedPagesAsPdf(pages, currentDocument.name);
       setStatus(`PDF יוצא (${pages.length} עמודים)`);
     } else {
-      await exportStagePdf(stage, currentDocument.name, currentPage, exportRenderOptions);
+      const rendered = await renderPageForExport(currentPage, "image/png");
+      if (rendered === null) {
+        const stage = stageRef.current;
+        if (stage === null) return;
+        await exportStagePdf(stage, currentDocument.name, currentPage, exportRenderOptions);
+      } else {
+        await exportRenderedPagesAsPdf([rendered], currentDocument.name);
+      }
       setStatus("PDF יוצא");
     }
   }
 
   async function handleExportJpg(): Promise<void> {
-    const stage = stageRef.current;
-    if (stage === null) return;
     if (exportScope === "all" && currentDocument.pages.length > 1) {
       const pages = await renderPagesForExport("image/jpeg");
       downloadRenderedPagesAsImages(pages, currentDocument.name);
       setStatus(`יוצאו ${pages.length} עמודי JPEG`);
     } else {
-      exportStageJpg(stage, currentDocument.name, currentPage, exportRenderOptions);
+      const rendered = await renderPageForExport(currentPage, "image/jpeg");
+      if (rendered === null) {
+        const stage = stageRef.current;
+        if (stage === null) return;
+        exportStageJpg(stage, currentDocument.name, currentPage, exportRenderOptions);
+      } else {
+        downloadDataUrl(`${safeFilename(currentDocument.name)}.jpg`, rendered.dataUrl);
+      }
       setStatus("JPG exported");
     }
   }
@@ -2767,10 +3080,12 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     setShowPrintDialog(true);
   }
 
+  /**
+   * Open the fast in-app preview modal immediately.
+   * No rendering happens here — the modal renders low-res thumbnails lazily
+   * in a background queue while the user browses the page list.
+   */
   async function handlePrintFromDialog(mode: PrintRangeMode, customRange: string | undefined): Promise<void> {
-    const stage = stageRef.current;
-    if (!stage) return;
-
     const allPages = currentDocument.pages;
     const rangeResult = getPagesForPrint(mode, customRange, allPages.length, currentPageIndex);
 
@@ -2779,15 +3094,90 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
       return;
     }
 
-    const pageIndices = rangeResult;
     saveLastPrintSettings({ printRangeMode: mode, customPageRange: customRange });
+    setShowPrintDialog(false);
+    setPrintPreviewPageIndices(rangeResult);
+    setShowPrintPreviewModal(true);
+  }
+
+  /**
+   * Full-quality print flow — called when the user clicks "הדפסה" inside the
+   * preview modal.  Uses the UNCHANGED high-quality render path (full pixelRatio,
+   * PNG) and the Python print preview subprocess.
+   *
+   * Preview thumbnails shown in PrintPreviewModal are stored only in that
+   * component's local state and CANNOT reach this function — onPrint() carries
+   * no image data, only a signal to start a fresh render.
+   *
+   * GRAY-IMAGE FIX
+   * ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
+   * Step 1 — preloadAssetsForPrint: loads every asset into the browser image
+   *   decode cache before any page is switched.  This ensures useKonvaImage's
+   *   onload fires within the RAF cycle that follows each page switch, preventing
+   *   the race condition where stage.toDataURL() runs before images are decoded.
+   *
+   * Step 2 — waitForKonvaPageImages: after each page switch + double-RAF, polls
+   *   the Konva stage until no HTMLImageElement is still in loading state.
+   *   Safety net for large images / slow machines.
+   *
+   * URL.revokeObjectURL is not called anywhere in this path; assets use data URLs
+   * that persist for the lifetime of the document.
+   */
+  async function executeFinalPrint(pageIndices: number[]): Promise<void> {
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    const allPages = currentDocument.pages;
     setIsPrintBusy(true);
-    markDebugEvent("print:prepare", { mode, customRange, pageCount: pageIndices.length });
+    markDebugEvent("print:prepare", { pageCount: pageIndices.length });
+
+    // ג”€ג”€ Step 1: Pre-load all assets into the browser image decode cache ג”€ג”€ג”€ג”€ג”€ג”€
+    // Must happen BEFORE any page switching so the cache is warm when
+    // useKonvaImage sets img.src after the page switch.
+    setStatus("טוען תמונות לפני הדפסה…");
+
+    let preloadStatuses: PrintImageStatus[];
+    try {
+      preloadStatuses = await preloadAssetsForPrint(allPages, pageIndices, currentDocument.assets);
+    } catch (err) {
+      setStatus(`שגיאה בטעינת תמונות: ${err instanceof Error ? err.message : "לא ידוע"}`);
+      setIsPrintBusy(false);
+      return;
+    }
+
+    // If any asset could not be loaded, warn the user and abort.
+    // The user can retry by clicking "הדפסה" again (e.g., after reconnecting
+    // to a drive or waiting for a slow asset to load).
+    const failedStatuses = preloadStatuses.filter((s) => !s.loaded);
+    if (failedStatuses.length > 0) {
+      const first = failedStatuses[0]!;
+      const label = first.layerName ? `"${first.layerName}"` : "תמונה";
+      setStatus(
+        `תמונה לא נטענה: עמוד ${first.pageIndex}, שכבה ${label}` +
+        ` — ${first.error ?? "שגיאה לא ידועה"}. לחץ שוב על הדפסה לניסיון נוסף.`,
+      );
+      markDebugEvent("print:preload-failed", {
+        failedCount: failedStatuses.length,
+        first: {
+          pageIndex: first.pageIndex,
+          assetId: first.assetId,
+          layerName: first.layerName,
+          error: first.error,
+        },
+      });
+      setIsPrintBusy(false);
+      return;
+    }
+
+    markDebugEvent("print:preload-complete", {
+      pageCount: pageIndices.length,
+      assetCount: preloadStatuses.length,
+    });
     setStatus("מכין עמודים להדפסה…");
 
     try {
       if (pageIndices.length === 1) {
-        // Single page → Python print preview (existing flow)
+        // Single page → Python print preview
         const page = allPages[pageIndices[0]];
         if (!page) { setStatus("עמוד לא נמצא"); return; }
 
@@ -2797,16 +3187,23 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
           await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
         }
 
+        // ג”€ג”€ Step 2: Verify all Konva.Image nodes are fully loaded ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
+        const imageCheck = await waitForKonvaPageImages(stage, 1);
+        if (!imageCheck.allLoaded) {
+          console.warn(
+            `[print] Page 1: ${imageCheck.unloadedCount} image(s) still loading after timeout — printing anyway`,
+          );
+        }
+
         markDebugEvent("print:render-single-start", { pageId: page.id });
         const rendered = exportStagePrintImage(stage, page, "image/png", exportRenderOptions);
         markDebugEvent("print:render-single-end", { pageId: page.id, dataUrlLength: rendered.dataUrl.length });
         const pageName = typeof page.metadata["name"] === "string" ? page.metadata["name"] : undefined;
 
-        setShowPrintDialog(false);
         const result = await openPrintPreviewForRenderedPage({
           ...rendered,
           documentName: currentDocument.name,
-          pageName
+          pageName,
         });
 
         if (!result.success) {
@@ -2816,7 +3213,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
         setStatus("חלון הדפסה נפתח");
 
       } else {
-        // Multi-page → render all pages sequentially → Python print preview (multi-page mode)
+        // Multi-page → render all pages at full quality → Python print preview
         const originalPageId = currentPage.id;
         const renderedPages: PrintableStageImage[] = [];
         const renderedPageNames: string[] = [];
@@ -2824,12 +3221,25 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
         for (const idx of pageIndices) {
           const page = allPages[idx];
           if (!page) continue;
-          markDebugEvent("print:page-switch-for-render", { from: useDocumentStore.getState().activePageId, to: page.id, index: idx });
+          markDebugEvent("print:page-switch-for-render", {
+            from: useDocumentStore.getState().activePageId, to: page.id, index: idx,
+          });
           setActivePage(page.id);
           await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+
+          // ג”€ג”€ Step 2: Verify all Konva.Image nodes are fully loaded ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
+          const imageCheck = await waitForKonvaPageImages(stage, idx + 1);
+          if (!imageCheck.allLoaded) {
+            console.warn(
+              `[print] Page ${idx + 1}: ${imageCheck.unloadedCount} image(s) still loading after timeout — printing anyway`,
+            );
+          }
+
           markDebugEvent("print:render-page-start", { pageId: page.id, index: idx });
           renderedPages.push(exportStagePrintImage(stage, page, "image/png", exportRenderOptions));
-          markDebugEvent("print:render-page-end", { pageId: page.id, index: idx, renderedCount: renderedPages.length });
+          markDebugEvent("print:render-page-end", {
+            pageId: page.id, index: idx, renderedCount: renderedPages.length,
+          });
           const name = typeof page.metadata["name"] === "string" ? page.metadata["name"] : `עמוד ${idx + 1}`;
           renderedPageNames.push(name);
         }
@@ -2842,16 +3252,13 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
           return;
         }
 
-        setShowPrintDialog(false);
         markDebugEvent("print:open-preview-pages", { pageCount: renderedPages.length });
         const result = await openPrintPreviewForPages(renderedPages, currentDocument.name, renderedPageNames);
 
         if (!result.success) {
-          // Fallback: open the first page image with the OS default app (Windows print tool)
           setStatus(`שגיאה במודול ההדפסה — פותח בכלי Windows: ${result.error ?? ""}`);
           const sppFallback = (window as unknown as { spp?: { openPath?: (p: string) => Promise<{ error?: string }> } }).spp;
           if (sppFallback?.openPath) {
-            // open first temp image so user can print from OS viewer
             const sppWrite = (window as unknown as { spp?: { writeTempImage?: (d: string, e: string) => Promise<string> } }).spp;
             if (sppWrite?.writeTempImage) {
               const p = renderedPages[0];
@@ -2869,6 +3276,12 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     } finally {
       setIsPrintBusy(false);
     }
+  }
+
+  /** Called by the preview modal's "הדפסה" button. */
+  async function handlePreviewModalPrint(): Promise<void> {
+    setShowPrintPreviewModal(false);
+    await executeFinalPrint(printPreviewPageIndices);
   }
 
   async function handlePrintOneCopy(): Promise<void> {
@@ -3157,8 +3570,8 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
       return;
     }
 
-    // Render the layer's *current visible alpha* (image alpha ∩ shape clip ∩
-    // pixelMask ∩ library mask, with crop/flip/imageScale/imageOffset) into a
+    // Render the layer's *current visible alpha* (image alpha גˆ© shape clip גˆ©
+    // pixelMask גˆ© library mask, with crop/flip/imageScale/imageOffset) into a
     // new mask asset so the Frame/Mask exactly matches what the user saw.
     let maskAsset: Asset;
     try {
@@ -3308,7 +3721,11 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
         return;
       }
       const mask = await maskResultToSelectionMask(result, target.asset.hash ?? target.asset.checksum ?? target.asset.id);
-      store.setSelectionMask(mask);
+      if (store.smartSelectionMode === "add") {
+        store.addToSelectionMask(mask);
+      } else {
+        store.setSelectionMask(mask);
+      }
       store.setSmartSelectionStatus(result.fallback ? "fallback" : "ready", result.message ?? "Smart selection ready");
       store.setSmartSelectionProgress(null);
       setStatus(result.fallback ? "Smart selection used fallback preview" : "Smart selection ready");
@@ -3329,6 +3746,10 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     store.setSmartSelectionProgress({ phase: "refine", message: "Refining edges...", percent: null });
     setStatus("Refining selection edges...");
     try {
+      const input = makeSmartSelectionInput(target.asset, target.layer);
+      if (input !== null) {
+        await window.spp?.smartSelection?.loadImage(input.imageId, input.imagePath, input.sourceHash);
+      }
       const result = await runSmartRefineMask(target.asset.id, selection.data, selection.width, selection.height, store.smartSelectionSoftness);
       if (result === null) {
         store.setSmartSelectionStatus("error", "Edge refinement is unavailable");
@@ -3944,7 +4365,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     if (isProductMode) {
       return (
         <div className="rs-mode-section">
-          <div className="rs-mode-label"><Boxes size={11} />׳׳¦׳‘ ׳׳•׳¦׳¨</div>
+          <div className="rs-mode-label"><Boxes size={11} />מצב מוצר</div>
           <ProductDefinitionPanel />
         </div>
       );
@@ -3952,7 +4373,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     if (isCollageMode && activeCollageRule !== null) {
       return (
         <div className="rs-mode-section">
-          <div className="rs-mode-label"><SlidersHorizontal size={11} />׳׳¦׳‘ ׳§׳•׳׳׳–׳³</div>
+          <div className="rs-mode-label"><SlidersHorizontal size={11} />מצב קולאז׳</div>
           <CollageModePanel rule={activeCollageRule} selectedLayer={selectedLayer} onReplaceImage={() => replaceImageInputRef.current?.click()} />
         </div>
       );
@@ -3960,7 +4381,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     if (isGridMode && activeGridRule !== null) {
       return (
         <div className="rs-mode-section">
-          <div className="rs-mode-label"><SlidersHorizontal size={11} />׳׳¦׳‘ ׳’׳¨׳™׳“</div>
+          <div className="rs-mode-label"><SlidersHorizontal size={11} />מצב גריד</div>
           <GridModePanel
             assignmentCount={currentDocument.gridImageAssignments.filter((assignment) => assignment.gridId === activeGridRule.id).length}
             rule={activeGridRule}
@@ -3979,7 +4400,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     if (isMaskMode && activeMaskRule !== null) {
       return (
         <div className="rs-mode-section">
-          <div className="rs-mode-label"><SlidersHorizontal size={11} />׳׳¦׳‘ ׳׳¡׳›׳”</div>
+          <div className="rs-mode-label"><SlidersHorizontal size={11} />מצב מסכה</div>
           <MaskModePanel
             assignmentCount={currentDocument.maskImageAssignments.filter((assignment) => assignment.maskId === activeMaskRule.id).length}
             dpi={currentPage.setup.dpi}
@@ -4000,7 +4421,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     if (isPhotoPrintMode && activePhotoPrintRule !== null) {
       return (
         <div className="rs-mode-section">
-          <div className="rs-mode-label"><SlidersHorizontal size={11} />׳₪׳™׳×׳•׳— ׳×׳׳•׳ ׳•׳×</div>
+          <div className="rs-mode-label"><SlidersHorizontal size={11} />פיתוח תמונות</div>
           <PhotoPrintModePanel
             rule={activePhotoPrintRule}
             document={currentDocument}
@@ -4016,7 +4437,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     if (isClassPhotoMode && activeClassPhotoRule !== null) {
       return (
         <div className="rs-mode-section">
-          <div className="rs-mode-label"><SlidersHorizontal size={11} />׳×׳׳•׳ ׳× ׳׳—׳–׳•׳¨</div>
+          <div className="rs-mode-label"><SlidersHorizontal size={11} />תמונת מחזור</div>
           <ClassPhotoModePanel
             rule={activeClassPhotoRule}
             selectedLayer={selectedLayer}
@@ -4028,7 +4449,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     if (isBlessingMode && activeBlessingRule !== null) {
       return (
         <div className="rs-mode-section">
-          <div className="rs-mode-label"><SlidersHorizontal size={11} />׳׳¦׳‘ ׳‘׳¨׳›׳•׳×</div>
+          <div className="rs-mode-label"><SlidersHorizontal size={11} />מצב ברכות</div>
           <BlessingModePanel rule={activeBlessingRule} selectedLayer={selectedLayer} />
         </div>
       );
@@ -4061,6 +4482,21 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
           isBusy={isPrintBusy}
         />
       )}
+      {/* Fast in-app print preview modal — shows low-res thumbnails lazily.
+          Final print quality is unchanged; clicking "הדפסה" here runs the
+          full-quality render path via handlePreviewModalPrint / executeFinalPrint. */}
+      {showPrintPreviewModal && stageRef.current && (
+        <PrintPreviewModal
+          pages={currentDocument.pages}
+          selectedIndices={printPreviewPageIndices}
+          stage={stageRef.current}
+          originalPageId={currentPage.id}
+          setActivePage={setActivePage}
+          documentName={currentDocument.name}
+          onClose={() => setShowPrintPreviewModal(false)}
+          onPrint={() => { void handlePreviewModalPrint(); }}
+        />
+      )}
       {maskOverflowPrompt !== null && (() => {
         const nextSize = {
           maskWidth: maskOverflowPrompt.patch.maskWidth ?? maskOverflowPrompt.rule.maskWidth,
@@ -4070,9 +4506,9 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
         const fitSize = pageSizeForMaskFit(currentPage, maskOverflowPrompt.rule, nextSize);
         return (
           <MaskOverflowPrompt
-            available={`${Math.round(overflow.availableWidth)} × ${Math.round(overflow.availableHeight)} px`}
-            required={`${Math.round(overflow.requiredWidth)} × ${Math.round(overflow.requiredHeight)} px`}
-            resizedTo={`${fitSize.width} × ${fitSize.height} px`}
+            available={`${Math.round(overflow.availableWidth)} ֳ— ${Math.round(overflow.availableHeight)} px`}
+            required={`${Math.round(overflow.requiredWidth)} ֳ— ${Math.round(overflow.requiredHeight)} px`}
+            resizedTo={`${fitSize.width} ֳ— ${fitSize.height} px`}
             onCancel={() => {
               setMaskOverflowPrompt(null);
               setStatus("שינוי גודל המסיכה בוטל");
@@ -4191,7 +4627,6 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
           >
             <Settings size={15} />
           </button>
-          <span className="topbar-divider" />
           <UtilitiesMenu
             customerName={currentDocument.metadata.customerName as string | undefined}
             customerPhone={(currentDocument.metadata.customerPhone ?? currentDocument.metadata.phoneNumber) as string | undefined}
@@ -4425,6 +4860,12 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
         }}
         onToggleGrid={viewport.toggleGrid}
         onToggleSnap={viewport.toggleSnap}
+        onOpenAiTool={(tool) => {
+          if (selectedLayer?.type === "image") {
+            useAiToolsStore.getState().openTool({ tool, layerId: selectedLayer.id, pageId: currentPage.id });
+            exitImageEditMode();
+          }
+        }}
       />
 
       <section className="stage">
@@ -4522,13 +4963,15 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                 selectedLayerIds={selectedLayerIds}
                 selectedLayerId={selectedLayerId}
                 variableLayerIds={variableLayerIds}
-                onAddAdjustmentLayer={handleAddBrightnessContrastAdjustment}
+                onAddAdjustmentLayer={handleAddAdjustmentLayer}
+                onAddGroup={handleAddGroup}
                 onAddImageLayer={() => imageInputRef.current?.click()}
                 onAddShapeLayer={handleAddShapeLayer}
                 onAddTextLayer={handleAddText}
                 onRenameComplete={() => setRenamingLayerId(null)}
                 onStartRename={(layerId) => setRenamingLayerId(layerId)}
                 onReorder={(layerIdsTopToBottom) => reorderLayers(currentPage.id, layerIdsTopToBottom)}
+                onSmartArrange={handleSmartArrange}
                 onSelect={(layerId) => setSelection([layerId])}
                 onSelectMany={(layerIds) => setSelection(layerIds)}
                 onPatchLayer={(layer) => updateLayer(currentPage.id, layer)}
@@ -4558,6 +5001,9 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                   setSelection([frameId]);
                   setStatus("התמונה הועברה לתוך הפריים");
                 }}
+                onMoveLayerIntoGroup={(layerId, groupId) => moveLayerIntoGroup(currentPage.id, layerId, groupId)}
+                onDeleteGroup={handleDeleteGroup}
+                onDuplicateGroup={handleDuplicateGroup}
               />
             )}
             {leftTab === "pages" && (
@@ -4709,6 +5155,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
               {collageTemplateToast}
             </div>
           ) : null}
+          <LoadingToast />
           {screenshotCropReviewOpen ? (
             <ScreenshotCropReviewPanel
               assets={suspiciousScreenshotCropAssets}
@@ -4782,7 +5229,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                 }
                 updateCanvasMenuLayer(canvasContextMenu, (layer) => ({ ...layer, visible: layer.visible === false }), "Layer visibility toggled");
               }}
-              onAddToFavorites={handleCanvasMenuFavoritePlaceholder}
+              onAddToFavorites={handleAddToLocalLibrary}
               hasTextStyleClipboard={hasTextStyleClipboard}
               onTextMaskPlaceholder={() => convertCanvasMenuTextToMask(canvasContextMenu)}
               onSaveAsCollageTemplate={() => saveCanvasMenuAsCollageTemplate(canvasContextMenu)}
@@ -4821,6 +5268,32 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
               onOpenImageEditor={() => void handleOpenImageEditor(canvasContextMenu)}
               onOpenInPhotoshop={() => void handleOpenInPhotoshop(canvasContextMenu)}
               onOpenInColorLab={() => void handleOpenInColorLab(canvasContextMenu)}
+              onHarmonize={canvasContextMenu.hasImage ? () => {
+                const layer = currentPage.layers.find((l) => l.id === canvasContextMenu.layerId);
+                if (layer !== undefined) {
+                  setHarmonizeTarget({
+                    layerId: layer.id,
+                    bbox: { x: Math.round(layer.x), y: Math.round(layer.y), w: Math.round(layer.width), h: Math.round(layer.height) }
+                  });
+                }
+                setCanvasContextMenu(null);
+              } : undefined}
+              onAiExpand={canvasContextMenu.hasImage ? () => {
+                useAiToolsStore.getState().openTool({ tool: "expand", layerId: canvasContextMenu.layerId, pageId: currentPage.id });
+                setCanvasContextMenu(null);
+              } : undefined}
+              onAiRemove={canvasContextMenu.hasImage ? () => {
+                useAiToolsStore.getState().openTool({ tool: "remove", layerId: canvasContextMenu.layerId, pageId: currentPage.id });
+                setCanvasContextMenu(null);
+              } : undefined}
+              onAiUpscale={canvasContextMenu.hasImage ? () => {
+                useAiToolsStore.getState().openTool({ tool: "upscale", layerId: canvasContextMenu.layerId, pageId: currentPage.id });
+                setCanvasContextMenu(null);
+              } : undefined}
+              onAiRestore={canvasContextMenu.hasImage ? () => {
+                useAiToolsStore.getState().openTool({ tool: "restore", layerId: canvasContextMenu.layerId, pageId: currentPage.id });
+                setCanvasContextMenu(null);
+              } : undefined}
             />
           )}
           {layerContextMenu !== null && (() => {
@@ -5141,6 +5614,9 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                     onBatchFieldChange={(selectedLayer.type === "frame" || selectedLayer.type === "image") ? (field) => handleBatchFieldChange(selectedLayer.id, field) : undefined}
                     onConvertAlphaToFrame={selectedLayer.type === "image" ? handleConvertAlphaToFrameMask : undefined}
                     onDelete={handleDeleteSelected}
+                    onOpenAiTool={selectedLayer.type === "image" ? (tool) => {
+                      useAiToolsStore.getState().openTool({ tool, layerId: selectedLayer.id, pageId: currentPage.id });
+                    } : undefined}
                     onPatch={patchSelectedLayer}
                     onUpdateAsset={updateAsset}
                   />
@@ -5214,7 +5690,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
               }}
               type="button"
             >
-              ‹
+              ג€¹
             </button>
             {currentDocument.pages.map((page, index) => (
               <button
@@ -5241,7 +5717,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
               }}
               type="button"
             >
-              ›
+              ג€÷
             </button>
           </div>
         </div>
@@ -5266,6 +5742,53 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
           />
         </div>
       )}
+
+      {harmonizeTarget !== null && (() => {
+        const harmonizeLayer = currentPage.layers.find((l) => l.id === harmonizeTarget.layerId);
+        const harmonizeAsset = harmonizeLayer?.type === "image"
+          ? currentDocument.assets.find((a) => a.id === harmonizeLayer.assetId)
+          : harmonizeLayer?.type === "frame"
+          ? currentDocument.assets.find((a) => a.id === harmonizeLayer.imageAssetId)
+          : undefined;
+        if (harmonizeAsset === undefined) return null;
+        return (
+          <HarmonizePanel
+            layerId={harmonizeTarget.layerId}
+            asset={harmonizeAsset}
+            bbox={harmonizeTarget.bbox}
+            stageRef={stageRef}
+            onApply={(updatedAsset, shadowResult) => {
+              updateAsset(updatedAsset);
+              if (shadowResult) {
+                const targetLayer = currentPage.layers.find(
+                  (l) => l.id === harmonizeTarget.layerId
+                );
+                if (targetLayer !== undefined) {
+                  const shadowLayer = createImageLayer({
+                    name: shadowResult.asset.name,
+                    assetId: shadowResult.asset.id,
+                    rect: {
+                      x: targetLayer.x,
+                      y: targetLayer.y,
+                      width: targetLayer.width,
+                      height: targetLayer.height,
+                    },
+                    zIndex: targetLayer.zIndex - 1,
+                    fitMode: "fit",
+                  });
+                  addAssetAndLayer(currentPage.id, shadowResult.asset, shadowLayer);
+                }
+              }
+              setStatus("ההתאמה לרקע הוחלה");
+              setHarmonizeTarget(null);
+            }}
+            onClose={() => setHarmonizeTarget(null)}
+          />
+        );
+      })()}
+
+      <AiToolsContainer />
+
     </main>
   );
 }
@@ -5399,7 +5922,7 @@ function loadHtmlImage(source: string): Promise<HTMLImageElement> {
   });
 }
 
-// ─── Tool button ──────────────────────────────────────────────────────────────
+// ג”€ג”€ג”€ Tool button ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 function SmartScreenshotCropToast({
   assets,
@@ -5544,7 +6067,8 @@ function ContextToolbar({
   onPatch,
   onSmartTextFit,
   onToggleGrid,
-  onToggleSnap
+  onToggleSnap,
+  onOpenAiTool
 }: {
   canvasWidth: number;
   canvasHeight: number;
@@ -5583,6 +6107,7 @@ function ContextToolbar({
   onSmartTextFit: (mode: SmartTextFitMode) => void;
   onToggleGrid: () => void;
   onToggleSnap: () => void;
+  onOpenAiTool?: (tool: import("@/state/aiToolsStore").AiTool) => void;
 }): ReactElement {
   if (imageEditMode && (selectedLayer?.type === "image" || selectedLayer?.type === "frame")) {
     return (
@@ -5596,6 +6121,7 @@ function ContextToolbar({
         onDeleteSelection={onImageEditDeleteSelection}
         onResetCrop={onImageEditResetCrop}
         onResetMask={onImageEditResetMask}
+        onOpenAiTool={onOpenAiTool}
       />
     );
   }
@@ -5966,7 +6492,7 @@ function PlaceholderContextToolbar({ label, onDelete, onDuplicate, onMoveLayer }
   return <section className="context-toolbar" aria-label={`${label} context toolbar`} data-testid="context-toolbar"><span className="context-toolbar-label">{label}</span><span className="context-muted">מוכן להרחבה בשלב הבא</span><div className="context-group"><ToolbarButton icon={Copy} label="שכפל" onClick={onDuplicate} /><ToolbarButton icon={ChevronsUp} label="הבא קדימה" onClick={() => onMoveLayer("forward")} /><ToolbarButton icon={ChevronsDown} label="שלח אחורה" onClick={() => onMoveLayer("backward")} /><ToolbarButton danger icon={Trash2} label="מחק" onClick={onDelete} /></div></section>;
 }
 
-// ─── Image Resize Control ─────────────────────────────────────────────────────
+// ג”€ג”€ג”€ Image Resize Control ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 type SizeUnit = "mm" | "cm" | "inch";
 
@@ -5983,7 +6509,7 @@ function ImageResizeControl({
   const frameLayer = isFrame ? (layer as FrameLayer) : null;
   const contentScale = frameLayer?.contentTransform.scale ?? 1;
 
-  // For frames: "virtual" content size (frame × scale). For images: actual layer size.
+  // For frames: "virtual" content size (frame ֳ— scale). For images: actual layer size.
   const pxW = isFrame ? layer.width * contentScale : layer.width;
   const pxH = isFrame ? layer.height * contentScale : layer.height;
 
@@ -6094,7 +6620,7 @@ function ImageResizeControl({
   );
 }
 
-// ─── Image Context Toolbar ────────────────────────────────────────────────────
+// ג”€ג”€ג”€ Image Context Toolbar ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 function ImageContextToolbar({
   canvasWidth,
@@ -6129,7 +6655,7 @@ function ImageContextToolbar({
   const isCollageFrameProp = isFrame &&
     (layer.metadata["collageFrame"] as { isCollageFrame?: boolean } | undefined)?.isCollageFrame === true;
 
-  // ─── Visual effects helpers ────────────────────────────────────────────────
+  // ג”€ג”€ג”€ Visual effects helpers ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
   const vfxStack: VisualEffectStack =
     ("visualEffects" in layer && layer.visualEffects !== undefined)
       ? layer.visualEffects
@@ -6189,7 +6715,7 @@ function ImageContextToolbar({
     patchVfx({ ...vfxStack, effects: vfxStack.effects.map((e) => e.id === strokeEffect.id ? { ...e, enabled: true, params: { ...e.params, ...patch } as VisualEffectParams } : e) });
   }
 
-  // ─── Shape / metadata helpers ─────────────────────────────────────────────
+  // ג”€ג”€ג”€ Shape / metadata helpers ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
   const imageShape = (layer.metadata["imageShape"] as string | undefined) ?? "rect";
   const cornerRadius = (layer.metadata["imageCornerRadius"] as number | undefined) ?? 0;
   const flipH = (layer.metadata["flipH"] as boolean | undefined) ?? false;
@@ -6206,10 +6732,10 @@ function ImageContextToolbar({
     onPatch({ metadata: { ...layer.metadata, ...patch } as Record<string, import("@/types/primitives").JsonValue> });
   }
 
-  // ─── Fit mode ─────────────────────────────────────────────────────────────
+  // ג”€ג”€ג”€ Fit mode ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
   const fitMode = "fitMode" in layer ? (layer.fitMode as string) : "fit";
 
-  // ─── Corner radius (FrameLayer has its own field, ImageLayer uses metadata) ──
+  // ג”€ג”€ג”€ Corner radius (FrameLayer has its own field, ImageLayer uses metadata) ג”€ג”€
   const frameCornerRadius = isFrame ? ((layer as Extract<VisualLayer, { type: "frame" }>).cornerRadius ?? 0) : cornerRadius;
 
   function setCornerRadius(v: number): void {
@@ -6220,7 +6746,7 @@ function ImageContextToolbar({
     }
   }
 
-  // ─── Fit to canvas ────────────────────────────────────────────────────────
+  // ג”€ג”€ג”€ Fit to canvas ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
   function fitToCanvas(mode: "fill" | "fit"): void {
     const imgW = layer.width;
     const imgH = layer.height;
@@ -6640,7 +7166,7 @@ function ToolButton({
   );
 }
 
-// ─── Panel header ─────────────────────────────────────────────────────────────
+// ג”€ג”€ג”€ Panel header ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 function PanelHeader({ selectedLayer }: { selectedLayer: VisualLayer | null }): ReactElement {
   return (
@@ -6651,7 +7177,7 @@ function PanelHeader({ selectedLayer }: { selectedLayer: VisualLayer | null }): 
   );
 }
 
-// ─── Accordion section ────────────────────────────────────────────────────────
+// ג”€ג”€ג”€ Accordion section ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 function AccordionSection({
   title,
@@ -6675,7 +7201,7 @@ function AccordionSection({
   );
 }
 
-// ─── Template Save Modal ──────────────────────────────────────────────────────
+// ג”€ג”€ג”€ Template Save Modal ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 function TemplateSaveModal({
   initialName,
@@ -6760,7 +7286,7 @@ function TemplateSaveModal({
   );
 }
 
-// ─── Batch Variable Section ───────────────────────────────────────────────────
+// ג”€ג”€ג”€ Batch Variable Section ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 function BatchVariableSection({
   layerId,
@@ -6907,7 +7433,7 @@ function BatchVariableSection({
   );
 }
 
-// ─── Empty inspector state ────────────────────────────────────────────────────
+// ג”€ג”€ג”€ Empty inspector state ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 function EmptyInspectorState(): ReactElement {
   return (
@@ -6919,7 +7445,7 @@ function EmptyInspectorState(): ReactElement {
   );
 }
 
-// ─── Text Studio ──────────────────────────────────────────────────────────────
+// ג”€ג”€ג”€ Text Studio ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 function TextStudio({
   hasTextStyleClipboard,
@@ -7002,10 +7528,408 @@ function TextStudio({
   );
 }
 
-// ─── Smart Tips Panel ────────────────────────────────────────────────────────
+// ג”€ג”€ג”€ Smart Tips Panel ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 import { PHOTO_TIPS, TIP_CATEGORIES, CATEGORY_LABELS, PARAM_MAP } from "@/data/photoTipsData";
 import type { PhotoTip } from "@/data/photoTipsData";
+
+const TIP_TEXT_HE: Record<string, { title: string; problem: string; symptoms: string[] }> = {
+  dark_photo: {
+    title: "התמונה כהה מדי",
+    problem: "חסר אור בתמונה ופרטים חשובים של הנושא נבלעים בצללים.",
+    symptoms: ["התמונה נראית עמומה", "פנים לא מספיק ברורות", "ההיסטוגרמה נוטה שמאלה"],
+  },
+  too_bright: {
+    title: "התמונה בהירה מדי",
+    problem: "אזורים בהירים משתלטים ועלולים לאבד פרטים.",
+    symptoms: ["אזורים לבנים כמעט בלי פרטים", "פנים נראות שטופות", "ההיסטוגרמה נוטה ימינה"],
+  },
+  flat_photo: {
+    title: "תמונה שטוחה / עומק נמוך",
+    problem: "ההפרדה בין כהים, ביניים ובהירים חלשה.",
+    symptoms: ["אין תחושת עומק", "הכול נראה אפור או דהוי", "קצוות מרגישים חלשים"],
+  },
+  too_much_contrast: {
+    title: "הקונטרסט חזק מדי",
+    problem: "התמונה נראית קשה, עם צללים חסומים או אורות שרופים.",
+    symptoms: ["אזורים כהים מאבדים פרטים", "אורות נראים קשים", "פנים נראות דרמטיות מדי"],
+  },
+  red_photo: {
+    title: "התמונה אדומה מדי",
+    problem: "התמונה חמה מדי או גווני עור אדומים/כתומים מדי.",
+    symptoms: ["עור נראה אדום או כתום", "כל התמונה מרגישה חמה מדי", "לבנים מקבלים גוון"],
+  },
+  cold_blue_photo: {
+    title: "התמונה כחולה או קרה מדי",
+    problem: "התמונה קרה וחסרה חמימות טבעית.",
+    symptoms: ["עור נראה חיוור או כחול", "תאורת פנים לא טבעית", "לבנים נראים כחולים"],
+  },
+  weak_colors: {
+    title: "צבעים חלשים או דהויים",
+    problem: "לתמונה חסרה חיות צבע.",
+    symptoms: ["צבעים נראים דהויים", "התמונה מרגישה חסרת חיים", "בהדפסה התוצאה עלולה להיות עמומה"],
+  },
+  oversaturated_colors: {
+    title: "צבעים חזקים מדי",
+    problem: "הצבעים נראים לא טבעיים או זרחניים.",
+    symptoms: ["דשא או בגדים נראים זרחניים", "עור נראה כתום", "בהדפסה הצבע עלול להיות רווי מדי"],
+  },
+  dark_faces: {
+    title: "פנים כהות מדי",
+    problem: "הפנים אינן מקבלות מספיק אור ביחס לשאר התמונה.",
+    symptoms: ["העיניים לא ברורות", "הפנים בצל", "הרקע בהיר יותר מהנושא"],
+  },
+  red_skin: {
+    title: "עור אדום מדי",
+    problem: "גווני העור נוטים לאדום או כתום.",
+    symptoms: ["לחיים אדומות מדי", "עור נראה כתום", "הלבן בעיניים מקבל גוון"],
+  },
+  soft_faces: {
+    title: "פנים רכות או מטושטשות",
+    problem: "הפנים חסרות חדות או פרטים.",
+    symptoms: ["עיניים לא חדות", "פרטי שיער חלשים", "הפנים נראות רכות מדי"],
+  },
+  soft_photo: {
+    title: "התמונה רכה מדי",
+    problem: "לתמונה חסרה חדות כללית.",
+    symptoms: ["קצוות לא חדים", "פרטים עדינים נעלמים", "הדפסה עלולה להיראות רכה"],
+  },
+  noisy_photo: {
+    title: "רעש או גרעיניות",
+    problem: "בתמונה יש רעש דיגיטלי או גרעיניות בולטת.",
+    symptoms: ["רעש באזורים כהים", "שמיים או קירות מגורענים", "פרטים נראים מלוכלכים"],
+  },
+  too_small_for_print: {
+    title: "קטנה מדי להדפסה",
+    problem: "רזולוציית התמונה נמוכה ביחס לגודל ההדפסה.",
+    symptoms: ["מעט פיקסלים", "התמונה נראית מפוקסלת בזום", "גודל ההדפסה גדול"],
+  },
+  off_center_photo: {
+    title: "הנושא לא ממורכז",
+    problem: "הקומפוזיציה משאירה את הנושא במקום פחות מאוזן.",
+    symptoms: ["יותר מדי שטח ריק בצד אחד", "הנושא קרוב מדי לקצה", "הפריים מרגיש לא מאוזן"],
+  },
+  crooked_photo: {
+    title: "התמונה עקומה",
+    problem: "האופק או קווים אנכיים אינם ישרים.",
+    symptoms: ["האופק נטוי", "מבנים נראים עקומים", "הקומפוזיציה מרגישה לא יציבה"],
+  },
+  subject_focus: {
+    title: "הדגשת הנושא",
+    problem: "הנושא לא מספיק נפרד מהרקע.",
+    symptoms: ["הרקע מתחרה בנושא", "אין מוקד ברור", "העין לא יודעת איפה להתמקד"],
+  },
+  depth_bokeh: {
+    title: "הוספת עומק / תחושת בוקה",
+    problem: "התמונה מרגישה שטוחה והרקע מושך תשומת לב.",
+    symptoms: ["הרקע חד מדי", "אין הפרדה בין שכבות", "התמונה פחות מקצועית"],
+  },
+  cinematic_look: {
+    title: "מראה קולנועי / מקצועי",
+    problem: "התמונה תקינה אבל חסר לה אופי עיבודי.",
+    symptoms: ["הצבעים פשוטים מדי", "אין עומק טונאלי", "התוצאה מרגישה רגילה"],
+  },
+  print_dark: {
+    title: "ההדפסה יוצאת כהה מדי",
+    problem: "בהדפסה התמונה עלולה להיראות כהה יותר מהמסך.",
+    symptoms: ["פרטים בצללים נעלמים", "התוצאה פחות פתוחה", "נייר מט או קנבס מכהים את התמונה"],
+  },
+  print_red_skin: {
+    title: "עור מודפס אדום מדי",
+    problem: "גווני עור עלולים לצאת חמים/אדומים בהדפסה.",
+    symptoms: ["לחיים יוצאות אדומות", "עור נראה כתום", "תאורת פנים חמה מדי"],
+  },
+  print_weak_colors: {
+    title: "צבעים חלשים בהדפסה",
+    problem: "הפלט המודפס נראה פחות חי מהמסך.",
+    symptoms: ["צבעים דהויים", "מוצרים חסרי נוכחות", "קנבס או מט מורידים רוויה"],
+  },
+  canvas_prep: {
+    title: "הכנה לקנבס",
+    problem: "הדפסה על קנבס דורשת הגנה על אורות וחיזוק עדין.",
+    symptoms: ["פרטים בהירים עלולים להישרף", "המרקם מרכך פרטים", "צבעים נראים פחות חדים"],
+  },
+  sublimation_prep: {
+    title: "הכנה לסובלימציה",
+    problem: "סובלימציה דורשת צבע וקונטרסט מבוקרים יותר.",
+    symptoms: ["צבעים יכולים לצאת חלשים", "פרטים קטנים מתרככים", "גווני עור צריכים הגנה"],
+  },
+};
+
+const TOOL_LABEL_HE: Record<string, string> = {
+  Exposure: "חשיפה",
+  Shadows: "צללים",
+  Brightness: "בהירות",
+  Contrast: "קונטרסט",
+  Highlights: "אורות",
+  Whites: "לבנים",
+  Blacks: "שחורים",
+  Clarity: "בהירות מקומית",
+  Temperature: "טמפרטורה",
+  Tint: "גוון",
+  Saturation: "רוויה",
+  Vibrance: "חיות צבע",
+  Upscale: "הגדלת רזולוציה",
+  "Print Mode": "מצב הדפסה",
+  "Print Sharpness": "חדות להדפסה",
+  HSL: "HSL",
+  "HSL Red/Orange": "HSL אדום/כתום",
+};
+
+const ACTION_LABEL_HE: Record<string, string> = {
+  "Raise gently": "להעלות בעדינות",
+  "Lower gently": "להוריד בעדינות",
+  "Open dark areas": "לפתוח אזורים כהים",
+  "Use only if it is still dark": "להשתמש רק אם עדיין כהה",
+  "Add a little if the image becomes flat": "להוסיף מעט אם התמונה נהיית שטוחה",
+  "Recover bright areas": "להחזיר פרטים באזורים בהירים",
+  "Lower if clipping remains": "להוריד אם עדיין יש שריפה",
+  "Add a little if needed": "להוסיף מעט לפי הצורך",
+  "Raise slightly": "להעלות מעט",
+  "Raise first": "להעלות קודם",
+  "Add subtle depth": "להוסיף עומק עדין",
+  "Reduce contrast": "להפחית קונטרסט",
+  "Reduce bright regions": "להפחית אזורים בהירים",
+  "Lift black point a little": "להרים מעט את נקודת השחור",
+  "Cool the image slightly": "לקרר מעט את התמונה",
+  "Move slightly toward green": "להזיז מעט לכיוון ירוק",
+  "Warm the image": "לחמם את התמונה",
+  "Add a small magenta correction if needed": "להוסיף מעט מג׳נטה אם צריך",
+  "Recover weak colors gently": "להחזיר צבעים חלשים בעדינות",
+  "Reduce gently": "להפחית בעדינות",
+  "Lower globally": "להוריד באופן כללי",
+  "Lower if weak colors also look too strong": "להוריד אם גם צבעים חלשים נראים חזקים מדי",
+  "Reduce only the problem color": "להפחית רק את הצבע הבעייתי",
+  "Use AI upscaling": "להשתמש בהגדלת AI",
+  "Use General Print Safe": "להשתמש במצב הדפסה בטוח",
+  "Use material-specific boost": "להשתמש בחיזוק לפי חומר",
+  "Use Canvas Print Boost": "להשתמש בחיזוק לקנבס",
+  "Use Sublimation Boost": "להשתמש בחיזוק לסובלימציה",
+  "Use gently": "להשתמש בעדינות",
+};
+
+const TIP_TEXT_HE_DISPLAY: Record<string, { title: string; problem: string; symptoms: string[] }> = {
+  ...TIP_TEXT_HE,
+  dark_photo: {
+    title: "התמונה כהה מדי",
+    problem: "התמונה חסרה אור ופרטים חשובים בנושא נבלעים בצללים.",
+    symptoms: ["התמונה נראית עמומה", "פנים לא ברורות", "ההיסטוגרמה נוטה שמאלה"]
+  },
+  too_bright: {
+    title: "התמונה בהירה מדי",
+    problem: "אזורים בהירים מדי מאבדים פרטים ויכולים להיראות שרופים.",
+    symptoms: ["שמיים או חולצות לבנות נשרפים", "פנים נראות שטוחות", "הקונטרסט מרגיש חלש"]
+  },
+  flat_photo: {
+    title: "תמונה שטוחה / עומק נמוך",
+    problem: "התמונה חסרה הפרדה בין האזורים הבהירים והכהים.",
+    symptoms: ["המראה אפרפר", "אין תחושת עומק", "הנושא לא קופץ קדימה"]
+  },
+  too_much_contrast: {
+    title: "קונטרסט חזק מדי",
+    problem: "הפער בין אור לצל אגרסיבי מדי ומסתיר פרטים.",
+    symptoms: ["צללים חסומים", "אזורים בהירים קשים", "פנים נראות דרמטיות מדי"]
+  },
+  red_photo: {
+    title: "התמונה אדמדמה",
+    problem: "איזון הצבעים חם מדי וגורם לעור וללבן להיראות אדומים.",
+    symptoms: ["עור אדום", "לבן נראה ורוד", "כל התמונה חמה מדי"]
+  },
+  cold_blue_photo: {
+    title: "התמונה קרה / כחולה",
+    problem: "איזון הצבעים קר מדי והצילום מאבד חמימות טבעית.",
+    symptoms: ["עור נראה חיוור", "לבן נוטה לכחול", "האווירה קרה מדי"]
+  },
+  weak_colors: {
+    title: "צבעים חלשים",
+    problem: "הצבעים חסרי חיים וההדפסה עלולה לצאת דהויה.",
+    symptoms: ["צבעים דהויים", "שמיים או בגדים חסרי עומק", "התמונה נראית ישנה"]
+  },
+  oversaturated_colors: {
+    title: "צבעים רוויים מדי",
+    problem: "הצבעים חזקים מדי ופוגעים במראה טבעי, בעיקר בפנים.",
+    symptoms: ["עור כתום", "ירוקים זוהרים", "אדומים משתלטים"]
+  },
+  dark_faces: {
+    title: "פנים כהות",
+    problem: "הפנים חשוכות יחסית לרקע וצריכות פתיחה עדינה.",
+    symptoms: ["עיניים לא ברורות", "צללים על הפנים", "הרקע נראה תקין אבל הפנים כהות"]
+  },
+  red_skin: {
+    title: "עור אדום מדי",
+    problem: "גווני העור נוטים לאדום או כתום וצריכים איזון ממוקד.",
+    symptoms: ["לחיים אדומות מדי", "עור כתום", "פנים לא טבעיות"]
+  },
+  soft_faces: {
+    title: "פנים רכות",
+    problem: "פרטי הפנים חסרים חדות או מיקרו-קונטרסט.",
+    symptoms: ["עיניים רכות", "שיער חסר פירוט", "הפנים נראות מעט מטושטשות"]
+  },
+  soft_photo: {
+    title: "התמונה רכה",
+    problem: "כל התמונה חסרה חדות וצריכה חיזוק עדין או הגדלת AI.",
+    symptoms: ["קצוות לא חדים", "טקסטורה חלשה", "הדפסה גדולה תדגיש את הרכות"]
+  },
+  noisy_photo: {
+    title: "רעש בתמונה",
+    problem: "גרעיניות או רעש דיגיטלי מורידים איכות, במיוחד באזורים כהים.",
+    symptoms: ["נקודות צבע", "צללים מלוכלכים", "שמיים לא חלקים"]
+  },
+  too_small_for_print: {
+    title: "קטנה מדי להדפסה",
+    problem: "הרזולוציה לא מספיקה לגודל ההדפסה הרצוי.",
+    symptoms: ["פיקסלים בולטים", "קצוות משוננים", "איכות יורדת בהגדלה"]
+  },
+  off_center_photo: {
+    title: "קומפוזיציה לא ממורכזת",
+    problem: "הנושא לא יושב טוב בתוך המסגרת או קרוב מדי לקצה.",
+    symptoms: ["מרווח לא מאוזן", "חלק חשוב קרוב לחיתוך", "התמונה מרגישה לא יציבה"]
+  },
+  crooked_photo: {
+    title: "התמונה עקומה",
+    problem: "קו האופק או אלמנטים אנכיים לא מיושרים.",
+    symptoms: ["אופק נוטה", "מבנים עקומים", "תחושה שהתמונה נופלת לצד"]
+  },
+  subject_focus: {
+    title: "הנושא לא בולט",
+    problem: "הרקע מתחרה בנושא המרכזי וצריך הפרדה עדינה.",
+    symptoms: ["העין לא יודעת לאן להסתכל", "רקע עמוס", "הנושא נטמע בתמונה"]
+  },
+  depth_bokeh: {
+    title: "הוספת עומק",
+    problem: "התמונה יכולה להרוויח מטשטוש רקע עדין או מיקוד בנושא.",
+    symptoms: ["הרקע חד מדי", "אין הפרדה", "התמונה מרגישה שטוחה"]
+  },
+  cinematic_look: {
+    title: "מראה קולנועי",
+    problem: "אפשר לתת לתמונה אופי מסוגנן יותר בלי לפגוע בטבעיות.",
+    symptoms: ["מראה רגיל מדי", "צבעים חסרי אופי", "האווירה לא מודגשת"]
+  },
+  print_dark: {
+    title: "הדפסה יוצאת כהה",
+    problem: "תמונות רבות נראות כהות יותר בהדפסה מאשר במסך.",
+    symptoms: ["המסך נראה תקין אבל ההדפסה כהה", "פרטים בצללים נעלמים", "פנים יוצאות עמומות"]
+  },
+  print_red_skin: {
+    title: "עור אדום בהדפסה",
+    problem: "בהדפסה גווני עור אדומים או כתומים עלולים להתחזק.",
+    symptoms: ["לחיים אדומות בהדפסה", "עור כתום", "לבן ליד פנים נראה ורוד"]
+  },
+  print_weak_colors: {
+    title: "צבעים חלשים בהדפסה",
+    problem: "חומרים מסוימים דורשים חיזוק צבע לפני הדפסה.",
+    symptoms: ["הדפסה דהויה", "צבעי מוצר לא בולטים", "התמונה פחות חיה מהמסך"]
+  },
+  canvas_prep: {
+    title: "הכנה לקנבס",
+    problem: "קנבס צריך חידוד וצבע מאוזנים יחד עם מרווח גלישה.",
+    symptoms: ["הטקסטורה בולעת פרטים", "הקצוות מיועדים לקיפול", "צריך להגן על פנים בקצוות"]
+  },
+  sublimation_prep: {
+    title: "הכנה לסובלימציה",
+    problem: "סובלימציה דורשת איזון צבע וזהירות מגוונים זוהרים מדי.",
+    symptoms: ["צבעים עלולים להתחזק", "עור יכול להפוך כתום", "צריך לבדוק התאמה לחומר"]
+  }
+};
+
+const TOOL_LABEL_HE_DISPLAY: Record<string, string> = {
+  ...TOOL_LABEL_HE,
+  Exposure: "חשיפה",
+  Shadows: "צללים",
+  Brightness: "בהירות",
+  Contrast: "קונטרסט",
+  Highlights: "אזורים בהירים",
+  Whites: "לבנים",
+  Blacks: "שחורים",
+  Clarity: "בהירות מקומית",
+  Temperature: "טמפרטורה",
+  Tint: "גוון",
+  Saturation: "רוויה",
+  Vibrance: "חיות צבע",
+  Upscale: "הגדלה",
+  "Print Mode": "מצב הדפסה",
+  "Print Sharpness": "חדות להדפסה",
+  HSL: "HSL",
+  "HSL Red/Orange": "HSL אדום/כתום"
+};
+
+const ACTION_LABEL_HE_DISPLAY: Record<string, string> = {
+  ...ACTION_LABEL_HE,
+  "Raise gently": "להעלות בעדינות",
+  "Open dark areas": "לפתוח אזורים כהים",
+  "Use only if it is still dark": "להשתמש רק אם עדיין חשוך",
+  "Add a little if the image becomes flat": "להוסיף מעט אם התמונה נהיית שטוחה",
+  "Lower only until highlight detail returns": "להוריד רק עד שפרטי האור חוזרים",
+  "Reduce slightly if skin is washed out": "להפחית מעט אם העור נשטף",
+  "Lower gently": "להוריד בעדינות",
+  "Recover bright areas first": "לשחזר קודם אזורים בהירים",
+  "Reduce if the photo feels harsh": "להפחית אם התמונה מרגישה קשה",
+  "Lift only blocked shadows": "להרים רק צללים חסומים",
+  "Warm the image": "לחמם את התמונה",
+  "Fine tune away from green/magenta": "לאזן ירוק/מג'נטה בעדינות",
+  "Reduce red/orange if available": "להפחית אדום/כתום אם זמין",
+  "Cool the image": "לקרר את התמונה",
+  "Correct green or magenta cast": "לתקן סטייה ירוקה או מג'נטה",
+  "Raise first for natural color": "להעלות קודם לצבע טבעי",
+  "Raise carefully": "להעלות בזהירות",
+  "Lower if weak colors also look too strong": "להוריד אם גם צבעים חלשים נראים חזקים מדי",
+  "Reduce only the problem color": "להפחית רק את הצבע הבעייתי",
+  "Use AI upscaling": "להשתמש בהגדלת AI",
+  "Use General Print Safe": "להשתמש במצב הדפסה בטוח",
+  "Use material-specific boost": "להשתמש בחיזוק לפי חומר",
+  "Use Canvas Print Boost": "להשתמש בחיזוק לקנבס",
+  "Use Sublimation Boost": "להשתמש בחיזוק לסובלימציה",
+  "Use gently": "להשתמש בעדינות"
+};
+
+const WARNING_LABEL_HE: Record<string, string> = {
+  "Do not burn bright areas": "לא לשרוף אזורים בהירים",
+  "Do not open shadows until the image looks gray": "לא לפתוח צללים עד שהתמונה נראית אפורה",
+  "Do not darken the whole image too much": "לא להכהות את כל התמונה יותר מדי",
+  "Protect skin and skies from grayness": "להגן על עור ושמיים מאפרוריות",
+  "Do not crush blacks": "לא לחסום שחורים",
+  "Avoid harsh skin texture": "להימנע מטקסטורת עור קשה",
+  "Do not make the image muddy": "לא להפוך את התמונה לבוצית",
+  "Keep a clear black and white point": "לשמור על נקודת שחור ולבן ברורה",
+  "Do not make skin pale or green": "לא להפוך עור לחיוור או ירקרק",
+  "Prefer HSL over global saturation for portraits": "בפורטרטים עדיף HSL על רוויה כללית",
+  "Do not over-warm whites": "לא לחמם לבנים יותר מדי",
+  "Check skin tones after temperature changes": "לבדוק גווני עור אחרי שינוי טמפרטורה",
+  "Do not push skin into orange": "לא לדחוף עור לכתום",
+  "Prefer vibrance before saturation": "להעדיף חיות צבע לפני רוויה",
+  "Do not remove all color life": "לא להוציא את כל החיות מהצבע",
+  "Use HSL for one problematic color": "להשתמש ב-HSL לצבע בעייתי יחיד",
+  "Do not brighten until skin loses shape": "לא להבהיר עד שהפנים מאבדות צורה",
+  "Watch highlight clipping on forehead and cheeks": "לשים לב לשריפת אור במצח ובלחיים",
+  "Do not make skin gray": "לא להפוך עור לאפור",
+  "Avoid green tint": "להימנע מגוון ירוק",
+  "Do not create halos around faces": "לא ליצור הילות סביב פנים",
+  "Do not oversharpen for print": "לא לחדד יתר על המידה להדפסה",
+  "Watch for bright edge halos": "לשים לב להילות בהירות בקצוות",
+  "Do not smooth away real detail": "לא להחליק פרטים אמיתיים",
+  "Use less sharpening after denoise": "להשתמש בפחות חידוד אחרי ניקוי רעש",
+  "Do not rely on sharpening as an upscale replacement": "לא להסתמך על חידוד במקום הגדלת רזולוציה",
+  "Warn before large prints": "להתריע לפני הדפסות גדולות",
+  "Do not crop important body parts": "לא לחתוך חלקי גוף חשובים",
+  "Keep enough bleed for print": "להשאיר גלישה מספקת להדפסה",
+  "Straightening crops edges": "יישור חותך קצוות",
+  "Check faces and product edges after rotation": "לבדוק פנים וקצוות מוצר אחרי סיבוב",
+  "Do not make corners visibly black": "לא להשאיר פינות שחורות בולטות",
+  "Keep product colors accurate": "לשמור על צבעי מוצר מדויקים",
+  "Avoid blurring the subject": "להימנע מטשטוש הנושא",
+  "Radial blur is only a temporary approximation": "טשטוש רדיאלי הוא קירוב זמני בלבד",
+  "Do not over-style family or product photos": "לא לסגנן מדי תמונות משפחה או מוצר",
+  "Keep skin tones believable": "לשמור על גווני עור אמינים",
+  "Do not rely only on monitor brightness": "לא להסתמך רק על בהירות המסך",
+  "Use a print preset for the material": "להשתמש בפריסט הדפסה לפי החומר",
+  "Use test print for recurring jobs": "לעבוד עם הדפסת בדיקה לעבודות חוזרות",
+  "Avoid neon colors": "להימנע מצבעי ניאון",
+  "Different materials need different compensation": "חומרים שונים דורשים פיצוי שונה",
+  "Do not oversharpen canvas": "לא לחדד קנבס יותר מדי",
+  "Leave room for wrap/bleed": "להשאיר מקום לקיפול או גלישה",
+  "Do not oversaturate skin": "לא להרוות עור יותר מדי",
+  "Mirror warning is informational in this version": "אזהרת המראה היא מידע בלבד בגרסה הזו"
+};
 
 function SmartTipsPanel({
   layer,
@@ -7021,6 +7945,7 @@ function SmartTipsPanel({
 
   const tipsInCategory = PHOTO_TIPS.filter((t) => t.category === selectedCategory);
   const tip = PHOTO_TIPS.find((t) => t.id === selectedTipId) ?? tipsInCategory[0] ?? null;
+  const tipText = tip !== null ? (TIP_TEXT_HE_DISPLAY[tip.id] ?? { title: tip.title, problem: tip.problem, symptoms: tip.symptoms }) : null;
 
   // Select first tip of new category
   useEffect(() => {
@@ -7030,7 +7955,10 @@ function SmartTipsPanel({
 
   function applyFix(params: Record<string, unknown>): void {
     if (imageLayer === null) return;
-    const adj = { ...imageLayer.colorAdjustments };
+    const basicTone: Partial<{ brightness: number; contrast: number; exposure: number }> = {};
+    const highlightsShadows: Partial<{ highlights: number; shadows: number; whites: number; blacks: number }> = {};
+    const color: Partial<{ saturation: number; vibrance: number; temperature: number; tint: number }> = {};
+    const detail: Partial<{ sharpness: number; clarity: number }> = {};
     const extras = { ...((layer.metadata["imageEditParams"] as Record<string, number> | undefined) ?? {}) };
 
     for (const [key, raw] of Object.entries(params)) {
@@ -7038,15 +7966,35 @@ function SmartTipsPanel({
       if (mapping === undefined) continue;
       const numVal = typeof raw === "number" ? raw : 0;
       const scaled = mapping.scale !== undefined ? numVal * mapping.scale : numVal;
-      if (mapping.field === "adj") {
-        (adj as Record<string, number>)[mapping.key] = Math.round(scaled);
-      } else {
-        extras[mapping.key] = Math.round(scaled);
-      }
+      const rounded = Math.round(scaled);
+      if (key === "brightness") basicTone.brightness = rounded;
+      else if (key === "contrast") basicTone.contrast = rounded;
+      else if (key === "exposure") basicTone.exposure = numVal;
+      else if (key === "highlights") highlightsShadows.highlights = rounded;
+      else if (key === "shadows") highlightsShadows.shadows = rounded;
+      else if (key === "whites") highlightsShadows.whites = rounded;
+      else if (key === "blacks") highlightsShadows.blacks = rounded;
+      else if (key === "saturation") color.saturation = rounded;
+      else if (key === "vibrance") color.vibrance = rounded;
+      else if (key === "temperature") color.temperature = rounded;
+      else if (key === "tint") color.tint = rounded;
+      else if (key === "clarity") detail.clarity = rounded;
+      else if (key === "sharpness" || key === "texture") detail.sharpness = rounded;
+      extras[mapping.key] = rounded;
     }
 
+    const templates: ImageAdjustmentTemplate[] = [];
+    if (Object.keys(basicTone).length > 0) templates.push({ type: "basicTone", ...basicTone });
+    if (Object.keys(highlightsShadows).length > 0) templates.push({ type: "highlightsShadows", ...highlightsShadows });
+    if (Object.keys(color).length > 0) templates.push({ type: "color", ...color });
+    if (Object.keys(detail).length > 0) templates.push({ type: "detail", ...detail });
+    const generatedAdjustments = templates.map((template) => createImageAdjustment(template));
+    const previousStack = imageLayer.imageAdjustments?.stack ?? [];
+
     onPatch({
-      colorAdjustments: adj,
+      imageAdjustments: generatedAdjustments.length > 0
+        ? { enabled: true, stack: [...previousStack, ...generatedAdjustments] }
+        : imageLayer.imageAdjustments,
       metadata: { ...layer.metadata, imageEditParams: extras as Record<string, import("@/types/primitives").JsonValue> }
     } as Partial<VisualLayer>);
   }
@@ -7078,7 +8026,7 @@ function SmartTipsPanel({
             type="button"
             onClick={() => setSelectedTipId(t.id)}
           >
-            {t.title}
+            {TIP_TEXT_HE_DISPLAY[t.id]?.title ?? t.title}
           </button>
         ))}
       </div>
@@ -7086,19 +8034,19 @@ function SmartTipsPanel({
       {/* Tip detail */}
       {tip !== null && (
         <div className="tip-detail">
-          <h4 className="tip-title">{tip.title}</h4>
-          {tip.problem && <p className="tip-problem">{tip.problem}</p>}
+          <h4 className="tip-title">{tipText?.title ?? tip.title}</h4>
+          {tipText?.problem && <p className="tip-problem">{tipText.problem}</p>}
 
           <div className="tip-section-label">תסמינים</div>
           <ul className="tip-list-items">
-            {tip.symptoms.map((s, i) => <li key={i}>{s}</li>)}
+            {(tipText?.symptoms ?? tip.symptoms).map((s, i) => <li key={i}>{s}</li>)}
           </ul>
 
           <div className="tip-section-label">סדר תיקון מומלץ</div>
           <ol className="tip-steps">
             {tip.recommended_steps.map((step, i) => (
               <li key={i}>
-                <strong>{step.tool}</strong>: {step.action}
+                <strong>{TOOL_LABEL_HE_DISPLAY[step.tool] ?? step.tool}</strong>: {ACTION_LABEL_HE_DISPLAY[step.action] ?? step.action}
                 {step.suggested_range && (
                   <span className="tip-range"> ({step.suggested_range})</span>
                 )}
@@ -7108,9 +8056,9 @@ function SmartTipsPanel({
 
           {tip.warnings.length > 0 && (
             <>
-              <div className="tip-section-label">⚠ אזהרות</div>
+              <div className="tip-section-label">אזהרות</div>
               <ul className="tip-list-items warnings">
-                {tip.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                {tip.warnings.map((w, i) => <li key={i}>{WARNING_LABEL_HE[w] ?? w}</li>)}
               </ul>
             </>
           )}
@@ -7135,6 +8083,81 @@ function SmartTipsPanel({
 }
 
 // ─── Image Studio — Fast React/Konva Quick Adjustments ───────────────────────
+
+function ImageAiToolsPanel({
+  layer,
+  onOpenAiTool
+}: {
+  layer: VisualLayer;
+  onOpenAiTool?: (tool: import("@/state/aiToolsStore").AiTool) => void;
+}): ReactElement {
+  const isImageLayer = layer.type === "image";
+  const disabled = !isImageLayer || onOpenAiTool === undefined;
+  const tools: Array<{
+    tool: import("@/state/aiToolsStore").AiTool;
+    title: string;
+    description: string;
+    icon: LucideIcon;
+  }> = [
+    {
+      tool: "expand",
+      title: "הרחבת תמונה",
+      description: "הגדלת הקנבס ויצירת המשך טבעי לתמונה.",
+      icon: Maximize2
+    },
+    {
+      tool: "remove",
+      title: "הסרת אובייקט",
+      description: "סימון אזור להסרה ומילוי הרקע סביבו.",
+      icon: Eraser
+    },
+    {
+      tool: "upscale",
+      title: "שיפור רזולוציה",
+      description: "Topaz / ESRGAN להגדלה וחידוד.",
+      icon: Zap
+    },
+    {
+      tool: "restore",
+      title: "שחזור תמונה",
+      description: "שיפור תמונות ישנות, רכות או פגומות.",
+      icon: Sparkles
+    }
+  ];
+
+  return (
+    <div className="image-ai-tools-panel">
+      <div className="image-ai-tool-grid">
+        {tools.map(({ tool, title, description, icon: Icon }) => (
+          <button
+            className="image-ai-tool-btn"
+            disabled={disabled}
+            key={tool}
+            type="button"
+            onClick={() => onOpenAiTool?.(tool)}
+          >
+            <Icon size={15} />
+            <span>
+              <strong>{title}</strong>
+              <small>{description}</small>
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {!isImageLayer && (
+        <p className="tip-no-image">
+          כלי AI זמינים כרגע לשכבות תמונה חופשיות. למסגרות, בחר את התמונה עצמה או פתח עריכה פנימית.
+        </p>
+      )}
+
+      <div className="image-ai-effects-placeholder">
+        <strong>ספריית אפקטים</strong>
+        <span>בקרוב: קריקטורה, איור קו, סקיצה, פוסטר ועוד.</span>
+      </div>
+    </div>
+  );
+}
 
 type EngineParams = Record<string, number | boolean | string>;
 
@@ -7375,7 +8398,7 @@ function QuickSlider({
               title="אפס"
               type="button"
             >
-              ×
+              ֳ—
             </button>
           )}
         </span>
@@ -7453,6 +8476,7 @@ function ImageStudio({
   onBatchFieldChange,
   onConvertAlphaToFrame,
   onDelete,
+  onOpenAiTool,
   onPatch,
   onUpdateAsset,
 }: {
@@ -7462,10 +8486,11 @@ function ImageStudio({
   onBatchFieldChange?: (field: BatchVariableField | null) => void;
   onConvertAlphaToFrame?: () => void;
   onDelete: () => void;
+  onOpenAiTool?: (tool: import("@/state/aiToolsStore").AiTool) => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
   onUpdateAsset: (asset: Asset) => void;
 }): ReactElement {
-  const [studioTab, setStudioTab] = useState<"quick" | "tips">("quick");
+  const [studioTab, setStudioTab] = useState<"quick" | "tips" | "ai">("quick");
   const [advancedBusy, setAdvancedBusy] = useState(false);
 
   // For ImageLayer: read from layer.effects; for FrameLayer: read from metadata["imageEditParams"]
@@ -7584,9 +8609,18 @@ function ImageStudio({
         >
           <Sparkles size={12} /> טיפים
         </button>
+        <button
+          className={`studio-tab${studioTab === "ai" ? " active" : ""}`}
+          type="button"
+          onClick={() => setStudioTab("ai")}
+        >
+          <Zap size={12} /> AI
+        </button>
       </div>
 
       {studioTab === "tips" && <SmartTipsPanel layer={layer} onPatch={onPatch} />}
+
+      {studioTab === "ai" && <ImageAiToolsPanel layer={layer} onOpenAiTool={onOpenAiTool} />}
 
       {studioTab === "quick" && (
         <>
@@ -7647,6 +8681,12 @@ function ImageStudio({
               <QuickSlider key={param.key} param={param} params={savedParams} onChange={updateParam} onReset={resetSingleParam} />
             ))}
           </AccordionSection>
+
+          {layer.type === "image" && (
+            <AccordionSection title="התאמות תמונה (חכם)" defaultOpen={false}>
+              <ImageAdjustmentsPanel layer={layer} />
+            </AccordionSection>
+          )}
 
           <AccordionSection title="אפקטים מהירים" defaultOpen={false}>
             {QUICK_CHECKBOXES.map((checkbox) => {
@@ -7779,7 +8819,7 @@ function ImageStudio({
 
 
 
-// ─── Pages panel (left sidebar pages tab) ────────────────────────────────────
+// ג”€ג”€ג”€ Pages panel (left sidebar pages tab) ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 function PageThumbButton({
   active,
@@ -7801,7 +8841,7 @@ function PageThumbButton({
       type="button"
     >
       <div className="page-thumb-preview">{index + 1}</div>
-      <span>׳¢׳׳•׳“ {index + 1}</span>
+      <span>עמוד {index + 1}</span>
     </button>
   );
 }
@@ -7853,7 +8893,7 @@ function PagesPanel({
   );
 }
 
-// ─── Page settings panel (left sidebar settings tab) ─────────────────────────
+// ג”€ג”€ג”€ Page settings panel (left sidebar settings tab) ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 function PageSettingsPanel({
   activePage,
@@ -7997,11 +9037,14 @@ function PageSettingsPanel({
         <button className="toggle" onClick={() => onAddGuide("x")} type="button">קו אנכי</button>
         <button className="toggle" onClick={() => onAddGuide("y")} type="button">קו אופקי</button>
       </div>
+
+      <div className="page-panel-section-title" style={{ marginTop: 6 }}>מראה עמוד (Page Look)</div>
+      <PageLookPanel />
     </div>
   );
 }
 
-// ─── Slider field ─────────────────────────────────────────────────────────────
+// ג”€ג”€ג”€ Slider field ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 function GridModePanel({
   assignmentCount,
@@ -8762,7 +9805,7 @@ function SliderField({
   );
 }
 
-// ─── Font selector ────────────────────────────────────────────────────────────
+// ג”€ג”€ג”€ Font selector ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 function getBrightnessContrastOperation(layer: AdjustmentLayer): { type: "brightnessContrast"; brightness: number; contrast: number } {
   const operation = layer.adjustments.find((item) => item.type === "brightnessContrast");
@@ -8823,6 +9866,137 @@ function AdjustmentLayerControls({
       <button className="mini-action" onClick={() => patchOperation({ brightness: 0, contrast: 0 })} type="button">
         <RotateCcw size={13} />
         איפוס
+      </button>
+    </section>
+  );
+}
+
+type AdjustmentOperationType = AdjustmentOperation["type"];
+
+function defaultAdjustmentOperation(type: AdjustmentOperationType): AdjustmentOperation {
+  if (type === "brightnessContrast") return { type, brightness: 0, contrast: 0 };
+  if (type === "exposure") return { type, exposure: 0, gamma: 1, offset: 0 };
+  if (type === "hueSaturation") return { type, hue: 0, saturation: 0, lightness: 0 };
+  if (type === "blackWhite") return { type, enabled: true };
+  if (type === "invert") return { type, enabled: true };
+  if (type === "sepia") return { type, intensity: 80, warmth: 100 };
+  return { type, black: 0, mid: 1, white: 255 };
+}
+
+function adjustmentOperationLabel(operation: AdjustmentOperation): string {
+  if (operation.type === "brightnessContrast") return "בהירות/ניגודיות";
+  if (operation.type === "exposure") return "חשיפה";
+  if (operation.type === "hueSaturation") return "גוון/רוויה";
+  if (operation.type === "blackWhite") return "שחור לבן";
+  if (operation.type === "invert") return "היפוך צבעים";
+  if (operation.type === "sepia") return "ספיה";
+  return "Levels";
+}
+
+function primaryAdjustmentOperation(layer: AdjustmentLayer): AdjustmentOperation {
+  return layer.adjustments[0] ?? defaultAdjustmentOperation("brightnessContrast");
+}
+
+function AdjustmentLayerControlsV2({
+  layer,
+  onPatch
+}: {
+  layer: AdjustmentLayer;
+  onPatch: (patch: Partial<VisualLayer>) => void;
+}): ReactElement {
+  const operation = primaryAdjustmentOperation(layer);
+  const blendModeOptions: BlendMode[] = ["normal", "multiply", "screen", "overlay", "darken", "lighten"];
+
+  function replaceOperation(nextOperation: AdjustmentOperation): void {
+    onPatch({
+      adjustments: [nextOperation, ...layer.adjustments.slice(1)]
+    } as Partial<VisualLayer>);
+  }
+
+  function resetOperation(): void {
+    replaceOperation(defaultAdjustmentOperation(operation.type));
+  }
+
+  return (
+    <section className="adjustment-layer-controls">
+      <label className="field">
+        <span className="field-label">שם שכבה</span>
+        <input className="text-input" onChange={(event) => onPatch({ name: event.target.value } as Partial<VisualLayer>)} value={layer.name} />
+      </label>
+      <div className="quick-controls">
+        <button className={layer.visible ? "toggle on" : "toggle"} onClick={() => onPatch({ visible: !layer.visible } as Partial<VisualLayer>)} type="button">
+          {layer.visible ? <Eye size={14} /> : <EyeOff size={14} />}
+          תצוגה
+        </button>
+        <button className={layer.locked ? "toggle on" : "toggle"} onClick={() => onPatch({ locked: !layer.locked } as Partial<VisualLayer>)} type="button">
+          {layer.locked ? <Lock size={14} /> : <Unlock size={14} />}
+          נעילה
+        </button>
+      </div>
+      <SliderField label="אטימות שכבה" min={0} max={1} step={0.01} value={layer.opacity} onChange={(v) => onPatch({ opacity: v } as Partial<VisualLayer>)} decimals={2} />
+      <label className="field">
+        <span className="field-label">Blend mode</span>
+        <select className="text-input" onChange={(event) => onPatch({ blendMode: event.target.value as BlendMode } as Partial<VisualLayer>)} value={layer.blendMode}>
+          {blendModeOptions.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
+        </select>
+      </label>
+      <label className="field">
+        <span className="field-label">משפיעה על</span>
+        <select className="text-input" onChange={(event) => onPatch({ targetMode: event.target.value as AdjustmentLayer["targetMode"] } as Partial<VisualLayer>)} value={layer.targetMode}>
+          <option value="below">כל השכבות שמתחת</option>
+          <option value="clipped-to-layer">רק השכבה שמתחת</option>
+        </select>
+      </label>
+
+      {operation.type === "brightnessContrast" ? (
+        <>
+          <SliderField label="בהירות" min={-100} max={100} value={operation.brightness} onChange={(v) => replaceOperation({ ...operation, brightness: v })} />
+          <SliderField label="ניגודיות" min={-100} max={100} value={operation.contrast} onChange={(v) => replaceOperation({ ...operation, contrast: v })} />
+        </>
+      ) : null}
+      {operation.type === "exposure" ? (
+        <>
+          <SliderField label="חשיפה" min={-5} max={5} step={0.05} value={operation.exposure} onChange={(v) => replaceOperation({ ...operation, exposure: v })} decimals={2} />
+          <SliderField label="Gamma" min={0.1} max={3} step={0.05} value={operation.gamma} onChange={(v) => replaceOperation({ ...operation, gamma: v })} decimals={2} />
+          <SliderField label="Offset" min={-1} max={1} step={0.01} value={operation.offset} onChange={(v) => replaceOperation({ ...operation, offset: v })} decimals={2} />
+        </>
+      ) : null}
+      {operation.type === "hueSaturation" ? (
+        <>
+          <SliderField label="גוון" min={-180} max={180} value={operation.hue} onChange={(v) => replaceOperation({ ...operation, hue: v })} />
+          <SliderField label="רוויה" min={-100} max={100} value={operation.saturation} onChange={(v) => replaceOperation({ ...operation, saturation: v })} />
+          <SliderField label="בהירות" min={-100} max={100} value={operation.lightness} onChange={(v) => replaceOperation({ ...operation, lightness: v })} />
+        </>
+      ) : null}
+      {operation.type === "blackWhite" ? (
+        <label className="toggle-row">
+          <input checked={operation.enabled} onChange={(event) => replaceOperation({ ...operation, enabled: event.target.checked })} type="checkbox" />
+          <span>הפעל שחור לבן</span>
+        </label>
+      ) : null}
+      {operation.type === "invert" ? (
+        <label className="toggle-row">
+          <input checked={operation.enabled} onChange={(event) => replaceOperation({ ...operation, enabled: event.target.checked })} type="checkbox" />
+          <span>הפעל היפוך צבעים</span>
+        </label>
+      ) : null}
+      {operation.type === "levels" ? (
+        <>
+          <SliderField label="Black" min={0} max={254} value={operation.black} onChange={(v) => replaceOperation({ ...operation, black: Math.min(v, operation.white - 1) })} />
+          <SliderField label="Mid" min={0.1} max={5} step={0.05} value={operation.mid} onChange={(v) => replaceOperation({ ...operation, mid: v })} decimals={2} />
+          <SliderField label="White" min={1} max={255} value={operation.white} onChange={(v) => replaceOperation({ ...operation, white: Math.max(v, operation.black + 1) })} />
+        </>
+      ) : null}
+      {operation.type === "sepia" ? (
+        <>
+          <SliderField label="עוצמה" min={0} max={100} value={operation.intensity} onChange={(v) => replaceOperation({ ...operation, intensity: v })} />
+          <SliderField label="חמימות" min={0} max={100} value={operation.warmth} onChange={(v) => replaceOperation({ ...operation, warmth: v })} />
+        </>
+      ) : null}
+
+      <button className="mini-action" onClick={resetOperation} type="button">
+        <RotateCcw size={13} />
+        איפוס {adjustmentOperationLabel(operation)}
       </button>
     </section>
   );
@@ -8900,7 +10074,7 @@ function FontSelector({
         type="button"
       >
         <span className="font-trigger-label">{value}</span>
-        <span className="font-trigger-arrow">▾</span>
+        <span className="font-trigger-arrow">ג–¾</span>
       </button>
 
       {open && (
@@ -8931,7 +10105,7 @@ function FontSelector({
   );
 }
 
-// ─── Layer inspector ──────────────────────────────────────────────────────────
+// ג”€ג”€ג”€ Layer inspector ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 // For text layers: coordinates + visibility/lock live inside the Type tab.
 // For non-text layers: they stay at the top here.
 
@@ -9019,7 +10193,7 @@ function LayerInspector({
       ) : null}
 
       {isAdjustment ? (
-        <AdjustmentLayerControls layer={selectedLayer} onPatch={onPatch} />
+        <AdjustmentLayerControlsV2 layer={selectedLayer} onPatch={onPatch} />
       ) : null}
 
       {isVisualNonText ? (
@@ -9034,7 +10208,7 @@ function LayerInspector({
   );
 }
 
-// ─── Non-text layer tabs: Edit | FX ──────────────────────────────────────────
+// ג”€ג”€ג”€ Non-text layer tabs: Edit | FX ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 function NonTextLayerControls({
   layer,
@@ -9088,7 +10262,7 @@ function NonTextLayerControls({
   );
 }
 
-// ─── Visual effects controls ──────────────────────────────────────────────────
+// ג”€ג”€ג”€ Visual effects controls ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 function makeId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -9380,7 +10554,7 @@ function VisualEffectCard({
   );
 }
 
-// ─── Text controls ────────────────────────────────────────────────────────────
+// ג”€ג”€ג”€ Text controls ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 const WARP_TYPES = [
   { id: "none", label: "ללא" },
@@ -9468,7 +10642,7 @@ function TextControls({
 
   return (
     <div className="text-pro-controls">
-      {/* ── Tabs are at the TOP so options are immediately visible ── */}
+      {/* ג”€ג”€ Tabs are at the TOP so options are immediately visible ג”€ג”€ */}
       <div className="text-tabs" role="tablist" aria-label="Text controls">
         <button className={tab === "type" ? "on" : ""} onClick={() => setTab("type")} type="button">Type</button>
         <button className={tab === "effects" ? "on" : ""} onClick={() => setTab("effects")} type="button">FX</button>
@@ -9476,7 +10650,7 @@ function TextControls({
         <button className={tab === "presets" ? "on" : ""} onClick={() => setTab("presets")} type="button">Presets</button>
       </div>
 
-      {/* ── Type Tab ── */}
+      {/* ג”€ג”€ Type Tab ג”€ג”€ */}
       {tab === "type" ? (
         <div className="text-tab-panel">
           <div className="field">
@@ -9511,7 +10685,7 @@ function TextControls({
             value={layer.lineHeight}
             onChange={(v) => onPatch({ lineHeight: v } as Partial<VisualLayer>)}
             decimals={2}
-            unit="×"
+            unit="ֳ—"
           />
           <SliderField
             label="ריווח אותיות"
@@ -9616,7 +10790,7 @@ function TextControls({
         </div>
       ) : null}
 
-      {/* ── Effects Tab ── */}
+      {/* ג”€ג”€ Effects Tab ג”€ג”€ */}
       {tab === "effects" ? (
         <div className="text-tab-panel">
           {/* Stroke */}
@@ -10012,7 +11186,7 @@ function TextControls({
         </div>
       ) : null}
 
-      {/* ── Warp Tab ── */}
+      {/* ג”€ג”€ Warp Tab ג”€ג”€ */}
       {tab === "warp" ? (
         <div className="text-tab-panel">
           <div className="field">
@@ -10093,7 +11267,7 @@ function TextControls({
         </div>
       ) : null}
 
-      {/* ── Presets Tab ── */}
+      {/* ג”€ג”€ Presets Tab ג”€ג”€ */}
       {tab === "presets" ? (
         <div className="text-tab-panel">
           <div className="button-row">
@@ -10171,7 +11345,24 @@ function Metric({ label, value }: { label: string; value: number }): ReactElemen
   );
 }
 
-// ─── Layer list ───────────────────────────────────────────────────────────────
+// ג”€ג”€ג”€ Layer list ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
+
+function buildGroupDisplayOrder(
+  filtered: VisualLayer[],
+  groupChildMap: Map<string, VisualLayer[]>,
+  childLayerIds: Set<string>
+): string[] {
+  const ids: string[] = [];
+  for (const layer of filtered) {
+    if (childLayerIds.has(layer.id)) continue;
+    ids.push(layer.id);
+    if (layer.type === "group") {
+      const children = groupChildMap.get(layer.id) ?? [];
+      for (const child of children) ids.push(child.id);
+    }
+  }
+  return ids;
+}
 
 function LayerList({
   assets,
@@ -10183,11 +11374,13 @@ function LayerList({
   onRename,
   onRenameComplete,
   onAddAdjustmentLayer,
+  onAddGroup,
   onAddImageLayer,
   onAddShapeLayer,
   onAddTextLayer,
   onStartRename,
   onReorder,
+  onSmartArrange,
   onSelect,
   onSelectMany,
   onPatchLayer,
@@ -10195,7 +11388,10 @@ function LayerList({
   onToggleVisibility,
   onLayerContextMenu,
   onHoverLayer,
-  onMoveImageIntoFrame
+  onMoveImageIntoFrame,
+  onMoveLayerIntoGroup,
+  onDeleteGroup,
+  onDuplicateGroup
 }: {
   assets: Asset[];
   layers: VisualLayer[];
@@ -10205,12 +11401,14 @@ function LayerList({
   variableLayerIds: Set<string>;
   onRename: (layerId: string, name: string) => void;
   onRenameComplete: () => void;
-  onAddAdjustmentLayer: () => void;
+  onAddAdjustmentLayer: (operation: AdjustmentOperation) => void;
+  onAddGroup: () => void;
   onAddImageLayer: () => void;
   onAddShapeLayer: () => void;
   onAddTextLayer: () => void;
   onStartRename: (layerId: string) => void;
   onReorder: (layerIdsTopToBottom: string[]) => void;
+  onSmartArrange: (mode: SmartArrangeMode) => void;
   onSelect: (layerId: string) => void;
   onSelectMany: (layerIds: string[]) => void;
   onPatchLayer: (layer: VisualLayer) => void;
@@ -10219,11 +11417,81 @@ function LayerList({
   onLayerContextMenu: (layerId: string, screenX: number, screenY: number) => void;
   onHoverLayer?: (layerId: string | null) => void;
   onMoveImageIntoFrame?: (imageLayerId: string, frameId: string) => void;
+  onMoveLayerIntoGroup?: (layerId: string, groupId: string | null) => void;
+  onDeleteGroup?: (groupId: string, deleteChildren: boolean) => void;
+  onDuplicateGroup?: (groupId: string) => void;
 }): ReactElement {
   const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [filter, setFilter] = useState<"all" | "images" | "text" | "frames" | "framesMasks" | "shapes" | "adjustments" | "hidden" | "locked">("all");
   const [draftName, setDraftName] = useState("");
+  const [pendingGroupDelete, setPendingGroupDelete] = useState<string | null>(null);
+
+  // Tool Library access straight from the Layers panel "+" menu. Targets the
+  // selected image layer when one is active (image context), otherwise applies
+  // as a page-level look. Replaces the old "disconnected" legacy adjustment layers.
+  const activePageId = useDocumentStore((s) => s.activePageId);
+  const applyPresetToImage = useDocumentStore((s) => s.applyPresetToImage);
+  const applyPresetToAllImagesOnPage = useDocumentStore((s) => s.applyPresetToAllImagesOnPage);
+  const applyPresetToDuplicatedImage = useDocumentStore((s) => s.applyPresetToDuplicatedImage);
+  const applyPresetAsPageLook = useDocumentStore((s) => s.applyPresetAsPageLook);
+  const addImageAdjustment = useDocumentStore((s) => s.addImageAdjustment);
+  const applyAdjustmentToAllImagesOnPage = useDocumentStore((s) => s.applyAdjustmentToAllImagesOnPage);
+  const addPageLook = useDocumentStore((s) => s.addPageLook);
+
+  const selectedLayer = layers.find((l) => l.id === selectedLayerId);
+  const selectedImageLayer = selectedLayer?.type === "image" ? (selectedLayer as ImageLayer) : undefined;
+  // A collage/photo-print/mask cell that currently holds an image is also a valid
+  // Tool Library target — adjustments apply to the image inside the frame.
+  const selectedFrameWithImage =
+    selectedLayer?.type === "frame" && (selectedLayer as FrameLayer).imageAssetId !== undefined
+      ? (selectedLayer as FrameLayer)
+      : undefined;
+  // Unified adjustable target (plain image layer OR frame cell with an image).
+  const libraryTargetId = selectedImageLayer?.id ?? selectedFrameWithImage?.id;
+  const libraryTargetAssetId = selectedImageLayer?.assetId ?? selectedFrameWithImage?.imageAssetId;
+  const libraryTargetName = selectedImageLayer?.name ?? selectedFrameWithImage?.name;
+  const libraryContext: LibraryContext = libraryTargetId !== undefined ? "image" : "page";
+  const librarySrc =
+    libraryTargetAssetId !== undefined
+      ? resolveCanvasAssetPath(assets.find((a) => a.id === libraryTargetAssetId))
+      : undefined;
+
+  const handleLibraryApply = (
+    item: LibraryItem,
+    strength: number,
+    applyToAll: boolean,
+    duplicate: boolean,
+    extra: ImageAdjustmentTemplate[]
+  ): void => {
+    if (activePageId === null) return;
+    if (item.kind === "tool" || item.kind === "aiTool") {
+      // `extra` carries the concrete, edited recipe (tool sliders / AI analysis).
+      if (applyToAll) {
+        for (const template of extra) applyAdjustmentToAllImagesOnPage(activePageId, template);
+      } else if (libraryTargetId !== undefined) {
+        for (const template of extra) addImageAdjustment(activePageId, libraryTargetId, template);
+      }
+    } else if (item.kind === "imagePreset" && item.presetId !== undefined) {
+      if (applyToAll || libraryTargetId === undefined) {
+        void runWithBusy("מחיל פריסט על כל תמונות העמוד…", () =>
+          applyPresetToAllImagesOnPage(activePageId, item.presetId!, strength, extra)
+        );
+      } else if (duplicate && selectedImageLayer !== undefined) {
+        // Duplicate-and-apply only makes sense for standalone image layers; a frame
+        // cell can't be cloned in place, so it falls through to in-place apply.
+        applyPresetToDuplicatedImage(activePageId, selectedImageLayer.id, item.presetId, strength, extra);
+      } else {
+        applyPresetToImage(activePageId, libraryTargetId, item.presetId, strength, extra);
+      }
+    } else if (item.kind === "pageLookPreset" && item.presetId !== undefined) {
+      applyPresetAsPageLook(activePageId, item.presetId, strength);
+    } else if (item.kind === "effect" && item.effectKind !== undefined) {
+      addPageLook(activePageId, createPageLookLayer({ kind: item.effectKind }));
+    }
+    setLibraryOpen(false);
+  };
   const ordered = [...layers].sort((a, b) => b.zIndex - a.zIndex);
   const filtered = ordered.filter((layer) => {
     if (filter === "images") return layer.type === "image";
@@ -10238,6 +11506,21 @@ function LayerList({
   });
   const canReorder = filter === "all";
 
+  // Build a map from groupId → children (sorted top-to-bottom by zIndex desc)
+  const groupChildMap = new Map<string, VisualLayer[]>();
+  const childLayerIds = new Set<string>();
+  for (const layer of ordered) {
+    if (layer.type === "group") {
+      const group = layer as GroupLayer;
+      const children = group.childIds
+        .map((id) => layers.find((l) => l.id === id))
+        .filter((l): l is VisualLayer => l !== undefined)
+        .sort((a, b) => b.zIndex - a.zIndex);
+      groupChildMap.set(group.id, children);
+      for (const child of children) childLayerIds.add(child.id);
+    }
+  }
+
   useEffect(() => {
     const layer = layers.find((item) => item.id === renamingLayerId);
     if (layer !== undefined) setDraftName(layer.name);
@@ -10250,9 +11533,10 @@ function LayerList({
       setDraggingLayerId(null);
       return;
     }
-    // If an ImageLayer is being dropped onto a Frame row, move it into the frame.
     const draggedLayer = layers.find((l) => l.id === draggingLayerId);
     const targetLayer = layers.find((l) => l.id === targetLayerId);
+
+    // Image into frame (existing behavior)
     if (
       onMoveImageIntoFrame !== undefined
       && draggedLayer?.type === "image"
@@ -10262,14 +11546,47 @@ function LayerList({
       setDraggingLayerId(null);
       return;
     }
+
+    // Drop non-group layer onto a group header → move into group
+    if (
+      onMoveLayerIntoGroup !== undefined
+      && targetLayer?.type === "group"
+      && draggedLayer?.type !== "group"
+    ) {
+      onMoveLayerIntoGroup(draggingLayerId, targetLayerId);
+      setDraggingLayerId(null);
+      return;
+    }
+
     if (!canReorder) {
       setDraggingLayerId(null);
       return;
     }
-    const nextIds = ordered.map((l) => l.id).filter((id) => id !== draggingLayerId);
-    const targetIndex = nextIds.indexOf(targetLayerId);
-    nextIds.splice(targetIndex < 0 ? 0 : targetIndex, 0, draggingLayerId);
-    onReorder(nextIds);
+
+    // Build display order (groups + their children as a block, then ungrouped)
+    const displayIds = buildGroupDisplayOrder(filtered, groupChildMap, childLayerIds);
+    const nextIds = displayIds.filter((id) => id !== draggingLayerId);
+
+    if (draggedLayer?.type === "group") {
+      // Dragging a group: remove children too, then insert group+children at target
+      const group = draggedLayer as GroupLayer;
+      const childIds = group.childIds;
+      const withoutChildren = nextIds.filter((id) => !childIds.includes(id));
+      const targetIndex = withoutChildren.indexOf(targetLayerId);
+      withoutChildren.splice(targetIndex < 0 ? 0 : targetIndex, 0, draggingLayerId, ...childIds);
+      onReorder(withoutChildren);
+    } else {
+      const targetIndex = nextIds.indexOf(targetLayerId);
+      nextIds.splice(targetIndex < 0 ? 0 : targetIndex, 0, draggingLayerId);
+      // If dragged layer moves outside its group, remove it from that group
+      if (onMoveLayerIntoGroup !== undefined && draggedLayer?.parentId !== undefined) {
+        const targetParentId = targetLayer?.parentId;
+        if (draggedLayer.parentId !== targetParentId) {
+          onMoveLayerIntoGroup(draggingLayerId, targetParentId ?? null);
+        }
+      }
+      onReorder(nextIds);
+    }
     setDraggingLayerId(null);
   }
 
@@ -10318,69 +11635,20 @@ function LayerList({
   ];
   const blendModeOptions: BlendMode[] = ["normal", "multiply", "screen", "overlay", "darken", "lighten"];
 
-  return (
-    <section className="layer-list" aria-label="שכבות">
-      <div className="layer-add-menu">
-        <button
-          aria-expanded={addMenuOpen}
-          aria-label="הוסף שכבה"
-          className="layer-add-btn"
-          onClick={() => setAddMenuOpen((open) => !open)}
-          title="הוסף שכבה"
-          type="button"
-        >
-          <Plus size={13} />
-        </button>
-        {addMenuOpen ? (
-          <>
-            <div className="layer-add-backdrop" onClick={() => setAddMenuOpen(false)} />
-            <div className="layer-add-popover">
-              <button onClick={() => { onAddImageLayer(); setAddMenuOpen(false); }} type="button"><ImagePlus size={12} />תמונה</button>
-              <button onClick={() => { onAddTextLayer(); setAddMenuOpen(false); }} type="button"><Type size={12} />טקסט</button>
-              <button onClick={() => { onAddShapeLayer(); setAddMenuOpen(false); }} type="button"><Square size={12} />צורה</button>
-              <div className="ctx-divider" />
-              <button onClick={() => { onAddAdjustmentLayer(); setAddMenuOpen(false); }} type="button"><SlidersHorizontal size={12} />בהירות/ניגודיות</button>
-            </div>
-          </>
-        ) : null}
-      </div>
-      <h3>שכבות</h3>
-      {ordered.length === 0 ? <p>אין שכבות עדיין.</p> : null}
-      <div className="layer-filter-bar" aria-label="Layer filters">
-        {filterOptions.map((option) => (
-          <button
-            aria-pressed={filter === option.id}
-            className={filter === option.id ? "active" : ""}
-            key={option.id}
-            onClick={() => {
-              setFilter(option.id);
-              setDraggingLayerId(null);
-            }}
-            type="button"
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-      <div className="layer-list-count">{filtered.length}/{ordered.length}</div>
-      {ordered.length > 0 && filtered.length === 0 ? <p>No layers match this filter.</p> : null}
-      {filtered.map((layer) => {
-        const isFM = isFrameMaskLayer(layer);
-        const fmFrame = isFM ? (layer as FrameLayer) : null;
-        const fmAsset = fmFrame !== null && fmFrame.imageAssetId !== undefined
-          ? assets.find((a) => a.id === fmFrame.imageAssetId)
-          : undefined;
-        return (
-        <Fragment key={layer.id}>
+  function renderLayerRow(layer: VisualLayer, isChild = false): ReactElement {
+    const isFM = isFrameMaskLayer(layer);
+    const fmFrame = isFM ? (layer as FrameLayer) : null;
+    const fmAsset = fmFrame !== null && fmFrame.imageAssetId !== undefined
+      ? assets.find((a) => a.id === fmFrame.imageAssetId)
+      : undefined;
+    return (
+      <Fragment key={layer.id}>
         <div
-          className={`layer-row ${selectedLayerIds.includes(layer.id) ? "active" : ""} ${draggingLayerId === layer.id ? "dragging" : ""} ${!layer.visible ? "hidden" : ""} ${layer.locked ? "locked" : ""}`}
+          className={`layer-row${isChild ? " layer-row--child" : ""} ${selectedLayerIds.includes(layer.id) ? "active" : ""} ${draggingLayerId === layer.id ? "dragging" : ""} ${!layer.visible ? "hidden" : ""} ${layer.locked ? "locked" : ""}`}
           draggable
           onContextMenu={(e) => handleRowContextMenu(e, layer.id)}
           onDragEnd={() => setDraggingLayerId(null)}
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
+          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
           onDragStart={(e) => {
             e.stopPropagation();
             e.dataTransfer.effectAllowed = "move";
@@ -10414,18 +11682,41 @@ function LayerList({
                 onChange={(event) => setDraftName(event.target.value)}
                 onClick={(event) => event.stopPropagation()}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    commitRename(layer);
-                  } else if (event.key === "Escape") {
-                    event.preventDefault();
-                    onRenameComplete();
-                  }
+                  if (event.key === "Enter") { event.preventDefault(); commitRename(layer); }
+                  else if (event.key === "Escape") { event.preventDefault(); onRenameComplete(); }
                 }}
               />
             ) : (
               <strong>{layer.name}</strong>
             )}
+            {layer.type === "adjustment-layer" ? <em className="layer-legacy-pill" title="שכבת התאמה ישנה — מושבתת, תומר אוטומטית">Legacy — מושבת</em> : null}
+            {(() => {
+              if (layer.type !== "image") return null;
+              const adj = (layer as ImageLayer).imageAdjustments;
+              const presets = adj?.presetInstances ?? [];
+              const generatedIds = new Set(presets.flatMap((p) => p.generatedAdjustments));
+              const manualCount = (adj?.stack ?? []).filter((a) => !generatedIds.has(a.id)).length;
+              const total = presets.length + manualCount;
+              if (total === 0) return null;
+              const presetName = presets[0]?.name;
+              const title =
+                presetName !== undefined
+                  ? `פריסט: ${presetName}${total > 1 ? ` ועוד ${total - 1}` : ""} — לחץ לעריכת עוצמה`
+                  : `${total} התאמות מוחלות — לחץ לעריכה`;
+              return (
+                <em
+                  className="layer-preset-pill"
+                  title={title}
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => { e.stopPropagation(); onSelect(layer.id); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onSelect(layer.id); } }}
+                  style={{ cursor: "pointer" }}
+                >
+                  ✨{total > 1 ? ` ${total}` : ""}
+                </em>
+              );
+            })()}
             {layer.opacity < 0.995 ? <em className="layer-opacity-badge">{Math.round(layer.opacity * 100)}%</em> : null}
             {layer.blendMode !== "normal" ? <em className="layer-blend-badge">{layer.blendMode}</em> : null}
             {hasLayerFx(layer) ? <em className="layer-fx-pill">fx</em> : null}
@@ -10445,10 +11736,7 @@ function LayerList({
           <button
             aria-label={layer.visible ? "הסתר שכבה" : "הצג שכבה"}
             className={`layer-eye-btn ${!layer.visible ? "hidden" : ""}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleVisibility(layer.id);
-            }}
+            onClick={(e) => { e.stopPropagation(); onToggleVisibility(layer.id); }}
             title={layer.visible ? "הסתר שכבה" : "הצג שכבה"}
             type="button"
           >
@@ -10457,10 +11745,7 @@ function LayerList({
           <button
             aria-label={layer.locked ? "Unlock layer" : "Lock layer"}
             className={`layer-lock-btn ${layer.locked ? "locked" : ""}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleLock(layer.id);
-            }}
+            onClick={(e) => { e.stopPropagation(); onToggleLock(layer.id); }}
             title={layer.locked ? "Unlock layer" : "Lock layer"}
             type="button"
           >
@@ -10475,10 +11760,7 @@ function LayerList({
         {isFM && fmFrame !== null ? (
           <div
             className={`layer-row-child ${fmAsset === undefined ? "empty" : ""}`}
-            onDragOver={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onDrop={(e) => handleDrop(e, fmFrame.id)}
             onClick={() => onSelect(fmFrame.id)}
           >
@@ -10492,14 +11774,246 @@ function LayerList({
             )}
           </div>
         ) : null}
-        </Fragment>
-        );
-      })}
+      </Fragment>
+    );
+  }
+
+  function renderGroupRow(group: GroupLayer): ReactElement {
+    const children = groupChildMap.get(group.id) ?? [];
+    const isSelected = selectedLayerIds.includes(group.id);
+    return (
+      <Fragment key={group.id}>
+        <div
+          className={`layer-row layer-row--group${isSelected ? " active" : ""}${draggingLayerId === group.id ? " dragging" : ""}${!group.visible ? " hidden" : ""}`}
+          draggable
+          onContextMenu={(e) => handleRowContextMenu(e, group.id)}
+          onDragEnd={() => setDraggingLayerId(null)}
+          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onDragStart={(e) => {
+            e.stopPropagation();
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("text/plain", group.id);
+            setDraggingLayerId(group.id);
+          }}
+          onDrop={(e) => handleDrop(e, group.id)}
+          onMouseEnter={() => onHoverLayer?.(group.id)}
+          onMouseLeave={() => onHoverLayer?.(null)}
+        >
+          <button
+            className="layer-group-collapse-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPatchLayer({ ...group, collapsed: !group.collapsed });
+            }}
+            title={group.collapsed ? "펼치기" : "접기"}
+            type="button"
+          >
+            {group.collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+          </button>
+          <div
+            className="layer-main"
+            onClick={(e) => handleLayerClick(e, group.id)}
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              setDraftName(group.name);
+              onStartRename(group.id);
+            }}
+            role="button"
+            tabIndex={0}
+          >
+            <FolderPlus size={13} className="layer-group-icon" />
+            {renamingLayerId === group.id ? (
+              <input
+                autoFocus
+                className="layer-name-input"
+                value={draftName}
+                onBlur={() => commitRename(group)}
+                onChange={(event) => setDraftName(event.target.value)}
+                onClick={(event) => event.stopPropagation()}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") { event.preventDefault(); commitRename(group); }
+                  else if (event.key === "Escape") { event.preventDefault(); onRenameComplete(); }
+                }}
+              />
+            ) : (
+              <strong>{group.name}</strong>
+            )}
+            <em className="layer-group-count">{children.length}</em>
+            {group.opacity < 0.995 ? (
+              <em className="layer-opacity-badge">{Math.round(group.opacity * 100)}%</em>
+            ) : null}
+          </div>
+          <input
+            aria-label="Group opacity"
+            className="layer-group-opacity"
+            max={100}
+            min={0}
+            step={1}
+            title="Group opacity"
+            type="range"
+            value={Math.round(group.opacity * 100)}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => {
+              e.stopPropagation();
+              onPatchLayer({ ...group, opacity: Number(e.target.value) / 100 });
+            }}
+          />
+          <button
+            aria-label={group.visible ? "הסתר קבוצה" : "הצג קבוצה"}
+            className={`layer-eye-btn ${!group.visible ? "hidden" : ""}`}
+            onClick={(e) => { e.stopPropagation(); onToggleVisibility(group.id); }}
+            title={group.visible ? "הסתר קבוצה" : "הצג קבוצה"}
+            type="button"
+          >
+            {group.visible ? <Eye size={13} /> : <EyeOff size={13} />}
+          </button>
+          <span className="layer-actions">
+            {pendingGroupDelete === group.id ? (
+              <span className="layer-group-delete-confirm">
+                <button
+                  className="layer-group-delete-btn"
+                  onClick={(e) => { e.stopPropagation(); setPendingGroupDelete(null); onDeleteGroup?.(group.id, false); }}
+                  title="מחק קבוצה בלבד"
+                  type="button"
+                >
+                  קבוצה בלבד
+                </button>
+                <button
+                  className="layer-group-delete-btn layer-group-delete-btn--all"
+                  onClick={(e) => { e.stopPropagation(); setPendingGroupDelete(null); onDeleteGroup?.(group.id, true); }}
+                  title="מחק קבוצה עם תוכן"
+                  type="button"
+                >
+                  עם תוכן
+                </button>
+                <button
+                  className="layer-group-delete-btn--cancel"
+                  onClick={(e) => { e.stopPropagation(); setPendingGroupDelete(null); }}
+                  type="button"
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            ) : (
+              <>
+                <button
+                  aria-label="שכפל קבוצה"
+                  onClick={(e) => { e.stopPropagation(); onDuplicateGroup?.(group.id); }}
+                  title="שכפל קבוצה"
+                  type="button"
+                >
+                  <Copy size={11} />
+                </button>
+                <button
+                  aria-label="מחק קבוצה"
+                  onClick={(e) => { e.stopPropagation(); setPendingGroupDelete(group.id); }}
+                  title="מחק קבוצה"
+                  type="button"
+                >
+                  <Trash2 size={11} />
+                </button>
+              </>
+            )}
+          </span>
+        </div>
+        {!group.collapsed && children.map((child) => renderLayerRow(child, true))}
+      </Fragment>
+    );
+  }
+
+  // Build display list: top-level items in order (groups + ungrouped layers, no standalone children)
+  const displayLayers = filtered.filter((l) => !childLayerIds.has(l.id));
+
+  return (
+    <section className="layer-list" aria-label="שכבות">
+      <div className="layer-add-menu">
+        <button
+          aria-label="הוסף קבוצה"
+          className="layer-group-btn"
+          onClick={onAddGroup}
+          title="הוסף קבוצה"
+          type="button"
+        >
+          <FolderPlus size={13} />
+        </button>
+        <button
+          aria-expanded={addMenuOpen}
+          aria-label="הוסף שכבה"
+          className="layer-add-btn"
+          onClick={() => setAddMenuOpen((open) => !open)}
+          title="הוסף שכבה"
+          type="button"
+        >
+          <Plus size={13} />
+        </button>
+        {addMenuOpen ? (
+          <>
+            <div className="layer-add-backdrop" onClick={() => setAddMenuOpen(false)} />
+            <div className="layer-add-popover">
+              <button onClick={() => { onAddImageLayer(); setAddMenuOpen(false); }} type="button"><ImagePlus size={12} />תמונה</button>
+              <button onClick={() => { onAddTextLayer(); setAddMenuOpen(false); }} type="button"><Type size={12} />טקסט</button>
+              <button onClick={() => { onAddShapeLayer(); setAddMenuOpen(false); }} type="button"><Square size={12} />צורה</button>
+              {(ENABLE_IMAGE_LEVEL_ADJUSTMENTS || ENABLE_PAGE_LOOK_LAYERS) && (
+                <>
+                  <div className="ctx-divider" />
+                  <button onClick={() => { setLibraryOpen(true); setAddMenuOpen(false); }} type="button"><SlidersHorizontal size={12} />ספריית כלים ופריסטים</button>
+                </>
+              )}
+              {ENABLE_LEGACY_ADJUSTMENT_LAYER_CREATION && (
+                <>
+                  <div className="ctx-divider" />
+                  <button onClick={() => { onAddAdjustmentLayer(defaultAdjustmentOperation("brightnessContrast")); setAddMenuOpen(false); }} type="button"><SlidersHorizontal size={12} />בהירות/ניגודיות (Legacy)</button>
+                  <button onClick={() => { onAddAdjustmentLayer(defaultAdjustmentOperation("exposure")); setAddMenuOpen(false); }} type="button"><SlidersHorizontal size={12} />חשיפה (Legacy)</button>
+                  <button onClick={() => { onAddAdjustmentLayer(defaultAdjustmentOperation("hueSaturation")); setAddMenuOpen(false); }} type="button"><SlidersHorizontal size={12} />גוון/רוויה (Legacy)</button>
+                  <button onClick={() => { onAddAdjustmentLayer(defaultAdjustmentOperation("blackWhite")); setAddMenuOpen(false); }} type="button"><SlidersHorizontal size={12} />שחור לבן (Legacy)</button>
+                  <button onClick={() => { onAddAdjustmentLayer(defaultAdjustmentOperation("invert")); setAddMenuOpen(false); }} type="button"><SlidersHorizontal size={12} />היפוך צבעים (Legacy)</button>
+                  <button onClick={() => { onAddAdjustmentLayer(defaultAdjustmentOperation("levels")); setAddMenuOpen(false); }} type="button"><SlidersHorizontal size={12} />Levels (Legacy)</button>
+                  <button onClick={() => { onAddAdjustmentLayer(defaultAdjustmentOperation("sepia")); setAddMenuOpen(false); }} type="button"><SlidersHorizontal size={12} />ספיה (Legacy)</button>
+                </>
+              )}
+            </div>
+          </>
+        ) : null}
+        <SmartArrangeControl onArrange={onSmartArrange} />
+      </div>
+      {libraryOpen && (
+        <ToolLibrary
+          context={libraryContext}
+          previewSrc={librarySrc}
+          previewLabel={libraryTargetName}
+          selectedCount={libraryTargetId !== undefined ? 1 : 0}
+          onApply={handleLibraryApply}
+          onClose={() => setLibraryOpen(false)}
+        />
+      )}
+      <PageAdjustmentsSection />
+      <h3>שכבות</h3>
+      {ordered.length === 0 ? <p>אין שכבות עדיין.</p> : null}
+      <div className="layer-filter-bar" aria-label="Layer filters">
+        {filterOptions.map((option) => (
+          <button
+            aria-pressed={filter === option.id}
+            className={filter === option.id ? "active" : ""}
+            key={option.id}
+            onClick={() => { setFilter(option.id); setDraggingLayerId(null); }}
+            type="button"
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      <div className="layer-list-count">{filtered.length}/{ordered.length}</div>
+      {ordered.length > 0 && filtered.length === 0 ? <p>No layers match this filter.</p> : null}
+      {displayLayers.map((layer) =>
+        layer.type === "group"
+          ? renderGroupRow(layer as GroupLayer)
+          : renderLayerRow(layer)
+      )}
     </section>
   );
 }
 
-// ─── Layer Panel Context Menu ─────────────────────────────────────────────────
+// ג”€ג”€ג”€ Layer Panel Context Menu ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 function layerTypeIcon(layer: VisualLayer): ReactElement {
   if (layer.type === "image") return <ImagePlus size={12} />;
@@ -10507,6 +12021,7 @@ function layerTypeIcon(layer: VisualLayer): ReactElement {
   if (layer.type === "frame") return <Frame size={12} />;
   if (layer.type === "shape") return <Square size={12} />;
   if (layer.type === "adjustment-layer") return <SlidersHorizontal size={12} />;
+  if (layer.type === "group") return <FolderPlus size={12} />;
   return <Layers size={12} />;
 }
 
@@ -10703,7 +12218,7 @@ function LayerContextMenu({
   );
 }
 
-// ─── Canvas Context Menu ──────────────────────────────────────────────────────
+// ג”€ג”€ג”€ Canvas Context Menu ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 function CanvasContextMenu({
   target,
@@ -10763,7 +12278,12 @@ function CanvasContextMenu({
   onTextPasteEffects,
   onOpenImageEditor,
   onOpenInPhotoshop,
-  onOpenInColorLab
+  onOpenInColorLab,
+  onHarmonize,
+  onAiExpand,
+  onAiRemove,
+  onAiUpscale,
+  onAiRestore
 }: {
   target: CanvasContextMenuTarget;
   imageEditorAvailable: boolean;
@@ -10823,6 +12343,11 @@ function CanvasContextMenu({
   onOpenImageEditor: () => void;
   onOpenInPhotoshop: () => void;
   onOpenInColorLab: () => void;
+  onHarmonize?: () => void;
+  onAiExpand?: () => void;
+  onAiRemove?: () => void;
+  onAiUpscale?: () => void;
+  onAiRestore?: () => void;
 }): ReactElement {
   const menuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: target.screenX, top: target.screenY });
@@ -10971,7 +12496,19 @@ function CanvasContextMenu({
         <summary>עריכה</summary>
         <button className="ctx-item" onClick={onReplaceImage} type="button">החלף תמונה</button>
         <button className="ctx-item" onClick={onDuplicate} type="button">שכפל תמונה</button>
+        {onHarmonize && target.hasImage && (
+          <button className="ctx-item" onClick={onHarmonize} type="button">מיזוג סגנון</button>
+        )}
       </details>
+      {target.hasImage && (onAiExpand ?? onAiRemove ?? onAiUpscale ?? onAiRestore) && (
+        <details className="ctx-submenu">
+          <summary>✨ כלי AI</summary>
+          {onAiExpand && <button className="ctx-item" onClick={onAiExpand} type="button">הרחב תמונה</button>}
+          {onAiRemove && <button className="ctx-item" onClick={onAiRemove} type="button">הסר אובייקט</button>}
+          {onAiUpscale && <button className="ctx-item" onClick={onAiUpscale} type="button">שפר רזולוציה</button>}
+          {onAiRestore && <button className="ctx-item" onClick={onAiRestore} type="button">שחזר תמונה</button>}
+        </details>
+      )}
       <div className="ctx-divider" />
       <button
         className="ctx-item"
@@ -11007,7 +12544,7 @@ function CanvasContextMenu({
       )}
       <div className="ctx-divider" />
       <button className="ctx-item" onClick={onAddToFavorites} type="button">
-        הוסף למועדפים
+        הוסף לספרייה המקומית
       </button>
     </div>
   );

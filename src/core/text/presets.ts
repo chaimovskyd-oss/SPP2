@@ -426,10 +426,25 @@ export const BUILTIN_TEXT_PRESETS: TextPreset[] = [
   })
 ];
 
+const PRESET_TYPOGRAPHY_KEYS = ["fontFamily", "fontWeight", "fontStyle", "lineHeight", "letterSpacing"] as const;
+
+function presetStyleForApply(style: TextStylePatch, includesTypography: boolean): TextStylePatch {
+  const next = cloneStylePatch(style);
+  // Presets and text effects must never set or constrain the font size.
+  delete next.fontSize;
+  // Pure-effect presets (outline, 3D, neon, metal, ...) leave the layer's typography untouched.
+  if (!includesTypography) {
+    for (const key of PRESET_TYPOGRAPHY_KEYS) {
+      delete next[key];
+    }
+  }
+  return next;
+}
+
 export function applyTextPresetToLayer(layer: TextLayer, preset: TextPreset): TextLayer {
   return {
     ...layer,
-    ...cloneStylePatch(preset.style),
+    ...presetStyleForApply(preset.style, preset.includesTypography),
     effects: cloneEffects(preset.effects),
     textEffects: cloneEffects(preset.effects)
   };
@@ -506,9 +521,12 @@ export function extractTextStylePatch(layer: TextLayer): TextStylePatch {
 }
 
 export function applyTextStylePatch(layer: TextLayer, patch: TextStylePatch): TextLayer {
+  const next = cloneStylePatch(patch);
+  // Pasting a style/FX must never resize the target text.
+  delete next.fontSize;
   return {
     ...layer,
-    ...cloneStylePatch(patch),
+    ...next,
     effects: cloneEffects(patch.effects ?? layer.effects),
     textEffects: cloneEffects(patch.effects ?? layer.effects)
   };

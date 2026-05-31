@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { BUILTIN_TEXT_PRESETS, createDocument, createPage, createProjectEnvelope, createTextLayer, createTextPresetFromLayer, parseProject, serializeProject } from "@/core";
+import { BUILTIN_TEXT_PRESETS, applyTextPresetToLayer, createDocument, createPage, createProjectEnvelope, createTextLayer, createTextPresetFromLayer, parseProject, serializeProject } from "@/core";
 import { useDocumentStore } from "@/state/documentStore";
 import type { TextLayer } from "@/types/layers";
 
@@ -147,6 +147,45 @@ describe("Pro text engine foundation", () => {
     expect(layerPattern).not.toBe(presetPattern);
     expect(layerPattern?.params).not.toBe(presetPattern?.params);
     expect(layerPattern?.params).toEqual(presetPattern?.params);
+  });
+
+  it("never changes the font size when applying an effect-only preset (outline / 3D)", () => {
+    const layer: TextLayer = { ...createTextLayer({ text: "תלת", rect: { x: 0, y: 0, width: 180, height: 80 } }), fontSize: 64, fontFamily: "Custom Display" };
+    const gold3d = BUILTIN_TEXT_PRESETS.find((preset) => preset.presetId === "real_3d_gold");
+    const outline = BUILTIN_TEXT_PRESETS.find((preset) => preset.presetId === "outlined_white");
+    expect(gold3d?.includesTypography).toBe(false);
+    expect(outline?.includesTypography).toBe(false);
+
+    const after3d = applyTextPresetToLayer(layer, gold3d!);
+    expect(after3d.fontSize).toBe(64);
+    expect(after3d.fontFamily).toBe("Custom Display");
+    expect(after3d.effects.some((effect) => effect.effectType === "extrude_3d")).toBe(true);
+    expect(after3d.stroke).toBeDefined();
+
+    const afterOutline = applyTextPresetToLayer(layer, outline!);
+    expect(afterOutline.fontSize).toBe(64);
+    expect(afterOutline.fontFamily).toBe("Custom Display");
+    expect(afterOutline.stroke).toBeDefined();
+  });
+
+  it("applies typography presets without ever overriding the font size", () => {
+    const layer: TextLayer = { ...createTextLayer({ text: "טקסט", rect: { x: 0, y: 0, width: 180, height: 80 } }), fontSize: 48 };
+    const modern = BUILTIN_TEXT_PRESETS.find((preset) => preset.presetId === "modern_clean");
+    expect(modern?.includesTypography).toBe(true);
+
+    const after = applyTextPresetToLayer(layer, modern!);
+    expect(after.fontFamily).toBe("DM Sans");
+    expect(after.fontSize).toBe(48);
+  });
+
+  it("does not transfer the captured font size when re-applying a user preset", () => {
+    const source: TextLayer = { ...createTextLayer({ text: "Source", rect: { x: 0, y: 0, width: 220, height: 90 } }), fontSize: 96, fontFamily: "Source Font" };
+    const target: TextLayer = { ...createTextLayer({ text: "Target", rect: { x: 0, y: 0, width: 220, height: 90 } }), fontSize: 24, fontFamily: "Target Font" };
+
+    const userPreset = createTextPresetFromLayer(source, "Captured look");
+    const after = applyTextPresetToLayer(target, userPreset);
+
+    expect(after.fontSize).toBe(24);
   });
 
   it("captures complete user text presets from the current layer state", () => {

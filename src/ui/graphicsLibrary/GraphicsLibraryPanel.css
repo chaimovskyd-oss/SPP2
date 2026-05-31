@@ -1,0 +1,604 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   LOCAL GRAPHICS LIBRARY PANEL
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.glib-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  position: relative; /* anchor for .glib-add-menu */
+}
+
+/* ── Header ────────────────────────────────────────────────────────────────── */
+
+.glib-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+
+.glib-search-icon {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.glib-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  direction: rtl;
+  text-align: right;
+  min-width: 0;
+}
+
+.glib-search-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.glib-icon-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background var(--t), color var(--t);
+  flex-shrink: 0;
+}
+
+.glib-icon-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.glib-icon-btn.active {
+  background: color-mix(in oklab, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
+
+/* ── Add-files dropdown menu ────────────────────────────────────────────────── */
+
+.glib-add-menu {
+  position: absolute;
+  top: 42px;
+  right: 4px;
+  z-index: 8001;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  min-width: 190px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  direction: rtl;
+}
+
+.glib-add-menu-label {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  padding: 2px 4px 4px;
+  direction: rtl;
+}
+
+/* ── Thumbnail size row ──────────────────────────────────────────────────────── */
+
+.glib-size-row {
+  display: flex;
+  gap: 2px;
+  padding: 0 6px 4px;
+  border-bottom: 1px solid var(--border-soft);
+  justify-content: flex-end;
+}
+
+/* ── Category chips ─────────────────────────────────────────────────────────── */
+
+.glib-categories {
+  display: flex;
+  gap: 3px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.glib-categories::-webkit-scrollbar { display: none; }
+
+.glib-cat-chip {
+  padding: 2px 9px;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+  transition: background var(--t), color var(--t), border-color var(--t);
+  flex-shrink: 0;
+  direction: rtl;
+}
+
+.glib-cat-chip:hover {
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+.glib-cat-chip.active {
+  background: color-mix(in oklab, var(--accent) 18%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 40%, transparent);
+}
+
+/* ── Filter bar ────────────────────────────────────────────────────────────── */
+
+.glib-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.glib-filter-select {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  padding: 2px 4px;
+  cursor: pointer;
+  direction: rtl;
+  outline: none;
+  max-width: 88px;
+  transition: border-color var(--t);
+}
+
+.glib-filter-select:focus { border-color: var(--accent); }
+
+.glib-filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  user-select: none;
+  direction: rtl;
+  padding: 2px 5px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  transition: all var(--t);
+}
+
+.glib-filter-toggle.active {
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+  border-color: color-mix(in oklab, var(--accent) 30%, transparent);
+}
+
+.glib-filter-toggle:hover { background: var(--bg-elevated); }
+
+.glib-filter-toggle input { display: none; }
+
+/* ── Progress bar ───────────────────────────────────────────────────────────── */
+
+.glib-progress {
+  height: 2px;
+  background: var(--border-soft);
+  flex-shrink: 0;
+}
+
+.glib-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 150ms ease;
+}
+
+/* ── Asset grid ─────────────────────────────────────────────────────────────── */
+
+.glib-grid-wrap {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 5px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.glib-grid-wrap::-webkit-scrollbar { width: 4px; }
+.glib-grid-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.glib-grid {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+
+.glib-grid--s { grid-template-columns: repeat(4, 1fr); }
+.glib-grid--m { grid-template-columns: repeat(3, 1fr); }
+.glib-grid--l { grid-template-columns: repeat(2, 1fr); }
+.glib-grid--list { grid-template-columns: 1fr; }
+
+/* ── Asset cell ─────────────────────────────────────────────────────────────── */
+
+.glib-cell {
+  position: relative;
+  border-radius: 5px;
+  overflow: hidden;
+  aspect-ratio: 1;
+  background: var(--bg-elevated);
+  cursor: pointer;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: outline-color var(--t), box-shadow var(--t);
+}
+
+.glib-cell:hover { outline-color: var(--accent); }
+
+.glib-cell.selected {
+  outline-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 30%, transparent);
+}
+
+.glib-cell-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  opacity: 0;
+  transition: opacity 200ms ease;
+  pointer-events: none;
+  user-select: none;
+  padding: 3px;
+  box-sizing: border-box;
+}
+
+.glib-cell-img--loaded { opacity: 1; }
+
+.glib-cell-fav {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bg-base);
+  color: var(--text-tertiary);
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transition: opacity var(--t), color var(--t);
+  z-index: 2;
+  cursor: pointer;
+}
+
+.glib-cell:hover .glib-cell-fav { opacity: 1; }
+.glib-cell-fav--active { opacity: 1 !important; color: var(--warning); }
+.glib-cell-fav:hover { color: var(--warning); }
+
+.glib-cell-svg-badge {
+  position: absolute;
+  bottom: 2px;
+  left: 2px;
+  font-size: 8px;
+  background: rgba(0,0,0,0.5);
+  color: #fff;
+  border-radius: 3px;
+  padding: 1px 3px;
+  line-height: 1.4;
+}
+
+/* ── List row ───────────────────────────────────────────────────────────────── */
+
+.glib-list-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  direction: rtl;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: background var(--t), outline-color var(--t);
+}
+
+.glib-list-row:hover { background: var(--bg-elevated); }
+.glib-list-row.selected { outline-color: var(--accent); background: color-mix(in oklab, var(--accent) 8%, transparent); }
+
+.glib-list-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  object-fit: contain;
+  background: var(--bg-elevated);
+  flex-shrink: 0;
+}
+
+.glib-list-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.glib-list-name {
+  font-size: 11px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.glib-list-meta {
+  font-size: 9px;
+  color: var(--text-tertiary);
+}
+
+.glib-list-fav {
+  width: 18px;
+  height: 18px;
+  color: var(--text-tertiary);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: color var(--t);
+}
+
+.glib-list-fav--active { color: var(--warning); }
+.glib-list-fav:hover { color: var(--warning); }
+
+/* ── Empty / loading states ─────────────────────────────────────────────────── */
+
+.glib-state {
+  grid-column: 1 / -1;
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.7;
+  direction: rtl;
+}
+
+.glib-state-icon {
+  font-size: 28px;
+  margin-bottom: 8px;
+}
+
+.glib-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: glib-spin 0.7s linear infinite;
+  margin: 0 auto 8px;
+}
+
+@keyframes glib-spin { to { transform: rotate(360deg); } }
+
+/* ── Asset preview (bottom panel) ──────────────────────────────────────────── */
+
+.glib-preview {
+  border-top: 1px solid var(--border-soft);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-sunken);
+  max-height: 240px;
+}
+
+.glib-preview-img-wrap {
+  height: 100px;
+  background: color-mix(in oklab, var(--bg-base) 60%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.glib-preview-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.glib-preview-body {
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow-y: auto;
+  flex: 1;
+  scrollbar-width: thin;
+}
+
+.glib-preview-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-primary);
+  direction: rtl;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.glib-preview-meta {
+  font-size: 10px;
+  color: var(--text-secondary);
+  direction: rtl;
+  line-height: 1.5;
+}
+
+.glib-preview-colors {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+.glib-color-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.2);
+  flex-shrink: 0;
+}
+
+.glib-preview-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.glib-tag {
+  font-size: 9px;
+  padding: 1px 6px;
+  background: var(--bg-elevated);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  direction: rtl;
+}
+
+.glib-preview-actions {
+  display: flex;
+  gap: 5px;
+  padding: 6px 10px 8px;
+  flex-shrink: 0;
+}
+
+.glib-action-btn {
+  flex: 1;
+  padding: 5px 4px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  transition: background var(--t), color var(--t), opacity var(--t);
+  direction: rtl;
+}
+
+.glib-action-btn--primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.glib-action-btn--primary:hover { opacity: 0.85; }
+
+.glib-action-btn--secondary {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.glib-action-btn--secondary:hover { color: var(--text-primary); background: var(--bg-mid); }
+
+/* ── Context menu ───────────────────────────────────────────────────────────── */
+
+.glib-ctx-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 8000;
+}
+
+.glib-ctx-menu {
+  position: fixed;
+  z-index: 8001;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  min-width: 160px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  direction: rtl;
+}
+
+.glib-ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  font-size: 11px;
+  color: var(--text-primary);
+  cursor: pointer;
+  width: 100%;
+  text-align: right;
+  transition: background var(--t);
+}
+
+.glib-ctx-item:hover { background: var(--bg-mid); }
+.glib-ctx-item--danger { color: var(--error, #e54d4d); }
+.glib-ctx-item--danger:hover { background: color-mix(in oklab, var(--error, #e54d4d) 10%, transparent); }
+
+.glib-ctx-divider {
+  height: 1px;
+  background: var(--border-soft);
+  margin: 3px 0;
+}
+
+/* ── Scan progress label ───────────────────────────────────────────────────── */
+
+.glib-scan-status {
+  padding: 4px 10px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-align: center;
+  direction: rtl;
+  flex-shrink: 0;
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────────────── */
+
+.glib-footer {
+  padding: 5px 10px;
+  font-size: 9px;
+  color: var(--text-tertiary);
+  text-align: center;
+  border-top: 1px solid var(--border-soft);
+  flex-shrink: 0;
+  direction: rtl;
+}
+
+/* ── Import dialog ──────────────────────────────────────────────────────────── */
+
+.glib-import-select {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 11px;
+  padding: 5px 8px;
+  direction: rtl;
+  outline: none;
+  width: 100%;
+  margin-top: 6px;
+}
+
+/* ── Rename tags input ──────────────────────────────────────────────────────── */
+
+.glib-tags-edit {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 11px;
+  padding: 5px 8px;
+  direction: rtl;
+  outline: none;
+  width: 100%;
+}
+
+.glib-tags-edit:focus { border-color: var(--accent); }

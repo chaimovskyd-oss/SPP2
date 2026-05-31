@@ -1,0 +1,846 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>תוכנית עבודה ל-SPP2: Harmonize Layer + Auto Blend Stack</title>
+  <style>
+    :root{
+      --bg:#0f172a;
+      --panel:#111827;
+      --panel2:#1f2937;
+      --text:#f8fafc;
+      --muted:#cbd5e1;
+      --accent:#38bdf8;
+      --accent2:#facc15;
+      --ok:#22c55e;
+      --warn:#fb923c;
+      --danger:#ef4444;
+      --line:#334155;
+      --code:#020617;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      background:linear-gradient(135deg,#0f172a,#111827 45%,#1e293b);
+      color:var(--text);
+      font-family:Arial,"Noto Sans Hebrew",sans-serif;
+      line-height:1.75;
+    }
+    header{
+      padding:42px 28px;
+      background:radial-gradient(circle at top right,rgba(56,189,248,.25),transparent 35%),
+                 radial-gradient(circle at bottom left,rgba(250,204,21,.18),transparent 28%);
+      border-bottom:1px solid var(--line);
+    }
+    h1{margin:0 0 10px;font-size:34px}
+    h2{margin:40px 0 14px;font-size:26px;color:#e0f2fe}
+    h3{margin:26px 0 10px;font-size:20px;color:#fde68a}
+    h4{margin:20px 0 8px;font-size:17px;color:#bae6fd}
+    p{margin:8px 0}
+    .wrap{max-width:1180px;margin:0 auto;padding:24px}
+    .subtitle{color:var(--muted);font-size:18px;max-width:980px}
+    .card{
+      background:rgba(17,24,39,.88);
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:22px;
+      margin:18px 0;
+      box-shadow:0 12px 30px rgba(0,0,0,.22);
+    }
+    .grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+      gap:16px;
+    }
+    .tag{
+      display:inline-block;
+      padding:4px 10px;
+      border:1px solid var(--line);
+      border-radius:999px;
+      color:#e2e8f0;
+      background:#0b1220;
+      margin:3px;
+      font-size:13px;
+    }
+    .phase{
+      border-right:5px solid var(--accent);
+    }
+    .phase.easy{border-right-color:var(--ok)}
+    .phase.mid{border-right-color:var(--warn)}
+    .phase.hard{border-right-color:var(--danger)}
+    table{
+      width:100%;
+      border-collapse:collapse;
+      margin:16px 0;
+      overflow:hidden;
+      border-radius:12px;
+    }
+    th,td{
+      border:1px solid var(--line);
+      padding:10px 12px;
+      vertical-align:top;
+    }
+    th{background:#0b1220;color:#e0f2fe}
+    td{background:rgba(15,23,42,.55)}
+    code,pre{
+      background:var(--code);
+      color:#e2e8f0;
+      border:1px solid #1e293b;
+      border-radius:12px;
+    }
+    code{padding:2px 6px}
+    pre{
+      padding:16px;
+      overflow:auto;
+      white-space:pre-wrap;
+      direction:ltr;
+      text-align:left;
+      line-height:1.5;
+    }
+    ul,ol{padding-right:24px}
+    li{margin:5px 0}
+    .checklist li{list-style:none;margin:8px 0}
+    .checklist li::before{content:"☐ ";color:var(--accent2);font-weight:bold}
+    .note{
+      border:1px solid #475569;
+      background:rgba(30,41,59,.75);
+      border-radius:14px;
+      padding:14px 16px;
+      margin:14px 0;
+    }
+    .warning{border-color:#fb923c;background:rgba(251,146,60,.12)}
+    .success{border-color:#22c55e;background:rgba(34,197,94,.12)}
+    .danger{border-color:#ef4444;background:rgba(239,68,68,.12)}
+    a{color:#7dd3fc}
+    .small{font-size:13px;color:#94a3b8}
+    .toc a{display:block;padding:6px 0;text-decoration:none}
+    footer{
+      color:#94a3b8;
+      border-top:1px solid var(--line);
+      margin-top:40px;
+      padding:24px;
+      text-align:center;
+    }
+  </style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>תוכנית עבודה ל-SPP2: Harmonize Layer + Auto Blend Stack</h1>
+    <p class="subtitle">
+      מסמך עבודה להוספת שני כלי עיבוד מתקדמים ל-SPP2:
+      כלי התאמת שכבה לסביבה, וכלי מיזוג שכבות/תמונות מוערמות.
+      הדגש הוא על בנייה מדורגת, לא הרסנית, ניתנת לבדיקה, ושלא תפגע בכלים קיימים.
+    </p>
+    <p class="small">עודכן: 28.05.2026</p>
+  </div>
+</header>
+
+<main class="wrap">
+
+<section class="card toc">
+  <h2>ניווט מהיר</h2>
+  <a href="#summary">1. תקציר והמלצה</a>
+  <a href="#principles">2. עקרונות בנייה</a>
+  <a href="#harmonize">3. כלי Harmonize Layer</a>
+  <a href="#blend">4. כלי Auto Blend Stack</a>
+  <a href="#architecture">5. ארכיטקטורה מוצעת</a>
+  <a href="#ui">6. ממשק משתמש</a>
+  <a href="#stages">7. שלבי פיתוח</a>
+  <a href="#testing">8. בדיקות ויציבות</a>
+  <a href="#prompts">9. פרומפטים לקלוד</a>
+  <a href="#future">10. הרחבות עתידיות</a>
+</section>
+
+<section id="summary" class="card">
+  <h2>1. תקציר והמלצה</h2>
+  <p>
+    ההמלצה היא לא לנסות לבנות מיד “פוטושופ מלא”, אלא להתחיל משני כלים שימושיים מאוד לדפוס:
+  </p>
+  <div class="grid">
+    <div class="card">
+      <h3>Harmonize Layer</h3>
+      <p>
+        כפתור שמקבל שכבה נבחרת, מנתח את הסביבה שלה, ומתאים לה צבע, בהירות,
+        קונטרסט, רוויה, טמפרטורת צבע, חדות ורעש.
+      </p>
+      <span class="tag">ריאלי מאוד</span>
+      <span class="tag">שימושי במוקאפים</span>
+      <span class="tag">לא חייב AI</span>
+    </div>
+    <div class="card">
+      <h3>Auto Blend Stack</h3>
+      <p>
+        כלי עצמאי שמקבל כמה תמונות/שכבות וממזג אותן לפי מטרה:
+        Focus Stack, Exposure Blend, או מיזוג פנורמה בסיסי.
+      </p>
+      <span class="tag">דורש OpenCV</span>
+      <span class="tag">עדיף כמודול נפרד</span>
+      <span class="tag">בנייה מדורגת</span>
+    </div>
+  </div>
+
+  <table>
+    <tr>
+      <th>פיצ׳ר</th>
+      <th>גרסה ראשונה מומלצת</th>
+      <th>קושי</th>
+      <th>ערך ל-SPP</th>
+    </tr>
+    <tr>
+      <td>Harmonize Layer</td>
+      <td>התאמות צבע/אור/קונטרסט/רוויה לפי אזור רקע</td>
+      <td>בינוני</td>
+      <td>גבוה מאוד</td>
+    </tr>
+    <tr>
+      <td>Focus Stack</td>
+      <td>בחירת האזורים החדים מכל תמונה</td>
+      <td>בינוני+</td>
+      <td>גבוה לצילומי מוצרים</td>
+    </tr>
+    <tr>
+      <td>Exposure Blend</td>
+      <td>Mertens exposure fusion דרך OpenCV</td>
+      <td>בינוני</td>
+      <td>נחמד לצילומים קשים</td>
+    </tr>
+    <tr>
+      <td>Panorama Blend</td>
+      <td>יישור + תפר + מיזוג בסיסי</td>
+      <td>קשה</td>
+      <td>פחות דחוף</td>
+    </tr>
+  </table>
+
+  <div class="note success">
+    <strong>ההמלצה הפרקטית:</strong>
+    להתחיל מ-Harmonize Layer, כי הוא הכי מתאים לעבודה היומיומית שלך: הדבקת אלמנטים,
+    מוקאפים, קולאז׳ים, תמונות למוצרים, ושילוב תמונות שהגיעו ממקורות שונים.
+  </div>
+</section>
+
+<section id="principles" class="card">
+  <h2>2. עקרונות בנייה</h2>
+  <ul>
+    <li><strong>לא הורסים מקור:</strong> כל פעולה צריכה להיות לא הרסנית ככל האפשר, או ליצור שכבה חדשה/עותק.</li>
+    <li><strong>מודול נפרד:</strong> לא להכניס לוגיקה כבדה לתוך EditorScreen ישירות.</li>
+    <li><strong>Fallback:</strong> אם Python/OpenCV/AI לא זמין, התוכנה לא קורסת אלא מציגה הודעה ברורה.</li>
+    <li><strong>Preview לפני Apply:</strong> תמיד עדיף תצוגה מקדימה עם מחוון strength.</li>
+    <li><strong>Undo מלא:</strong> כל פעולה חייבת להיכנס להיסטוריית Undo/Redo.</li>
+    <li><strong>שמירת פרויקט:</strong> פעולה שיוצרת שכבה/פילטר צריכה להישמר בפרויקט בלי לשבור טעינה ישנה.</li>
+    <li><strong>עיבוד כבד ב-sidecar:</strong> OpenCV, מודלים או חישובים כבדים — Python sidecar.</li>
+  </ul>
+</section>
+
+<section id="harmonize" class="card">
+  <h2>3. כלי Harmonize Layer</h2>
+
+  <h3>מטרת הכלי</h3>
+  <p>
+    המשתמש בוחר שכבה, לוחץ “התאם לסביבה”, והמערכת משנה את מראה השכבה כך שתשתלב טוב יותר
+    עם הרקע או עם האזור שבו היא נמצאת.
+  </p>
+
+  <h3>מה הכלי צריך לדעת לעשות בגרסה ראשונה</h3>
+  <ul>
+    <li>לזהות את שכבת היעד.</li>
+    <li>לרנדר את שכבת היעד כ-PNG שקוף.</li>
+    <li>לרנדר את הרקע/הקנבס בלי שכבת היעד.</li>
+    <li>לחשב אזור סביב השכבה — margin של למשל 20–80px.</li>
+    <li>לנתח צבע, בהירות, קונטרסט ורוויה של סביבת הרקע.</li>
+    <li>לנתח את אותם נתונים בשכבה עצמה.</li>
+    <li>להחיל תיקון הדרגתי לפי strength.</li>
+  </ul>
+
+  <h3>התאמות מומלצות</h3>
+  <table>
+    <tr>
+      <th>התאמה</th>
+      <th>מה היא עושה</th>
+      <th>עדיפות</th>
+    </tr>
+    <tr>
+      <td>Brightness Match</td>
+      <td>מתאים את רמת הבהירות הממוצעת של השכבה לסביבה.</td>
+      <td>גבוהה</td>
+    </tr>
+    <tr>
+      <td>Contrast Match</td>
+      <td>מקרב את הפער בין כהים לבהירים לרקע.</td>
+      <td>גבוהה</td>
+    </tr>
+    <tr>
+      <td>Saturation Match</td>
+      <td>מתאים רוויה כדי שהתמונה לא תיראה מודבקת מדי.</td>
+      <td>גבוהה</td>
+    </tr>
+    <tr>
+      <td>Temperature Match</td>
+      <td>מקרר או מחמם את השכבה לפי הרקע.</td>
+      <td>גבוהה</td>
+    </tr>
+    <tr>
+      <td>Noise / Grain Match</td>
+      <td>מוסיף מעט רעש אם הרקע מצולם והשכבה נקייה מדי.</td>
+      <td>בינונית</td>
+    </tr>
+    <tr>
+      <td>Edge Softening</td>
+      <td>מרכך מעט את גבולות האובייקט כדי להפחית תחושת הדבקה.</td>
+      <td>בינונית</td>
+    </tr>
+    <tr>
+      <td>Shadow Tint</td>
+      <td>שינוי קל בגוון הכהים כדי להתאים לתאורת הסביבה.</td>
+      <td>מתקדמת</td>
+    </tr>
+  </table>
+
+  <h3>מצבי עבודה מוצעים</h3>
+  <div class="grid">
+    <div class="card">
+      <h4>Auto</h4>
+      <p>הכלי מנתח לבד את הסביבה ומציע תיקון.</p>
+    </div>
+    <div class="card">
+      <h4>Manual Fine Tune</h4>
+      <p>המשתמש יכול לכוון בהירות, קונטרסט, רוויה וחום/קור.</p>
+    </div>
+    <div class="card">
+      <h4>Apply as Adjustment Layer</h4>
+      <p>במקום לשנות את הפיקסלים, נוצרת שכבת התאמה מעל השכבה.</p>
+    </div>
+  </div>
+
+  <h3>Pipeline טכני מוצע</h3>
+  <ol>
+    <li>React שולח ל-sidecar:
+      <ul>
+        <li>PNG של השכבה הנבחרת עם שקיפות.</li>
+        <li>PNG של הקנבס/רקע בלי השכבה.</li>
+        <li>Bounding box של השכבה בקואורדינטות קנבס.</li>
+        <li>Strength והגדרות משתמש.</li>
+      </ul>
+    </li>
+    <li>Python מנתח את האזור סביב השכבה.</li>
+    <li>Python מחשב פרופיל צבע של רקע ושל שכבה.</li>
+    <li>Python מחזיר:
+      <ul>
+        <li>preview PNG</li>
+        <li>diagnostics JSON</li>
+        <li>recommended values</li>
+      </ul>
+    </li>
+    <li>React מציג Preview.</li>
+    <li>Apply יוצר שכבה חדשה או adjustment non-destructive.</li>
+  </ol>
+
+  <div class="note">
+    <strong>חשוב:</strong>
+    בגרסה ראשונה לא חייבים AI. אפשר להגיע לתוצאה שימושית מאוד עם OpenCV / Pillow / NumPy בלבד.
+  </div>
+</section>
+
+<section id="blend" class="card">
+  <h2>4. כלי Auto Blend Stack</h2>
+
+  <h3>מטרה</h3>
+  <p>
+    כלי שמקבל כמה שכבות/תמונות דומות ומפיק תמונה אחת טובה יותר.
+    בניגוד ל-Harmonize, זה לא כלי לשכבה אחת אלא לכלי ייעודי שמטפל בסטאק.
+  </p>
+
+  <h3>מצבים מומלצים</h3>
+  <table>
+    <tr>
+      <th>מצב</th>
+      <th>שימוש</th>
+      <th>רמת קושי</th>
+      <th>המלצה</th>
+    </tr>
+    <tr>
+      <td>Focus Stack</td>
+      <td>צילום מוצר מכמה פוקוסים — לוקחים מכל תמונה את האזור החד.</td>
+      <td>בינוני+</td>
+      <td>מומלץ</td>
+    </tr>
+    <tr>
+      <td>Exposure Blend</td>
+      <td>כמה חשיפות שונות — מיזוג לתמונה מאוזנת יותר.</td>
+      <td>בינוני</td>
+      <td>מומלץ</td>
+    </tr>
+    <tr>
+      <td>Clean Stack</td>
+      <td>כמה תמונות דומות — הפחתת רעש/אנשים/אובייקטים משתנים.</td>
+      <td>בינוני+</td>
+      <td>מעניין בהמשך</td>
+    </tr>
+    <tr>
+      <td>Panorama Blend</td>
+      <td>חיבור תמונות רחבות.</td>
+      <td>קשה</td>
+      <td>לא שלב ראשון</td>
+    </tr>
+  </table>
+
+  <h3>Focus Stack — אלגוריתם בסיסי</h3>
+  <ol>
+    <li>קבלת כמה תמונות.</li>
+    <li>יישור תמונות לפי הראשונה — align.</li>
+    <li>חישוב sharpness map לכל תמונה בעזרת Laplacian.</li>
+    <li>לכל פיקסל/אזור בוחרים את התמונה הכי חדה.</li>
+    <li>מחליקים את המסיכה כדי שלא יהיו קצוות קשים.</li>
+    <li>ממזגים לתוצאה אחת.</li>
+    <li>מחזירים preview ותמונת תוצאה.</li>
+  </ol>
+
+  <h3>Exposure Blend — אלגוריתם בסיסי</h3>
+  <ol>
+    <li>קבלת כמה תמונות בחשיפות שונות.</li>
+    <li>יישור בסיסי.</li>
+    <li>שימוש ב-OpenCV MergeMertens.</li>
+    <li>שמירת תוצאה ב-16bit או PNG איכותי אם אפשר.</li>
+    <li>החזרה ל-SPP כשכבה/עמוד חדש.</li>
+  </ol>
+
+  <h3>Clean Stack — רעיון עתידי</h3>
+  <p>
+    אם מצלמים כמה תמונות מאותה נקודה, אפשר להשתמש ב-median/average חכם כדי להפחית רעש
+    או להעלים אובייקטים שעברו בפריים. זה פחות דחוף, אבל יכול להיות כלי מאוד מגניב.
+  </p>
+</section>
+
+<section id="architecture" class="card">
+  <h2>5. ארכיטקטורה מוצעת</h2>
+
+  <h3>מבנה מודולים</h3>
+  <pre><code>src/
+  features/
+    harmonize/
+      HarmonizePanel.tsx
+      harmonizeClient.ts
+      harmonizeTypes.ts
+      harmonizePreview.ts
+    blendStack/
+      BlendStackPage.tsx
+      BlendStackPanel.tsx
+      blendStackClient.ts
+      blendStackTypes.ts
+
+python-sidecar/
+  tools/
+    harmonize_layer.py
+    blend_stack.py
+    image_stats.py
+    alignment.py
+    masks.py
+  tests/
+    test_harmonize_layer.py
+    test_focus_stack.py
+    test_exposure_blend.py</code></pre>
+
+  <h3>API פנימי מוצע</h3>
+  <pre><code>POST /api/harmonize-layer
+
+Input:
+{
+  "layerPngBase64": "...",
+  "backgroundPngBase64": "...",
+  "bbox": { "x": 100, "y": 80, "width": 400, "height": 300 },
+  "options": {
+    "strength": 0.75,
+    "matchBrightness": true,
+    "matchContrast": true,
+    "matchSaturation": true,
+    "matchTemperature": true,
+    "matchNoise": false,
+    "edgeSoftening": 0.2
+  }
+}
+
+Output:
+{
+  "ok": true,
+  "previewPngBase64": "...",
+  "diagnostics": {
+    "backgroundMeanLuma": 0.52,
+    "layerMeanLuma": 0.68,
+    "suggestedBrightness": -0.16,
+    "suggestedSaturation": -0.08
+  }
+}</code></pre>
+
+  <pre><code>POST /api/blend-stack
+
+Input:
+{
+  "images": [
+    { "id": "img1", "pngBase64": "..." },
+    { "id": "img2", "pngBase64": "..." }
+  ],
+  "mode": "focus-stack",
+  "options": {
+    "align": true,
+    "alignmentMethod": "orb",
+    "smoothMasks": true,
+    "outputAsNewPage": true
+  }
+}
+
+Output:
+{
+  "ok": true,
+  "resultPngBase64": "...",
+  "debug": {
+    "alignedCount": 3,
+    "failedImages": []
+  }
+}</code></pre>
+
+  <h3>איפה לא לשים את זה</h3>
+  <ul>
+    <li>לא בתוך קומפוננטת קנבס ראשית.</li>
+    <li>לא בתוך קוד הייבוא הכללי של תמונות.</li>
+    <li>לא כחלק אוטומטי מכל פעולה קיימת.</li>
+    <li>לא לערבב עם מודול הדפסה או PDF Studio.</li>
+  </ul>
+</section>
+
+<section id="ui" class="card">
+  <h2>6. ממשק משתמש מוצע</h2>
+
+  <h3>Harmonize Layer — בתוך Editor</h3>
+  <p>
+    כאשר נבחרת שכבת תמונה, יופיע כפתור:
+    <strong>התאם לסביבה</strong>.
+  </p>
+
+  <h4>פאנל מוצע</h4>
+  <ul>
+    <li>כפתור: נתח שכבה.</li>
+    <li>מחוון Strength.</li>
+    <li>צ׳קבוקסים:
+      <ul>
+        <li>התאם בהירות</li>
+        <li>התאם קונטרסט</li>
+        <li>התאם רוויה</li>
+        <li>התאם חום/קור</li>
+        <li>רכך קצוות</li>
+        <li>התאם רעש/גרעיניות</li>
+      </ul>
+    </li>
+    <li>Preview לפני/אחרי.</li>
+    <li>כפתורים:
+      <ul>
+        <li>החל על השכבה</li>
+        <li>צור שכבה חדשה</li>
+        <li>צור Adjustment Layer</li>
+      </ul>
+    </li>
+  </ul>
+
+  <h3>Auto Blend Stack — עמוד נפרד</h3>
+  <p>
+    עדיף לפתוח כעמוד עצמאי מתוך מסך הבית או מתפריט כלים:
+    <strong>כלי מיזוג תמונות</strong>.
+  </p>
+
+  <h4>מבנה העמוד</h4>
+  <ul>
+    <li>אזור גרירה להעלאת כמה תמונות.</li>
+    <li>רשימת תמונות עם אפשרות סדר.</li>
+    <li>בחירת מצב:
+      <ul>
+        <li>Focus Stack</li>
+        <li>Exposure Blend</li>
+        <li>Clean Stack</li>
+      </ul>
+    </li>
+    <li>אפשרות Align אוטומטי.</li>
+    <li>כפתור Preview.</li>
+    <li>כפתור שליחה לעמוד חדש ב-SPP.</li>
+    <li>כפתור יצוא PNG/TIFF.</li>
+  </ul>
+</section>
+
+<section id="stages" class="card">
+  <h2>7. שלבי פיתוח מומלצים</h2>
+
+  <div class="card phase easy">
+    <h3>שלב 1 — תשתית רינדור ושליחה ל-sidecar</h3>
+    <ul class="checklist">
+      <li>להוסיף פונקציה שמרנדרת שכבה נבחרת ל-PNG שקוף.</li>
+      <li>להוסיף פונקציה שמרנדרת את הקנבס בלי השכבה הנבחרת.</li>
+      <li>להעביר ל-sidecar bbox מדויק של השכבה.</li>
+      <li>להחזיר preview ולשים אותו בתצוגה.</li>
+      <li>לוודא שהכל עובד בלי שינוי קבוע בפרויקט.</li>
+    </ul>
+  </div>
+
+  <div class="card phase easy">
+    <h3>שלב 2 — Harmonize בסיסי ללא AI</h3>
+    <ul class="checklist">
+      <li>חישוב mean/std של brightness.</li>
+      <li>חישוב saturation ממוצע.</li>
+      <li>חישוב temperature בסיסי לפי יחס אדום/כחול.</li>
+      <li>החלת תיקון לפי strength.</li>
+      <li>יצירת preview לפני/אחרי.</li>
+      <li>Apply כשכבה חדשה.</li>
+    </ul>
+  </div>
+
+  <div class="card phase mid">
+    <h3>שלב 3 — Harmonize מתקדם</h3>
+    <ul class="checklist">
+      <li>הוספת histogram matching עדין.</li>
+      <li>הוספת noise/grain matching.</li>
+      <li>הוספת edge softening לפי alpha mask.</li>
+      <li>הוספת diagnostics למסך Debug.</li>
+      <li>הוספת שמירת presets.</li>
+    </ul>
+  </div>
+
+  <div class="card phase mid">
+    <h3>שלב 4 — Blend Stack עצמאי</h3>
+    <ul class="checklist">
+      <li>יצירת עמוד Blend Stack נפרד.</li>
+      <li>תמיכה בהעלאת כמה תמונות.</li>
+      <li>מיון/מחיקה/החלפת סדר תמונות.</li>
+      <li>קריאה ל-sidecar.</li>
+      <li>החזרת תוצאה לעמוד חדש ב-SPP.</li>
+    </ul>
+  </div>
+
+  <div class="card phase mid">
+    <h3>שלב 5 — Focus Stack</h3>
+    <ul class="checklist">
+      <li>יישור תמונות בסיסי.</li>
+      <li>חישוב sharpness map.</li>
+      <li>יצירת מסיכות חדות.</li>
+      <li>החלקת מסיכות.</li>
+      <li>מיזוג לתמונה אחת.</li>
+    </ul>
+  </div>
+
+  <div class="card phase hard">
+    <h3>שלב 6 — Exposure Blend ו-Panorama בהמשך</h3>
+    <ul class="checklist">
+      <li>Exposure Blend עם OpenCV MergeMertens.</li>
+      <li>אפשרות לשמירת קובץ 16bit אם רלוונטי.</li>
+      <li>בדיקת Panorama רק אחרי שהכלים הקודמים יציבים.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="testing" class="card">
+  <h2>8. בדיקות ויציבות</h2>
+
+  <h3>בדיקות Harmonize</h3>
+  <ul class="checklist">
+    <li>שכבה קטנה מאוד.</li>
+    <li>שכבה גדולה כמעט כמו כל הדף.</li>
+    <li>שכבה עם שקיפות חלקית.</li>
+    <li>שכבה מחוץ לגבולות הקנבס בחלקה.</li>
+    <li>שכבה בתוך מסיכה.</li>
+    <li>רקע לבן לגמרי.</li>
+    <li>רקע כהה מאוד.</li>
+    <li>רקע צבעוני מאוד.</li>
+    <li>תמונה באיכות נמוכה.</li>
+    <li>קובץ גדול מאוד.</li>
+  </ul>
+
+  <h3>בדיקות Blend Stack</h3>
+  <ul class="checklist">
+    <li>2 תמונות בלבד.</li>
+    <li>10 תמונות ומעלה.</li>
+    <li>תמונות בגדלים שונים.</li>
+    <li>תמונות עם יחס שונה.</li>
+    <li>תמונה אחת פגומה או לא נטענת.</li>
+    <li>תמונות שלא באמת דומות אחת לשנייה.</li>
+    <li>ביטול באמצע תהליך.</li>
+    <li>בדיקת שימוש בזיכרון.</li>
+    <li>בדיקת זמן עיבוד.</li>
+  </ul>
+
+  <div class="note warning">
+    <strong>מניעת קריסות:</strong>
+    כל קריאה ל-sidecar חייבת timeout, טיפול בשגיאה, הודעה ברורה למשתמש,
+    ושום מצב שבו Promise כושל מפיל את ה-Editor.
+  </div>
+</section>
+
+<section id="prompts" class="card">
+  <h2>9. פרומפטים לקלוד</h2>
+
+  <h3>פרומפט 1 — תשתית Harmonize בלבד</h3>
+  <pre><code>אני רוצה להוסיף ל-SPP2 כלי חדש בשם Harmonize Layer, אבל בשלב הזה לבנות רק תשתית בטוחה בלי לשנות פיקסלים בפועל.
+
+מטרה:
+כאשר נבחרת שכבת תמונה ב-Editor, יופיע כפתור "התאם לסביבה".
+לחיצה עליו תפתח פאנל צד קטן עם:
+- כפתור "צור Preview"
+- מחוון strength
+- מקום להצגת preview
+- הודעות שגיאה/סטטוס
+
+דרישות טכניות:
+1. אל תשנה את מבנה הפרויקט הקיים מעבר למינימום.
+2. אל תכניס לוגיקה כבדה לתוך EditorScreen.
+3. צור מודול חדש תחת features/harmonize.
+4. צור טיפוסים מסודרים עבור בקשת harmonize ותשובה.
+5. צור פונקציה שמרנדרת את השכבה הנבחרת ל-PNG שקוף.
+6. צור פונקציה שמרנדרת את הקנבס בלי השכבה הנבחרת.
+7. שלח ל-sidecar או ל-mock function את:
+   - layer PNG
+   - background PNG
+   - bbox
+   - options
+8. בשלב הזה החזר preview זהה למקור כדי לבדוק את הזרימה.
+9. ודא שיש טיפול בשגיאות, loading state, ו-timeout.
+10. ודא שאין שינוי קבוע בשכבה עד שהמשתמש לוחץ Apply.
+
+חשוב:
+- לא לשבור Undo/Redo.
+- לא לשבור autosave.
+- לא לשנות כלים קיימים.
+- אם אין שכבה נבחרת או השכבה אינה תמונה, הצג הודעה פשוטה.</code></pre>
+
+  <h3>פרומפט 2 — מימוש Harmonize בסיסי ב-Python</h3>
+  <pre><code>עכשיו אני רוצה לממש את הצד של Python עבור Harmonize Layer ב-SPP2.
+
+מטרה:
+לקבל PNG של שכבה עם alpha, PNG של רקע/קנבס בלי השכבה, bbox של השכבה, ואפשרויות משתמש.
+להחזיר PNG מתוקן שבו השכבה מותאמת לסביבת הרקע.
+
+נא לבנות מודול python-sidecar/tools/harmonize_layer.py.
+
+דרישות:
+1. השתמש ב-Pillow, NumPy ואם צריך OpenCV.
+2. קרא את layerPngBase64 ואת backgroundPngBase64.
+3. השתמש ב-bbox כדי לדגום אזור רקע סביב השכבה.
+4. התעלם מפיקסלים שקופים בשכבה.
+5. חשב:
+   - brightness mean/std
+   - saturation mean
+   - basic color temperature
+   - contrast estimate
+6. בצע תיקון עדין לפי strength:
+   - brightness
+   - contrast
+   - saturation
+   - temperature
+7. שמור alpha מקורי.
+8. החזר previewPngBase64.
+9. החזר diagnostics JSON עם הערכים שחושבו.
+10. אם יש שגיאה, החזר ok:false עם reason ברור.
+
+חשוב:
+- לא לבצע תיקונים קיצוניים.
+- strength 0 מחזיר תמונה מקורית.
+- strength 1 מחיל תיקון מלא אבל עדיין עדין.
+- חייב לעבוד גם על תמונות גדולות בלי לקרוס; אם צריך, בצע downsample לניתוח בלבד.</code></pre>
+
+  <h3>פרומפט 3 — Apply לא הרסני</h3>
+  <pre><code>אני רוצה להוסיף Apply ל-Harmonize Layer בצורה בטוחה ולא הרסנית.
+
+דרישות:
+1. אחרי יצירת preview, כפתור Apply יאפשר:
+   א. יצירת שכבה חדשה מעל המקור עם התוצאה.
+   ב. החלפה של השכבה הנבחרת רק אם המשתמש בוחר במפורש.
+2. ברירת מחדל: צור שכבה חדשה.
+3. השכבה החדשה תקבל שם: "Harmonized - [שם השכבה המקורית]".
+4. הפעולה חייבת להיכנס ל-Undo/Redo.
+5. autosave צריך לשמור את התוצאה כמו שכבת תמונה רגילה.
+6. אל תשנה את מנגנון טעינת הפרויקטים הקיים אלא אם חייבים.
+7. אם התמונה גדולה, השתמש במנגנון assets הקיים ולא ב-base64 בתוך state אם זה לא נכון לפרויקט.</code></pre>
+
+  <h3>פרומפט 4 — עמוד Blend Stack עצמאי</h3>
+  <pre><code>אני רוצה להוסיף ל-SPP2 עמוד כלי עצמאי בשם Blend Stack, בלי לחבר עדיין אלגוריתם אמיתי.
+
+מטרה:
+עמוד חדש מה-Home או Tools שמאפשר להעלות כמה תמונות, לבחור מצב מיזוג, ליצור preview mock, ולהחזיר תוצאה לעמוד חדש.
+
+דרישות UI:
+1. אזור Drag & Drop להעלאת תמונות.
+2. רשימת תמונות עם thumbnail, שם, גודל, כפתור מחיקה ושינוי סדר.
+3. dropdown לבחירת מצב:
+   - Focus Stack
+   - Exposure Blend
+   - Clean Stack
+4. checkbox: Align images automatically.
+5. כפתור "צור Preview".
+6. אזור תצוגה לתוצאה.
+7. כפתור "שלח לעמוד חדש ב-SPP".
+
+דרישות טכניות:
+1. צור features/blendStack.
+2. אל תערבב עם כלי קולאז׳, PDF Studio או מודול ההדפסה.
+3. בשלב הראשון preview יכול להיות פשוט התמונה הראשונה.
+4. כתוב טיפוסים מסודרים.
+5. הוסף טיפול בשגיאות וקבצים לא תקינים.
+6. ודא שהתהליך לא חוסם את ה-UI.</code></pre>
+
+  <h3>פרומפט 5 — Focus Stack אמיתי</h3>
+  <pre><code>אני רוצה לממש Focus Stack אמיתי עבור Blend Stack ב-SPP2 דרך Python sidecar.
+
+נא לבנות python-sidecar/tools/blend_stack.py עם mode focus-stack.
+
+דרישות:
+1. קבל רשימת תמונות PNG/JPEG כ-base64.
+2. המר ל-NumPy/OpenCV.
+3. אם align=true, יישר תמונות לפי הראשונה בעזרת ORB/ECC או fallback פשוט.
+4. חשב sharpness map לכל תמונה בעזרת Laplacian.
+5. צור מסיכת בחירה לפי התמונה החדה ביותר בכל אזור.
+6. החלק את המסיכות כדי למנוע תפרים קשים.
+7. מזג לתוצאה אחת.
+8. החזר resultPngBase64.
+9. החזר debug JSON:
+   - כמה תמונות עובדו
+   - אילו תמונות נכשלו
+   - האם alignment הצליח
+10. אם התמונות שונות מדי, החזר אזהרה במקום לקרוס.
+
+חשוב:
+- לשמור על זיכרון.
+- לעשות resize פנימי אם התמונות ענקיות, אבל להחזיר איכות סבירה.
+- לא להפיל את React אם יש שגיאה.</code></pre>
+</section>
+
+<section id="future" class="card">
+  <h2>10. הרחבות עתידיות</h2>
+
+  <h3>Harmonize מתקדם</h3>
+  <ul>
+    <li>AI Harmonization עם מודל ייעודי, אופציונלי בלבד.</li>
+    <li>יצירת צל רך לפי כיוון תאורה.</li>
+    <li>התאמת grain לפי אזור רקע.</li>
+    <li>שמירת presets: “צילום מוצר”, “מוקאפ”, “תמונה ישנה”, “קולאז׳”.</li>
+    <li>Adjustment Layer אמיתי שניתן לעריכה חוזרת.</li>
+  </ul>
+
+  <h3>Blend Stack מתקדם</h3>
+  <ul>
+    <li>HDR מתקדם יותר.</li>
+    <li>Clean Stack להסרת אובייקטים זזים.</li>
+    <li>Panorama בסיסי.</li>
+    <li>Mask editor ידני אחרי blend.</li>
+    <li>אפשרות לראות את המסיכות שנוצרו ולתקן אותן.</li>
+  </ul>
+
+  <div class="note success">
+    <strong>כיוון נכון:</strong>
+    קודם לבנות כלים קטנים, יציבים ומועילים. רק אחרי שהם עובדים טוב,
+    להוסיף AI או אוטומציות כבדות.
+  </div>
+</section>
+
+<footer>
+  מסמך עבודה ל-SPP2 — Harmonize Layer + Auto Blend Stack
+</footer>
+
+</main>
+</body>
+</html>

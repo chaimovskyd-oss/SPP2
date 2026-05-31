@@ -6,7 +6,10 @@ import {
   addPageAction,
   applyDocumentAction,
   changeLayerAction,
+  changeLayerActionCoalesced,
+  changeLayersAction,
   changePageAction,
+  changePageLooksAction,
   createHistoryState,
   deleteLayerAction,
   deletePageAction,
@@ -40,7 +43,20 @@ import type { TextStyle } from "@/types/template";
 import { clampContentTransformToFillBounds } from "@/core/rendering/frameFitEngine";
 import type { Asset, Document, Page } from "@/types/document";
 import type { LinkedGroupPatch } from "@/core/layers/linkedGroups";
-import type { ContentTransform, FrameLayer, LinkedGroup, VisualLayer } from "@/types/layers";
+import type { ContentTransform, FrameLayer, ImageLayer, LinkedGroup, VisualLayer } from "@/types/layers";
+import { createImageAdjustment, createPageLookLayer } from "@/types/imageAdjustments";
+import type {
+  AppliedPresetInstance,
+  ImageAdjustment,
+  ImageAdjustmentStack,
+  ImageAdjustmentTemplate,
+  PageLookEffect,
+  PageLookLayer
+} from "@/types/imageAdjustments";
+import { getPreset, instantiatePresetAdjustments, scaleTemplate } from "@/core/presets/smartPresets";
+import type { SmartArrangeLayerUpdate } from "@/core/smartArrange";
+import type { SmartPresetDefinition } from "@/core/presets/smartPresets";
+import { createId } from "@/core/ids";
 import type { TextPreset, TextStylePatch } from "@/types/text";
 import type {
   CollageCanvasSettings,
@@ -65,6 +81,7 @@ export interface DocumentState {
   meaningfulActionCount: number;
   lastMeaningfulActionType: string | null;
   textStyleClipboard: TextStylePatch | null;
+  imageAdjustmentsClipboard: ImageAdjustmentStack | null;
   linkedGroups: LinkedGroup[];
   setDocument: (document: Document) => void;
   clearDocument: () => void;
@@ -79,13 +96,59 @@ export interface DocumentState {
   addLayer: (pageId: string, layer: VisualLayer) => void;
   addAssetAndLayer: (pageId: string, asset: Asset, layer: VisualLayer) => void;
   updateLayer: (pageId: string, layer: VisualLayer) => void;
+  /** Apply Smart Arrange geometry updates to many layers as ONE undo record. */
+  applySmartArrange: (pageId: string, updates: SmartArrangeLayerUpdate[], label?: string) => void;
   removeLayer: (pageId: string, layerId: string) => void;
   moveLayer: (pageId: string, layerId: string, direction: "forward" | "backward" | "front" | "back") => void;
   reorderLayers: (pageId: string, layerIdsTopToBottom: string[]) => void;
+  moveLayerIntoGroup: (pageId: string, layerId: string, groupId: string | null) => void;
   updateTextLayer: (pageId: string, layerId: string, patch: Partial<Extract<VisualLayer, { type: "text" }>>) => void;
   applyTextPreset: (pageId: string, layerId: string, preset: TextPreset) => void;
   copyTextStyle: (pageId: string, layerId: string) => void;
   pasteTextStyle: (pageId: string, layerIds: string[]) => void;
+  // ─── Image Adjustments (Phase 2) ──────────────────────────────────────────
+  addImageAdjustment: (pageId: string, layerId: string, template: ImageAdjustmentTemplate) => void;
+  updateImageAdjustment: (pageId: string, layerId: string, adjustmentId: string, patch: Partial<ImageAdjustment>) => void;
+  removeImageAdjustment: (pageId: string, layerId: string, adjustmentId: string) => void;
+  toggleImageAdjustment: (pageId: string, layerId: string, adjustmentId: string) => void;
+  setImageAdjustmentStack: (pageId: string, layerId: string, stack: ImageAdjustmentStack) => void;
+  resetImageAdjustments: (pageId: string, layerId: string) => void;
+  copyImageAdjustments: (pageId: string, layerId: string) => void;
+  pasteImageAdjustments: (pageId: string, layerIds: string[]) => void;
+  /** Append one freshly-created adjustment to several image layers — one undo record. */
+  applyAdjustmentToImages: (pageId: string, layerIds: string[], template: ImageAdjustmentTemplate) => void;
+  /** Append one freshly-created adjustment to every image layer on the page — one undo record. */
+  applyAdjustmentToAllImagesOnPage: (pageId: string, template: ImageAdjustmentTemplate) => void;
+  // ─── Smart Presets (Phase 3) ──────────────────────────────────────────────
+  /** Instantiate a preset's recipe onto one image layer, recording an AppliedPresetInstance. */
+  applyPresetToImage: (pageId: string, layerId: string, presetId: string, strength?: number, extra?: ImageAdjustmentTemplate[]) => void;
+  /** Apply a preset to several image layers as one undo record. */
+  applyPresetToImages: (pageId: string, layerIds: string[], presetId: string, strength?: number) => void;
+  /** Apply a preset to every image layer on the page as one undo record. */
+  applyPresetToAllImagesOnPage: (pageId: string, presetId: string, strength?: number, extra?: ImageAdjustmentTemplate[]) => void;
+  /**
+   * Duplicate an image layer directly above the original and apply the preset to
+   * the COPY only — leaves the source untouched so the user can blend the edited
+   * copy over the original via blend mode / opacity. Returns nothing; one undo.
+   */
+  applyPresetToDuplicatedImage: (pageId: string, layerId: string, presetId: string, strength?: number, extra?: ImageAdjustmentTemplate[]) => void;
+  /** Re-instantiate an applied preset's generated adjustments at a new master strength (ids reused). */
+  updateAppliedPresetStrength: (pageId: string, layerId: string, instanceId: string, strength: number) => void;
+  /** Remove an applied preset instance and the adjustments it generated. */
+  removeAppliedPreset: (pageId: string, layerId: string, instanceId: string) => void;
+  // ─── Page Looks (Phase 4) ─────────────────────────────────────────────────
+  /** Add an atmospheric page-look overlay to a page. */
+  addPageLook: (pageId: string, look: PageLookLayer) => void;
+  /** Patch a page-look's meta (name/enabled/locked/opacity/strength). */
+  updatePageLook: (pageId: string, lookId: string, patch: Partial<Omit<PageLookLayer, "id" | "effect">>) => void;
+  /** Patch a page-look effect's parameters (same effect kind). */
+  updatePageLookEffect: (pageId: string, lookId: string, patch: Partial<PageLookEffect>) => void;
+  togglePageLook: (pageId: string, lookId: string) => void;
+  removePageLook: (pageId: string, lookId: string) => void;
+  /** Move a page-look up/down in the overlay order. */
+  reorderPageLook: (pageId: string, lookId: string, direction: "up" | "down") => void;
+  /** Instantiate a preset's page-look recipe as a new overlay (one undo). */
+  applyPresetAsPageLook: (pageId: string, presetId: string, strength?: number) => void;
   updateFrameContent: (pageId: string, frameId: string, contentTransform: ContentTransform) => void;
   setFrameImage: (pageId: string, frameId: string, assetId: string) => void;
   setLinkedGroups: (groups: LinkedGroup[]) => void;
@@ -188,6 +251,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   meaningfulActionCount: 0,
   lastMeaningfulActionType: null,
   textStyleClipboard: null,
+  imageAdjustmentsClipboard: null,
   linkedGroups: [],
   setDocument: (document) =>
     set({
@@ -199,7 +263,8 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       revision: 0,
       meaningfulActionCount: 0,
       lastMeaningfulActionType: null,
-      textStyleClipboard: null
+      textStyleClipboard: null,
+      imageAdjustmentsClipboard: null
     }),
   clearDocument: () =>
     set({
@@ -212,6 +277,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       meaningfulActionCount: 0,
       lastMeaningfulActionType: null,
       textStyleClipboard: null,
+      imageAdjustmentsClipboard: null,
       linkedGroups: []
     }),
   setActivePage: (pageId) =>
@@ -359,6 +425,32 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       const previous = findLayer(state.document, pageId, layer.id);
       return previous === undefined ? state : commitDocumentAction(state, changeLayerAction(pageId, previous, layer, "ChangeLayerPropertyAction"));
     }),
+  applySmartArrange: (pageId, updates, label = "SmartArrangeAction") =>
+    set((state) => {
+      if (state.document === null || updates.length === 0) {
+        return state;
+      }
+      const page = state.document.pages.find((item) => item.id === pageId);
+      if (page === undefined) {
+        return state;
+      }
+      const byId = new Map(updates.map((u) => [u.layerId, u]));
+      const nextLayers = page.layers.map((layer) => {
+        const u = byId.get(layer.id);
+        if (u === undefined) return layer;
+        const next = { ...layer };
+        if (u.x !== undefined) next.x = u.x;
+        if (u.y !== undefined) next.y = u.y;
+        if (u.width !== undefined) next.width = u.width;
+        if (u.height !== undefined) next.height = u.height;
+        if (next.type === "text") {
+          if (u.fontSize !== undefined) next.fontSize = u.fontSize;
+          if (u.alignment !== undefined) next.alignment = u.alignment;
+        }
+        return next;
+      });
+      return commitDocumentAction(state, changeLayersAction(pageId, page.layers, nextLayers, label));
+    }),
   removeLayer: (pageId, layerId) =>
     set((state) => {
       if (state.document === null) {
@@ -388,6 +480,25 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         return state;
       }
       return commitDocumentAction(state, reorderLayersAction(pageId, page.layers, reorderLayersByVisualOrder(page.layers, layerIdsTopToBottom)));
+    }),
+  moveLayerIntoGroup: (pageId, layerId, groupId) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const page = state.document.pages.find((p) => p.id === pageId);
+      if (page === undefined) return state;
+      const nextLayers = page.layers.map((l) => {
+        if (l.id === layerId) {
+          return { ...l, parentId: groupId ?? undefined };
+        }
+        if (l.type === "group") {
+          const g = l as import("@/types/layers").GroupLayer;
+          const childIds = g.childIds.filter((id) => id !== layerId);
+          if (l.id === groupId) return { ...g, childIds: [...childIds, layerId] };
+          return { ...g, childIds };
+        }
+        return l;
+      });
+      return commitDocumentAction(state, reorderLayersAction(pageId, page.layers, nextLayers));
     }),
   updateTextLayer: (pageId, layerId, patch) =>
     set((state) => {
@@ -439,6 +550,283 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
           : layer
       );
       return commitDocumentAction(state, reorderLayersAction(pageId, page.layers, nextLayers));
+    }),
+  addImageAdjustment: (pageId, layerId, template) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const layer = getImageLayer(state.document, pageId, layerId);
+      if (layer === undefined) return state;
+      const next = withImageAdjustments(layer, (s) => ({ ...s, stack: [...s.stack, createImageAdjustment(template)] }));
+      return commitDocumentAction(state, changeLayerAction(pageId, layer, next, "AddImageAdjustmentAction"));
+    }),
+  updateImageAdjustment: (pageId, layerId, adjustmentId, patch) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const layer = getImageLayer(state.document, pageId, layerId);
+      if (layer?.imageAdjustments === undefined) return state;
+      const next = withImageAdjustments(layer, (s) => ({
+        ...s,
+        stack: s.stack.map((adj) => (adj.id === adjustmentId ? ({ ...adj, ...patch } as ImageAdjustment) : adj))
+      }));
+      // Coalesce drags on the same parameter into one undo step.
+      const coalesceKey = `update-adj:${layerId}:${adjustmentId}:${Object.keys(patch).sort().join(",")}`;
+      return commitDocumentAction(state, changeLayerActionCoalesced(pageId, layer, next, coalesceKey, "UpdateImageAdjustmentAction"));
+    }),
+  removeImageAdjustment: (pageId, layerId, adjustmentId) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const layer = getImageLayer(state.document, pageId, layerId);
+      if (layer?.imageAdjustments === undefined) return state;
+      const next = withImageAdjustments(layer, (s) => ({
+        ...s,
+        stack: s.stack.filter((adj) => adj.id !== adjustmentId),
+        presetInstances: s.presetInstances?.map((preset) => ({
+          ...preset,
+          generatedAdjustments: preset.generatedAdjustments.filter((id) => id !== adjustmentId)
+        }))
+      }));
+      return commitDocumentAction(state, changeLayerAction(pageId, layer, next, "RemoveImageAdjustmentAction"));
+    }),
+  toggleImageAdjustment: (pageId, layerId, adjustmentId) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const layer = getImageLayer(state.document, pageId, layerId);
+      if (layer?.imageAdjustments === undefined) return state;
+      const next = withImageAdjustments(layer, (s) => ({
+        ...s,
+        stack: s.stack.map((adj) => (adj.id === adjustmentId ? ({ ...adj, enabled: !adj.enabled } as ImageAdjustment) : adj))
+      }));
+      return commitDocumentAction(state, changeLayerAction(pageId, layer, next, "ToggleImageAdjustmentAction"));
+    }),
+  setImageAdjustmentStack: (pageId, layerId, stack) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const layer = getImageLayer(state.document, pageId, layerId);
+      if (layer === undefined) return state;
+      const next: AdjustableLayer = { ...layer, imageAdjustments: stack };
+      return commitDocumentAction(state, changeLayerAction(pageId, layer, next, "SetImageAdjustmentStackAction"));
+    }),
+  resetImageAdjustments: (pageId, layerId) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const layer = getImageLayer(state.document, pageId, layerId);
+      if (layer?.imageAdjustments === undefined) return state;
+      const next: AdjustableLayer = { ...layer, imageAdjustments: undefined };
+      return commitDocumentAction(state, changeLayerAction(pageId, layer, next, "ResetImageAdjustmentsAction"));
+    }),
+  copyImageAdjustments: (pageId, layerId) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const layer = getImageLayer(state.document, pageId, layerId);
+      if (layer?.imageAdjustments === undefined) return state;
+      return { imageAdjustmentsClipboard: cloneAdjustmentStack(layer.imageAdjustments) };
+    }),
+  pasteImageAdjustments: (pageId, layerIds) =>
+    set((state) => {
+      if (state.document === null || state.imageAdjustmentsClipboard === null) return state;
+      const page = state.document.pages.find((item) => item.id === pageId);
+      if (page === undefined) return state;
+      const clipboard = state.imageAdjustmentsClipboard;
+      const targetIds = new Set(layerIds);
+      const nextLayers = page.layers.map((layer) =>
+        targetIds.has(layer.id) && isAdjustableLayer(layer)
+          ? ({ ...layer, imageAdjustments: cloneAdjustmentStack(clipboard) } as AdjustableLayer)
+          : layer
+      );
+      return commitDocumentAction(state, changeLayersAction(pageId, page.layers, nextLayers, "PasteImageAdjustmentsAction"));
+    }),
+  applyAdjustmentToImages: (pageId, layerIds, template) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const page = state.document.pages.find((item) => item.id === pageId);
+      if (page === undefined) return state;
+      const targetIds = new Set(layerIds);
+      const nextLayers = appendAdjustmentToImageLayers(page.layers, template, (layer) => targetIds.has(layer.id));
+      return commitDocumentAction(state, changeLayersAction(pageId, page.layers, nextLayers, "ApplyAdjustmentToImagesAction"));
+    }),
+  applyAdjustmentToAllImagesOnPage: (pageId, template) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const page = state.document.pages.find((item) => item.id === pageId);
+      if (page === undefined) return state;
+      const nextLayers = appendAdjustmentToImageLayers(page.layers, template, () => true);
+      return commitDocumentAction(state, changeLayersAction(pageId, page.layers, nextLayers, "ApplyAdjustmentToAllImagesAction"));
+    }),
+  applyPresetToImage: (pageId, layerId, presetId, strength, extra) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const layer = getImageLayer(state.document, pageId, layerId);
+      if (layer === undefined) return state;
+      const def = getPreset(presetId);
+      if (def === undefined) return state;
+      const next = applyPresetToImageLayer(layer, def, strength ?? def.defaultStrength, "singleImage", extra);
+      return commitDocumentAction(state, changeLayerAction(pageId, layer, next, "ApplyPresetToImageAction"));
+    }),
+  applyPresetToImages: (pageId, layerIds, presetId, strength) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const page = state.document.pages.find((item) => item.id === pageId);
+      if (page === undefined) return state;
+      const def = getPreset(presetId);
+      if (def === undefined) return state;
+      const targetIds = new Set(layerIds);
+      const effective = strength ?? def.defaultStrength;
+      const nextLayers = page.layers.map((layer) =>
+        isAdjustableLayer(layer) && targetIds.has(layer.id)
+          ? applyPresetToImageLayer(layer, def, effective, "selectedImages")
+          : layer
+      );
+      return commitDocumentAction(state, changeLayersAction(pageId, page.layers, nextLayers, "ApplyPresetToImagesAction"));
+    }),
+  applyPresetToAllImagesOnPage: (pageId, presetId, strength, extra) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const page = state.document.pages.find((item) => item.id === pageId);
+      if (page === undefined) return state;
+      const def = getPreset(presetId);
+      if (def === undefined) return state;
+      const effective = strength ?? def.defaultStrength;
+      const nextLayers = page.layers.map((layer) =>
+        isAdjustableLayer(layer) ? applyPresetToImageLayer(layer, def, effective, "allImagesOnPage", extra) : layer
+      );
+      return commitDocumentAction(state, changeLayersAction(pageId, page.layers, nextLayers, "ApplyPresetToAllImagesAction"));
+    }),
+  applyPresetToDuplicatedImage: (pageId, layerId, presetId, strength, extra) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const page = state.document.pages.find((item) => item.id === pageId);
+      if (page === undefined) return state;
+      const source = getImageLayer(state.document, pageId, layerId);
+      if (source === undefined) return state;
+      const def = getPreset(presetId);
+      if (def === undefined) return state;
+      const effective = strength ?? def.defaultStrength;
+
+      // Clone the source at the SAME geometry (no offset) so it stacks pixel-for-
+      // pixel above the original — required for clean blend-mode compositing.
+      const clone = structuredClone(source) as AdjustableLayer;
+      clone.id = crypto.randomUUID();
+      clone.name = `${source.name} · ${def.name}`;
+      clone.selected = false;
+      // Place the copy directly above the source: bump every layer at or above
+      // source.zIndex so the clone can occupy source.zIndex + 1 uniquely.
+      clone.zIndex = source.zIndex + 1;
+      const edited = applyPresetToImageLayer(clone, def, effective, "singleImage", extra);
+
+      const nextLayers = page.layers.map((layer) =>
+        layer.id !== source.id && layer.zIndex > source.zIndex
+          ? ({ ...layer, zIndex: layer.zIndex + 1 } as VisualLayer)
+          : layer
+      );
+      nextLayers.push(edited);
+      return commitDocumentAction(state, changeLayersAction(pageId, page.layers, nextLayers, "ApplyPresetToDuplicatedImageAction"));
+    }),
+  updateAppliedPresetStrength: (pageId, layerId, instanceId, strength) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const layer = getImageLayer(state.document, pageId, layerId);
+      if (layer?.imageAdjustments === undefined) return state;
+      const instance = layer.imageAdjustments.presetInstances?.find((preset) => preset.id === instanceId);
+      const def = instance === undefined ? undefined : getPreset(instance.presetId);
+      if (instance === undefined || def === undefined) return state;
+      const next = restrengthenPresetInstance(layer, instance, def, strength);
+      const coalesceKey = `preset-strength:${layerId}:${instanceId}`;
+      return commitDocumentAction(state, changeLayerActionCoalesced(pageId, layer, next, coalesceKey, "UpdatePresetStrengthAction"));
+    }),
+  removeAppliedPreset: (pageId, layerId, instanceId) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const layer = getImageLayer(state.document, pageId, layerId);
+      if (layer?.imageAdjustments === undefined) return state;
+      const instance = layer.imageAdjustments.presetInstances?.find((preset) => preset.id === instanceId);
+      if (instance === undefined) return state;
+      const generated = new Set(instance.generatedAdjustments);
+      const next = withImageAdjustments(layer, (s) => ({
+        ...s,
+        stack: s.stack.filter((adj) => !generated.has(adj.id)),
+        presetInstances: s.presetInstances?.filter((preset) => preset.id !== instanceId)
+      }));
+      return commitDocumentAction(state, changeLayerAction(pageId, layer, next, "RemoveAppliedPresetAction"));
+    }),
+  addPageLook: (pageId, look) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const page = state.document.pages.find((item) => item.id === pageId);
+      if (page === undefined) return state;
+      const before = page.pageLooks;
+      const after = [...(before ?? []), look];
+      return commitDocumentAction(state, changePageLooksAction(pageId, before, after, "AddPageLookAction"));
+    }),
+  updatePageLook: (pageId, lookId, patch) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const page = state.document.pages.find((item) => item.id === pageId);
+      if (page?.pageLooks === undefined) return state;
+      const before = page.pageLooks;
+      const after = before.map((look) => (look.id === lookId ? { ...look, ...patch } : look));
+      const coalesceKey = `pagelook-meta:${lookId}:${Object.keys(patch).sort().join(",")}`;
+      return commitDocumentAction(state, changePageLooksAction(pageId, before, after, "UpdatePageLookAction", coalesceKey));
+    }),
+  updatePageLookEffect: (pageId, lookId, patch) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const page = state.document.pages.find((item) => item.id === pageId);
+      if (page?.pageLooks === undefined) return state;
+      const before = page.pageLooks;
+      const after = before.map((look) =>
+        look.id === lookId ? { ...look, effect: { ...look.effect, ...patch } as PageLookEffect } : look
+      );
+      const coalesceKey = `pagelook-fx:${lookId}:${Object.keys(patch).sort().join(",")}`;
+      return commitDocumentAction(state, changePageLooksAction(pageId, before, after, "UpdatePageLookEffectAction", coalesceKey));
+    }),
+  togglePageLook: (pageId, lookId) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const page = state.document.pages.find((item) => item.id === pageId);
+      if (page?.pageLooks === undefined) return state;
+      const before = page.pageLooks;
+      const after = before.map((look) => (look.id === lookId ? { ...look, enabled: !look.enabled } : look));
+      return commitDocumentAction(state, changePageLooksAction(pageId, before, after, "TogglePageLookAction"));
+    }),
+  removePageLook: (pageId, lookId) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const page = state.document.pages.find((item) => item.id === pageId);
+      if (page?.pageLooks === undefined) return state;
+      const before = page.pageLooks;
+      const filtered = before.filter((look) => look.id !== lookId);
+      const after = filtered.length === 0 ? undefined : filtered;
+      return commitDocumentAction(state, changePageLooksAction(pageId, before, after, "RemovePageLookAction"));
+    }),
+  reorderPageLook: (pageId, lookId, direction) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const page = state.document.pages.find((item) => item.id === pageId);
+      if (page?.pageLooks === undefined) return state;
+      const before = page.pageLooks;
+      const index = before.findIndex((look) => look.id === lookId);
+      const target = direction === "up" ? index + 1 : index - 1;
+      if (index < 0 || target < 0 || target >= before.length) return state;
+      const after = [...before];
+      const [moved] = after.splice(index, 1);
+      after.splice(target, 0, moved!);
+      return commitDocumentAction(state, changePageLooksAction(pageId, before, after, "ReorderPageLookAction"));
+    }),
+  applyPresetAsPageLook: (pageId, presetId, strength) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const page = state.document.pages.find((item) => item.id === pageId);
+      if (page === undefined) return state;
+      const def = getPreset(presetId);
+      if (def?.pageLookEffect === undefined) return state;
+      const look = createPageLookLayer(def.pageLookEffect, {
+        name: def.name,
+        strength: strength ?? def.defaultStrength,
+        presetId: def.id
+      });
+      const before = page.pageLooks;
+      const after = [...(before ?? []), look];
+      return commitDocumentAction(state, changePageLooksAction(pageId, before, after, "ApplyPresetAsPageLookAction"));
     }),
   updateFrameContent: (pageId, frameId, contentTransform) =>
     set((state) => {
@@ -1820,6 +2208,113 @@ function createInlineAction(type: string, apply: DocumentAction["apply"], undo: 
 
 function findLayer(document: Document, pageId: string, layerId: string): VisualLayer | undefined {
   return document.pages.find((page) => page.id === pageId)?.layers.find((layer) => layer.id === layerId);
+}
+
+const EMPTY_IMAGE_ADJUSTMENT_STACK: ImageAdjustmentStack = { enabled: true, stack: [] };
+
+/**
+ * Layers that can carry an image-adjustment stack: plain image layers and
+ * frame layers that currently hold an image (collage cells, photo-print slots,
+ * masked frames, …). Tool Library / Smart Presets target both.
+ */
+type AdjustableLayer = ImageLayer | FrameLayer;
+
+/** True for image layers and for frame layers that currently hold an image. */
+function isAdjustableLayer(layer: VisualLayer): layer is AdjustableLayer {
+  return layer.type === "image" || (layer.type === "frame" && layer.imageAssetId !== undefined);
+}
+
+function getImageLayer(document: Document, pageId: string, layerId: string): AdjustableLayer | undefined {
+  const layer = findLayer(document, pageId, layerId);
+  return layer !== undefined && isAdjustableLayer(layer) ? layer : undefined;
+}
+
+function withImageAdjustments<T extends AdjustableLayer>(layer: T, mutate: (stack: ImageAdjustmentStack) => ImageAdjustmentStack): T {
+  return { ...layer, imageAdjustments: mutate(layer.imageAdjustments ?? EMPTY_IMAGE_ADJUSTMENT_STACK) };
+}
+
+/** Deep-ish copy of a stack, assigning fresh ids so the clone edits independently of the source. */
+function cloneAdjustmentStack(stack: ImageAdjustmentStack): ImageAdjustmentStack {
+  return {
+    enabled: stack.enabled,
+    stack: stack.stack.map((adj) => ({ ...adj, id: createId("adj") }) as ImageAdjustment)
+  };
+}
+
+function appendAdjustmentToImageLayers(
+  layers: VisualLayer[],
+  template: ImageAdjustmentTemplate,
+  match: (layer: AdjustableLayer) => boolean
+): VisualLayer[] {
+  return layers.map((layer) =>
+    isAdjustableLayer(layer) && match(layer)
+      ? withImageAdjustments(layer, (s) => ({ ...s, stack: [...s.stack, createImageAdjustment(template)] }))
+      : layer
+  );
+}
+
+/**
+ * Append a preset's scaled adjustments to one image layer and record an
+ * AppliedPresetInstance pointing at the generated ids.
+ */
+function applyPresetToImageLayer<T extends AdjustableLayer>(
+  layer: T,
+  def: SmartPresetDefinition,
+  strength: number,
+  targetMode: AppliedPresetInstance["targetMode"],
+  /**
+   * Optional fine-tune templates appended as plain MANUAL adjustments (NOT part
+   * of the preset instance), so re-strengthening the base preset stays clean and
+   * the tweaks survive reload independently.
+   */
+  extra: ImageAdjustmentTemplate[] = []
+): T {
+  const generated = instantiatePresetAdjustments(def, strength);
+  const manual = extra.map((template) => createImageAdjustment(template));
+  const instance: AppliedPresetInstance = {
+    id: createId("preset"),
+    presetId: def.id,
+    name: def.name,
+    appliedAt: Date.now(),
+    strength,
+    targetMode,
+    editable: true,
+    generatedAdjustments: generated.map((adj) => adj.id)
+  };
+  return withImageAdjustments(layer, (s) => ({
+    ...s,
+    stack: [...s.stack, ...generated, ...manual],
+    presetInstances: [...(s.presetInstances ?? []), instance]
+  }));
+}
+
+/**
+ * Re-instantiate an applied preset's generated adjustments at a new strength,
+ * reusing the existing ids and preserving their position in the stack.
+ */
+function restrengthenPresetInstance<T extends AdjustableLayer>(
+  layer: T,
+  instance: AppliedPresetInstance,
+  def: SmartPresetDefinition,
+  strength: number
+): T {
+  const ids = instance.generatedAdjustments;
+  // Rebuild scaled adjustments paired with the instance's stored ids (by order).
+  const rebuilt = def.imageAdjustments.map((template, index) => {
+    const adj = createImageAdjustment(scaleTemplate(template, strength));
+    const reuseId = ids[index];
+    return reuseId === undefined ? adj : ({ ...adj, id: reuseId } as ImageAdjustment);
+  });
+  const byId = new Map(rebuilt.map((adj) => [adj.id, adj]));
+  return withImageAdjustments(layer, (s) => ({
+    ...s,
+    stack: s.stack.map((adj) => byId.get(adj.id) ?? adj),
+    presetInstances: s.presetInstances?.map((preset) =>
+      preset.id === instance.id
+        ? { ...preset, strength, generatedAdjustments: rebuilt.map((adj) => adj.id) }
+        : preset
+    )
+  }));
 }
 
 function withMeasuredTextLayerSize<T extends Extract<VisualLayer, { type: "text" }>>(layer: T): T {

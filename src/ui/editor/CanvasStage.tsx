@@ -35,8 +35,11 @@ import type { Asset, Page } from "@/types/document";
 import type { CollageRule, CollageSlot } from "@/types/collage";
 import type { Rect as RectType } from "@/types/primitives";
 import type { AdjustmentLayer, FrameLayer, ImageLayer, ShapeLayer, TextLayer, VisualLayer } from "@/types/layers";
+import { createAdjustmentPixelFilter, hasActiveAdjustment } from "@/core/rendering/adjustmentPipeline";
+import { ENABLE_CLASSIC_ADJUSTMENT_LAYER_RENDERING } from "@/core/features/adjustmentFlags";
 import { SCREEN_HELPER_NODE_NAME } from "./canvasNodeNames";
 import { KonvaLayerNode, type CanvasContextMenuTarget } from "./KonvaLayerNode";
+import { PageLookOverlay } from "./PageLookOverlay";
 import { PassportGuidelinesOverlay } from "@/ui/photoPrint/PassportGuidelinesOverlay";
 import { markDebugEvent, registerKonvaStage, trackDebugMount } from "@/debug/sppDiagnostics";
 
@@ -46,7 +49,7 @@ import { markDebugEvent, registerKonvaStage, trackDebugMount } from "@/debug/spp
 // area by a Konva Group clipFunc; only the Transformer sits outside that clip.
 const OVERFLOW_PAD = 200; // px
 
-const VISUAL_LAYER_TYPES = new Set<VisualLayer["type"]>(["image", "text", "shape", "frame", "mask", "background", "guide", "group"]);
+const VISUAL_LAYER_TYPES = new Set<VisualLayer["type"]>(["image", "text", "shape", "frame", "mask", "background", "guide"]);
 
 // AABB hit-test in canvas units, taking rotation into account.
 // Used for Alt+Click to bypass listening={false} on locked layers.
@@ -85,16 +88,6 @@ function isWheelZoomableFrame(layer: FrameLayer): boolean {
 
 function isRenderableLayer(layer: VisualLayer): boolean {
   return VISUAL_LAYER_TYPES.has(layer.type) && layer.type !== "adjustment-layer";
-}
-
-function brightnessContrastAdjustment(layer: AdjustmentLayer): { brightness: number; contrast: number } | null {
-  const op = layer.adjustments.find((item) => item.type === "brightnessContrast");
-  if (op === undefined) return null;
-  const strength = Math.max(0, Math.min(1, layer.opacity));
-  const brightness = Math.max(-100, Math.min(100, op.brightness)) * strength;
-  const contrast = Math.max(-100, Math.min(100, op.contrast)) * strength;
-  if (Math.abs(brightness) < 0.001 && Math.abs(contrast) < 0.001) return null;
-  return { brightness, contrast };
 }
 
 // ─── Guide color palette ──────────────────────────────────────────────────────
@@ -163,6 +156,17 @@ export function CanvasStage({
   const inputStateRef = useRef(createInputState("move"));
   const [marqueeRect, setMarqueeRect] = useState<RectType | null>(null);
   const [smartLines, setSmartLines] = useState<SnapLine[]>([]);
+
+  function selectLayerFromCanvas(layerId: string, additive = false): void {
+    if (!additive) {
+      onSelectLayer(layerId);
+      return;
+    }
+    const next = selectedLayerIds.includes(layerId)
+      ? selectedLayerIds.filter((id) => id !== layerId)
+      : [...selectedLayerIds, layerId];
+    onSelectLayers(next);
+  }
 
   useEffect(() => {
     const cleanupMount = trackDebugMount("CanvasStage", { pageId: page.id });
@@ -1110,7 +1114,11 @@ export function CanvasStage({
         return;
       }
       const mask = await maskResultToSelectionMask(result, input.sourceHash);
-      imageEditStore.setSelectionMask(mask);
+      if (imageEditStore.smartSelectionMode === "add") {
+        imageEditStore.addToSelectionMask(mask);
+      } else {
+        imageEditStore.setSelectionMask(mask);
+      }
       imageEditStore.setSmartSelectionStatus(result.fallback ? "fallback" : "ready", result.message ?? "Smart selection ready");
       imageEditStore.setSmartSelectionProgress(null);
     } catch (error) {
@@ -1584,24 +1592,49 @@ export function CanvasStage({
               listening={false}
             />
           )) : null}
-          {renderAdjustmentAwareLayers(
-            [...page.layers].sort((a, b) => a.zIndex - b.zIndex),
-            (layer) => (
-              <KonvaLayerNode
-                assets={assets}
-                key={layer.id}
-                layer={layer}
-                selected={selectedLayerIds.includes(layer.id)}
-                layoutEditMode={layoutEditMode}
-                reduceImageEffects={reduceImageEffects}
-                onBeginTextEdit={onBeginTextEdit}
-                onImageDoubleClick={onImageDoubleClick}
-                onChange={handleLayerChange}
-                onSelect={(layerId) => onSelectLayer(layerId)}
-                onContextMenu={onLayerContextMenu}
-              />
-            )
-          )}
+          {(() => {
+            const allLayers = [...page.layers].sort((a, b) => a.zIndex - b.zIndex);
+            const groupMap = new Map(
+              allLayers
+                .filter((l) => l.type === "group")
+                .map((l) => [l.id, l as import("@/types/layers").GroupLayer])
+            );
+            const renderLayers = allLayers.filter((layer) => {
+              if (layer.type === "group") return false;
+              if (layer.parentId !== undefined) {
+                const parentGroup = groupMap.get(layer.parentId);
+                if (parentGroup !== undefined && parentGroup.visible === false) return false;
+              }
+              return true;
+            });
+            return renderAdjustmentAwareLayers(
+              renderLayers,
+              page.width,
+              page.height,
+              (layer) => {
+                const parentGroup = layer.parentId !== undefined ? groupMap.get(layer.parentId) : undefined;
+                const effectiveLayer = parentGroup !== undefined && parentGroup.opacity < 0.999
+                  ? { ...layer, opacity: layer.opacity * parentGroup.opacity }
+                  : layer;
+                return (
+                  <KonvaLayerNode
+                    assets={assets}
+                    key={layer.id}
+                    layer={effectiveLayer}
+                    selected={selectedLayerIds.includes(layer.id)}
+                    layoutEditMode={layoutEditMode}
+                    reduceImageEffects={reduceImageEffects}
+                    onBeginTextEdit={onBeginTextEdit}
+                    onImageDoubleClick={onImageDoubleClick}
+                    onChange={handleLayerChange}
+                    onSelect={selectLayerFromCanvas}
+                    onContextMenu={onLayerContextMenu}
+                  />
+                );
+              }
+            );
+          })()}
+          <PageLookOverlay pageLooks={page.pageLooks} width={page.width} height={page.height} />
           {marqueeRect !== null ? (
             <Rect
               name={SCREEN_HELPER_NODE_NAME}
@@ -2133,48 +2166,111 @@ function buildGridLines(page: Page, visible: boolean): Array<{ key: string; poin
 
 function AdjustmentFilterGroup({
   adjustment,
+  pageWidth,
+  pageHeight,
+  contentKey,
   children
 }: {
   adjustment: AdjustmentLayer;
+  pageWidth: number;
+  pageHeight: number;
+  contentKey: string;
   children: ReactNode;
 }): ReactElement {
   const groupRef = useRef<Konva.Group>(null);
-  const resolved = brightnessContrastAdjustment(adjustment);
+  const [cacheReady, setCacheReady] = useState(false);
+  const active = hasActiveAdjustment(adjustment);
+  const filter = useMemo(
+    () => createAdjustmentPixelFilter(adjustment.adjustments, Math.max(0, Math.min(1, adjustment.opacity))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(adjustment.adjustments), adjustment.opacity]
+  );
 
   useEffect(() => {
+    // Bug fix: always reset cacheReady BEFORE checking groupRef,
+    // because when active=false the ref is null and we'd early-return
+    // leaving cacheReady stale at true — then when active flips back,
+    // Konva tries to apply a filter to an uncached node → white screen.
+    setCacheReady(false);
     const node = groupRef.current;
     if (node === null) return;
-    if (resolved === null || adjustment.visible === false) {
-      node.clearCache();
+    let cancelled = false;
+    let rafA = 0;
+    let rafB = 0;
+    let drawCleanup: (() => void) | null = null;
+    node.clearCache();
+    if (!active) {
       node.getLayer()?.batchDraw();
       return;
     }
-    try {
-      node.cache({ pixelRatio: 1 });
-      node.getLayer()?.batchDraw();
-    } catch (error) {
-      node.clearCache();
-      markDebugEvent("adjustment-layer:cache-failed", {
-        layerId: adjustment.id,
-        name: adjustment.name,
-        message: error instanceof Error ? error.message : String(error)
+    rafA = requestAnimationFrame(() => {
+      rafB = requestAnimationFrame(() => {
+        if (cancelled) return;
+        const doCache = (): boolean => {
+          try {
+            node.clearCache();
+            node.cache({
+              x: 0,
+              y: 0,
+              width: Math.max(1, pageWidth),
+              height: Math.max(1, pageHeight),
+              pixelRatio: 1
+            });
+            return true;
+          } catch (error) {
+            node.clearCache();
+            markDebugEvent("adjustment-layer:cache-failed", {
+              layerId: adjustment.id,
+              name: adjustment.name,
+              message: error instanceof Error ? error.message : String(error)
+            });
+            return false;
+          }
+        };
+
+        if (doCache()) {
+          if (!cancelled) setCacheReady(true);
+          const konvaLayer = node.getLayer();
+          konvaLayer?.batchDraw();
+
+          // One-time re-cache after the next Konva draw to pick up
+          // images that finish loading after the initial cache snapshot.
+          if (konvaLayer) {
+            const onDraw = (): void => {
+              if (cancelled) return;
+              konvaLayer.off("draw", onDraw);
+              drawCleanup = null;
+              requestAnimationFrame(() => {
+                if (cancelled || !node.isCached()) return;
+                doCache();
+                konvaLayer.batchDraw();
+              });
+            };
+            konvaLayer.on("draw", onDraw);
+            drawCleanup = () => konvaLayer.off("draw", onDraw);
+          }
+        } else {
+          if (!cancelled) setCacheReady(false);
+        }
       });
-    }
+    });
     return () => {
+      cancelled = true;
+      if (rafA !== 0) cancelAnimationFrame(rafA);
+      if (rafB !== 0) cancelAnimationFrame(rafB);
+      if (drawCleanup) drawCleanup();
       node.clearCache();
     };
-  }, [adjustment.id, adjustment.name, adjustment.visible, resolved?.brightness, resolved?.contrast]);
+  }, [active, adjustment.id, adjustment.name, filter, pageHeight, pageWidth, contentKey]);
 
-  if (resolved === null || adjustment.visible === false) {
+  if (!active) {
     return <Group>{children}</Group>;
   }
 
   return (
     <Group
       ref={groupRef}
-      filters={[Konva.Filters.Brighten, Konva.Filters.Contrast]}
-      brightness={resolved.brightness / 200}
-      contrast={resolved.contrast / 2}
+      filters={cacheReady ? [filter] : []}
       listening
     >
       {children}
@@ -2184,16 +2280,40 @@ function AdjustmentFilterGroup({
 
 function renderAdjustmentAwareLayers(
   layers: VisualLayer[],
+  pageWidth: number,
+  pageHeight: number,
   renderLayer: (layer: VisualLayer) => ReactNode
 ): ReactNode[] {
+  // Safe Mode: legacy AdjustmentLayer rendering is disabled. Skip the
+  // full-page Konva cache entirely — render only the renderable layers and
+  // drop adjustment-layer entries (they still appear in the Layers Panel as
+  // "Legacy — Disabled", and migration converts them to image adjustments).
+  if (!ENABLE_CLASSIC_ADJUSTMENT_LAYER_RENDERING) {
+    const out: ReactNode[] = [];
+    for (const layer of layers) {
+      if (layer.type === "adjustment-layer") continue;
+      if (isRenderableLayer(layer)) out.push(renderLayer(layer));
+    }
+    return out;
+  }
+
   let rendered: ReactNode[] = [];
+  // Parallel array tracking a stable content key per rendered slot so that
+  // AdjustmentFilterGroup can detect when its wrapped layers change and
+  // invalidate the Konva cache accordingly.
+  let contentIds: string[] = [];
+
   for (const layer of layers) {
     if (layer.type !== "adjustment-layer") {
-      if (isRenderableLayer(layer)) rendered.push(renderLayer(layer));
+      if (isRenderableLayer(layer)) {
+        rendered.push(renderLayer(layer));
+        // Include visibility and opacity so toggling either invalidates the cache.
+        contentIds.push(`${layer.id}:${layer.visible ? 1 : 0}:${layer.opacity}`);
+      }
       continue;
     }
 
-    if (layer.visible === false || brightnessContrastAdjustment(layer) === null) {
+    if (!hasActiveAdjustment(layer)) {
       continue;
     }
 
@@ -2201,7 +2321,13 @@ function renderAdjustmentAwareLayers(
       const index = rendered.length - 1;
       if (index >= 0) {
         rendered[index] = (
-          <AdjustmentFilterGroup adjustment={layer} key={`adj-${layer.id}-clip`}>
+          <AdjustmentFilterGroup
+            adjustment={layer}
+            key={`adj-${layer.id}-clip`}
+            pageHeight={pageHeight}
+            pageWidth={pageWidth}
+            contentKey={contentIds[index] ?? ""}
+          >
             {rendered[index]}
           </AdjustmentFilterGroup>
         );
@@ -2210,11 +2336,19 @@ function renderAdjustmentAwareLayers(
     }
 
     if (rendered.length > 0) {
+      const belowKey = contentIds.join(",");
       rendered = [
-        <AdjustmentFilterGroup adjustment={layer} key={`adj-${layer.id}-below`}>
+        <AdjustmentFilterGroup
+          adjustment={layer}
+          key={`adj-${layer.id}-below`}
+          pageHeight={pageHeight}
+          pageWidth={pageWidth}
+          contentKey={belowKey}
+        >
           {rendered}
         </AdjustmentFilterGroup>
       ];
+      contentIds = [belowKey];
     }
   }
   return rendered;

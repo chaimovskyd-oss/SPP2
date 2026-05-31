@@ -68,8 +68,26 @@
       "output": "release",
       "buildResources": "build"
     },
+    "fileAssociations": [
+      {
+        "ext": "spp2",
+        "name": "SPP2 Project",
+        "description": "קובץ פרויקט SPP2",
+        "icon": "build/icon.ico",
+        "role": "Editor"
+      },
+      {
+        "ext": "psd",
+        "name": "Photoshop Document",
+        "description": "ייבוא PSD לתוכנה",
+        "icon": "build/icon.ico",
+        "role": "Viewer"
+      }
+    ],
     "win": {
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "icon": "build/icon.ico",
       "artifactName": "SPP2-Setup-${version}.${ext}"
     },
@@ -86,12 +104,15 @@
       "uninstallerIcon": "build/icon.ico"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "icon": "build/icon.icns",
       "category": "public.app-category.graphics-design"
     }
   },
   "dependencies": {
+    "@fal-ai/client": "^1.10.1",
     "@mediapipe/tasks-vision": "^0.10.35",
     "@types/qrcode": "^1.5.6",
     "@vitejs/plugin-react": "^5.1.1",

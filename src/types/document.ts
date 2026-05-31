@@ -1,4 +1,5 @@
 import type { VisualLayer } from "./layers";
+import type { PageLookLayer } from "./imageAdjustments";
 import type { ID, Guide, Margins, Metadata, PageSetup, VersionedEntity, ViewportState } from "./primitives";
 import type { Preset } from "./preset";
 import type { GridImageAssignment, GridLayoutRule, GridTextOverlayRule } from "./grid";
@@ -41,6 +42,8 @@ export interface Page extends VersionedEntity {
   margins: Margins;
   background: Background;
   layers: VisualLayer[];
+  /** Always-top atmospheric overlays (Phase 4). Rendered above all layers. */
+  pageLooks?: PageLookLayer[];
   guides: Guide[];
   metadata: Metadata;
 }

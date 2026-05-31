@@ -42,11 +42,46 @@
       font-size: 12.5px;
       margin-bottom: 18px;
     }
-    .status {
-      font-size: 14px;
+
+    /* ── Status row ── */
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
       min-height: 21px;
       margin-bottom: 10px;
     }
+    .status {
+      font-size: 14px;
+      flex: 1;
+    }
+
+    /* Elapsed timer */
+    .elapsed {
+      font-size: 11.5px;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    /* Pulsing activity dot */
+    .activity-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      flex-shrink: 0;
+      opacity: 0;
+    }
+    .activity-dot.active {
+      opacity: 1;
+      animation: pulse-dot 1.6s ease-in-out infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1);   }
+      50%       { opacity: 0.35; transform: scale(0.7); }
+    }
+
+    /* ── Progress bar ── */
     .progress-track {
       position: relative;
       height: 8px;
@@ -62,6 +97,29 @@
       background: linear-gradient(90deg, var(--accent), var(--accent-2));
       transition: width 0.4s ease;
     }
+    /* Shimmer overlay — visible only when active */
+    .progress-fill::after {
+      content: "";
+      position: absolute; inset: 0;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(255,255,255,0.18) 40%,
+        rgba(255,255,255,0.32) 50%,
+        rgba(255,255,255,0.18) 60%,
+        transparent 100%
+      );
+      background-size: 250% 100%;
+      opacity: 0;
+      animation: shimmer 2s linear infinite;
+    }
+    .progress-fill.active::after { opacity: 1; }
+    @keyframes shimmer {
+      0%   { background-position: 160% center; }
+      100% { background-position: -60% center; }
+    }
+
+    /* ── Log details ── */
     details {
       flex: 1; min-height: 0;
       display: flex; flex-direction: column;
@@ -77,12 +135,37 @@
       color: var(--muted);
       font-size: 12px;
       padding: 2px 0;
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
     details[open] summary {
       margin-bottom: 6px;
       color: var(--fg);
     }
     summary::-webkit-details-marker { display: none; }
+
+    /* Small arrow indicator */
+    .summary-arrow {
+      font-size: 10px;
+      transition: transform 0.2s;
+      display: inline-block;
+    }
+    details[open] .summary-arrow { transform: rotate(90deg); }
+
+    /* "live" badge — pulses when there's activity */
+    .live-badge {
+      font-size: 10px;
+      background: rgba(107,138,253,0.15);
+      color: var(--accent);
+      border: 1px solid rgba(107,138,253,0.3);
+      border-radius: 3px;
+      padding: 1px 5px;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .live-badge.visible { opacity: 1; }
+
     .log {
       flex: 1;
       overflow-y: auto;
@@ -95,6 +178,12 @@
       white-space: pre-wrap;
       word-break: break-word;
     }
+    /* Subtle scrollbar */
+    .log::-webkit-scrollbar { width: 5px; }
+    .log::-webkit-scrollbar-track { background: transparent; }
+    .log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* ── Footer ── */
     .footer {
       display: flex;
       justify-content: space-between;
@@ -140,11 +229,23 @@
     <div class="subtitle">ההכנה רצה פעם אחת בלבד. בפעמים הבאות האפליקציה תיפתח מיד.</div>
 
     <div class="error-banner" id="error"></div>
-    <div class="status" id="status">מתחיל…</div>
-    <div class="progress-track"><div class="progress-fill" id="bar"></div></div>
 
-    <details>
-      <summary>הצג פרטים טכניים</summary>
+    <div class="status-row">
+      <div class="activity-dot" id="dot"></div>
+      <div class="status" id="status">מתחיל…</div>
+      <div class="elapsed" id="elapsed"></div>
+    </div>
+
+    <div class="progress-track">
+      <div class="progress-fill" id="bar"></div>
+    </div>
+
+    <details id="details">
+      <summary>
+        <span class="summary-arrow">▶</span>
+        <span>פרטים טכניים</span>
+        <span class="live-badge" id="liveBadge">LIVE</span>
+      </summary>
       <div class="log" id="log"></div>
     </details>
 
@@ -158,44 +259,115 @@
   </div>
 
   <script>
-    const $status = document.getElementById("status");
-    const $bar = document.getElementById("bar");
-    const $log = document.getElementById("log");
-    const $err = document.getElementById("error");
-    const $cancel = document.getElementById("cancelBtn");
+    const $status   = document.getElementById("status");
+    const $bar      = document.getElementById("bar");
+    const $log      = document.getElementById("log");
+    const $err      = document.getElementById("error");
+    const $cancel   = document.getElementById("cancelBtn");
     const $continue = document.getElementById("continueBtn");
+    const $dot      = document.getElementById("dot");
+    const $elapsed  = document.getElementById("elapsed");
+    const $details  = document.getElementById("details");
+    const $live     = document.getElementById("liveBadge");
 
+    // ── Elapsed timer ───────────────────────────────────────────────────────
+    const startTime = Date.now();
+    let elapsedInterval = null;
+
+    function startElapsed() {
+      if (elapsedInterval) return;
+      elapsedInterval = setInterval(() => {
+        const sec  = Math.floor((Date.now() - startTime) / 1000);
+        const m    = String(Math.floor(sec / 60)).padStart(2, "0");
+        const s    = String(sec % 60).padStart(2, "0");
+        $elapsed.textContent = m + ":" + s;
+      }, 1000);
+    }
+
+    function stopElapsed() {
+      if (elapsedInterval) clearInterval(elapsedInterval);
+      elapsedInterval = null;
+    }
+
+    // ── Log / auto-scroll ──────────────────────────────────────────────────
     const MAX_LOG_LINES = 600;
     let logLines = [];
+    let _autoScroll = true; // follows bottom unless user scrolled up
+
+    $log.addEventListener("scroll", () => {
+      const distFromBottom = $log.scrollHeight - $log.scrollTop - $log.clientHeight;
+      _autoScroll = distFromBottom < 50;
+    });
+
+    $details.addEventListener("toggle", () => {
+      if ($details.open) {
+        // Always jump to bottom when the panel is opened
+        $log.scrollTop = $log.scrollHeight;
+        _autoScroll = true;
+      }
+    });
+
+    // Flash the LIVE badge for 1.5 s whenever a line arrives
+    let liveFadeTimer = null;
+    function flashLive() {
+      $live.classList.add("visible");
+      if (liveFadeTimer) clearTimeout(liveFadeTimer);
+      liveFadeTimer = setTimeout(() => $live.classList.remove("visible"), 1500);
+    }
 
     function pushLog(line) {
       logLines.push(line);
       if (logLines.length > MAX_LOG_LINES) logLines = logLines.slice(-MAX_LOG_LINES);
       $log.textContent = logLines.join("\n");
-      $log.scrollTop = $log.scrollHeight;
+      flashLive();
+      if ($details.open && _autoScroll) {
+        $log.scrollTop = $log.scrollHeight;
+      }
     }
 
+    // ── Activity state ─────────────────────────────────────────────────────
+    function setActive(on) {
+      if (on) {
+        $dot.classList.add("active");
+        $bar.classList.add("active");
+        startElapsed();
+      } else {
+        $dot.classList.remove("active");
+        $bar.classList.remove("active");
+        stopElapsed();
+      }
+    }
+
+    setActive(true); // start immediately
+
+    // ── IPC events ────────────────────────────────────────────────────────
     window.sppBootstrap.onEvent((evt) => {
       if (evt.type === "stage") {
         $status.textContent = evt.message || "";
         if (typeof evt.progress === "number") {
-          $bar.style.width = Math.max(0, Math.min(1, evt.progress)) * 100 + "%";
+          const pct = Math.max(0, Math.min(1, evt.progress)) * 100;
+          $bar.style.width = pct + "%";
+          if (evt.progress >= 1) setActive(false);
         }
       } else if (evt.type === "log") {
         pushLog(evt.line);
       } else if (evt.type === "error") {
+        setActive(false);
         $err.textContent = "אירעה שגיאה: " + evt.message;
         $err.style.display = "block";
         $cancel.textContent = "סגור";
         if (evt.canContinue) {
           $continue.style.display = "inline-block";
         }
+        // Auto-open details on error so the user can see what happened
+        $details.open = true;
       }
     });
 
     $cancel.addEventListener("click", async () => {
       $cancel.disabled = true;
       $status.textContent = "מבטל…";
+      setActive(false);
       try { await window.sppBootstrap.resolve("abort"); } catch {}
       try { await window.sppBootstrap.cancel(); } catch {}
     });

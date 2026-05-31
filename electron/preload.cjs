@@ -21,6 +21,9 @@ contextBridge.exposeInMainWorld("spp", {
   importPsd: (filePath) =>
     ipcRenderer.invoke("spp:import-psd", filePath),
 
+  harmonizeLayer: (layerPath, bgPath, bboxJson, optionsJson, outputPath) =>
+    ipcRenderer.invoke("spp:harmonize-layer", layerPath, bgPath, bboxJson, optionsJson, outputPath),
+
   savePdfDialog: (pdfBase64, suggestedName) =>
     ipcRenderer.invoke("spp:save-pdf-dialog", pdfBase64, suggestedName),
 
@@ -75,6 +78,26 @@ contextBridge.exposeInMainWorld("spp", {
     },
   },
 
+  pixabaySaveAsset: (args) =>
+    ipcRenderer.invoke("spp:pixabay-save-asset", args),
+
+  /** Local Graphics Library */
+  glib: {
+    ensureDirs:          ()             => ipcRenderer.invoke("spp:glib:ensure-dirs"),
+    scanDir:             ()             => ipcRenderer.invoke("spp:glib:scan-dir"),
+    readIndex:           ()             => ipcRenderer.invoke("spp:glib:read-index"),
+    writeIndex:          (assets)       => ipcRenderer.invoke("spp:glib:write-index", assets),
+    saveThumbnail:       (args)         => ipcRenderer.invoke("spp:glib:save-thumbnail", args),
+    readFileB64:         (filePath)     => ipcRenderer.invoke("spp:glib:read-file-b64", filePath),
+    revealFile:          (filePath)     => ipcRenderer.invoke("spp:glib:reveal-file", filePath),
+    deleteFile:          (filePath)     => ipcRenderer.invoke("spp:glib:delete-file", filePath),
+    moveFile:            (args)         => ipcRenderer.invoke("spp:glib:move-file", args),
+    saveAsset:           (args)         => ipcRenderer.invoke("spp:glib:save-asset", args),
+    chooseImportFolder:  ()             => ipcRenderer.invoke("spp:glib:choose-import-folder"),
+    copyFolder:          (args)         => ipcRenderer.invoke("spp:glib:copy-folder", args),
+    getBaseDir:          ()             => ipcRenderer.invoke("spp:glib:get-base-dir"),
+  },
+
   openUrl: (url) =>
     ipcRenderer.invoke("spp:open-url", url),
 
@@ -100,6 +123,12 @@ contextBridge.exposeInMainWorld("spp", {
     const handler = (_event, watchId, filePath) => callback(watchId, filePath);
     ipcRenderer.on("spp:file-changed", handler);
     return () => ipcRenderer.removeListener("spp:file-changed", handler);
+  },
+
+  onOpenFilePath: (callback) => {
+    const handler = (_event, filePath) => callback(filePath);
+    ipcRenderer.on("spp:open-file-path", handler);
+    return () => ipcRenderer.removeListener("spp:open-file-path", handler);
   },
 
   /** Batch Production Templates — stored as full SPP packages in userData. */

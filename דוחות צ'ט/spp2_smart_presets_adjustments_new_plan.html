@@ -1,0 +1,1505 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SPP2 — תוכנית חדשה למנוע פריסטים, תיקוני תמונה ואפקטי עמוד</title>
+  <style>
+    :root{
+      --bg:#0f172a;
+      --panel:#111827;
+      --panel2:#1f2937;
+      --panel3:#0b1220;
+      --text:#f8fafc;
+      --muted:#cbd5e1;
+      --soft:#94a3b8;
+      --line:#334155;
+      --blue:#38bdf8;
+      --gold:#fbbf24;
+      --red:#fb7185;
+      --green:#34d399;
+      --purple:#a78bfa;
+      --orange:#fb923c;
+      --code:#020617;
+      --cyan:#67e8f9;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      background:
+        radial-gradient(circle at top left,rgba(56,189,248,.14),transparent 28%),
+        radial-gradient(circle at 85% 15%,rgba(251,191,36,.11),transparent 28%),
+        linear-gradient(135deg,#0f172a,#111827 44%,#1e1b4b);
+      color:var(--text);
+      font-family:Arial,"Segoe UI",sans-serif;
+      line-height:1.68;
+    }
+    header{
+      padding:48px 7vw 34px;
+      border-bottom:1px solid var(--line);
+      background:rgba(2,6,23,.50);
+    }
+    main{padding:28px 7vw 90px;max-width:1380px;margin:auto}
+    h1{font-size:42px;margin:0 0 10px;color:#fff;letter-spacing:-.5px}
+    h2{font-size:30px;margin:48px 0 18px;color:var(--blue);border-bottom:1px solid var(--line);padding-bottom:8px}
+    h3{font-size:22px;margin:30px 0 12px;color:var(--gold)}
+    h4{font-size:18px;margin:22px 0 8px;color:#e0f2fe}
+    p{margin:8px 0;color:var(--muted)}
+    ul,ol{color:var(--muted)}
+    li{margin:5px 0}
+    .hero{display:grid;grid-template-columns:1.15fr .85fr;gap:22px;margin-top:24px}
+    .card,.recipe,.note,.prompt,.warning,.success,.decision{
+      background:rgba(15,23,42,.80);
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:20px;
+      box-shadow:0 16px 36px rgba(0,0,0,.18);
+    }
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+    .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px}
+    .small{font-size:14px;color:var(--soft)}
+    .tag{display:inline-block;padding:4px 9px;border:1px solid var(--line);border-radius:999px;margin:3px;color:#dbeafe;background:#172554;font-size:13px}
+    .tag.green{background:#064e3b;color:#d1fae5}.tag.gold{background:#422006;color:#fef3c7}.tag.red{background:#450a0a;color:#fecaca}.tag.purple{background:#2e1065;color:#ede9fe}.tag.orange{background:#431407;color:#ffedd5}
+    .ok{color:var(--green)}.warn{color:var(--gold)}.bad{color:var(--red)}.purple{color:var(--purple)}.orange{color:var(--orange)}.cyan{color:var(--cyan)}
+    table{width:100%;border-collapse:collapse;margin:16px 0;background:rgba(15,23,42,.65);border-radius:14px;overflow:hidden}
+    th,td{border:1px solid var(--line);padding:10px 12px;text-align:right;vertical-align:top}
+    th{background:#1e293b;color:#fff}
+    td{color:var(--muted)}
+    code,pre{font-family:Consolas,"Courier New",monospace;direction:ltr;text-align:left}
+    pre{background:var(--code);border:1px solid #1e293b;border-radius:14px;padding:16px;overflow:auto;color:#d1fae5;font-size:13px;line-height:1.45}
+    .toc a{display:block;color:#bae6fd;text-decoration:none;padding:6px 0;border-bottom:1px dashed rgba(148,163,184,.25)}
+    .recipe h4{margin-top:0;color:#fff}
+    .recipe ul{margin-top:6px}
+    .section-label{font-weight:bold;color:#fff}
+    .divider{height:1px;background:var(--line);margin:24px 0}
+    .kbd{background:#111827;border:1px solid #475569;border-radius:6px;padding:2px 6px;color:#fff;white-space:nowrap}
+    .checklist li{margin:7px 0}
+    .print-note,.decision{margin-top:20px;padding:18px;border:1px dashed var(--gold);border-radius:16px;background:rgba(251,191,36,.08)}
+    .warning{border-color:rgba(251,113,133,.6);background:rgba(127,29,29,.18)}
+    .success{border-color:rgba(52,211,153,.55);background:rgba(6,78,59,.18)}
+    .muted-box{background:rgba(2,6,23,.32);border:1px solid rgba(148,163,184,.25);border-radius:14px;padding:14px;margin:14px 0}
+    .flow{font-size:16px;color:#e0f2fe;background:#020617;border:1px solid #1e293b;border-radius:14px;padding:15px;direction:ltr;text-align:left;white-space:pre-wrap}
+    .pillrow{margin-top:12px}
+    @media(max-width:900px){.hero{grid-template-columns:1fr}h1{font-size:31px}main,header{padding-left:18px;padding-right:18px}.grid2{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>SPP2 — תוכנית חדשה למנוע פריסטים, תיקוני תמונה ואפקטי עמוד</h1>
+  <p>
+    אפיון מעודכן ומלא להחלפת מימוש שכבות ההתאמה הקלאסיות הנוכחי, שמכביד על התוכנה וגורם להיעלמות תמונות,
+    במערכת יציבה יותר: <b>תיקוני תמונה לא־הרסניים</b>, <b>פריסטים חכמים</b>, <b>אפקטי עמוד עליונים</b>,
+    ו־<b>ספריית כלים מסודרת</b>.
+  </p>
+  <div class="hero">
+    <div class="card">
+      <h3>החלטה מרכזית</h3>
+      <p>
+        בשלב הראשון לא מיישמים שכבות התאמה קלאסיות בסגנון פוטושופ, כלומר שכבה שיושבת באמצע הערימה ומשפיעה על כל מה שמתחתיה.
+        במקום זה בונים מנוע שמתאים יותר ל־SPP2:
+      </p>
+      <div class="flow">Photo / Print Presets  →  נכתבים כתיקונים לא־הרסניים על ImageLayer
+Page Looks            →  שכבת אפקט עליונה וקלה על כל העמוד
+Smart Fixes           →  מתכון חכם שמפעיל תיקוני תמונה / עמוד לפי הצורך
+Classic Adjustment    →  נשאר Disabled / Experimental להמשך בלבד</div>
+      <p>
+        כך שומרים את כל החזון של ספריית פריסטים, Looks, Photo Rescue וכלי דפוס — בלי לשבור את הקנבס.
+      </p>
+    </div>
+
+    <div class="card toc">
+      <h3>ניווט מהיר</h3>
+      <a href="#why-change">1. למה משנים כיוון</a>
+      <a href="#new-model">2. המודל החדש</a>
+      <a href="#migration">3. החלפת המימוש הקיים</a>
+      <a href="#data-model">4. מבנה נתונים מומלץ</a>
+      <a href="#library-ui">5. ספריית הכלים החדשה</a>
+      <a href="#base-tools">6. כל סוגי הכלים והאפקטים</a>
+      <a href="#preset-catalog">7. קטלוג פריסטים מלא</a>
+      <a href="#recipes">8. מתכונים מפורטים</a>
+      <a href="#groups">9. איך מציגים קבוצות בלי לשבור רינדור</a>
+      <a href="#implementation">10. תוכנית יישום מדורגת</a>
+      <a href="#tests">11. בדיקות קבלה</a>
+      <a href="#gold-prompt">12. פרומפט זהב לקלוד</a>
+    </div>
+  </div>
+</header>
+
+<main>
+
+<section id="why-change">
+  <h2>1. למה משנים כיוון</h2>
+
+  <div class="warning">
+    <h3>הבעיה במימוש הנוכחי</h3>
+    <p>
+      שכבות ההתאמה הנוכחיות מנסות לעבוד כמו פוטושופ: שכבה באמצע הערימה משפיעה על כל השכבות שמתחתיה.
+      בפועל, בתוך React-Konva זה גורם לעטיפת שכבות בקבוצה, cache גדול, חישוב כבד, ובחלק מהמקרים תמונות נעלמות.
+    </p>
+    <p>
+      הבעיה היא לא הרעיון של תיקונים ופריסטים. הבעיה היא הדרך שבה מנסים לרנדר אותם בזמן אמת.
+    </p>
+  </div>
+
+  <h3>מה מסוכן כרגע</h3>
+  <table>
+    <tr><th>מנגנון</th><th>למה הוא בעייתי</th><th>מה עושים במקום</th></tr>
+    <tr>
+      <td>Adjustment Layer באמצע הערימה</td>
+      <td>דורש לדעת מי מעל, מי מתחת, מי בתוך קבוצה, מי כבר נטען, ומה צריך cache.</td>
+      <td>מכבים בשלב ראשון. משאירים כ־Experimental.</td>
+    </tr>
+    <tr>
+      <td>Konva Group cache לכל העמוד</td>
+      <td>כבד מאוד, במיוחד בעמודים גדולים והרבה תמונות. יכול לתפוס cache לפני שהתמונה נטענה.</td>
+      <td>לא עושים cache מלא לעמוד. תיקונים מוחלים על תמונה בודדת או אפקט קל עליון.</td>
+    </tr>
+    <tr>
+      <td>Preset כקבוצת שכבות רינדור אמיתיות</td>
+      <td>יפה בממשק, אבל מסוכן אם כל שכבה דורשת קומפוזיציה.</td>
+      <td>Preset Group הוא קבוצת הגדרות / מתכון, לא בהכרח קבוצת Konva כבדה.</td>
+    </tr>
+    <tr>
+      <td>קבוצות שכבות עם רינדור כבד</td>
+      <td>מכניס סיכון ל־visibility, opacity, order, parentId, childIds.</td>
+      <td>קבוצות הן metadata/UI בשלב ראשון.</td>
+    </tr>
+  </table>
+
+  <div class="success">
+    <h3>מה כן רוצים לשמור</h3>
+    <ul>
+      <li>ספריית כלים עשירה ומסודרת במקום תפריט + ענק.</li>
+      <li>כפתורי קסם כמו Sun Rescue, Dark Photo Fix, Gold Noir, Sublimation Boost.</li>
+      <li>אפשרות לערוך את הפריסט אחרי ההפעלה.</li>
+      <li>אפשרות להחיל על תמונה אחת, כמה תמונות, כל התמונות בעמוד, או כאפקט עמוד.</li>
+      <li>Undo/Redo יציב.</li>
+      <li>ייצוא/הדפסה באיכות מלאה.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="new-model">
+  <h2>2. המודל החדש — לא שכבות התאמה קלאסיות, אלא SPP Smart Presets</h2>
+
+  <div class="grid">
+    <div class="card">
+      <h3>1. Image Adjustments</h3>
+      <p>תיקונים לא־הרסניים שנשמרים ישירות על ImageLayer.</p>
+      <p>מיועד לתיקון אמיתי של תמונות: בהירות, קונטרסט, חשיפה, רוויה, חום/קור, שחור לבן, חדות.</p>
+      <div class="pillrow"><span class="tag green">מהיר</span><span class="tag green">יציב</span><span class="tag">לא הורס מקור</span></div>
+    </div>
+    <div class="card">
+      <h3>2. Smart Presets</h3>
+      <p>מתכונים שמחילים סט תיקונים על תמונה אחת, בחירה מרובה, או כל התמונות בעמוד.</p>
+      <p>לדוגמה: Sun Rescue מחיל Highlights/Shadows/Exposure/Vibrance על התמונות שנבחרו.</p>
+      <div class="pillrow"><span class="tag gold">כפתור אחד</span><span class="tag">ניתן לעריכה</span><span class="tag">Undo אחד</span></div>
+    </div>
+    <div class="card">
+      <h3>3. Page Look</h3>
+      <p>אפקט עמוד עליון, קל, תמיד מעל הכול. מיועד לאווירה כללית ולא לתיקון תמונה מדויק.</p>
+      <p>לדוגמה: Sepia Wash, Warm Glow, Vignette, Color Overlay, Vintage Atmosphere.</p>
+      <div class="pillrow"><span class="tag purple">תמיד למעלה</span><span class="tag green">קל לרינדור</span></div>
+    </div>
+    <div class="card">
+      <h3>4. Experimental Classic Adjustment</h3>
+      <p>שכבת התאמה אמיתית שמשפיעה על כל מה שמתחת — לא נמחקת, אבל כבויה ולא בשימוש בשלב הראשון.</p>
+      <p>תחזור רק בעתיד עם מנוע קומפוזיציה אמיתי.</p>
+      <div class="pillrow"><span class="tag red">לא לשלב ראשון</span><span class="tag">עתידי</span></div>
+    </div>
+  </div>
+
+  <h3>כלל זהב</h3>
+  <div class="decision">
+    <p>
+      <b>תיקון צילום או תיקון דפוס</b> — מוחל על תמונות.
+      <br />
+      <b>מראה עיצובי / אווירה כללית</b> — יכול להיות Page Look עליון.
+      <br />
+      <b>שכבת התאמה שמשפיעה על כל מה שמתחת</b> — לא בשלב הראשון.
+    </p>
+  </div>
+
+  <h3>טבלת החלטה לפי סוג פעולה</h3>
+  <table>
+    <tr><th>פעולה</th><th>מימוש נכון עכשיו</th><th>למה</th></tr>
+    <tr><td>להבהיר תמונה כהה</td><td>Image Adjustment / Preset על תמונה</td><td>לא משנים טקסטים, רקעים ומסגרות.</td></tr>
+    <tr><td>לתקן כמה תמונות צהובות</td><td>Apply preset to selected images</td><td>יציב, מהיר, Undo פשוט.</td></tr>
+    <tr><td>לתת לכל העמוד מראה חם</td><td>Page Look עליון</td><td>אפקט אווירה, מתאים להשפעה כללית.</td></tr>
+    <tr><td>להכין תמונות לסובלימציה</td><td>Print Preset על תמונות</td><td>מכוון לתוכן התמונה, לא לטקסטים/מסגרות.</td></tr>
+    <tr><td>להפוך עיצוב שלם לספיה</td><td>Page Look או Apply to all images</td><td>תלוי אם רוצים להשפיע גם על טקסטים ורקעים.</td></tr>
+    <tr><td>להשפיע רק על כל מה שמתחת לשכבה</td><td>לא עכשיו</td><td>דורש מנוע קומפוזיציה מסובך.</td></tr>
+  </table>
+</section>
+
+<section id="migration">
+  <h2>3. החלפת שכבות ההתאמה הקיימות בשיטה החדשה</h2>
+
+  <h3>מטרת ההחלפה</h3>
+  <p>
+    לא מוחקים את המידע הקיים ולא שוברים פרויקטים ישנים. בשלב הראשון מנטרלים את נתיב הרינדור המסוכן,
+    וממפים את השימושים המרכזיים למנוע החדש.
+  </p>
+
+  <h3>חוקי Safe Mode</h3>
+  <pre>const ENABLE_CLASSIC_ADJUSTMENT_LAYER_RENDERING = false;
+const ENABLE_FULL_PAGE_ADJUSTMENT_CACHE = false;
+const ENABLE_PAGE_LOOK_OVERLAYS = true;
+const ENABLE_IMAGE_LEVEL_ADJUSTMENTS = true;</pre>
+
+  <table>
+    <tr><th>שכבה קיימת</th><th>מה עושים בטעינה</th><th>מה המשתמש רואה</th></tr>
+    <tr>
+      <td>brightness/contrast adjustment layer</td>
+      <td>אם היא גלובלית/מתחת — מסמנים כ־Classic Disabled. אפשר להציע Convert to Page Look או Apply to Images.</td>
+      <td>שכבה קיימת עם תווית “מצב ישן / לא פעיל ברינדור חי”.</td>
+    </tr>
+    <tr>
+      <td>sepia / tint layer</td>
+      <td>אפשר להמיר ל־Page Look אם היא אמורה להשפיע על כל העמוד.</td>
+      <td>אפקט עמוד עליון עם strength.</td>
+    </tr>
+    <tr>
+      <td>preset group ישן</td>
+      <td>להמיר ל־Smart Preset Instance אם אפשר.</td>
+      <td>מתכון עריך, לא קבוצת Konva כבדה.</td>
+    </tr>
+    <tr>
+      <td>group layer</td>
+      <td>לנרמל parentId/childIds ולהשאיר כ־UI metadata.</td>
+      <td>קבוצה בלוח שכבות, בלי cache/transform כבד.</td>
+    </tr>
+  </table>
+
+  <h3>פקודות המרה מומלצות</h3>
+  <pre>Convert classic adjustment:
+[ ] Convert to Image Preset on selected/all images
+[ ] Convert to Page Look
+[ ] Keep disabled as legacy layer
+[ ] Delete legacy layer</pre>
+
+  <div class="note">
+    <h3>חשוב</h3>
+    <p>
+      לא לבצע המרה אוטומטית אגרסיבית שעלולה לשנות עיצוב ישן.
+      בפרויקטים קיימים עדיף לטעון בבטחה, להציג אזהרה קטנה, ולאפשר למשתמש להמיר ידנית.
+    </p>
+  </div>
+</section>
+
+<section id="data-model">
+  <h2>4. מבנה נתונים מומלץ</h2>
+
+  <h3>ImageLayer עם תיקונים לא־הרסניים</h3>
+  <pre>type ImageLayer = {
+  id: string;
+  type: "image";
+  assetId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+
+  imageAdjustments?: {
+    enabled: boolean;
+    stack: ImageAdjustment[];
+    presetInstances?: AppliedPresetInstance[];
+  };
+};
+
+type ImageAdjustment =
+  | {
+      id: string;
+      type: "basicTone";
+      enabled: boolean;
+      brightness: number;
+      contrast: number;
+      exposure: number;
+      gamma: number;
+      offset: number;
+    }
+  | {
+      id: string;
+      type: "color";
+      enabled: boolean;
+      saturation: number;
+      vibrance: number;
+      temperature: number;
+      tint: number;
+      hue: number;
+    }
+  | {
+      id: string;
+      type: "detail";
+      enabled: boolean;
+      sharpness: number;
+      clarity: number;
+      noiseReduction: number;
+    }
+  | {
+      id: string;
+      type: "blackWhite";
+      enabled: boolean;
+      strength: number;
+      red: number;
+      yellow: number;
+      green: number;
+      cyan: number;
+      blue: number;
+      magenta: number;
+    }
+  | {
+      id: string;
+      type: "curves";
+      enabled: boolean;
+      preset?: string;
+      points?: CurvePoint[];
+    };</pre>
+
+  <h3>AppliedPresetInstance — פריסט שהוחל על תמונה</h3>
+  <pre>type AppliedPresetInstance = {
+  id: string;
+  presetId: string;
+  name: string;
+  appliedAt: number;
+  strength: number;
+  targetMode: "singleImage" | "selectedImages" | "allImagesOnPage";
+  editable: boolean;
+  generatedAdjustments: string[]; // ids of adjustments created in the image adjustment stack
+};</pre>
+
+  <h3>Page Look Layer</h3>
+  <pre>type PageLookLayer = {
+  id: string;
+  type: "pageLook";
+  name: string;
+  enabled: boolean;
+  locked?: boolean;
+  opacity: number;
+  strength: number;
+  effect:
+    | { type: "colorOverlay"; color: string; blendMode: "multiply" | "screen" | "overlay" | "soft-light" | "normal" }
+    | { type: "gradientOverlay"; stops: GradientStop[]; angle: number; blendMode: string }
+    | { type: "vignette"; amount: number; softness: number; centerX: number; centerY: number }
+    | { type: "grain"; amount: number; size: number }
+    | { type: "pageWash"; warm: number; cool: number; sepia: number; fade: number };
+  alwaysTop: true;
+};</pre>
+
+  <h3>Preset Definition</h3>
+  <pre>type SmartPresetDefinition = {
+  id: string;
+  name: string;
+  category: "Photo Rescue" | "Portrait" | "Print" | "Looks" | "Creative" | "Basic" | "Advanced";
+  description: string;
+  defaultStrength: number;
+
+  recommendedApplyMode: "selectedImages" | "allImagesOnPage" | "pageLook";
+  allowedApplyModes: Array<"singleImage" | "selectedImages" | "allImagesOnPage" | "pageLook">;
+
+  requires: string[];
+  optionalRequires: string[];
+
+  imageAdjustments?: ImageAdjustmentDefinition[];
+  pageLookEffect?: PageLookEffectDefinition;
+
+  notRecommendedAsPageLook?: boolean;
+  notRecommendedForText?: boolean;
+  printWarnings?: string[];
+};</pre>
+
+  <h3>דוגמה: Sun Rescue</h3>
+  <pre>{
+  "id": "sun_rescue",
+  "name": "Sun Rescue",
+  "category": "Photo Rescue",
+  "description": "מתקן שמש חזקה, highlights שרופים וצללים קשים.",
+  "defaultStrength": 0.75,
+  "recommendedApplyMode": "selectedImages",
+  "allowedApplyModes": ["singleImage", "selectedImages", "allImagesOnPage"],
+  "notRecommendedAsPageLook": true,
+  "requires": ["basicTone", "highlightsShadows", "vibrance"],
+  "optionalRequires": ["faceDetection"],
+  "imageAdjustments": [
+    { "type": "highlightsShadows", "highlights": -55, "whites": -25, "shadows": 22, "blacks": 0 },
+    { "type": "basicTone", "exposure": -0.10, "brightness": 0, "contrast": 4, "gamma": 1.02 },
+    { "type": "color", "vibrance": 12, "saturation": -3, "temperature": 0, "tint": 0 },
+    { "type": "curves", "preset": "softHighlightCompression" }
+  ]
+}</pre>
+
+  <h3>דוגמה: Vintage Page Look</h3>
+  <pre>{
+  "id": "vintage_page_wash",
+  "name": "Vintage Page Wash",
+  "category": "Looks",
+  "description": "שכבת אווירה עליונה שנותנת מראה וינטג' חם לכל העמוד.",
+  "defaultStrength": 0.55,
+  "recommendedApplyMode": "pageLook",
+  "allowedApplyModes": ["pageLook", "selectedImages", "allImagesOnPage"],
+  "requires": ["pageLookOverlay"],
+  "pageLookEffect": {
+    "type": "pageWash",
+    "warm": 18,
+    "sepia": 22,
+    "fade": 8,
+    "vignette": 10,
+    "grain": 4
+  }
+}</pre>
+</section>
+
+<section id="library-ui">
+  <h2>5. ספריית הכלים החדשה</h2>
+  <p>
+    כפתור <b>+</b> כבר לא פותח רשימת שכבות ארוכה. הוא פותח ספרייה חכמה עם חיפוש, קטגוריות, המלצות,
+    מצב זמינות, והצעת אופן החלה נכון.
+  </p>
+
+  <h3>מבנה חלון</h3>
+  <pre>+ Add / Apply
+
+Search: ______________________
+
+Tabs:
+[Recommended] [Recently Used] [Basic Fixes] [Photo Rescue] [Portrait]
+[Print] [Looks] [Creative] [Page Look] [Advanced] [Experimental]
+
+Card:
+☀ Sun Rescue
+מתקן שמש חזקה, אזורים שרופים וצללים קשים
+Recommended: Apply to selected images
+Allowed: selected / all images on page
+Status: Available
+[Apply] [Preview] [More]</pre>
+
+  <h3>כל כרטיס צריך להציג</h3>
+  <table>
+    <tr><th>שדה</th><th>דוגמה</th><th>למה זה חשוב</th></tr>
+    <tr><td>שם</td><td>Sun Rescue</td><td>ברור וקל לזכור.</td></tr>
+    <tr><td>תיאור קצר</td><td>מתקן שמש חזקה וצללים קשים</td><td>משתמש מבין מתי להשתמש.</td></tr>
+    <tr><td>Apply Mode מומלץ</td><td>לתמונות שנבחרו</td><td>מונע החלה שגויה על כל העמוד.</td></tr>
+    <tr><td>תגיות</td><td>Exposure, Shadows, Print</td><td>חיפוש וסינון.</td></tr>
+    <tr><td>סטטוס</td><td>Available / Limited / Experimental</td><td>שקיפות למשתמש.</td></tr>
+    <tr><td>אזהרה</td><td>לא מומלץ על טקסטים</td><td>מונע תוצאה מבלבלת.</td></tr>
+  </table>
+
+  <h3>Apply Modes</h3>
+  <table>
+    <tr><th>מצב</th><th>מה קורה בפועל</th><th>שימוש</th></tr>
+    <tr>
+      <td>Apply to selected image</td>
+      <td>נכתבים תיקונים לא־הרסניים על התמונה הנבחרת.</td>
+      <td>תיקון תמונה אחת.</td>
+    </tr>
+    <tr>
+      <td>Apply to selected images</td>
+      <td>אותו פריסט נכתב לכל התמונות שנבחרו כפעולה אחת.</td>
+      <td>תיקון כמה תמונות יחד.</td>
+    </tr>
+    <tr>
+      <td>Apply to all images on page</td>
+      <td>הפריסט מוחל על כל ImageLayer בעמוד.</td>
+      <td>עמוד תמונות שלם, גן, קולאז', פיתוח.</td>
+    </tr>
+    <tr>
+      <td>Add as Page Look</td>
+      <td>נוצרת שכבת PageLook עליונה וקלה.</td>
+      <td>אווירה, צבע, וינטג', וינייטה.</td>
+    </tr>
+    <tr>
+      <td>Experimental Classic Layer</td>
+      <td>לא פעיל כברירת מחדל.</td>
+      <td>רק בדיקות עתידיות.</td>
+    </tr>
+  </table>
+</section>
+
+<section id="base-tools">
+  <h2>6. כל סוגי הכלים והאפקטים במערכת החדשה</h2>
+
+  <h3>6.1 תיקוני בסיס לתמונה</h3>
+  <table>
+    <tr><th>כלי</th><th>פרמטרים</th><th>מימוש</th><th>עדיפות</th></tr>
+    <tr><td>Brightness / Contrast</td><td>brightness, contrast</td><td>Image Adjustment</td><td>גבוהה</td></tr>
+    <tr><td>Exposure</td><td>exposure, gamma, offset</td><td>Image Adjustment</td><td>גבוהה</td></tr>
+    <tr><td>Highlights / Shadows</td><td>highlights, shadows, whites, blacks</td><td>Image Adjustment / CPU filter / shader future</td><td>גבוהה מאוד</td></tr>
+    <tr><td>Saturation / Vibrance</td><td>saturation, vibrance</td><td>Image Adjustment</td><td>גבוהה</td></tr>
+    <tr><td>Temperature / Tint</td><td>temperature, tint</td><td>Image Adjustment</td><td>גבוהה</td></tr>
+    <tr><td>Hue</td><td>hue rotation</td><td>Image Adjustment</td><td>בינונית</td></tr>
+    <tr><td>Black & White</td><td>mix לפי צבעים</td><td>Image Adjustment</td><td>גבוהה</td></tr>
+    <tr><td>Sepia / Colorize</td><td>hue, strength, warmth</td><td>Image Adjustment או Page Look</td><td>גבוהה</td></tr>
+  </table>
+
+  <h3>6.2 כלים מתקדמים לתמונה</h3>
+  <table>
+    <tr><th>כלי</th><th>פרמטרים</th><th>מימוש מומלץ</th><th>הערה</th></tr>
+    <tr><td>Curves Simple</td><td>contrast, shadows, highlights, fade blacks</td><td>Image Adjustment</td><td>UX פשוט, לא גרף מסובך.</td></tr>
+    <tr><td>Curves Pro</td><td>RGB + ערוצים + נקודות</td><td>Image Adjustment מתקדם</td><td>לשלב מתקדם יותר.</td></tr>
+    <tr><td>Clarity / Local Contrast</td><td>amount, radius</td><td>Image Adjustment, Preview מוקטן</td><td>יכול להיות כבד, להפעיל בזהירות.</td></tr>
+    <tr><td>Sharpness</td><td>amount, radius, threshold</td><td>Image Adjustment</td><td>חשוב לדפוס.</td></tr>
+    <tr><td>Noise Reduction</td><td>luma, color, detail preserve</td><td>Image Adjustment / Python export</td><td>אפשר Preview פשוט, איכות מלאה בייצוא.</td></tr>
+    <tr><td>Threshold</td><td>level, smoothing</td><td>Image Adjustment</td><td>חשוב ללייזר.</td></tr>
+    <tr><td>Gradient Map / Duotone</td><td>shadow/mid/highlight colors</td><td>Image Adjustment או Page Look</td><td>ל־Gold Noir, Posters.</td></tr>
+    <tr><td>LUT Layer</td><td>lut file, strength</td><td>עתידי</td><td>לא שלב ראשון.</td></tr>
+  </table>
+
+  <h3>6.3 אפקטי עמוד עליונים</h3>
+  <table>
+    <tr><th>אפקט</th><th>איך מרנדרים</th><th>שימוש</th><th>סיכון</th></tr>
+    <tr><td>Color Overlay</td><td>מלבן עליון עם צבע, opacity, blendMode</td><td>חימום/קירור/שטיפה צבעונית</td><td>נמוך</td></tr>
+    <tr><td>Gradient Overlay</td><td>גרדיאנט עליון</td><td>עומק, דרמה, פוסטרים</td><td>נמוך</td></tr>
+    <tr><td>Vignette</td><td>צורה/גרדיאנט כהה בקצוות</td><td>מיקוד במרכז</td><td>נמוך</td></tr>
+    <tr><td>Sepia Wash</td><td>Overlay חום/זהוב</td><td>וינטג'</td><td>נמוך</td></tr>
+    <tr><td>Lighten / Darken Wash</td><td>לבן/שחור שקוף או blend mode</td><td>הבהרה/החשכה רכה</td><td>נמוך</td></tr>
+    <tr><td>Grain</td><td>Noise pattern קל</td><td>Film/Vintage</td><td>בינוני, צריך cache קטן או pattern.</td></tr>
+    <tr><td>Texture Overlay</td><td>תמונה/טקסטורה עליונה</td><td>נייר, קנבס, מים</td><td>בינוני.</td></tr>
+  </table>
+
+  <h3>6.4 כלים ניסיוניים / עתידיים</h3>
+  <table>
+    <tr><th>כלי</th><th>מתי לחזור אליו</th><th>תנאי מקדים</th></tr>
+    <tr><td>Classic Adjustment Layer below stack</td><td>שלב עתידי</td><td>CompositeRenderer עם OffscreenCanvas ו־bounds.</td></tr>
+    <tr><td>Group Adjustment</td><td>אחרי שקבוצות יציבות</td><td>Group metadata יציב + render plan.</td></tr>
+    <tr><td>Clipped Adjustment to layer</td><td>אפשר שלב ביניים</td><td>Image adjustments יציב קודם.</td></tr>
+    <tr><td>AI Suggested Fixes</td><td>אחרי שיש פריסטים</td><td>ניתוח תמונה בסיסי + fallback.</td></tr>
+    <tr><td>Skin Mask / Face Mask</td><td>אחרי Face Detection יציב</td><td>מודל זיהוי פנים אמין.</td></tr>
+  </table>
+</section>
+
+<section id="preset-catalog">
+  <h2>7. קטלוג פריסטים מלא לפי קטגוריות</h2>
+
+  <h3>7.1 Photo Rescue</h3>
+  <div class="grid2">
+    <div class="recipe"><h4>☀ Sun Rescue</h4><p>מתקן שמש חזקה, Highlights שרופים וצללים קשים.</p><ul><li>מימוש: Image Preset.</li><li>מומלץ: selected images.</li><li>לא מומלץ כ־Page Look.</li></ul></div>
+    <div class="recipe"><h4>🌙 Dark Photo Fix</h4><p>לתמונות כהות, צילום ערב או חדר חשוך.</p><ul><li>מימוש: Image Preset.</li><li>כולל Exposure, Shadows, Noise Reduction.</li></ul></div>
+    <div class="recipe"><h4>🌤 Backlight Rescue</h4><p>צילום מול חלון/שמש, פנים כהות ורקע בהיר.</p><ul><li>מימוש: Image Preset.</li><li>אם יש Face Detection — לחזק פנים בלבד בעתיד.</li></ul></div>
+    <div class="recipe"><h4>💡 Indoor Light Fix</h4><p>תאורת בית/גן צהובה, ירוקה או לא טבעית.</p><ul><li>מימוש: Image Preset.</li><li>Temperature/Tint הם המרכז.</li></ul></div>
+    <div class="recipe"><h4>📱 WhatsApp Recovery</h4><p>תמונות דחוסות, רכות ואפרוריות שהגיעו בוואטסאפ.</p><ul><li>מימוש: Image Preset.</li><li>Sharpness, Clarity, Vibrance.</li></ul></div>
+    <div class="recipe"><h4>🌫 Haze Removal</h4><p>תמונה שטוחה, מסונוורת או עם ערפל.</p><ul><li>מימוש: Image Preset.</li><li>Clarity/Contrast/Vibrance.</li></ul></div>
+  </div>
+
+  <h3>7.2 Portrait Tools</h3>
+  <div class="grid2">
+    <div class="recipe"><h4>🙂 Soft Portrait</h4><p>מראה עדין ונעים לפנים, בלי “איפור AI”.</p><ul><li>מימוש: Image Preset.</li><li>מוריד קונטרסט קשה ומחמם מעט.</li></ul></div>
+    <div class="recipe"><h4>🕶 Face Shadow Fix</h4><p>הבהרת פנים בצל.</p><ul><li>מימוש ראשוני: Global shadows על התמונה.</li><li>עתידי: Face mask.</li></ul></div>
+    <div class="recipe"><h4>🌡 Skin Tone Repair</h4><p>תיקון עור כתום/ירוק/חיוור.</p><ul><li>מימוש ראשוני: Temperature/Tint.</li><li>עתידי: Skin mask.</li></ul></div>
+    <div class="recipe"><h4>⚡ Flash Fix</h4><p>הפחתת פלאש קשוח ואזורים לבנים מדי.</p><ul><li>Highlights/Whites down.</li><li>Soft contrast.</li></ul></div>
+    <div class="recipe"><h4>👨‍👩‍👧 Warm Family Photo</h4><p>תמונה משפחתית חמימה ומזמינה.</p><ul><li>יכול לעבוד כ־Image Preset או Page Look עדין.</li></ul></div>
+  </div>
+
+  <h3>7.3 Print Tools</h3>
+  <div class="grid2">
+    <div class="recipe"><h4>🖨 Sublimation Boost</h4><p>חיזוק צבעים וקונטרסט לסובלימציה.</p><ul><li>מימוש: Image Preset.</li><li>עתידי: פרופילים לפי מדפסת/דיו/מוצר.</li></ul></div>
+    <div class="recipe"><h4>🖼 Canvas Punch</h4><p>הכנה לקנבס שבולע צבע ופרטים.</p><ul><li>Contrast, Vibrance, Sharpness.</li><li>להיזהר מעור מוגזם.</li></ul></div>
+    <div class="recipe"><h4>🪵 Wood Print Prep</h4><p>הכנה להדפסה על עץ/סטיקווד.</p><ul><li>חיזוק קונטרסט ושמירה על פרטים כהים.</li></ul></div>
+    <div class="recipe"><h4>🔥 Laser Ready</h4><p>הכנה לחריטה בלייזר.</p><ul><li>Black & White, Threshold, Edge Boost.</li><li>Preview לפי חומר בעתיד.</li></ul></div>
+    <div class="recipe"><h4>📷 Photo Print Clean</h4><p>תיקון כללי לפיתוח תמונות.</p><ul><li>עדין: מעט קונטרסט, צבע וחדות.</li></ul></div>
+    <div class="recipe"><h4>🧱 Block / Glass Boost</h4><p>הכנה לבלוקים, זכוכיות ובזלת.</p><ul><li>קונטרסט צבעוני, לא מוגזם.</li></ul></div>
+  </div>
+
+  <h3>7.4 Looks / Creative / Page Looks</h3>
+  <div class="grid2">
+    <div class="recipe"><h4>🎞 Vintage Film</h4><p>מראה פילם ישן, שחורים מורמים, חום עדין.</p><ul><li>מימוש: Page Look או Image Preset.</li></ul></div>
+    <div class="recipe"><h4>🟤 Sepia Memories</h4><p>ספיה נוסטלגית.</p><ul><li>Page Look טוב מאוד.</li><li>אפשר גם Image Preset לשחור לבן אמיתי.</li></ul></div>
+    <div class="recipe"><h4>🖤 Gold Noir</h4><p>שחור וזהב יוקרתי.</p><ul><li>עדיף Image Preset לתמונות/פוסטרים.</li><li>אפשר Page Look בגרסה עדינה.</li></ul></div>
+    <div class="recipe"><h4>🎬 Hollywood Teal & Orange</h4><p>מראה קולנועי.</p><ul><li>Image Preset לתמונות.</li><li>Page Look אפשרי כגרסה רכה.</li></ul></div>
+    <div class="recipe"><h4>🌈 Neon Duo</h4><p>דואוטון צבעוני לפוסטרים.</p><ul><li>Image Preset או Page Look לפי מצב.</li></ul></div>
+    <div class="recipe"><h4>✨ Soft Glow</h4><p>הילה רכה לעמוד/עיצוב.</p><ul><li>Page Look.</li><li>לא דורש עיבוד תמונות עמוק.</li></ul></div>
+    <div class="recipe"><h4>🌚 Moody Dark</h4><p>החשכה דרמטית עם וינייטה.</p><ul><li>Page Look.</li></ul></div>
+    <div class="recipe"><h4>☁ Dream Pastel</h4><p>מראה בהיר ורך בגווני פסטל.</p><ul><li>Page Look או Image Preset עדין.</li></ul></div>
+  </div>
+</section>
+
+<section id="recipes">
+  <h2>8. מתכונים מפורטים</h2>
+  <p>
+    הערכים כאן הם נקודת פתיחה. כל פריסט חייב לקבל Strength ראשי שמערבב בין המקור לתוצאה.
+    בפריסטים לתמונות, הערכים נכתבים ל־ImageLayer. בפריסטי Page Look נוצרת שכבת PageLook עליונה.
+  </p>
+
+  <div class="grid">
+    <div class="recipe"><h4>☀ Sun Rescue</h4><ul><li>Apply Mode: selectedImages</li><li>Highlights: -55</li><li>Whites: -25</li><li>Shadows: +22</li><li>Exposure: -0.10</li><li>Contrast: +4</li><li>Vibrance: +12</li><li>Saturation: -3</li><li>Curve: Highlight Compression</li></ul></div>
+    <div class="recipe"><h4>🌙 Dark Photo Fix</h4><ul><li>Apply Mode: selectedImages</li><li>Exposure: +0.35</li><li>Shadows: +45</li><li>Blacks: +8</li><li>Noise Reduction: +20</li><li>Clarity: +8</li><li>Vibrance: +10</li><li>Gamma: 1.04</li></ul></div>
+    <div class="recipe"><h4>🌤 Backlight Rescue</h4><ul><li>Apply Mode: selectedImages</li><li>Shadows: +60</li><li>Highlights: -35</li><li>Midtone Curve: lift</li><li>Contrast: -8</li><li>Exposure: +0.08</li><li>Optional future: Face exposure +0.25</li></ul></div>
+    <div class="recipe"><h4>💡 Indoor Light Fix</h4><ul><li>Apply Mode: selectedImages</li><li>Temperature: -10 עד -25</li><li>Tint: +5 עד +15 אם ירקרק</li><li>Exposure: +0.10</li><li>Vibrance: +8</li><li>Saturation: -3</li></ul></div>
+    <div class="recipe"><h4>📱 WhatsApp Recovery</h4><ul><li>Apply Mode: selectedImages / allImagesOnPage</li><li>Sharpness: +18</li><li>Clarity: +12</li><li>Noise Reduction: +10</li><li>Vibrance: +12</li><li>Contrast: +8</li><li>Optional future: JPEG artifact reduction</li></ul></div>
+    <div class="recipe"><h4>🌫 Haze Removal</h4><ul><li>Apply Mode: selectedImages</li><li>Clarity: +20</li><li>Contrast: +10</li><li>Blacks: -6</li><li>Vibrance: +8</li><li>Highlights: -8</li></ul></div>
+    <div class="recipe"><h4>🙂 Soft Portrait</h4><ul><li>Apply Mode: selectedImages</li><li>Contrast: -5</li><li>Highlights: -10</li><li>Shadows: +8</li><li>Temperature: +4</li><li>Clarity: -5</li><li>Vibrance: +4</li></ul></div>
+    <div class="recipe"><h4>⚡ Flash Fix</h4><ul><li>Apply Mode: selectedImages</li><li>Highlights: -45</li><li>Whites: -30</li><li>Contrast: -8</li><li>Temperature: +3</li><li>Shadows: +8</li></ul></div>
+    <div class="recipe"><h4>🖨 Sublimation Boost</h4><ul><li>Apply Mode: selectedImages / allImagesOnPage</li><li>Vibrance: +18</li><li>Saturation: +8</li><li>Contrast: +8</li><li>Midtones: +5</li><li>Sharpness: +6</li><li>Future: printer profile compensation</li></ul></div>
+    <div class="recipe"><h4>🖼 Canvas Punch</h4><ul><li>Apply Mode: selectedImages / allImagesOnPage</li><li>Contrast: +12</li><li>Vibrance: +10</li><li>Sharpness: +15</li><li>Clarity: +8</li><li>Shadows: +4</li></ul></div>
+    <div class="recipe"><h4>🔥 Laser Ready</h4><ul><li>Apply Mode: selectedImages</li><li>Black & White: enabled</li><li>Contrast: +25</li><li>Threshold: user controlled</li><li>Edge Boost: +12</li><li>Noise Cleanup: +8</li><li>Preview: black/white material mode</li></ul></div>
+    <div class="recipe"><h4>🪵 Wood Print Prep</h4><ul><li>Apply Mode: selectedImages</li><li>Contrast: +12</li><li>Shadows: +10</li><li>Warmth: +5</li><li>Sharpness: +8</li><li>Vibrance: +5</li></ul></div>
+    <div class="recipe"><h4>🎞 Vintage Film</h4><ul><li>Apply Mode: pageLook או selectedImages</li><li>Lift Blacks: +10</li><li>Saturation: -12</li><li>Temperature: +8</li><li>Contrast: -5</li><li>Grain: +6</li><li>Vignette: +8</li></ul></div>
+    <div class="recipe"><h4>🟤 Sepia Memories</h4><ul><li>Apply Mode: pageLook מומלץ</li><li>Sepia Color: #8b5a2b</li><li>Opacity: 35-55%</li><li>Blend: soft-light / multiply</li><li>Optional: B&W image preset if applied to images</li></ul></div>
+    <div class="recipe"><h4>🖤 Gold Noir</h4><ul><li>Apply Mode: selectedImages / pageLook variant</li><li>Black & White base</li><li>Gradient Map: black → gold → cream</li><li>Contrast: +18</li><li>Strong S Curve</li><li>Strength: 80%</li></ul></div>
+    <div class="recipe"><h4>🎬 Hollywood Teal & Orange</h4><ul><li>Apply Mode: selectedImages</li><li>Soft S Curve</li><li>Teal shadows</li><li>Warm highlights</li><li>Saturation: -6</li><li>Vibrance: +10</li><li>Contrast: +10</li></ul></div>
+  </div>
+
+  <h3>JSON לדוגמה: Sublimation Boost</h3>
+  <pre>{
+  "id": "sublimation_boost",
+  "name": "Sublimation Boost",
+  "category": "Print",
+  "description": "חיזוק צבעים וקונטרסט לסובלימציה בלי לשבור עור.",
+  "defaultStrength": 0.75,
+  "recommendedApplyMode": "selectedImages",
+  "allowedApplyModes": ["singleImage", "selectedImages", "allImagesOnPage"],
+  "requires": ["color", "basicTone", "detail"],
+  "optionalRequires": ["printerProfile"],
+  "imageAdjustments": [
+    { "type": "color", "vibrance": 18, "saturation": 8, "temperature": 0, "tint": 0 },
+    { "type": "basicTone", "brightness": 0, "contrast": 8, "exposure": 0.00, "gamma": 1.00 },
+    { "type": "detail", "sharpness": 6, "clarity": 4, "noiseReduction": 0 }
+  ],
+  "printWarnings": [
+    "יש לבדוק תוצאה בהדפסת ניסיון לפי סוג דיו/נייר/מוצר.",
+    "בעתיד יש להוסיף פרופילים לפי מדפסת ודיו."
+  ]
+}</pre>
+
+  <h3>JSON לדוגמה: Sepia Page Look</h3>
+  <pre>{
+  "id": "sepia_memories_page_look",
+  "name": "Sepia Memories",
+  "category": "Looks",
+  "description": "שכבת אווירה עליונה בסגנון ספיה נוסטלגי.",
+  "defaultStrength": 0.55,
+  "recommendedApplyMode": "pageLook",
+  "allowedApplyModes": ["pageLook", "selectedImages", "allImagesOnPage"],
+  "requires": ["pageLookOverlay"],
+  "pageLookEffect": {
+    "type": "colorOverlay",
+    "color": "#8b5a2b",
+    "blendMode": "soft-light",
+    "opacity": 0.55
+  }
+}</pre>
+</section>
+
+<section id="groups">
+  <h2>9. קבוצות ועריכה מתקדמת בלי לשבור רינדור</h2>
+
+  <h3>Preset Group כקבוצת הגדרות</h3>
+  <p>
+    כדי לשמור את החוויה מהתוכנית המקורית, אפשר להציג פריסט כקבוצה נפתחת בלוח צד,
+    אבל לא כקבוצת Konva שרונדרה מעל הקנבס.
+  </p>
+
+  <pre>Sun Rescue — applied to 5 images
+├─ Highlights / Shadows     [enabled] [strength]
+├─ Exposure Balance         [enabled] [strength]
+├─ Vibrance Recovery        [enabled] [strength]
+└─ Curve: Highlight Compress[enabled] [strength]</pre>
+
+  <p>
+    עריכה של אחד הפריטים משנה בפועל את ערכי ה־adjustmentStack בתמונות שאליהן הפריסט הוחל.
+  </p>
+
+  <h3>Layer Groups רגילות בשלב ראשון</h3>
+  <table>
+    <tr><th>יכולת</th><th>מותר עכשיו?</th><th>הערה</th></tr>
+    <tr><td>סידור שכבות בקבוצה בלוח שכבות</td><td class="ok">כן</td><td>Metadata/UI בלבד.</td></tr>
+    <tr><td>הסתרה/הצגה של קבוצה</td><td class="ok">כן</td><td>משפיע על הילדים דרך parentId.</td></tr>
+    <tr><td>נעילת קבוצה</td><td class="ok">כן</td><td>מונע עריכת ילדים.</td></tr>
+    <tr><td>Opacity לקבוצה</td><td class="warn">אפשר בזהירות</td><td>מוכפל לילדים, בלי cache.</td></tr>
+    <tr><td>Group transform</td><td class="bad">לא עכשיו</td><td>מסוכן עם crop/fill/masks.</td></tr>
+    <tr><td>Group mask</td><td class="bad">לא עכשיו</td><td>דורש קומפוזיציה.</td></tr>
+    <tr><td>Adjustment בתוך קבוצה</td><td class="bad">לא עכשיו</td><td>עתידי.</td></tr>
+    <tr><td>Nested groups</td><td class="bad">לא עכשיו</td><td>לשמור פשוט.</td></tr>
+  </table>
+
+  <h3>נורמליזציה לקבוצות</h3>
+  <pre>function normalizeLayerGroups(layers) {
+  // 1. Remove parentId when parent group does not exist.
+  // 2. Rebuild every group.childIds from actual child parentId values.
+  // 3. Remove stale childIds and duplicates.
+  // 4. Prevent nested groups for now.
+  // 5. Never allow adjustment/pageLook layers inside normal groups.
+  // 6. Ensure PageLook layers are always topmost.
+}</pre>
+</section>
+
+<section id="implementation">
+  <h2>10. תוכנית יישום מדורגת</h2>
+
+  <h3>שלב 0 — עצירת נזק</h3>
+  <ul class="checklist">
+    <li>להוסיף feature flag שמכבה רינדור של classic adjustment layers.</li>
+    <li>להסיר/לעקוף full-page Konva cache של שכבות התאמה.</li>
+    <li>לוודא שפתיחת פרויקט קיים לא מעלימה תמונות.</li>
+    <li>להציג שכבות התאמה קיימות כ־Legacy Disabled / Experimental.</li>
+  </ul>
+
+  <h3>שלב 1 — Image Adjustments</h3>
+  <ul class="checklist">
+    <li>להוסיף imageAdjustments ל־ImageLayer.</li>
+    <li>לתמוך ב־brightness/contrast/exposure/saturation/temperature/tint/sepia/b&w.</li>
+    <li>להחיל פילטרים רק על image node, לא על כל העמוד.</li>
+    <li>להוסיף reset/copy/paste adjustments.</li>
+    <li>להוסיף Apply to selected images.</li>
+  </ul>
+
+  <h3>שלב 2 — Smart Preset Engine</h3>
+  <ul class="checklist">
+    <li>לבנות registry של preset definitions.</li>
+    <li>להוסיף recommendedApplyMode ו־allowedApplyModes.</li>
+    <li>להוסיף applyPresetToImage / selected / allImagesOnPage.</li>
+    <li>להוסיף master strength לפריסט.</li>
+    <li>להוסיף undo כפעולה אחת לפריסט על כמה תמונות.</li>
+  </ul>
+
+  <h3>שלב 3 — Page Look</h3>
+  <ul class="checklist">
+    <li>להוסיף PageLookLayer שתמיד topmost.</li>
+    <li>לתמוך ב־color overlay, gradient, vignette, sepia wash, darken/lighten wash.</li>
+    <li>לא לאפשר PageLook בתוך קבוצה.</li>
+    <li>לא להפעיל PageLook דרך full-page pixel filters בשלב הראשון.</li>
+  </ul>
+
+  <h3>שלב 4 — ספריית + החדשה</h3>
+  <ul class="checklist">
+    <li>להחליף את תפריט ה־+ בספרייה עם חיפוש וקטגוריות.</li>
+    <li>לכל כרטיס להציג שם, תיאור, סטטוס, מצב החלה מומלץ.</li>
+    <li>להוסיף Recommended לפי בחירה נוכחית: אם נבחרה תמונה — להציע Photo Rescue; אם אין בחירה — להציע Page Look.</li>
+    <li>להוסיף Recently Used.</li>
+  </ul>
+
+  <h3>שלב 5 — קטלוג פריסטים ראשון</h3>
+  <ul class="checklist">
+    <li>Sun Rescue</li>
+    <li>Dark Photo Fix</li>
+    <li>Backlight Rescue</li>
+    <li>Indoor Light Fix</li>
+    <li>WhatsApp Recovery</li>
+    <li>Sublimation Boost</li>
+    <li>Canvas Punch</li>
+    <li>Laser Ready</li>
+    <li>Vintage Film</li>
+    <li>Sepia Memories</li>
+    <li>Gold Noir</li>
+  </ul>
+
+  <h3>שלב 6 — Smart / AI בעתיד</h3>
+  <ul class="checklist">
+    <li>להכין interfaces ל־faceDetection, exposureAnalysis, whiteBalanceAnalysis.</li>
+    <li>לא להכניס מודלים כבדים בשלב הראשון.</li>
+    <li>כל כלי AI חייב fallback.</li>
+    <li>Suggested Fixes ימליץ על פריסטים קיימים במקום ליצור מנוע חדש.</li>
+  </ul>
+
+  <h3>שלב 7 — Classic Adjustment עתידי</h3>
+  <ul class="checklist">
+    <li>רק אחרי שכל המערכת יציבה.</li>
+    <li>לבנות CompositeRenderer נפרד עם Render Plan.</li>
+    <li>להשתמש ב־OffscreenCanvas ו־bounds חלקיים.</li>
+    <li>לא לחזור ל־Konva Group cache לכל העמוד.</li>
+  </ul>
+</section>
+
+<section id="tests">
+  <h2>11. בדיקות קבלה</h2>
+
+  <h3>יציבות בסיסית</h3>
+  <ul>
+    <li>פתיחת פרויקט קיים לא מעלימה תמונות.</li>
+    <li>הוספת פריסט לא מאיטה משמעותית את הגרירה/זום/מעבר עמודים.</li>
+    <li>שכבות Legacy לא מפעילות full-page cache.</li>
+    <li>מעבר בין עמודים לא גורם ל־blank canvas.</li>
+  </ul>
+
+  <h3>Image Adjustments</h3>
+  <ul>
+    <li>בחירת תמונה ושינוי בהירות משפיעים רק עליה.</li>
+    <li>Reset מחזיר את התמונה למקור.</li>
+    <li>Copy/Paste Adjustments עובד בין תמונות.</li>
+    <li>Undo אחרי Apply to selected מחזיר את כל התמונות בבת אחת.</li>
+  </ul>
+
+  <h3>Page Look</h3>
+  <ul>
+    <li>Page Look תמיד מעל כל השכבות.</li>
+    <li>Page Look לא נכנס לקבוצות.</li>
+    <li>כיבוי Page Look מחזיר את העמוד למצב קודם.</li>
+    <li>Opacity/strength עובד חלק.</li>
+  </ul>
+
+  <h3>ספרייה</h3>
+  <ul>
+    <li>חיפוש מוצא כלים לפי שם, תיאור ותגיות.</li>
+    <li>Recommended משתנה לפי הבחירה הנוכחית.</li>
+    <li>כלי עם dependency חסר לא מפיל את התוכנה.</li>
+    <li>Coming Soon לא ניתן להפעלה בטעות.</li>
+  </ul>
+
+  <h3>ייצוא והדפסה</h3>
+  <ul>
+    <li>Image adjustments מופיעים בייצוא/הדפסה.</li>
+    <li>Page Look מופיע בייצוא/הדפסה.</li>
+    <li>איכות הייצוא לא תלויה ב־preview המוקטן.</li>
+    <li>אין שינוי בהתנהגות FILL/crop.</li>
+  </ul>
+</section>
+
+<section id="gold-prompt">
+  <h2>12. פרומפט זהב לקלוד / Cursor</h2>
+  <div class="prompt">
+    <p>להעתקה כמשימת פיתוח מלאה:</p>
+    <pre dir="ltr">We need to replace the current unstable Photoshop-style Adjustment Layer implementation in SPP2 with a safer SPP-style Smart Preset architecture.
+
+Context:
+SPP2 is a React + Electron + React-Konva editor for print preparation, photo layouts, collage, product design, and print workflows.
+The current adjustment layer implementation is causing performance issues and disappearing images.
+The likely cause is that classic adjustment layers can sit in the middle of the layer stack and affect all layers below them, using cached Konva groups / full-page cache.
+This is too heavy and unstable.
+
+Main decision:
+Do NOT continue implementing Photoshop-style adjustment layers as the main engine.
+Do NOT use full-page Konva Group cache for adjustment layers.
+Do NOT wrap all lower layers in cached groups.
+Do NOT let adjustment layers render as “all layers below” in the live canvas for now.
+
+Instead, implement a new architecture with three safe concepts:
+
+1. Image Adjustments
+2. Smart Presets
+3. Page Look Layers
+
+Classic Photoshop-like adjustment layers must remain disabled/experimental for now.
+
+====================================================================
+PART 1 — Disable the dangerous current path
+====================================================================
+
+Add feature flags:
+
+const ENABLE_CLASSIC_ADJUSTMENT_LAYER_RENDERING = false;
+const ENABLE_FULL_PAGE_ADJUSTMENT_CACHE = false;
+const ENABLE_IMAGE_LEVEL_ADJUSTMENTS = true;
+const ENABLE_PAGE_LOOK_LAYERS = true;
+
+When ENABLE_CLASSIC_ADJUSTMENT_LAYER_RENDERING is false:
+- Do not render classic adjustment layers using cached Konva groups.
+- Do not call node.cache() over the full page for adjustment layers.
+- Do not wrap layers below adjustment layers in a special render group.
+- Existing adjustment layers may remain in the layer list as Legacy / Experimental / Disabled.
+- Existing projects must open safely and images must not disappear.
+- Optionally show a small warning in the UI: “Classic adjustment layer rendering is disabled for stability. Convert to Image Preset or Page Look.”
+
+Do not delete user data automatically.
+Do not convert old adjustment layers automatically unless the user explicitly chooses a conversion.
+
+====================================================================
+PART 2 — Implement Image Adjustments
+====================================================================
+
+Add non-destructive image adjustments directly to ImageLayer.
+
+Each ImageLayer should support:
+
+imageAdjustments?: {
+  enabled: boolean;
+  stack: ImageAdjustment[];
+  presetInstances?: AppliedPresetInstance[];
+}
+
+Supported adjustment types for phase 1:
+- basicTone:
+  brightness, contrast, exposure, gamma, offset
+- color:
+  saturation, vibrance, temperature, tint, hue
+- blackWhite:
+  strength and optional channel mix values
+- sepia/colorize:
+  hue, warmth, strength
+- detail:
+  sharpness, clarity, noiseReduction
+- curves:
+  preset-based first, pro points later
+- highlightsShadows:
+  highlights, shadows, whites, blacks
+
+Important:
+- The original image asset must never be modified.
+- Adjustments are stored as parameters only.
+- Reset removes/disables the adjustment parameters and restores the original appearance.
+- Rendering should apply filters only to the specific image node, not the whole page.
+- If a filter fails, render the original image rather than hiding it.
+- Avoid heavy synchronous processing during drag/zoom/page switch.
+
+Add store actions:
+- updateImageLayerAdjustments(layerId, patch)
+- setImageAdjustmentStack(layerId, stack)
+- addImageAdjustment(layerId, adjustment)
+- removeImageAdjustment(layerId, adjustmentId)
+- toggleImageAdjustment(layerId, adjustmentId)
+- resetImageAdjustments(layerId)
+- copyImageAdjustments(sourceLayerId)
+- pasteImageAdjustments(targetLayerIds)
+- applyAdjustmentToSelectedImages(adjustment)
+- applyAdjustmentToAllImagesOnPage(pageId, adjustment)
+
+Undo/redo:
+- Applying a preset to multiple images should be one undoable action if the current undo system allows it.
+
+====================================================================
+PART 3 — Implement Smart Preset Engine
+====================================================================
+
+Create a preset registry with structured preset definitions.
+
+Preset definition shape:
+
+type SmartPresetDefinition = {
+  id: string;
+  name: string;
+  category:
+    | "Basic"
+    | "Photo Rescue"
+    | "Portrait"
+    | "Print"
+    | "Looks"
+    | "Creative"
+    | "Advanced"
+    | "Experimental";
+
+  description: string;
+  tags: string[];
+  defaultStrength: number;
+
+  recommendedApplyMode:
+    | "singleImage"
+    | "selectedImages"
+    | "allImagesOnPage"
+    | "pageLook";
+
+  allowedApplyModes: Array<
+    | "singleImage"
+    | "selectedImages"
+    | "allImagesOnPage"
+    | "pageLook"
+  >;
+
+  requires: string[];
+  optionalRequires: string[];
+
+  imageAdjustments?: ImageAdjustmentDefinition[];
+  pageLookEffect?: PageLookEffectDefinition;
+
+  notRecommendedAsPageLook?: boolean;
+  notRecommendedForText?: boolean;
+  printWarnings?: string[];
+};
+
+Preset application rules:
+- Photo Rescue presets should usually apply to selected images or all images on the page.
+- Print presets should usually apply to selected images or all images on the page.
+- Looks can apply either as image presets or as Page Look layers depending on the preset.
+- Page Look presets create lightweight top-level PageLookLayer objects.
+- Do not create Photoshop-style “adjustment layer below stack” objects from presets in phase 1.
+- Do not create Konva cached groups for presets.
+
+When applying a preset to images:
+- Generate one or more ImageAdjustment entries and append them to each target ImageLayer adjustment stack.
+- Store an AppliedPresetInstance on the image so the preset can be edited/reset later.
+- Apply master strength by scaling the generated adjustment values or storing a strength multiplier.
+- Allow editing the generated adjustment values later.
+
+AppliedPresetInstance shape:
+
+type AppliedPresetInstance = {
+  id: string;
+  presetId: string;
+  name: string;
+  appliedAt: number;
+  strength: number;
+  targetMode: "singleImage" | "selectedImages" | "allImagesOnPage";
+  editable: boolean;
+  generatedAdjustments: string[];
+};
+
+====================================================================
+PART 4 — Implement Page Look Layers
+====================================================================
+
+Add a new lightweight layer type:
+
+type PageLookLayer = {
+  id: string;
+  type: "pageLook";
+  name: string;
+  enabled: boolean;
+  locked?: boolean;
+  opacity: number;
+  strength: number;
+  alwaysTop: true;
+  effect:
+    | { type: "colorOverlay"; color: string; blendMode: "normal" | "multiply" | "screen" | "overlay" | "soft-light"; opacity: number }
+    | { type: "gradientOverlay"; stops: GradientStop[]; angle: number; blendMode: string; opacity: number }
+    | { type: "vignette"; amount: number; softness: number; centerX: number; centerY: number }
+    | { type: "grain"; amount: number; size: number }
+    | { type: "pageWash"; warm: number; cool: number; sepia: number; fade: number; vignette?: number; grain?: number };
+};
+
+Rules:
+- PageLookLayer always renders above all normal layers.
+- PageLookLayer must never be placed inside a group.
+- PageLookLayer must not be affected by group visibility/opacity.
+- PageLookLayer is lightweight and should use simple Konva shapes, gradients, opacity, and blend modes when possible.
+- Do not use full-page pixel filters for PageLook in phase 1.
+- PageLook is for atmosphere, not precise photo correction.
+- Examples: warm tint, cool tint, sepia wash, lighten wash, darken wash, vignette, gradient overlay, soft glow, grain.
+
+====================================================================
+PART 5 — Layer groups stabilization
+====================================================================
+
+Groups should be metadata/UI only in this phase.
+They should not become heavy Konva render groups.
+
+Supported now:
+- Organize layers in the layer panel.
+- Group visibility affects child visibility.
+- Group lock affects child editability.
+- Optional group opacity can multiply child opacity without cache.
+- Delete group only: ungroup children.
+- Delete group with children: delete children.
+- Duplicate group: duplicate children safely.
+
+Not supported now:
+- group transform
+- group clipping
+- group masks
+- nested groups
+- group-level adjustment rendering
+- adjustment layers inside groups
+- pageLook layers inside groups
+- group cache
+
+Add normalizeLayerGroups(layers):
+- Remove parentId if the parent group does not exist.
+- Rebuild every group.childIds from actual layer.parentId values.
+- Remove stale childIds.
+- Remove duplicate childIds.
+- Prevent nested groups for now.
+- Prevent pageLook and legacy adjustment layers from being children of normal groups.
+- Ensure pageLook layers are always topmost.
+- Do not allow a broken group relationship to hide unrelated image layers.
+
+Run normalization after:
+- loading a document
+- moving layers into/out of groups
+- deleting groups
+- duplicating groups
+- reordering layers
+- applying presets that create pageLook layers
+
+====================================================================
+PART 6 — New Add / Apply Library UI
+====================================================================
+
+Replace the current simple + menu with a searchable categorized library.
+
+Tabs:
+- Recommended
+- Recently Used
+- Basic Fixes
+- Photo Rescue
+- Portrait
+- Print
+- Looks
+- Creative
+- Page Look
+- Advanced
+- Experimental
+
+Each item card should show:
+- name
+- short description
+- tags
+- status:
+  Available / Limited / Requires Dependency / Coming Soon / Experimental
+- recommended apply mode
+- allowed apply modes
+- dependency warnings
+- print warnings if relevant
+
+Recommended behavior:
+- If one image is selected: prioritize Photo Rescue, Basic Fixes, Print presets.
+- If multiple images are selected: prioritize Apply to selected images.
+- If no image is selected: prioritize Page Look and general page effects.
+- If current mode is photo print/collage: prioritize allImagesOnPage options.
+- If current workflow/product is known in the future: recommend matching print presets.
+
+Apply modes:
+- Apply to selected image
+- Apply to selected images
+- Apply to all images on current page
+- Add as Page Look
+- Experimental classic layer should be hidden or disabled by default
+
+====================================================================
+PART 7 — Initial preset catalog
+====================================================================
+
+Implement preset definitions for these initial presets.
+
+Photo Rescue:
+1. Sun Rescue
+Recommended: selectedImages
+Allowed: singleImage, selectedImages, allImagesOnPage
+Not recommended as Page Look.
+Adjustments:
+- highlights -55
+- whites -25
+- shadows +22
+- exposure -0.10
+- contrast +4
+- vibrance +12
+- saturation -3
+- curve preset: softHighlightCompression
+
+2. Dark Photo Fix
+Recommended: selectedImages
+Adjustments:
+- exposure +0.35
+- shadows +45
+- blacks +8
+- noiseReduction +20
+- clarity +8
+- vibrance +10
+- gamma 1.04
+
+3. Backlight Rescue
+Recommended: selectedImages
+Adjustments:
+- shadows +60
+- highlights -35
+- midtone lift curve
+- contrast -8
+- exposure +0.08
+Optional future: face exposure +0.25 if face detection exists.
+
+4. Indoor Light Fix
+Recommended: selectedImages
+Adjustments:
+- temperature -10 to -25 depending on yellow cast
+- tint +5 to +15 if green cast
+- exposure +0.10
+- vibrance +8
+- saturation -3
+
+5. WhatsApp Recovery
+Recommended: selectedImages or allImagesOnPage
+Adjustments:
+- sharpness +18
+- clarity +12
+- noiseReduction +10
+- vibrance +12
+- contrast +8
+Optional future: JPEG artifact reduction.
+
+6. Haze Removal
+Recommended: selectedImages
+Adjustments:
+- clarity +20
+- contrast +10
+- blacks -6
+- vibrance +8
+- highlights -8
+
+Portrait:
+7. Soft Portrait
+Recommended: selectedImages
+Adjustments:
+- contrast -5
+- highlights -10
+- shadows +8
+- temperature +4
+- clarity -5
+- vibrance +4
+
+8. Face Shadow Fix
+Recommended: selectedImages
+Phase 1: global image adjustment
+- shadows +25
+- exposure +0.12
+- highlights -10
+Future: face mask.
+
+9. Skin Tone Repair
+Recommended: selectedImages
+- temperature/tint based correction
+- saturation -4
+- vibrance +6
+Future: skin mask.
+
+10. Flash Fix
+Recommended: selectedImages
+- highlights -45
+- whites -30
+- contrast -8
+- temperature +3
+- shadows +8
+
+Print:
+11. Sublimation Boost
+Recommended: selectedImages or allImagesOnPage
+- vibrance +18
+- saturation +8
+- contrast +8
+- midtones +5
+- sharpness +6
+Future: printer profile compensation.
+
+12. Canvas Punch
+Recommended: selectedImages or allImagesOnPage
+- contrast +12
+- vibrance +10
+- sharpness +15
+- clarity +8
+- shadows +4
+
+13. Laser Ready
+Recommended: selectedImages
+- black & white enabled
+- contrast +25
+- threshold user controlled
+- edge boost +12
+- noise cleanup +8
+- preview black/white material mode
+
+14. Wood Print Prep
+Recommended: selectedImages
+- contrast +12
+- shadows +10
+- warmth +5
+- sharpness +8
+- vibrance +5
+
+15. Photo Print Clean
+Recommended: selectedImages or allImagesOnPage
+- contrast +5
+- vibrance +6
+- sharpness +5
+- exposure +0.03
+
+Looks / Creative:
+16. Vintage Film
+Recommended: pageLook or selectedImages
+As Page Look:
+- warm page wash
+- sepia 15-22
+- fade 8
+- vignette 8
+- grain 4-6
+As Image Preset:
+- lift blacks +10
+- saturation -12
+- temperature +8
+- contrast -5
+
+17. Sepia Memories
+Recommended: pageLook
+- color overlay #8b5a2b
+- blend mode soft-light or multiply
+- opacity 0.35 to 0.55
+Optional image version: black & white + sepia colorize.
+
+18. Gold Noir
+Recommended: selectedImages, optional pageLook variant
+Image preset:
+- black & white base
+- gradient map black -> gold -> cream
+- contrast +18
+- strong S curve
+PageLook variant:
+- gold overlay/gradient only, not true gradient map.
+
+19. Hollywood Teal & Orange
+Recommended: selectedImages
+- soft S curve
+- teal shadows
+- warm highlights
+- saturation -6
+- vibrance +10
+- contrast +10
+
+20. Soft Glow
+Recommended: pageLook
+- light warm overlay
+- soft-light blend
+- vignette optional
+- opacity 0.15 to 0.35
+
+21. Moody Dark
+Recommended: pageLook
+- dark overlay
+- vignette amount 20
+- cool tint optional
+- opacity 0.20 to 0.45
+
+22. Dream Pastel
+Recommended: pageLook or selectedImages
+- lighten wash
+- pastel gradient
+- contrast -6
+- saturation -4
+- warmth +4
+
+====================================================================
+PART 8 — Editing applied presets
+====================================================================
+
+The user should be able to edit an applied preset without needing true Photoshop adjustment layers.
+
+For selected image:
+Show “Applied Presets” panel:
+- Sun Rescue
+  - master strength
+  - enable/disable
+  - reset
+  - expand details:
+    - Highlights/Shadows
+    - Exposure
+    - Vibrance
+    - Curves
+
+Editing a detail updates the generated ImageAdjustment entries on the image.
+
+For multiple selected images:
+- If all selected images share the same preset instance/presetId, show batch controls.
+- Editing batch controls applies the same parameter update to all selected images.
+- If selected images differ, show “mixed values” state.
+
+For PageLook:
+Show it in layer panel as a top-level layer:
+- visibility
+- opacity/strength
+- effect controls
+- delete
+- duplicate
+- rename
+- lock
+
+====================================================================
+PART 9 — Rendering rules
+====================================================================
+
+Canvas rendering:
+- Normal layers render as they do today.
+- ImageLayer renderer reads imageAdjustments and applies filters to that image only.
+- PageLook layers render at the end, above normal layers.
+- Legacy/classic adjustment layers do not affect live rendering when disabled.
+- Group layers themselves do not render as canvas objects.
+- Group visibility/opacity affects children through simple logic only, no cache.
+
+Performance:
+- Do not run heavy filters synchronously on every drag or zoom.
+- During dragging/transforming, it is acceptable to temporarily render a simpler preview if needed.
+- Full-quality rendering/export should apply the same adjustment parameters at final quality.
+- If advanced filters are too heavy for live canvas, use preview quality or defer to export renderer.
+
+Error handling:
+- If an adjustment filter fails, render the original image and log a debug event.
+- Never hide the image because a filter failed.
+- Never throw inside render path for missing dependencies.
+- Missing dependencies should produce Limited / Requires Dependency status.
+
+Debug events:
+- adjustment:classic-render-disabled
+- adjustment:image-filter-failed
+- pageLook:render-failed
+- preset:missing-dependency
+- group:normalized-invalid-parent
+- group:removed-pageLook-from-group
+
+====================================================================
+PART 10 — Acceptance tests
+====================================================================
+
+Stability:
+- Existing projects open and images remain visible.
+- Adding any preset does not make images disappear.
+- Adding a Page Look does not freeze the editor.
+- Switching pages repeatedly does not show blank canvas.
+- Dragging images remains responsive.
+
+Image Adjustments:
+- Select one image and apply brightness: only that image changes.
+- Reset restores original appearance.
+- Copy/paste adjustments works.
+- Apply preset to 10 selected images is one undoable action.
+- Applying to all images on page does not affect text, frames, or decorative elements.
+
+Page Look:
+- Page Look always renders above all normal layers.
+- Page Look affects text/background/images because it is a page effect.
+- Page Look can be hidden/deleted/duplicated.
+- Page Look cannot be inserted into a group.
+- Page Look opacity/strength works.
+
+Presets:
+- Each preset has a definition, category, description, tags, recommended apply mode.
+- Missing optional dependencies show Limited but still allow fallback.
+- Missing required dependencies disable apply or show a safe fallback.
+- Recently Used works.
+- Recommended tab changes based on selection.
+
+Groups:
+- Moving layers into groups does not make them disappear.
+- Group visibility hides/shows children.
+- Delete group only ungroups children.
+- Delete group with children removes children.
+- Normalizing groups prevents stale childIds/parentId bugs.
+
+Export/Print:
+- Image adjustments are included in export/print.
+- Page Look layers are included in export/print.
+- Preview quality does not limit final quality.
+- Existing fill/crop behavior is unchanged.
+- Existing photo print/collage/product modes continue to work.
+
+====================================================================
+FINAL IMPORTANT INSTRUCTION
+====================================================================
+
+Prioritize stability over Photoshop-like completeness.
+This is not a request to build full Photoshop adjustment layers now.
+The goal is to keep the full creative preset/library vision but implement it through:
+- non-destructive ImageLayer adjustments
+- Smart Presets
+- lightweight Page Look layers
+- safe group metadata
+
+Classic adjustment layers that affect all layers below should remain disabled/experimental until a real CompositeRenderer is built later with OffscreenCanvas, render plans, partial bounds, and proper cache invalidation.</pre>
+  </div>
+</section>
+
+<section>
+  <h2>סיכום</h2>
+  <div class="success">
+    <p>
+      התוכנית החדשה שומרת את כל הרעיון המקורי של ספריית שכבות, Presets, Smart Fixes ו־Print Tools,
+      אבל משנה את הליבה הטכנית:
+    </p>
+    <div class="flow">במקום:
+Classic Adjustment Layer → משפיע על כל מה שמתחת → Konva cache כבד
+
+עוברים ל:
+Image Adjustments → על תמונות בלבד
+Smart Presets → מחילים מתכונים על תמונות / עמוד
+Page Look → אפקט עליון קל
+Classic Adjustment → עתידי בלבד</div>
+    <p>
+      זה נותן ל־SPP2 יתרון אמיתי: כלי מהיר, נוח למתחילים, מתאים לדפוס, ועדיין מספיק מתקדם לעריכה.
+    </p>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

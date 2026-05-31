@@ -149,7 +149,7 @@ describe("Fix 4 — destructive screenshot crop produces a new bitmap with new d
 
 describe("Migration v10 → v11 — mask spacingMM backfill", () => {
   it("schema version is 11", () => {
-    expect(PROJECT_SCHEMA_VERSION).toBe(13);
+    expect(PROJECT_SCHEMA_VERSION).toBe(14);
   });
 
   it("backfills spacingMM from spacingX using DPI", () => {

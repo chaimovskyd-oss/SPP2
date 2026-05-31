@@ -1,0 +1,3 @@
+torchvision>=0.22
+realesrgan>=0.3
+gfpgan>=1.3

@@ -41,6 +41,21 @@ interface InpaintRemoveResult {
   processingMs: number;
 }
 
+interface HarmonizeDiagnostics {
+  brightnessAdj: number;
+  saturationAdj: number;
+  tempAdj: number;
+  contrastAdj: number;
+}
+
+interface HarmonizeResult {
+  ok: boolean;
+  diagnostics?: HarmonizeDiagnostics;
+  mode?: "algorithm" | "neural" | "passthrough";
+  shadow?: { ok: boolean; error?: string };
+  error?: string;
+}
+
 interface SppElectronAPI {
   platform: string;
   writeTempImage: (dataUrl: string, ext: string) => Promise<string>;
@@ -55,6 +70,7 @@ interface SppElectronAPI {
   readFileBase64: (filePath: string) => Promise<string>;
   choosePsdFile?: () => Promise<{ success: boolean; filePath?: string; fileSize?: number; error?: string }>;
   importPsd?: (filePath: string) => Promise<{ success: boolean; manifest?: import("./services/psdImport").PsdImportManifest; error?: string }>;
+  harmonizeLayer?: (layerPath: string, bgPath: string, bboxJson: string, optionsJson: string, outputPath: string) => Promise<HarmonizeResult>;
   savePdfDialog?: (pdfBase64: string, suggestedName?: string) => Promise<{ success: boolean; filePath?: string; error?: string }>;
   convertOfficeToPdf?: (inputPath: string) => Promise<{ success: boolean; pdfBase64?: string; outputPath?: string; outputName?: string; error?: string }>;
   getFilePath?: (file: File) => string;
@@ -159,6 +175,28 @@ interface SppElectronAPI {
     cancel(requestId: string): Promise<{ ok: boolean }>;
     onProgress(callback: (progress: SmartSelectionProgressEvent) => void): () => void;
   };
+  /** Local Graphics Library */
+  glib?: {
+    ensureDirs(): Promise<{ baseDir: string }>;
+    scanDir(): Promise<{ files: import("./features/graphicsLibrary/types").FileScanResult[]; baseDir: string }>;
+    readIndex(): Promise<{ success: boolean; index: import("./features/graphicsLibrary/types").GraphicAsset[] }>;
+    writeIndex(assets: import("./features/graphicsLibrary/types").GraphicAsset[]): Promise<{ success: boolean; error?: string }>;
+    saveThumbnail(args: { id: string; base64: string; ext: string }): Promise<{ success: boolean; thumbnailPath?: string; error?: string }>;
+    readFileB64(filePath: string): Promise<{ success: boolean; dataUrl?: string; error?: string }>;
+    revealFile(filePath: string): Promise<{ success: boolean; error?: string }>;
+    deleteFile(filePath: string): Promise<{ success: boolean; error?: string }>;
+    moveFile(args: { fromPath: string; toDir: string; newName?: string }): Promise<{ success: boolean; newPath?: string; error?: string }>;
+    saveAsset(args: { base64: string; ext: string; filename: string; category: string }): Promise<{ success: boolean; filePath?: string; fileName?: string; mtimeMs?: number; size?: number; error?: string }>;
+    chooseImportFolder(): Promise<{ success: boolean; folderPath?: string; canceled?: boolean; error?: string }>;
+    copyFolder(args: { srcDir: string; category: string }): Promise<{ success: boolean; destDir?: string; copied?: import("./features/graphicsLibrary/types").FileScanResult[]; error?: string }>;
+    getBaseDir(): Promise<{ baseDir: string }>;
+  };
+  pixabaySaveAsset?: (args: {
+    imageBase64: string;
+    filename: string;
+    ext: string;
+    metadata: import("./types/pixabay").PixabayResult;
+  }) => Promise<{ success: boolean; filePath?: string; error?: string }>;
   openUrl: (url: string) => Promise<void>;
   openFolder: (folderPath: string) => Promise<{ error?: string }>;
   openPath?: (filePath: string) => Promise<{ error?: string }>;
@@ -167,6 +205,7 @@ interface SppElectronAPI {
   watchFile: (watchId: string, filePath: string) => Promise<{ error?: string }>;
   unwatchFile: (watchId: string) => Promise<void>;
   onFileChanged: (callback: (watchId: string, filePath: string) => void) => () => void;
+  onOpenFilePath?: (callback: (filePath: string) => void) => () => void;
   // Settings-related IPC stubs — implemented in a future Electron update
   openLogsFolder?: () => Promise<void>;
   openSettingsFile?: () => Promise<void>;

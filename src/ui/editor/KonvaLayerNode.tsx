@@ -23,6 +23,8 @@ import type {
 } from "@/types/visualEffects";
 import { useKonvaImage } from "./useKonvaImage";
 import { collageAdjToKonva, EMPTY_EXTRA_QUICK_EFFECTS, extractExtraQuickEffects, imageEffectsToKonva, imageLayerAdjToKonva, type CollageColorAdj, type ExtraQuickEffects } from "@/core/rendering/colorAdjustUtils";
+import { buildAdjustmentFilters, stackNeedsFilters } from "@/core/rendering/konvaCustomFilters";
+import { ENABLE_IMAGE_LEVEL_ADJUSTMENTS } from "@/core/features/adjustmentFlags";
 import { renderTextToCanvas } from "./warpText";
 import { markDebugEvent, trackDebugMount } from "@/debug/sppDiagnostics";
 
@@ -39,7 +41,7 @@ interface KonvaLayerNodeProps {
   assets: Asset[];
   selected: boolean;
   layoutEditMode: boolean;
-  onSelect: (layerId: string) => void;
+  onSelect: (layerId: string, additive?: boolean) => void;
   onChange: (layer: VisualLayer) => void;
   onBeginTextEdit: (layerId: string) => void;
   onImageDoubleClick?: (layerId: string) => void;
@@ -89,7 +91,7 @@ function ShapeNode({
   layer: ShapeLayer;
   selected: boolean;
   onChange: (layer: VisualLayer) => void;
-  onSelect: (layerId: string) => void;
+  onSelect: (layerId: string, additive?: boolean) => void;
 }): React.ReactElement | null {
   const fillColor = layer.fill?.color;
   const fillOpacity = layer.fill?.opacity ?? 1;
@@ -105,7 +107,7 @@ function ShapeNode({
     opacity: layer.opacity * fillOpacity,
     listening: layer.locked !== true,
     draggable: !layer.locked,
-    onMouseDown: (e: Konva.KonvaEventObject<MouseEvent>) => { e.cancelBubble = true; onSelect(layer.id); },
+    onMouseDown: (e: Konva.KonvaEventObject<MouseEvent>) => { e.cancelBubble = true; onSelect(layer.id, e.evt.ctrlKey || e.evt.metaKey); },
     onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
       onChange({ ...layer, x: e.target.x(), y: e.target.y() });
     }
@@ -413,7 +415,7 @@ function TextNode({
 }: {
   layer: TextLayer;
   selected: boolean;
-  onSelect: (layerId: string) => void;
+  onSelect: (layerId: string, additive?: boolean) => void;
   onChange: (layer: VisualLayer) => void;
   onBeginTextEdit: (layerId: string) => void;
   onContextMenu?: (target: CanvasContextMenuTarget) => void;
@@ -509,7 +511,7 @@ function TextNode({
         onDragEnd={(event) => {
           onChange({ ...layer, x: event.target.x() - alignmentOffsetX, y: event.target.y() - alignmentOffsetY });
         }}
-        onClick={() => onSelect(layer.id)}
+        onClick={(event) => onSelect(layer.id, event.evt.ctrlKey || event.evt.metaKey)}
         onContextMenu={handleTextContextMenu}
         onDblClick={() => onBeginTextEdit(layer.id)}
         onTap={() => onSelect(layer.id)}
@@ -567,7 +569,7 @@ function TextNode({
       fontVariant="normal"
       fill={rgba(layer.color, layer.fillOpacity)}
       {...gradientProps}
-      stroke={stroke?.color}
+      stroke={stroke !== undefined ? rgba(stroke.color, stroke.opacity) : undefined}
       strokeWidth={stroke !== undefined && (stroke.position ?? "outside") === "outside" ? (stroke.width ?? 0) * 2 : (stroke?.width ?? 0)}
       strokeEnabled={stroke !== undefined && stroke.width > 0 && stroke.opacity > 0}
       fillAfterStrokeEnabled={stroke !== undefined && (stroke.position ?? "outside") === "outside"}
@@ -582,7 +584,7 @@ function TextNode({
       opacity={layer.opacity}
       visible={layer.visible}
       globalCompositeOperation={mapBlendMode(layer.blendMode) as "source-over"}
-      onClick={() => onSelect(layer.id)}
+      onClick={(event) => onSelect(layer.id, event.evt.ctrlKey || event.evt.metaKey)}
       onContextMenu={handleTextContextMenu}
       onDblClick={() => onBeginTextEdit(layer.id)}
       onTap={() => onSelect(layer.id)}
@@ -842,7 +844,7 @@ function ImageNode({
   layer: ImageLayer;
   assets: Asset[];
   selected: boolean;
-  onSelect: (layerId: string) => void;
+  onSelect: (layerId: string, additive?: boolean) => void;
   onChange: (layer: VisualLayer) => void;
   onContextMenu?: (target: CanvasContextMenuTarget) => void;
   onImageDoubleClick?: (layerId: string) => void;
@@ -917,25 +919,40 @@ function ImageNode({
 
   const extras = colorAdj.extras;
 
+  // Non-destructive Smart-Preset adjustment stack (Phase 2). Wraps the SAME pixel
+  // pipeline used by export, so live === export. Heavy spatial tools are dropped
+  // during drag/zoom (reduceImageEffects) for responsiveness.
+  const adjustmentStack = layer.imageAdjustments;
+  const adjustmentFilters = useMemo(() => {
+    if (!ENABLE_IMAGE_LEVEL_ADJUSTMENTS) return [];
+    if (adjustmentStack === undefined || adjustmentStack.enabled === false) return [];
+    if (!stackNeedsFilters(adjustmentStack.stack, reduceImageEffects)) return [];
+    return buildAdjustmentFilters(adjustmentStack.stack, { reduceEffects: reduceImageEffects });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(adjustmentStack), reduceImageEffects]);
+
   // Build the active filter list for this node.
   const activeFilters = useMemo(() => {
-    if (reduceImageEffects) return [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const list: any[] = [];
-    if (blurRadius > 0) list.push(Konva.Filters.Blur);
-    if (Math.abs(colorAdj.brightness) > 0.001) list.push(Konva.Filters.Brighten);
-    if (Math.abs(colorAdj.contrast) > 0.001) list.push(Konva.Filters.Contrast);
-    if (colorAdj.grayscale) list.push(Konva.Filters.Grayscale);
-    if (!colorAdj.grayscale && (Math.abs(colorAdj.saturation - 1) > 0.001 || Math.abs(colorAdj.hue) > 0.001 || Math.abs(extras.luminance) > 0.001)) list.push(Konva.Filters.HSL);
-    if (extras.sepia) list.push(Konva.Filters.Sepia);
-    if (extras.invert) list.push(Konva.Filters.Invert);
-    if (extras.threshold > 0) list.push(Konva.Filters.Threshold);
-    if (extras.posterize > 0) list.push(Konva.Filters.Posterize);
-    if (extras.removeWhite !== null) list.push(RemoveWhiteFilter);
-    if (extras.colorPop !== null) list.push(ColorPopFilter);
+    if (!reduceImageEffects) {
+      if (blurRadius > 0) list.push(Konva.Filters.Blur);
+      if (Math.abs(colorAdj.brightness) > 0.001) list.push(Konva.Filters.Brighten);
+      if (Math.abs(colorAdj.contrast) > 0.001) list.push(Konva.Filters.Contrast);
+      if (colorAdj.grayscale) list.push(Konva.Filters.Grayscale);
+      if (!colorAdj.grayscale && (Math.abs(colorAdj.saturation - 1) > 0.001 || Math.abs(colorAdj.hue) > 0.001 || Math.abs(extras.luminance) > 0.001)) list.push(Konva.Filters.HSL);
+      if (extras.sepia) list.push(Konva.Filters.Sepia);
+      if (extras.invert) list.push(Konva.Filters.Invert);
+      if (extras.threshold > 0) list.push(Konva.Filters.Threshold);
+      if (extras.posterize > 0) list.push(Konva.Filters.Posterize);
+      if (extras.removeWhite !== null) list.push(RemoveWhiteFilter);
+      if (extras.colorPop !== null) list.push(ColorPopFilter);
+    }
+    // Adjustment stack runs last (on top of legacy quick-effects), in stack order.
+    list.push(...adjustmentFilters);
     return list;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reduceImageEffects, blurRadius, colorAdj.brightness, colorAdj.contrast, colorAdj.saturation, colorAdj.hue, colorAdj.grayscale, extras.luminance, extras.sepia, extras.invert, extras.threshold, extras.posterize, extras.removeWhite !== null, extras.colorPop !== null]);
+  }, [reduceImageEffects, blurRadius, colorAdj.brightness, colorAdj.contrast, colorAdj.saturation, colorAdj.hue, colorAdj.grayscale, extras.luminance, extras.sepia, extras.invert, extras.threshold, extras.posterize, extras.removeWhite !== null, extras.colorPop !== null, adjustmentFilters]);
 
   const needsCache = activeFilters.length > 0;
   const filterCount = activeFilters.length;
@@ -1009,7 +1026,7 @@ function ImageNode({
     globalCompositeOperation: mapBlendMode(layer.blendMode) as "source-over",
     draggable: !layer.locked && !isBeingEdited && !isMaskContentEditMode,
     listening: !layer.locked || isBeingEdited || isMaskContentEditMode,
-    onClick: () => { if (!isBeingEdited && !isMaskContentEditMode) onSelect(layer.id); },
+    onClick: (event: Konva.KonvaEventObject<MouseEvent>) => { if (!isBeingEdited && !isMaskContentEditMode) onSelect(layer.id, event.evt.ctrlKey || event.evt.metaKey); },
     onTap: () => { if (!isBeingEdited && !isMaskContentEditMode) onSelect(layer.id); },
     onDblClick: () => {
       if (onImageDoubleClick !== undefined && layer.metadata["psdText"] !== undefined) {
@@ -1348,7 +1365,7 @@ function FrameNode({
   assets: Asset[];
   selected: boolean;
   layoutEditMode: boolean;
-  onSelect: (layerId: string) => void;
+  onSelect: (layerId: string, additive?: boolean) => void;
   onChange: (layer: VisualLayer) => void;
   onContextMenu?: (target: CanvasContextMenuTarget) => void;
   reduceImageEffects: boolean;
@@ -1391,29 +1408,44 @@ function FrameNode({
   // Edge config mirrored from collage assignment
   const collageEdgeConfig = layer.metadata["collageEdgeConfig"] as CollageEdgeConfig | null | undefined;
 
-  const frameNeedsCache = !reduceImageEffects && (blurRadius > 0 || frameColorAdj.hasAny);
-
   const frameExtras = frameColorAdj.extras ?? EMPTY_EXTRA_QUICK_EFFECTS;
+
+  // Non-destructive Image-Adjustment stack (Smart Presets / Tool Library) applied
+  // to the image inside the frame. Wraps the SAME pixel pipeline used by export,
+  // so live === export (frames always export through the Konva stage path).
+  const adjustmentStack = layer.imageAdjustments;
+  const adjustmentFilters = useMemo(() => {
+    if (!ENABLE_IMAGE_LEVEL_ADJUSTMENTS) return [];
+    if (adjustmentStack === undefined || adjustmentStack.enabled === false) return [];
+    if (!stackNeedsFilters(adjustmentStack.stack, reduceImageEffects)) return [];
+    return buildAdjustmentFilters(adjustmentStack.stack, { reduceEffects: reduceImageEffects });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(adjustmentStack), reduceImageEffects]);
+
+  const frameNeedsCache = (!reduceImageEffects && (blurRadius > 0 || frameColorAdj.hasAny)) || adjustmentFilters.length > 0;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const frameFilters = useMemo((): any[] => {
-    if (reduceImageEffects) return [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const list: any[] = [];
-    if (blurRadius > 0) list.push(Konva.Filters.Blur);
-    if (Math.abs(frameColorAdj.brightness) > 0.001) list.push(Konva.Filters.Brighten);
-    if (Math.abs(frameColorAdj.contrast) > 0.001) list.push(Konva.Filters.Contrast);
-    if (frameColorAdj.grayscale) list.push(Konva.Filters.Grayscale);
-    if (!frameColorAdj.grayscale && (Math.abs(frameColorAdj.saturation - 1) > 0.001 || Math.abs(frameColorAdj.hue) > 0.001 || Math.abs(frameExtras.luminance) > 0.001)) list.push(Konva.Filters.HSL);
-    if (frameExtras.sepia) list.push(Konva.Filters.Sepia);
-    if (frameExtras.invert) list.push(Konva.Filters.Invert);
-    if (frameExtras.threshold > 0) list.push(Konva.Filters.Threshold);
-    if (frameExtras.posterize > 0) list.push(Konva.Filters.Posterize);
-    if (frameExtras.removeWhite !== null) list.push(RemoveWhiteFilter);
-    if (frameExtras.colorPop !== null) list.push(ColorPopFilter);
+    if (!reduceImageEffects) {
+      if (blurRadius > 0) list.push(Konva.Filters.Blur);
+      if (Math.abs(frameColorAdj.brightness) > 0.001) list.push(Konva.Filters.Brighten);
+      if (Math.abs(frameColorAdj.contrast) > 0.001) list.push(Konva.Filters.Contrast);
+      if (frameColorAdj.grayscale) list.push(Konva.Filters.Grayscale);
+      if (!frameColorAdj.grayscale && (Math.abs(frameColorAdj.saturation - 1) > 0.001 || Math.abs(frameColorAdj.hue) > 0.001 || Math.abs(frameExtras.luminance) > 0.001)) list.push(Konva.Filters.HSL);
+      if (frameExtras.sepia) list.push(Konva.Filters.Sepia);
+      if (frameExtras.invert) list.push(Konva.Filters.Invert);
+      if (frameExtras.threshold > 0) list.push(Konva.Filters.Threshold);
+      if (frameExtras.posterize > 0) list.push(Konva.Filters.Posterize);
+      if (frameExtras.removeWhite !== null) list.push(RemoveWhiteFilter);
+      if (frameExtras.colorPop !== null) list.push(ColorPopFilter);
+    }
+    // Adjustment stack runs last (on top of legacy quick-effects), in stack order.
+    list.push(...adjustmentFilters);
     return list;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reduceImageEffects, blurRadius, frameColorAdj.brightness, frameColorAdj.contrast, frameColorAdj.saturation, frameColorAdj.hue, frameColorAdj.grayscale, frameExtras.luminance, frameExtras.sepia, frameExtras.invert, frameExtras.threshold, frameExtras.posterize, frameExtras.removeWhite !== null, frameExtras.colorPop !== null]);
+  }, [reduceImageEffects, blurRadius, frameColorAdj.brightness, frameColorAdj.contrast, frameColorAdj.saturation, frameColorAdj.hue, frameColorAdj.grayscale, frameExtras.luminance, frameExtras.sepia, frameExtras.invert, frameExtras.threshold, frameExtras.posterize, frameExtras.removeWhite !== null, frameExtras.colorPop !== null, adjustmentFilters]);
 
   const frameFilterCount = frameFilters.length;
 
@@ -1801,7 +1833,7 @@ function FrameNode({
       globalCompositeOperation={mapBlendMode(layer.blendMode) as "source-over"}
       draggable={frameIsDraggable}
       listening={!layer.locked}
-      onClick={() => onSelect(layer.id)}
+      onClick={(event) => onSelect(layer.id, event.evt.ctrlKey || event.evt.metaKey)}
       onTap={() => onSelect(layer.id)}
       onDblClick={() => {
         if (layer.imageAssetId !== undefined) {

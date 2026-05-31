@@ -1,4 +1,5 @@
 import type { ContentTransform, FaceAnchorData, FrameLayer } from "@/types/layers";
+import type { ImageAdjustmentStack } from "@/types/imageAdjustments";
 import type { CropRect, FitMode, ID, JsonValue, Metadata } from "@/types/primitives";
 import type { VisualEffectStack } from "@/types/visualEffects";
 import { adaptContentTransform, type SlotDims } from "./transformAdapt";
@@ -17,6 +18,7 @@ export interface PreservedFrameState {
   smartCropMode?: FrameLayer["smartCropMode"];
   faceAnchor?: FaceAnchorData;
   visualEffects?: VisualEffectStack;
+  imageAdjustments?: ImageAdjustmentStack;
   /** Free-form metadata fields that carry user work (variable bindings, color adjustments, etc.). */
   preservedMetadata: Metadata;
   prevSlot: SlotDims;
@@ -58,6 +60,7 @@ export function snapshotFrameState(frame: FrameLayer, slotW: number, slotH: numb
     smartCropMode: frame.smartCropMode,
     faceAnchor: frame.faceAnchor,
     visualEffects: frame.visualEffects,
+    imageAdjustments: frame.imageAdjustments,
     preservedMetadata: extractPreservedMetadata(frame.metadata),
     prevSlot: { w: slotW, h: slotH },
   };
@@ -95,6 +98,7 @@ export function restoreFrameState(
     // Prefer caller-provided visualEffects (if the sync explicitly set them);
     // otherwise restore from snapshot.
     visualEffects: fresh.visualEffects ?? preserved.visualEffects,
+    imageAdjustments: fresh.imageAdjustments ?? preserved.imageAdjustments,
     smartCropMode: fresh.smartCropMode ?? preserved.smartCropMode,
     faceAnchor: fresh.faceAnchor ?? preserved.faceAnchor,
     metadata: mergedMetadata,

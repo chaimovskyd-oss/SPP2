@@ -48,6 +48,22 @@ def is_text_layer(layer: Any) -> bool:
         return hasattr(layer, "text") and getattr(layer, "text") is not None
 
 
+def is_adjustment_layer(layer: Any) -> bool:
+    try:
+        from psd_tools.api.layers import AdjustmentLayer
+
+        return isinstance(layer, AdjustmentLayer)
+    except Exception:
+        return layer.__class__.__name__ in {
+            "BrightnessContrast",
+            "Exposure",
+            "HueSaturation",
+            "BlackAndWhite",
+            "Invert",
+            "Levels",
+        }
+
+
 def json_safe(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -136,6 +152,106 @@ def extract_text_metadata(layer: Any) -> dict[str, Any] | None:
     }
 
 
+def psd_blend_mode(layer: Any) -> str:
+    raw = getattr(layer, "blend_mode", None)
+    value = str(getattr(raw, "value", raw) or "normal").lower()
+    table = {
+        "b'norm'": "normal",
+        "b'mul '": "multiply",
+        "b'scrn'": "screen",
+        "b'over'": "overlay",
+        "b'dark'": "darken",
+        "b'lite'": "lighten",
+        "normal": "normal",
+        "multiply": "multiply",
+        "screen": "screen",
+        "overlay": "overlay",
+        "darken": "darken",
+        "lighten": "lighten",
+    }
+    return table.get(value, "normal")
+
+
+def numeric_attr(layer: Any, name: str, fallback: float) -> float:
+    value = getattr(layer, name, fallback)
+    numeric = number_or_none(value)
+    return fallback if numeric is None else numeric
+
+
+def first_numbers(value: Any, limit: int) -> list[float]:
+    out: list[float] = []
+
+    def visit(item: Any) -> None:
+        if len(out) >= limit:
+            return
+        numeric = number_or_none(item)
+        if numeric is not None:
+            out.append(numeric)
+            return
+        if isinstance(item, dict):
+            for child in item.values():
+                visit(child)
+        elif isinstance(item, (list, tuple)):
+            for child in item:
+                visit(child)
+        elif hasattr(item, "__dict__"):
+            visit(vars(item))
+
+    visit(value)
+    return out
+
+
+def extract_adjustment_metadata(layer: Any) -> dict[str, Any]:
+    class_name = layer.__class__.__name__
+    warnings: list[str] = []
+    operation: dict[str, Any] | None = None
+
+    if class_name == "BrightnessContrast":
+      operation = {
+          "type": "brightnessContrast",
+          "brightness": numeric_attr(layer, "brightness", 0),
+          "contrast": numeric_attr(layer, "contrast", 0),
+      }
+    elif class_name == "Exposure":
+      operation = {
+          "type": "exposure",
+          "exposure": numeric_attr(layer, "exposure", 0),
+          "gamma": max(0.1, numeric_attr(layer, "gamma", 1)),
+          "offset": numeric_attr(layer, "exposure_offset", 0),
+      }
+    elif class_name == "HueSaturation":
+      values = first_numbers(getattr(layer, "master", None), 3)
+      operation = {
+          "type": "hueSaturation",
+          "hue": values[0] if len(values) > 0 else 0,
+          "saturation": values[1] if len(values) > 1 else 0,
+          "lightness": values[2] if len(values) > 2 else 0,
+      }
+    elif class_name == "BlackAndWhite":
+      operation = {"type": "blackWhite", "enabled": True}
+    elif class_name == "Invert":
+      operation = {"type": "invert", "enabled": True}
+    elif class_name == "Levels":
+      master = getattr(layer, "master", None)
+      operation = {
+          "type": "levels",
+          "black": numeric_attr(master, "input_floor", 0) if master is not None else 0,
+          "mid": max(0.1, numeric_attr(master, "gamma", 1)) if master is not None else 1,
+          "white": numeric_attr(master, "input_ceiling", 255) if master is not None else 255,
+      }
+    else:
+      warnings.append(f'Unsupported PSD adjustment layer "{class_name}" was preserved as a warning and not rasterized.')
+
+    return {
+        "kind": "adjustment",
+        "psdAdjustmentType": class_name,
+        "supported": operation is not None,
+        "operation": operation,
+        "raw": json_safe(getattr(layer, "_data", None)),
+        "warnings": warnings,
+    }
+
+
 def bbox_to_rect(layer: Any) -> tuple[int, int, int, int] | None:
     bbox = getattr(layer, "bbox", None)
     if bbox is None:
@@ -181,6 +297,32 @@ def traverse_layers(layer_container: Any, group_path: list[str], out_dir: Path, 
             exported.extend(traverse_layers(layer, [*group_path, name], out_dir, warnings))
             continue
 
+        if is_adjustment_layer(layer):
+            adjustment = extract_adjustment_metadata(layer)
+            layer_warnings.extend(adjustment.get("warnings", []))
+            if not adjustment.get("supported", False):
+                warnings.extend(layer_warnings)
+            rect = bbox_to_rect(layer) or (0, 0, 1, 1)
+            x, y, width, height = rect
+            exported.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "name": name,
+                    "groupPath": group_path,
+                    "x": x,
+                    "y": y,
+                    "width": int(width),
+                    "height": int(height),
+                    "opacity": layer_opacity(layer),
+                    "visible": visible,
+                    "blendMode": psd_blend_mode(layer),
+                    "clipping": bool(getattr(layer, "clipping", False)),
+                    "warnings": layer_warnings,
+                    "adjustment": adjustment,
+                }
+            )
+            continue
+
         rect = bbox_to_rect(layer)
         if rect is None:
             warning = f'Skipped "{name}": empty or unreadable bounding box.'
@@ -222,6 +364,7 @@ def traverse_layers(layer_container: Any, group_path: list[str], out_dir: Path, 
                 "height": int(height),
                 "opacity": layer_opacity(layer),
                 "visible": visible,
+                "blendMode": psd_blend_mode(layer),
                 "warnings": layer_warnings,
                 **({"text": extract_text_metadata(layer)} if is_text_layer(layer) else {}),
             }

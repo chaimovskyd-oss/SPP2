@@ -245,11 +245,36 @@ export const PROJECT_MIGRATIONS: ProjectMigration[] = [
             const adjustment = layer as Partial<AdjustmentLayer> & typeof layer;
             return {
               ...adjustment,
+              locked: true,
               targetMode: adjustment.targetMode ?? "below",
               adjustments: Array.isArray(adjustment.adjustments) && adjustment.adjustments.length > 0
                 ? adjustment.adjustments
                 : [{ type: "brightnessContrast", brightness: 0, contrast: 0 }]
             } as AdjustmentLayer;
+          })
+        }))
+      }
+    })
+  },
+  {
+    fromSchema: 13,
+    toSchema: 14,
+    description: "קבוצות שכבות: הוספת collapsed ו-childIds כברירת מחדל לשכבות group",
+    migrate: (project) => ({
+      ...project,
+      schemaVersion: 14,
+      document: {
+        ...project.document,
+        pages: project.document.pages.map((page) => ({
+          ...page,
+          layers: page.layers.map((layer) => {
+            if (layer.type !== "group") return layer;
+            const g = layer as typeof layer & { collapsed?: boolean; childIds?: string[] };
+            return {
+              ...g,
+              collapsed: g.collapsed ?? false,
+              childIds: g.childIds ?? []
+            };
           })
         }))
       }
@@ -319,11 +344,16 @@ export function normalizeProjectEnvelope(input: unknown): ProjectEnvelope {
             const adjustment = layer as Partial<AdjustmentLayer> & typeof layer;
             return {
               ...adjustment,
+              locked: true,
               targetMode: adjustment.targetMode ?? "below",
               adjustments: Array.isArray(adjustment.adjustments) && adjustment.adjustments.length > 0
                 ? adjustment.adjustments
                 : [{ type: "brightnessContrast", brightness: 0, contrast: 0 }]
             } as AdjustmentLayer;
+          }
+          if (layer.type === "group") {
+            const g = layer as typeof layer & { collapsed?: boolean; childIds?: string[] };
+            return { ...g, collapsed: g.collapsed ?? false, childIds: g.childIds ?? [] };
           }
           if (layer.type !== "image") return layer;
           const imgLayer = layer as typeof layer & { effects?: unknown };

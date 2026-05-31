@@ -583,23 +583,33 @@ function applyExtrude3D(
   canvas: HTMLCanvasElement,
   params: { color: string; depth: number; offsetX: number; offsetY: number; steps: number; opacity: number }
 ): HTMLCanvasElement {
+  const steps = Math.max(1, Math.round(params.steps));
+  const depth = Math.max(0, params.depth);
+  const maxShiftX = params.offsetX * depth;
+  const maxShiftY = params.offsetY * depth;
+  // Grow the canvas toward the extrusion direction so the depth (and the outline
+  // baked into the base canvas) is never clipped, regardless of offset sign.
+  const padLeft = Math.ceil(Math.max(0, -maxShiftX));
+  const padTop = Math.ceil(Math.max(0, -maxShiftY));
+  const padRight = Math.ceil(Math.max(0, maxShiftX));
+  const padBottom = Math.ceil(Math.max(0, maxShiftY));
+
   const result = document.createElement("canvas");
-  result.width = canvas.width;
-  result.height = canvas.height;
+  result.width = canvas.width + padLeft + padRight;
+  result.height = canvas.height + padTop + padBottom;
   const ctx = result.getContext("2d");
   if (ctx === null) return canvas;
 
-  const steps = Math.max(1, Math.round(params.steps));
-  const depth = Math.max(0, params.depth);
+  const tinted = tintAlpha(canvas, params.color);
   for (let i = steps; i >= 1; i--) {
     const t = i / steps;
     ctx.save();
     ctx.globalAlpha = clamp(params.opacity * (0.35 + t * 0.65), 0, 1);
-    ctx.drawImage(tintAlpha(canvas, params.color), params.offsetX * depth * t, params.offsetY * depth * t);
+    ctx.drawImage(tinted, padLeft + maxShiftX * t, padTop + maxShiftY * t);
     ctx.restore();
   }
-  ctx.drawImage(canvas, 0, 0);
-  copyCanvasOffset(canvas, result);
+  ctx.drawImage(canvas, padLeft, padTop);
+  copyCanvasOffset(canvas, result, padLeft, padTop);
   return result;
 }
 

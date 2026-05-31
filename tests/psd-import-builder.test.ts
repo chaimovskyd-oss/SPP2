@@ -90,4 +90,43 @@ describe("PSD import document builder", () => {
     expect(result.summary.warnings).toContain('Skipped "Text": layer could not be rendered.');
     expect(result.summary.warnings).toContain("Background: hidden test");
   });
+
+  it("maps PSD adjustment layers without reading a raster PNG", async () => {
+    const psdManifest = manifest();
+    psdManifest.layers.splice(1, 0, {
+      id: "adj-brightness",
+      name: "Brightness/Contrast 1",
+      groupPath: [],
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+      opacity: 0.5,
+      visible: true,
+      blendMode: "normal",
+      clipping: true,
+      warnings: [],
+      adjustment: {
+        kind: "adjustment",
+        psdAdjustmentType: "BrightnessContrast",
+        supported: true,
+        operation: { type: "brightnessContrast", brightness: 18, contrast: -6 },
+        warnings: []
+      }
+    });
+    const readPaths: string[] = [];
+
+    const result = await buildDocumentFromPsdManifest(psdManifest, async (path) => {
+      readPaths.push(path);
+      return `base64-${path}`;
+    });
+    const adjustment = result.document.pages[0]?.layers[1];
+
+    expect(readPaths).toEqual(["bottom.png", "top.png"]);
+    expect(adjustment?.type).toBe("adjustment-layer");
+    if (adjustment?.type !== "adjustment-layer") throw new Error("wrong layer type");
+    expect(adjustment.targetMode).toBe("clipped-to-layer");
+    expect(adjustment.opacity).toBe(0.5);
+    expect(adjustment.adjustments).toEqual([{ type: "brightnessContrast", brightness: 18, contrast: -6 }]);
+  });
 });

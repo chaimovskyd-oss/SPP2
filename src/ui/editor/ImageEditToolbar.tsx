@@ -1,6 +1,7 @@
 import { Brush, Check, Copy, Crop, Eraser, RectangleHorizontal, RotateCcw, Scissors, Sparkles, Trash2, Wand2, X } from "lucide-react";
 import type { ReactElement } from "react";
 import { useImageEditStore, type ImageEditTool } from "@/state/imageEditStore";
+import type { AiTool } from "@/state/aiToolsStore";
 
 interface ImageEditToolbarProps {
   onApply: () => void;
@@ -12,6 +13,7 @@ interface ImageEditToolbarProps {
   onCopySelection: () => void;
   onCutSelection: () => void;
   onClearSelection: () => void;
+  onOpenAiTool?: (tool: AiTool) => void;
 }
 
 function isSelectionTool(tool: ImageEditTool | null): boolean {
@@ -27,7 +29,8 @@ export function ImageEditToolbar({
   onDeleteSelection,
   onCopySelection,
   onCutSelection,
-  onClearSelection
+  onClearSelection,
+  onOpenAiTool
 }: ImageEditToolbarProps): ReactElement {
   const activeTool = useImageEditStore((s) => s.activeTool);
   const selectionMask = useImageEditStore((s) => s.selectionMask);
@@ -137,6 +140,24 @@ export function ImageEditToolbar({
           </>
         )}
       </div>
+
+      {onOpenAiTool && (
+        <div className="context-group">
+          <span className="ctx-btn-label" style={{ opacity: 0.6 }}>✨ AI</span>
+          <button className="context-icon" title="הרחב תמונה" type="button" onClick={() => onOpenAiTool("expand")}>
+            <span className="ctx-btn-label">הרחב</span>
+          </button>
+          <button className="context-icon" title="הסר אובייקט" type="button" onClick={() => onOpenAiTool("remove")}>
+            <span className="ctx-btn-label">הסר</span>
+          </button>
+          <button className="context-icon" title="שפר רזולוציה" type="button" onClick={() => onOpenAiTool("upscale")}>
+            <span className="ctx-btn-label">שפר</span>
+          </button>
+          <button className="context-icon" title="שחזר תמונה" type="button" onClick={() => onOpenAiTool("restore")}>
+            <span className="ctx-btn-label">שחזר</span>
+          </button>
+        </div>
+      )}
 
       <div className="context-group" style={{ marginInlineStart: "auto" }}>
         <button className="context-icon danger" title="Cancel" type="button" onClick={onCancel}>

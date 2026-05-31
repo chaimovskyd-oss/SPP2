@@ -20,6 +20,7 @@ import type {
   WarpType
 } from "./text";
 import type { VisualEffectStack } from "./visualEffects";
+import type { ImageAdjustmentStack } from "./imageAdjustments";
 
 export type LayerType =
   | "image"
@@ -57,7 +58,23 @@ export interface BaseLayer extends VersionedEntity {
   selected: boolean;
   parentId?: ID;
   metadata: Metadata;
+  /** Opt this layer out of Smart Arrange. Additive/optional — unset = participates. */
+  smartArrangeLocked?: boolean;
+  /** Manually-pinned Smart Arrange role (Phase 3). Unset = inferred per run. */
+  smartArrangeRole?: SmartArrangeRole;
 }
+
+export type SmartArrangeRole =
+  | "title"
+  | "subtitle"
+  | "bodyText"
+  | "shortText"
+  | "mainImage"
+  | "secondaryImage"
+  | "logo"
+  | "decoration"
+  | "background"
+  | "unknown";
 
 export type FrameBehaviorMode = "layoutLocked" | "semiFlexible" | "freeform";
 
@@ -105,6 +122,7 @@ export interface FrameLayer extends BaseLayer {
   lockedContent?: boolean;
   lockedFrame?: boolean;
   visualEffects?: VisualEffectStack;
+  imageAdjustments?: ImageAdjustmentStack;
 }
 
 export interface ArcSettings extends VersionedEntity {
@@ -261,6 +279,8 @@ export interface ImageLayer extends BaseLayer {
   imageOffsetX?: number;
   imageOffsetY?: number;
   imageScale?: number;
+  /** Non-destructive Smart-Preset adjustment stack (Phase 2+). */
+  imageAdjustments?: ImageAdjustmentStack;
 }
 
 export interface ShapeLayer extends BaseLayer {
@@ -275,7 +295,13 @@ export interface ShapeLayer extends BaseLayer {
 export type AdjustmentTargetMode = "below" | "clipped-to-layer" | "group-only" | "page-global";
 
 export type AdjustmentOperation =
-  | { type: "brightnessContrast"; brightness: number; contrast: number };
+  | { type: "brightnessContrast"; brightness: number; contrast: number }
+  | { type: "exposure"; exposure: number; gamma: number; offset: number }
+  | { type: "hueSaturation"; hue: number; saturation: number; lightness: number }
+  | { type: "blackWhite"; enabled: boolean }
+  | { type: "invert"; enabled: boolean }
+  | { type: "levels"; black: number; mid: number; white: number }
+  | { type: "sepia"; intensity: number; warmth: number };
 
 export interface AdjustmentLayer extends BaseLayer {
   type: "adjustment-layer";
@@ -288,6 +314,7 @@ export interface AdjustmentLayer extends BaseLayer {
 export interface GroupLayer extends BaseLayer {
   type: "group";
   childIds: ID[];
+  collapsed: boolean;
 }
 
 export interface MaskLayer extends BaseLayer {

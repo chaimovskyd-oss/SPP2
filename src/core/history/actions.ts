@@ -1,4 +1,5 @@
 import type { Asset, Document, Page } from "@/types/document";
+import type { PageLookLayer } from "@/types/imageAdjustments";
 import type { ContentTransform, FrameLayer, VisualLayer } from "@/types/layers";
 import type { Margins, Rect } from "@/types/primitives";
 import type { ProductGuideVisibility, ProductInstructionSet, ProductPageContext, ProductPrintZone } from "@/types/product";
@@ -8,8 +9,24 @@ export interface DocumentAction {
   type: string;
   createdAt: string;
   mergeKey?: string;
+  /**
+   * When true and this action shares a mergeKey with the top undo entry within a
+   * short time window, the two collapse into a single undo step. Used for
+   * continuous gestures (slider drags) so one drag = one undo instead of dozens.
+   */
+  coalesce?: boolean;
   apply: (document: Document) => Document;
   undo: (document: Document) => Document;
+}
+
+/** Consecutive coalescing actions merge only if they land within this window. */
+const COALESCE_WINDOW_MS = 1000;
+
+function withinCoalesceWindow(previousIso: string, nextIso: string): boolean {
+  const prev = Date.parse(previousIso);
+  const next = Date.parse(nextIso);
+  if (Number.isNaN(prev) || Number.isNaN(next)) return false;
+  return next - prev <= COALESCE_WINDOW_MS && next - prev >= 0;
 }
 
 export interface HistoryState {
@@ -47,6 +64,26 @@ export function applyDocumentAction(document: Document, history: HistoryState, a
       history: {
         ...history,
         transaction: [...history.transaction, action]
+      }
+    };
+  }
+  // Coalesce continuous gestures: replace the top undo entry in place, keeping the
+  // ORIGINAL undo (pre-gesture state) so one drag undoes to where it started.
+  const previous = history.undoStack.at(-1);
+  if (
+    action.coalesce === true &&
+    previous !== undefined &&
+    previous.mergeKey !== undefined &&
+    previous.mergeKey === action.mergeKey &&
+    withinCoalesceWindow(previous.createdAt, action.createdAt)
+  ) {
+    const merged: DocumentAction = { ...action, undo: previous.undo };
+    return {
+      document: nextDocument,
+      history: {
+        ...history,
+        undoStack: [...history.undoStack.slice(0, -1), merged],
+        redoStack: []
       }
     };
   }
@@ -149,9 +186,52 @@ export function changeLayerAction(pageId: string, before: VisualLayer, after: Vi
   );
 }
 
+/**
+ * Like changeLayerAction but marks the action as coalescing under the supplied
+ * key, so a rapid sequence (e.g. a slider drag) collapses into one undo step.
+ */
+export function changeLayerActionCoalesced(
+  pageId: string,
+  before: VisualLayer,
+  after: VisualLayer,
+  coalesceKey: string,
+  type = "ChangeLayerPropertyAction"
+): DocumentAction {
+  return createAction(
+    type,
+    (document) => updateLayerById(document, pageId, after),
+    (document) => updateLayerById(document, pageId, before),
+    coalesceKey,
+    true
+  );
+}
+
 export function reorderLayersAction(pageId: string, before: VisualLayer[], after: VisualLayer[]): DocumentAction {
   return createAction("ReorderLayersAction", (document) => updatePageById(document, pageId, (page) => ({ ...page, layers: after })), (document) =>
     updatePageById(document, pageId, (page) => ({ ...page, layers: before }))
+  );
+}
+
+/** Full before/after page-layer swap with a caller-supplied action type. One undo record. */
+export function changeLayersAction(pageId: string, before: VisualLayer[], after: VisualLayer[], type = "ChangeLayersAction"): DocumentAction {
+  return createAction(type, (document) => updatePageById(document, pageId, (page) => ({ ...page, layers: after })), (document) =>
+    updatePageById(document, pageId, (page) => ({ ...page, layers: before }))
+  );
+}
+
+export function changePageLooksAction(
+  pageId: string,
+  before: PageLookLayer[] | undefined,
+  after: PageLookLayer[] | undefined,
+  type = "ChangePageLooksAction",
+  coalesceKey?: string
+): DocumentAction {
+  return createAction(
+    type,
+    (document) => updatePageById(document, pageId, (page) => ({ ...page, pageLooks: after })),
+    (document) => updatePageById(document, pageId, (page) => ({ ...page, pageLooks: before })),
+    coalesceKey,
+    coalesceKey !== undefined
   );
 }
 
@@ -200,12 +280,19 @@ export function setFrameImageAction(pageId: string, before: FrameLayer, imageAss
 }
 
 
-function createAction(type: string, apply: DocumentAction["apply"], undo: DocumentAction["undo"], mergeKey?: string): DocumentAction {
+function createAction(
+  type: string,
+  apply: DocumentAction["apply"],
+  undo: DocumentAction["undo"],
+  mergeKey?: string,
+  coalesce = false
+): DocumentAction {
   return {
     id: crypto.randomUUID(),
     type,
     createdAt: new Date().toISOString(),
     mergeKey,
+    coalesce,
     apply: (document) => touch(apply(document)),
     undo: (document) => touch(undo(document))
   };

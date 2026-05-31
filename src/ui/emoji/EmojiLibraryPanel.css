@@ -310,3 +310,37 @@
 .glib-pack-label {
   font-size: 11px;
 }
+
+/* ── Source tab (local / online) ─────────────────────────────────────────── */
+
+.glib-source-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+
+.glib-source-tab {
+  flex: 1;
+  padding: 7px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  background: transparent;
+  cursor: pointer;
+  text-align: center;
+  transition: color var(--t), background var(--t), box-shadow var(--t);
+  border-bottom: 2px solid transparent;
+  direction: rtl;
+}
+
+.glib-source-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
+.glib-source-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+}

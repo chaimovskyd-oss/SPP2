@@ -10,6 +10,7 @@ import {
   type GraphicItem,
   type GraphicPack,
 } from "@/data/graphics";
+import { PixabayPanel } from "@/ui/editor/PixabayPanel";
 import "./EmojiLibraryPanel.css";
 
 // ─── Persistence ─────────────────────────────────────────────────────────────
@@ -120,8 +121,62 @@ function resolveInsert(
   return props.onInsertGraphic;
 }
 
+// ─── Source tab (local vs. online) ───────────────────────────────────────────
+
+type GraphicsSource = "local" | "online";
+
+function SourceTabs({
+  active,
+  onChange,
+}: {
+  active: GraphicsSource;
+  onChange: (s: GraphicsSource) => void;
+}) {
+  return (
+    <div className="glib-source-tabs">
+      <button
+        className={`glib-source-tab ${active === "local" ? "active" : ""}`}
+        onClick={() => onChange("local")}
+        aria-pressed={active === "local"}
+      >
+        📁 מקומי
+      </button>
+      <button
+        className={`glib-source-tab ${active === "online" ? "active" : ""}`}
+        onClick={() => onChange("online")}
+        aria-pressed={active === "online"}
+      >
+        🌐 Pixabay
+      </button>
+    </div>
+  );
+}
+
 export function GraphicsLibraryPanel(props: Props) {
   const onInsert = resolveInsert(props);
+  const [source, setSource] = useState<GraphicsSource>("local");
+
+  if (source === "online") {
+    return (
+      <div className="emoji-panel">
+        <SourceTabs active={source} onChange={setSource} />
+        <PixabayPanel onInsertGraphic={onInsert} />
+      </div>
+    );
+  }
+
+  return <GraphicsLibraryPanelLocal onInsert={onInsert} source={source} onSourceChange={setSource} />;
+}
+
+function GraphicsLibraryPanelLocal({
+  onInsert,
+  source,
+  onSourceChange,
+}: {
+  onInsert: (file: string, name: string, fallbackUrl?: string) => void;
+  source: GraphicsSource;
+  onSourceChange: (s: GraphicsSource) => void;
+}) {
 
   const activePacks = useMemo(() => getActivePacks(), []);
   const defaultPack = activePacks[0]?.id ?? "openmoji";
@@ -216,6 +271,9 @@ export function GraphicsLibraryPanel(props: Props) {
 
   return (
     <div className="emoji-panel">
+
+      {/* ── Source selector ──────────────────────────────────────────────── */}
+      <SourceTabs active={source} onChange={onSourceChange} />
 
       {/* ── Search ───────────────────────────────────────────────────────── */}
       <div className="emoji-search-row">

@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useState, type ReactElement } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { AUTOSAVE_TEMPORARILY_DISABLED, cleanupRecovery, createGridModeDocument, createMaskModeDocument, createPhotoPrintModeDocument, createProjectEnvelope, discardRecoveryRecord, getLatestRecoveryRecord, restoreRecoveryRecord, withProjectMetadata, type AutosaveRecord } from "@/core";
 import { applyFaceDetectionToPhotoPrint } from "@/core/photoPrint/photoPrintModeEngine";
 import { captureError, writeLog } from "@/core/logging/logger";
@@ -250,6 +250,57 @@ export function App(): ReactElement {
       globalThis.window.removeEventListener("dragover", onDragOver, capture);
       globalThis.window.removeEventListener("drop", onDrop, capture);
     };
+  }, []);
+
+  // File-association / open-with handler: receives a file path from the main
+  // process when the user double-clicks a .spp2 or uses "Open With" for .psd.
+  // Refs let the stable useEffect([], ...) always call the latest render's closures.
+  const openProjectFileRef = useRef(openProjectFile);
+  openProjectFileRef.current = openProjectFile;
+
+  async function importPsdFromPath(filePath: string): Promise<void> {
+    if (!window.spp?.importPsd) return;
+    setIsImportingPsd(true);
+    setPsdImportProgress("מייבא שכבות PSD...");
+    try {
+      const result = await window.spp.importPsd(filePath);
+      if (!result.success || result.manifest === undefined) {
+        window.alert(result.error ?? "ייבוא PSD נכשל.");
+        return;
+      }
+      const { document: psdDocument, summary } = await buildDocumentFromPsdManifest(
+        result.manifest as PsdImportManifest,
+        window.spp.readFileBase64
+      );
+      const envelope = beginProject(createPsdProjectEnvelope(psdDocument), filePath);
+      setDocument(withProjectMetadata(envelope.document, envelope.metadata));
+      resetViewport();
+      clearSelection();
+      setScreen("editor");
+      window.alert(formatPsdImportSummary(summary.importedLayers, summary.skippedLayers, summary.warnings));
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "ייבוא PSD נכשל.");
+    } finally {
+      setIsImportingPsd(false);
+      setPsdImportProgress("");
+    }
+  }
+  const importPsdFromPathRef = useRef(importPsdFromPath);
+  importPsdFromPathRef.current = importPsdFromPath;
+
+  useEffect(() => {
+    if (!window.spp?.onOpenFilePath) return;
+    return window.spp.onOpenFilePath(async (filePath) => {
+      const lc = filePath.toLowerCase();
+      if (lc.endsWith(".psd") || lc.endsWith(".psb")) {
+        await importPsdFromPathRef.current(filePath);
+      } else {
+        const base64 = await window.spp!.readFileBase64(filePath);
+        const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+        const fileName = filePath.replace(/\\/g, "/").split("/").pop() ?? "project.spp2";
+        await openProjectFileRef.current(new File([bytes], fileName));
+      }
+    });
   }, []);
 
   // Global Ctrl+, shortcut to open settings from anywhere in the app

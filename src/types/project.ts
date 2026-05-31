@@ -3,7 +3,7 @@ import type { LinkedGroup } from "./layers";
 import type { BatchJob } from "./batch";
 
 export const PROJECT_FORMAT_VERSION = 1;
-export const PROJECT_SCHEMA_VERSION = 13;
+export const PROJECT_SCHEMA_VERSION = 14;
 export const APP_VERSION = "0.7.0-blessing-mode";
 
 export type ProjectState =

@@ -491,6 +491,58 @@ export function captureProjectThumbnail(stage: Konva.Stage, page: Page): string 
   }
 }
 
+// ─── Preview thumbnail — intentionally low quality ────────────────────────────
+// Max 600px, JPEG 0.70.  Used ONLY in the in-app print-preview modal.
+// Final print / PDF / PNG export continues to use renderPrintableStage /
+// exportStagePrintImage and is completely unaffected by this function.
+const PREVIEW_THUMBNAIL_MAX_PX = 600;
+
+/**
+ * PREVIEW ONLY — intentionally lower quality than final print/export.
+ *
+ * Renders the current Konva stage at a maximum of 600 px on the longest side,
+ * JPEG at 0.70 quality.  Do NOT use this for print, PDF, or PNG export.
+ * The final high-quality render path uses renderPrintableStage / exportStagePrintImage.
+ */
+export function renderPagePreviewThumbnail(stage: Konva.Stage, page: Page): string {
+  const helperNodes = stage.find(`.${SCREEN_HELPER_NODE_NAME}`);
+  const savedVisibility = helperNodes.map((n) => ({ n, v: n.visible() }));
+  const original = {
+    width: stage.width(),
+    height: stage.height(),
+    scaleX: stage.scaleX(),
+    scaleY: stage.scaleY(),
+  };
+  const layers = stage.getLayers();
+  const layerOffsets = layers.map((l) => ({ l, x: l.x(), y: l.y() }));
+
+  helperNodes.forEach((n) => n.visible(false));
+  layers.forEach((l) => { l.x(0); l.y(0); });
+  stage.width(page.width);
+  stage.height(page.height);
+  stage.scale({ x: 1, y: 1 });
+  stage.batchDraw();
+
+  // Scale down so the longest side fits within PREVIEW_THUMBNAIL_MAX_PX.
+  // This keeps file size and decode time small — preview quality is intentionally capped.
+  const ratio = Math.min(
+    PREVIEW_THUMBNAIL_MAX_PX / page.width,
+    PREVIEW_THUMBNAIL_MAX_PX / page.height,
+    1,
+  );
+
+  try {
+    return stage.toDataURL({ mimeType: "image/jpeg", pixelRatio: ratio, quality: 0.70 });
+  } finally {
+    stage.width(original.width);
+    stage.height(original.height);
+    stage.scale({ x: original.scaleX, y: original.scaleY });
+    layerOffsets.forEach(({ l, x, y }) => { l.x(x); l.y(y); });
+    savedVisibility.forEach(({ n, v }) => n.visible(v));
+    stage.batchDraw();
+  }
+}
+
 function dataUrlToBytes(value: string | undefined): Uint8Array | undefined {
   if (value === undefined || !value.startsWith("data:")) {
     return undefined;
