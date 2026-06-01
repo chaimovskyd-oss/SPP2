@@ -382,15 +382,6 @@ function resolveOuterGlow(layer: TextLayer): { color: string; blur: number; opac
   const glowEffect = layer.effects.find((e) => e.enabled && e.effectType === "outer_glow");
   if (glowEffect !== undefined) {
     const p = glowEffect.params as Record<string, unknown>;
-    // eslint-disable-next-line no-console
-    console.log("[outer_glow] native-Konva text path", {
-      layerId: layer.id,
-      fontFamily: layer.fontFamily,
-      fontSize: layer.fontSize,
-      color: layer.color,
-      params: p,
-      opacity: glowEffect.opacity
-    });
     return {
       color: typeof p["color"] === "string" ? p["color"] : "#ffffff",
       blur: typeof p["blur"] === "number" ? p["blur"] : 20,
@@ -517,9 +508,29 @@ function TextNode({
         onTap={() => onSelect(layer.id)}
         onTransformEnd={(event) => {
           const node = event.target;
+          const scaleX = node.scaleX();
+          const scaleY = node.scaleY();
           node.scaleX(1);
           node.scaleY(1);
-          onChange({ ...layer, x: node.x() - alignmentOffsetX, y: node.y() - alignmentOffsetY, rotation: node.rotation() });
+          // Managed text boxes (class-photo / blessing) keep a fixed rect; box-resize only moves them.
+          if (isManagedTextBox) {
+            onChange({ ...layer, x: node.x() - alignmentOffsetX, y: node.y() - alignmentOffsetY, rotation: node.rotation() });
+            return;
+          }
+          // Free text: mirror the native <Text> path — a boundary-box resize scales the font size.
+          // node.x() is the (scaled) image top-left; the glyph origin sits textOffset*scale from it,
+          // so anchoring on the glyph origin keeps the text in place once the canvas is regenerated.
+          const fontScale = Math.max(0.1, (Math.abs(scaleX) + Math.abs(scaleY)) / 2);
+          const nextFontSize = Math.max(4, Math.round(layer.fontSize * fontScale));
+          const nextLayer = {
+            ...layer,
+            fontSize: nextFontSize,
+            x: node.x() + textOffsetX * fontScale,
+            y: node.y() + textOffsetY * fontScale,
+            rotation: node.rotation()
+          };
+          const nextSize = measureTextLayerSize(nextLayer);
+          onChange({ ...nextLayer, width: nextSize.width, height: nextSize.height });
         }}
       />
     );
@@ -1448,13 +1459,27 @@ function FrameNode({
   }, [reduceImageEffects, blurRadius, frameColorAdj.brightness, frameColorAdj.contrast, frameColorAdj.saturation, frameColorAdj.hue, frameColorAdj.grayscale, frameExtras.luminance, frameExtras.sepia, frameExtras.invert, frameExtras.threshold, frameExtras.posterize, frameExtras.removeWhite !== null, frameExtras.colorPop !== null, adjustmentFilters]);
 
   const frameFilterCount = frameFilters.length;
+  const frameCacheSignature = JSON.stringify({
+    blurRadius,
+    frameColorAdj,
+    frameExtras,
+    adjustmentStack,
+    assetCrop,
+    contentScale: layer.contentTransform.scale,
+    contentRotation: layer.contentTransform.rotation,
+    fitMode: layer.fitMode,
+    imageAssetId: layer.imageAssetId
+  });
 
   useEffect(() => {
     const node = blurRef.current;
     if (node === null || image === null) return;
     try {
       const wasCached = node.isCached();
-      if (frameNeedsCache) { node.cache(); } else if (node.isCached()) { node.clearCache(); }
+      if (frameNeedsCache) {
+        if (node.isCached()) node.clearCache();
+        node.cache();
+      } else if (node.isCached()) { node.clearCache(); }
       const isCached = node.isCached();
       if (wasCached !== isCached || frameNeedsCache) {
         markDebugEvent("konva-frame-image-cache", {
@@ -1475,7 +1500,7 @@ function FrameNode({
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [frameNeedsCache, frameFilterCount, image, layer.width, layer.height]);
+  }, [frameNeedsCache, frameFilterCount, frameCacheSignature, image, layer.width, layer.height]);
 
   useEffect(() => {
     const group = frameMaskGroupRef.current;

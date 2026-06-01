@@ -16,7 +16,9 @@ import {
   type ImageAdjustment,
   type ImageAdjustmentTemplate
 } from "@/types/imageAdjustments";
-import type { ImageLayer } from "@/types/layers";
+import type { FrameLayer, ImageLayer } from "@/types/layers";
+
+type AdjustableImageLayer = ImageLayer | FrameLayer;
 
 const smallBadgeStyle = {
   fontSize: 10,
@@ -27,7 +29,11 @@ const smallBadgeStyle = {
   color: "var(--color-text-secondary,#aaa)"
 } as const;
 
-export function ImageAdjustmentsPanel({ layer }: { layer: ImageLayer }): ReactElement | null {
+function getAdjustableAssetId(layer: AdjustableImageLayer): string | undefined {
+  return layer.type === "image" ? layer.assetId : layer.imageAssetId;
+}
+
+export function ImageAdjustmentsPanel({ layer }: { layer: AdjustableImageLayer }): ReactElement | null {
   const pageId = useDocumentStore((s) => s.activePageId);
   const addImageAdjustment = useDocumentStore((s) => s.addImageAdjustment);
   const applyAdjustmentToAllImagesOnPage = useDocumentStore((s) => s.applyAdjustmentToAllImagesOnPage);
@@ -44,12 +50,13 @@ export function ImageAdjustmentsPanel({ layer }: { layer: ImageLayer }): ReactEl
   const applyPresetAsPageLook = useDocumentStore((s) => s.applyPresetAsPageLook);
   const updateAppliedPresetStrength = useDocumentStore((s) => s.updateAppliedPresetStrength);
   const removeAppliedPreset = useDocumentStore((s) => s.removeAppliedPreset);
+  const assetId = getAdjustableAssetId(layer);
   const assetSrc = useDocumentStore((s) =>
-    resolveCanvasAssetPath(s.document?.assets.find((a) => a.id === layer.assetId))
+    resolveCanvasAssetPath(s.document?.assets.find((a) => a.id === assetId))
   );
   const [libraryOpen, setLibraryOpen] = useState(false);
 
-  if (!ENABLE_IMAGE_LEVEL_ADJUSTMENTS || pageId === null) return null;
+  if (!ENABLE_IMAGE_LEVEL_ADJUSTMENTS || pageId === null || assetId === undefined) return null;
 
   const stack = layer.imageAdjustments?.stack ?? [];
   const presetInstances = layer.imageAdjustments?.presetInstances ?? [];

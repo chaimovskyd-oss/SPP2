@@ -549,6 +549,35 @@ export const SMART_PRESET_CATALOG: SmartPresetDefinition[] = [
     ]
   },
   {
+    id: "laser_printer_skin_fix",
+    name: "Laser Printer Skin Fix",
+    icon: "CMYK",
+    category: "Print",
+    description: "For laser printers that print photos too yellow: cools yellow cast, adds gentle magenta for healthy skin, and lifts blue without pushing faces purple or gray.",
+    defaultStrength: 0.72,
+    recommendedApplyMode: "allImagesOnPage",
+    allowedApplyModes: ["singleImage", "selectedImages", "allImagesOnPage"],
+    requires: ["color", "curves", "basicTone"],
+    optionalRequires: ["printerProfile", "skinMask"],
+    printWarnings: ["Tune strength after a small test print; this is intentionally mild to protect skin tones."],
+    imageAdjustments: [
+      { type: "color", temperature: -16, tint: 14, saturation: -5, vibrance: 7 },
+      { type: "curves", channel: "b", points: [
+        { x: 0, y: 0 },
+        { x: 72, y: 76 },
+        { x: 152, y: 164 },
+        { x: 255, y: 255 }
+      ] },
+      { type: "curves", channel: "g", points: [
+        { x: 0, y: 0 },
+        { x: 128, y: 124 },
+        { x: 255, y: 255 }
+      ] },
+      { type: "basicTone", contrast: 3, brightness: 1 },
+      { type: "highlightsShadows", highlights: -4, shadows: 3 }
+    ]
+  },
+  {
     id: "wood_print_prep",
     name: "Wood Print Prep",
     icon: "🪵",

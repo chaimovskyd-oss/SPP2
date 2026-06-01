@@ -83,6 +83,26 @@ describe("Class Photo layout utilization", () => {
     expect(record?.imageEditParams).toMatchObject({ brightness: 1.3, contrast: -0.8 });
     expect(frame?.type === "frame" ? frame.metadata.imageEditParams : undefined).toMatchObject({ brightness: 1.3, contrast: -0.8 });
   });
+
+  it("restores child name visual style on regenerate", () => {
+    const { page, rule } = buildSyncedClassPhoto("portrait", 2, 0);
+    const styledRule = {
+      ...rule,
+      metadata: {
+        ...rule.metadata,
+        childNameTextVisualStyle: {
+          stroke: { version: 1, color: "#ffffff", width: 4, opacity: 1 },
+          shadow: { version: 1, color: "#000000", blur: 6, offsetX: 0, offsetY: 2, opacity: 0.3 }
+        }
+      }
+    };
+
+    const regenerated = syncClassPhotoToPage(page, styledRule);
+    const childNames = peopleLayers(regenerated.page.layers, "classPhotoName", "child");
+
+    expect(childNames).toHaveLength(2);
+    expect(childNames.every((layer) => layer.type === "text" && layer.stroke?.color === "#ffffff" && layer.shadow?.blur === 6)).toBe(true);
+  });
 });
 
 function buildSyncedClassPhoto(orientation: "portrait" | "landscape", childCount: number, staffCount: number) {

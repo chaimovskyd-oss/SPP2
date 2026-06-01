@@ -6,6 +6,8 @@ import {
   normalizePixabayResult,
   searchPixabay,
   getPixabayErrorMessage,
+  hasHebrew,
+  translateToEnglish,
 } from "@/services/pixabayService";
 import type { PixabayHit, PixabaySearchResult } from "@/types/pixabay";
 
@@ -239,6 +241,53 @@ describe("searchPixabay", () => {
 
     const key = buildCacheKey({ q: "mountain" });
     expect(getCachedSearch(key)).not.toBeNull();
+  });
+});
+
+// ─── Hebrew detection & translation ───────────────────────────────────────────
+
+describe("hasHebrew", () => {
+  it("detects Hebrew letters", () => {
+    expect(hasHebrew("שמש")).toBe(true);
+    expect(hasHebrew("כדור ים")).toBe(true);
+  });
+
+  it("returns false for Latin / empty text", () => {
+    expect(hasHebrew("sunset")).toBe(false);
+    expect(hasHebrew("")).toBe(false);
+    expect(hasHebrew("123 !@#")).toBe(false);
+  });
+});
+
+describe("translateToEnglish", () => {
+  beforeEach(() => {
+    localStorageMock.clear();
+    vi.restoreAllMocks();
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("returns Latin queries unchanged without any network call", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    expect(await translateToEnglish("sunset")).toBe("sunset");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("translates Hebrew via the API and caches the result", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ responseData: { translatedText: "sun" } }), { status: 200 })
+    );
+
+    expect(await translateToEnglish("שמש")).toBe("sun");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    // Second call is served from cache — no extra fetch.
+    expect(await translateToEnglish("שמש")).toBe("sun");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the original query when translation fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("offline"));
+    expect(await translateToEnglish("כדור")).toBe("כדור");
   });
 });
 

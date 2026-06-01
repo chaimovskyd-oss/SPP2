@@ -881,6 +881,13 @@ textarea {
   font-weight: 900;
 }
 
+.context-preset-chip .preset-thumb {
+  width: 34px;
+  height: 34px;
+  border-radius: 4px;
+  background: var(--bg-elevated);
+}
+
 .context-preset-chip strong {
   overflow: hidden;
   color: var(--text-primary);
@@ -2617,6 +2624,13 @@ textarea {
   line-height: 1;
 }
 
+.preset-chip .preset-thumb {
+  width: 100%;
+  height: 40px;
+  border-radius: 4px;
+  background: var(--bg-elevated);
+}
+
 .preset-chip strong {
   overflow: hidden;
   color: var(--text-secondary);
@@ -3055,10 +3069,14 @@ textarea {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
-  left: 0;
+  left: auto;
   z-index: 100;
   display: flex;
   flex-direction: column;
+  /* Size to the font names rather than the (narrow) trigger so full names stay readable. */
+  width: max-content;
+  min-width: 240px;
+  max-width: 340px;
   max-height: 320px;
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
@@ -4177,7 +4195,7 @@ input[type="range"]::-webkit-slider-runnable-track {
   line-height: 1.35;
 }
 .image-ai-effects-placeholder {
-  display: flex;
+  display: none;
   flex-direction: column;
   gap: 3px;
   padding: 9px 10px;

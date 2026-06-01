@@ -14,6 +14,7 @@ interface ImageEditToolbarProps {
   onCutSelection: () => void;
   onClearSelection: () => void;
   onOpenAiTool?: (tool: AiTool) => void;
+  onOpenAiStyles?: () => void;
 }
 
 function isSelectionTool(tool: ImageEditTool | null): boolean {
@@ -30,7 +31,8 @@ export function ImageEditToolbar({
   onCopySelection,
   onCutSelection,
   onClearSelection,
-  onOpenAiTool
+  onOpenAiTool,
+  onOpenAiStyles
 }: ImageEditToolbarProps): ReactElement {
   const activeTool = useImageEditStore((s) => s.activeTool);
   const selectionMask = useImageEditStore((s) => s.selectionMask);
@@ -143,6 +145,12 @@ export function ImageEditToolbar({
 
       {onOpenAiTool && (
         <div className="context-group">
+          {onOpenAiStyles && (
+            <button className="context-icon" title="ספריית אפקטים AI" type="button" onClick={onOpenAiStyles}>
+              <Sparkles size={14} />
+              <span className="ctx-btn-label">AI FX</span>
+            </button>
+          )}
           <span className="ctx-btn-label" style={{ opacity: 0.6 }}>✨ AI</span>
           <button className="context-icon" title="הרחב תמונה" type="button" onClick={() => onOpenAiTool("expand")}>
             <span className="ctx-btn-label">הרחב</span>

@@ -9,6 +9,7 @@
  */
 
 import type { TextLayer } from "@/types/layers";
+import { measureTextLayerSize } from "@/core/text/measurement";
 
 const PAD = 28;
 const patternImageCache = new Map<string, HTMLImageElement>();
@@ -28,6 +29,14 @@ export function renderTextToCanvas(layer: TextLayer): HTMLCanvasElement | null {
   const sparkleEffect = layer.effects.find((e) => e.enabled && e.effectType === "sparkle");
   const extrudeEffect = layer.effects.find((e) => e.enabled && e.effectType === "extrude_3d");
   const hasInsideStroke = layer.stroke !== undefined && (layer.stroke.position ?? "outside") === "inside";
+  const hasStroke = layer.stroke !== undefined && layer.stroke.width > 0 && layer.stroke.opacity > 0;
+
+  // When the text has a stroke, fill-only scoping would re-render a per-character
+  // stroke overlay whose destination-out erase breaks on touching letters (Hebrew).
+  // The base render already draws a correct outline behind the fill, so let pattern/
+  // sparkle paint over everything ("all") instead of trying to restore the stroke.
+  const resolveScope = (raw: "fill_only" | "stroke_only" | "all"): "fill_only" | "stroke_only" | "all" =>
+    hasStroke && raw === "fill_only" ? "all" : raw;
 
   if (
     !hasWarp &&
@@ -40,18 +49,6 @@ export function renderTextToCanvas(layer: TextLayer): HTMLCanvasElement | null {
     extrudeEffect === undefined
   ) {
     return null;
-  }
-
-  if (outerGlowEffect !== undefined) {
-    // eslint-disable-next-line no-console
-    console.log("[outer_glow] rendering text layer", {
-      layerId: layer.id,
-      fontFamily: layer.fontFamily,
-      fontSize: layer.fontSize,
-      color: layer.color,
-      params: outerGlowEffect.params,
-      opacity: outerGlowEffect.opacity
-    });
   }
 
   // Step 1: base text (with or without warp)
@@ -77,7 +74,7 @@ export function renderTextToCanvas(layer: TextLayer): HTMLCanvasElement | null {
 
   if (patternEffect !== undefined) {
     const p = patternEffect.params as Record<string, unknown>;
-    const applyTo = (typeof p["applyTo"] === "string" ? p["applyTo"] : "fill_only") as "fill_only" | "stroke_only" | "all";
+    const applyTo = resolveScope((typeof p["applyTo"] === "string" ? p["applyTo"] : "fill_only") as "fill_only" | "stroke_only" | "all");
     canvas = applyWithScope(canvas, layer, hasWarp, applyTo, (input) =>
       applyPatternOverlay(input, {
         patternType: stringParam(p, "patternType", "stripes"),
@@ -116,7 +113,7 @@ export function renderTextToCanvas(layer: TextLayer): HTMLCanvasElement | null {
 
   if (sparkleEffect !== undefined) {
     const p = sparkleEffect.params as Record<string, unknown>;
-    const applyTo = (typeof p["applyTo"] === "string" ? p["applyTo"] : "fill_only") as "fill_only" | "stroke_only" | "all";
+    const applyTo = resolveScope((typeof p["applyTo"] === "string" ? p["applyTo"] : "fill_only") as "fill_only" | "stroke_only" | "all");
     canvas = applyWithScope(canvas, layer, hasWarp, applyTo, (input) =>
       applySparkle(input, {
         density: numberParam(p, "density", 0.16),
@@ -201,7 +198,8 @@ function setupCtx(
   ctx.shadowBlur = 0;
   ctx.shadowOffsetX = 0;
   ctx.shadowOffsetY = 0;
-  if (layer.shadow !== undefined) {
+  const skipShadow = (layer as TextLayer & { __sppSkipShadow?: boolean }).__sppSkipShadow === true;
+  if (layer.shadow !== undefined && !skipShadow) {
     ctx.shadowColor = hexToRgba(layer.shadow.color, layer.shadow.opacity);
     ctx.shadowBlur = layer.shadow.blur;
     ctx.shadowOffsetX = layer.shadow.offsetX;
@@ -209,20 +207,31 @@ function setupCtx(
   }
 }
 
-function buildCanvasFill(ctx: CanvasRenderingContext2D, layer: TextLayer): string | CanvasGradient {
+interface FillRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+function buildCanvasFill(ctx: CanvasRenderingContext2D, layer: TextLayer, rect?: FillRect): string | CanvasGradient {
   if (layer.gradient === undefined || layer.gradient.stops.length === 0) {
     return hexToRgba(layer.color, layer.fillOpacity);
   }
-  const w = Math.max(1, ctx.canvas.width);
-  const h = Math.max(1, ctx.canvas.height);
+  // Map the gradient to the text bounds when known (rect) instead of the whole padded
+  // canvas, so the look stays stable regardless of how much padding the canvas carries.
+  const x0 = rect?.x ?? 0;
+  const y0 = rect?.y ?? 0;
+  const w = Math.max(1, rect?.w ?? ctx.canvas.width);
+  const h = Math.max(1, rect?.h ?? ctx.canvas.height);
+  const cx = x0 + w / 2;
+  const cy = y0 + h / 2;
   if (layer.gradient.type === "radial") {
-    const g = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) / 2);
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) / 2);
     layer.gradient.stops.forEach((stop) => g.addColorStop(clamp(stop.offset, 0, 1), hexToRgba(stop.color, stop.opacity * layer.fillOpacity)));
     return g;
   }
   const radians = ((layer.gradient.angle ?? 0) * Math.PI) / 180;
-  const cx = w / 2;
-  const cy = h / 2;
   const dx = Math.cos(radians) * w * 0.5;
   const dy = Math.sin(radians) * h * 0.5;
   const g = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
@@ -354,40 +363,77 @@ function renderStraightText(layer: TextLayer): HTMLCanvasElement | null {
   const ctx = canvas.getContext("2d");
   if (ctx === null) return null;
 
-  const text = layer.text.split("\n")[0] ?? "";
   const fontStr = buildFontString(layer);
   ctx.font = fontStr;
-  ctx.textBaseline = "alphabetic";
+  ctx.textBaseline = "middle";
 
-  const chars = [...text];
-  const charWidths = chars.map((c) => ctx.measureText(c).width);
-
-  if (isRTLText(layer, text)) {
-    chars.reverse();
-    charWidths.reverse();
-  }
-
-  const totalWidth =
-    charWidths.reduce((s, w) => s + w, 0) +
-    Math.max(0, chars.length - 1) * layer.letterSpacing;
   const fontSize = layer.fontSize;
+  const lineHeightPx = fontSize * layer.lineHeight;
+
+  // Per-line shaped glyphs (RTL reversed) and their measured widths.
+  const lines = layer.text.split(/\r?\n/).map((raw) => {
+    const chars = [...raw];
+    const widths = chars.map((c) => ctx.measureText(c).width);
+    if (isRTLText(layer, raw)) {
+      chars.reverse();
+      widths.reverse();
+    }
+    const lineWidth = widths.reduce((s, w) => s + w, 0) + Math.max(0, chars.length - 1) * layer.letterSpacing;
+    return { chars, widths, lineWidth };
+  });
+
+  const contentWidth = lines.reduce((max, line) => Math.max(max, line.lineWidth), 0);
+  const contentHeight = lines.length * lineHeightPx;
+
+  // Align within the native <Text> box where possible (keeps the two render paths
+  // anchored the same, so switching presets does not shift the text) — but NEVER
+  // smaller than the glyphs we actually draw. measureTextLayerSize() measures whole
+  // lines (with kerning) and can come out narrower than our per-glyph sum, which would
+  // clip the last letter. Taking the max guarantees the text always fits.
+  const box = measureTextLayerSize(layer);
+  const alignWidth = Math.max(box.width, contentWidth);
 
   const strokePad = (layer.stroke?.width ?? 0) + (layer.shadow?.blur ?? 0) * 0.5;
-  const ep = PAD + strokePad;
+  const epX = PAD + strokePad;
+  // Vertical padding must also clear ascender/descender ink that overshoots the line
+  // box; that overshoot scales with the font size, so it matters a lot at large sizes.
+  const epY = PAD + strokePad + Math.ceil(fontSize * 0.4);
 
-  resizeCanvas(canvas, ctx, totalWidth + ep * 2, fontSize + ep * 2, layer, fontStr);
+  resizeCanvas(canvas, ctx, alignWidth + epX * 2, contentHeight + epY * 2, layer, fontStr);
+  ctx.textBaseline = "middle";
+  // Re-map any gradient fill to the text bounds (not the padded canvas) so the look
+  // is independent of the surrounding padding.
+  ctx.fillStyle = buildCanvasFill(ctx, layer, { x: epX, y: epY, w: alignWidth, h: contentHeight });
 
-  const ascent = fontSize * 0.82;
-  let x = ep;
-  for (let i = 0; i < chars.length; i++) {
-    ctx.save();
-    ctx.translate(x, ep + ascent);
-    drawCharLeft(ctx, layer, chars[i]);
-    ctx.restore();
-    x += charWidths[i] + layer.letterSpacing;
-  }
-  setCanvasOffset(canvas, ep, ep);
+  lines.forEach((line, lineIndex) => {
+    const lineLeft = epX + alignLineOffset(layer.alignment, alignWidth, line.lineWidth);
+    const centerY = epY + lineIndex * lineHeightPx + lineHeightPx / 2;
+    let x = lineLeft;
+    for (let c = 0; c < line.chars.length; c++) {
+      ctx.save();
+      ctx.translate(x, centerY);
+      drawCharAt(ctx, layer, line.chars[c], 0, 0);
+      ctx.restore();
+      x += line.widths[c] + layer.letterSpacing;
+    }
+  });
+
+  setCanvasOffset(canvas, epX, epY);
   return canvas;
+}
+
+/** Horizontal offset of a line within the text box, mirroring Konva's `align`. */
+function alignLineOffset(alignment: TextLayer["alignment"], boxWidth: number, lineWidth: number): number {
+  switch (alignment) {
+    case "center":
+      return Math.max(0, (boxWidth - lineWidth) / 2);
+    case "right":
+      return Math.max(0, boxWidth - lineWidth);
+    case "justify":
+    case "left":
+    default:
+      return 0;
+  }
 }
 
 // ─── Warp entry point ─────────────────────────────────────────────────────────
@@ -698,13 +744,15 @@ function renderTextVariant(
   hasWarp: boolean,
   flags: { skipFill?: boolean; skipStroke?: boolean }
 ): HTMLCanvasElement | null {
-  // Drop shadow on the variant to avoid double-shadow when composited back on top.
+  // Keep the shadow on the layer so the variant's text box (and offset) stays identical
+  // to the base canvas — but suppress *drawing* it via __sppSkipShadow to avoid a double
+  // shadow when the variant is composited back on top.
   const variant = {
     ...layer,
-    shadow: undefined,
+    __sppSkipShadow: true,
     __sppSkipFill: flags.skipFill === true,
     __sppSkipStroke: flags.skipStroke === true
-  } as TextLayer & { __sppSkipFill: boolean; __sppSkipStroke: boolean };
+  } as TextLayer & { __sppSkipShadow: boolean; __sppSkipFill: boolean; __sppSkipStroke: boolean };
   return hasWarp ? renderWarpedText(variant) : renderStraightText(variant);
 }
 

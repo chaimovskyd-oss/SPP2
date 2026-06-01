@@ -219,16 +219,15 @@ function pageLookPresetItem(def: SmartPresetDefinition): LibraryItem {
 /** Build the full item list available in the given context, in display order. */
 export function buildLibraryItems(context: LibraryContext): LibraryItem[] {
   const presets = listPresets();
+  const imageTools = TOOL_ORDER.map(toolItem);
+  const imagePresets = presets.filter((p) => p.imageAdjustments.length > 0).map(imagePresetItem);
+  const lookPresets = presets.filter(canApplyAsPageLook).map(pageLookPresetItem);
   if (context === "image") {
     const aiTools = AI_ORDER.map(aiItem);
-    const tools = TOOL_ORDER.map(toolItem);
-    const imagePresets = presets.filter((p) => p.imageAdjustments.length > 0).map(imagePresetItem);
-    const lookPresets = presets.filter(canApplyAsPageLook).map(pageLookPresetItem);
-    return [...aiTools, ...tools, ...imagePresets, ...lookPresets];
+    return [...aiTools, ...imageTools, ...imagePresets, ...lookPresets];
   }
   const effects = EFFECT_ORDER.map(effectItem);
-  const lookPresets = presets.filter(canApplyAsPageLook).map(pageLookPresetItem);
-  return [...effects, ...lookPresets];
+  return [...effects, ...lookPresets, ...imageTools, ...imagePresets];
 }
 
 /** Distinct display categories present in the item list, in first-seen order. */
@@ -261,6 +260,7 @@ export function recommendedItems(context: LibraryContext, items: LibraryItem[]):
       "soft_hdr",
       "hdr_pop",
       "product_punch",
+      "laser_printer_skin_fix",
       "landscape_boost",
       "gold_noir",
       "neon_duo",

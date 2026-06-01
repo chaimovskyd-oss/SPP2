@@ -1,5 +1,6 @@
 import type { FrameLayer, TextLayer } from "@/types/layers";
 import type { Page } from "@/types/document";
+import type { JsonValue } from "@/types/primitives";
 import type {
   ClassPhotoFrameStyle,
   ClassPhotoLayoutRule,
@@ -8,6 +9,34 @@ import type {
   ClassPhotoVisualBalanceSettings
 } from "@/types/classPhoto";
 import type { TextStyle } from "@/types/template";
+
+export interface ClassPhotoTextVisualStyle {
+  fontStyle?: TextLayer["fontStyle"];
+  fillOpacity?: number;
+  opacity?: number;
+  blendMode?: TextLayer["blendMode"];
+  stroke?: TextLayer["stroke"];
+  shadow?: TextLayer["shadow"];
+  gradient?: TextLayer["gradient"];
+  effects?: TextLayer["effects"];
+  textEffects?: TextLayer["textEffects"];
+  autoContrast?: TextLayer["autoContrast"];
+  autoContrastOverridden?: boolean;
+}
+
+function readTextVisualStyle(rule: ClassPhotoLayoutRule, role: "child" | "staff"): ClassPhotoTextVisualStyle | undefined {
+  const key = role === "child" ? "childNameTextVisualStyle" : "staffNameTextVisualStyle";
+  const value = rule.metadata[key];
+  return typeof value === "object" && value !== null ? value as unknown as ClassPhotoTextVisualStyle : undefined;
+}
+
+function visualStyleToMetadata(style: ClassPhotoTextVisualStyle): JsonValue {
+  return style as unknown as JsonValue;
+}
+
+export function classPhotoTextVisualStyleToMetadata(style: ClassPhotoTextVisualStyle): JsonValue {
+  return visualStyleToMetadata(style);
+}
 
 // ─── Position record ──────────────────────────────────────────────────────────
 
@@ -552,7 +581,7 @@ function makePersonFrameLayer(
       version: 1,
       offsetX: pos.record.manualImageCrop?.x ?? 0,
       offsetY: pos.record.manualImageCrop?.y ?? 0,
-      scale: 1,
+      scale: pos.record.manualImageScale ?? 1,
       rotation: pos.record.manualImageRotation ?? 0
     },
     crop: { x: 0, y: 0, width: pos.frameW, height: pos.frameH },
@@ -586,9 +615,10 @@ function makePersonNameLayer(
   textStyle: TextStyle,
   ruleId: string,
   zIndex: number,
-  existingId?: string
+  existingId?: string,
+  visualStyle?: ClassPhotoTextVisualStyle
 ): TextLayer {
-  return {
+  const base: TextLayer = {
     version: 1,
     id: existingId ?? crypto.randomUUID(),
     type: "text",
@@ -643,6 +673,7 @@ function makePersonNameLayer(
       }
     }
   };
+  return visualStyle === undefined ? base : { ...base, ...visualStyle };
 }
 
 // ─── Title/Footer text layers ─────────────────────────────────────────────────
@@ -681,8 +712,8 @@ export function makeTitleLayer(
     letterSpacing: ts.letterSpacing,
     color: ts.color,
     fillOpacity: 1,
-    alignment: "center",
-    direction: "rtl",
+    alignment: ts.alignment,
+    direction: ts.direction,
     overflowPolicy: "clip",
     anchorPoint: "top_left",
     anchorOffsetX: 0,
@@ -733,8 +764,8 @@ export function makeFooterLayer(
     letterSpacing: ts.letterSpacing,
     color: ts.color,
     fillOpacity: 1,
-    alignment: "center",
-    direction: "rtl",
+    alignment: ts.alignment,
+    direction: ts.direction,
     overflowPolicy: "clip",
     anchorPoint: "top_left",
     anchorOffsetX: 0,
@@ -801,7 +832,7 @@ export function syncClassPhotoToPage(
   for (const pos of positions.staffPositions) {
     const prevFrame = (() => { const id = existingFrameIds.get(pos.record.id); return id ? existingFrameById.get(id) : undefined; })();
     const frame = makePersonFrameLayer(pos, rule.staffFrameStyle, rule.id, zIdx++, existingFrameIds.get(pos.record.id), prevFrame);
-    const name = makePersonNameLayer(pos, rule.staffNameTextStyle, rule.id, zIdx++, existingNameIds.get(pos.record.id));
+    const name = makePersonNameLayer(pos, rule.staffNameTextStyle, rule.id, zIdx++, existingNameIds.get(pos.record.id), readTextVisualStyle(rule, "staff"));
     newLayers.push(frame, name);
     // Promote any user-edited visualEffects on the previous frame to the record
     // so subsequent regenerates can find it (record is the canonical source of truth).
@@ -823,7 +854,7 @@ export function syncClassPhotoToPage(
   for (const pos of positions.childPositions) {
     const prevChildFrame = (() => { const id = existingFrameIds.get(pos.record.id); return id ? existingFrameById.get(id) : undefined; })();
     const frame = makePersonFrameLayer(pos, rule.childFrameStyle, rule.id, zIdx++, existingFrameIds.get(pos.record.id), prevChildFrame);
-    const name = makePersonNameLayer(pos, rule.childNameTextStyle, rule.id, zIdx++, existingNameIds.get(pos.record.id));
+    const name = makePersonNameLayer(pos, rule.childNameTextStyle, rule.id, zIdx++, existingNameIds.get(pos.record.id), readTextVisualStyle(rule, "child"));
     newLayers.push(frame, name);
     const promotedOverride = pos.record.visualEffectsOverride
       ?? (prevChildFrame && !shallowEqualVisualEffects(prevChildFrame.visualEffects, buildFrameVisualEffects(rule.childFrameStyle))

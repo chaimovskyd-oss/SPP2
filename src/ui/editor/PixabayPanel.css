@@ -5,6 +5,10 @@
 .pb-panel {
   display: flex;
   flex-direction: column;
+  /* flex:1 + min-height:0 so the panel fills the space below the source tabs
+     when nested inside .emoji-panel, instead of overflowing past it */
+  flex: 1;
+  min-height: 0;
   height: 100%;
   overflow: hidden;
 }
@@ -264,17 +268,23 @@
 
 .pb-results {
   flex: 1;
+  /* min-height:0 is required so this scroll area can shrink inside the flex
+     column; without it the grid rows collapse and aspect-ratio cells overlap */
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 4px 6px;
+  padding: 8px;
   display: grid;
-  gap: 5px;
+  gap: 10px;
+  /* Each implicit row is sized to its own cell — rows can never collapse and
+     let one tile spill over the next */
+  grid-auto-rows: max-content;
   align-content: start;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
 
-/* Size variants — no overlap because cells never scale outside their grid track */
+/* Size variants — fixed column counts; each cell is an isolated square track */
 .pb-results--s { grid-template-columns: repeat(3, 1fr); }
 .pb-results--m { grid-template-columns: repeat(2, 1fr); }
 .pb-results--l { grid-template-columns: repeat(1, 1fr); }
@@ -292,19 +302,27 @@
 
 .pb-cell {
   position: relative;
-  border-radius: 6px;
+  border-radius: 8px;
   overflow: hidden;
-  aspect-ratio: 4/3;
+  /* Uniform square tile so every element gets identical, clearly-bounded space */
+  aspect-ratio: 1;
   background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  /* Checkerboard so transparent vectors/illustrations read clearly */
+  background-image:
+    linear-gradient(45deg, var(--border-soft) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--border-soft) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--border-soft) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--border-soft) 75%);
+  background-size: 14px 14px;
+  background-position: 0 0, 0 7px, 7px -7px, -7px 0;
   cursor: pointer;
   /* No scale — prevents cells spilling over neighbours */
-  transition: box-shadow var(--t), outline-color var(--t);
-  outline: 2px solid transparent;
-  outline-offset: -2px;
+  transition: box-shadow var(--t), border-color var(--t);
 }
 
 .pb-cell:hover {
-  outline-color: var(--accent);
+  border-color: var(--accent);
   box-shadow: 0 4px 16px rgba(0,0,0,0.35);
 }
 
@@ -315,7 +333,9 @@
 .pb-cell-img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  /* contain + padding shows the whole element inside its square, never cropped */
+  object-fit: contain;
+  padding: 8px;
   display: block;
   opacity: 0;
   transition: opacity 250ms ease;

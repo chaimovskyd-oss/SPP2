@@ -6,6 +6,7 @@ import {
   Plus,
   RotateCcw,
   Settings,
+  Sparkles,
   Trash2,
   Type,
   UserRound,
@@ -42,10 +43,13 @@ function detectCPTextRole(layer: VisualLayer | null, rule: ClassPhotoLayoutRule)
 interface ClassPhotoModePanelProps {
   rule: ClassPhotoLayoutRule;
   selectedLayer: VisualLayer | null;
+  smartCropProgress?: { done: number; total: number } | null;
+  onApplyFaceCrop: () => void;
+  onEqualizeFaceSize: () => void;
   onBackToWizard: () => void;
 }
 
-export function ClassPhotoModePanel({ rule, selectedLayer, onBackToWizard }: ClassPhotoModePanelProps): ReactElement {
+export function ClassPhotoModePanel({ rule, selectedLayer, smartCropProgress = null, onApplyFaceCrop, onEqualizeFaceSize, onBackToWizard }: ClassPhotoModePanelProps): ReactElement {
   const [addRole, setAddRole] = useState<"child" | "staff">("child");
   const [overflowWarning] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -124,6 +128,21 @@ export function ClassPhotoModePanel({ rule, selectedLayer, onBackToWizard }: Cla
       </button>
 
       {/* ── Add people ── */}
+      <button className="cp-panel-btn" disabled={smartCropProgress !== null} onClick={onApplyFaceCrop} type="button">
+        <Sparkles size={14} />
+        {smartCropProgress === null ? "התאם לפי פנים" : `מנתח ${smartCropProgress.done}/${smartCropProgress.total}`}
+      </button>
+      <button
+        className="cp-panel-btn"
+        disabled={smartCropProgress !== null}
+        onClick={onEqualizeFaceSize}
+        title="אם תא תמונת מחזור מסומן, שאר התאים יותאמו לגודל הפנים שלו. בלי בחירה, משתמש בממוצע."
+        type="button"
+      >
+        <Users size={14} />
+        {smartCropProgress === null ? "השווה גודל פנים" : `מנתח ${smartCropProgress.done}/${smartCropProgress.total}`}
+      </button>
+
       <div className="cp-panel-section">
         <div className="cp-section-header" onClick={() => toggleSection("add")}>
           <span><Plus size={13} /> הוספת אנשים</span>

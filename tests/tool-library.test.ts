@@ -26,15 +26,16 @@ describe("toolLibrary model", () => {
       expect(items.find((i) => i.kind === "tool")?.key).toBe("tool:basicTone");
     });
 
-    it("page context includes page effects and page-look presets but no raw tools/image presets", () => {
+    it("page context includes page effects, page-look presets, and page-wide image tools/presets", () => {
       const items = buildLibraryItems("page");
       const kinds = new Set(items.map((i) => i.kind));
       expect(kinds.has("effect")).toBe(true);
       expect(kinds.has("pageLookPreset")).toBe(true);
-      expect(kinds.has("tool")).toBe(false);
-      expect(kinds.has("imagePreset")).toBe(false);
+      expect(kinds.has("tool")).toBe(true);
+      expect(kinds.has("imagePreset")).toBe(true);
       expect(items[0]?.key).toBe("effect:colorOverlay");
       expect(items.filter((i) => i.kind === "effect")).toHaveLength(5);
+      expect(items.some((i) => i.key === "laser_printer_skin_fix")).toBe(true);
     });
 
     it("keys follow the documented scheme", () => {

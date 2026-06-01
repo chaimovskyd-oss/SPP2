@@ -30,7 +30,7 @@ import { createCollageImageAssignment, createCollageRule as collageRuleFactory }
 import { applyLayoutFamily, applyNewImagePool, mergeLiveFrameEditsIntoCollageRule, normalizeCollageColorAdjustments, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import { collageMaskSnapshotToJson, type CollageMaskSnapshot } from "@/core/collage/collageMaskShape";
 import { drainOverflow, pushOverflow, readOverflow, writeOverflow } from "@/core/reconcile";
-import { syncClassPhotoToPage } from "@/core/classPhoto/classPhotoLayoutEngine";
+import { classPhotoTextVisualStyleToMetadata, syncClassPhotoToPage, type ClassPhotoTextVisualStyle } from "@/core/classPhoto/classPhotoLayoutEngine";
 import {
   updateBlessingTextInDoc,
   applyBlessingSelectionToDoc,
@@ -43,7 +43,7 @@ import type { TextStyle } from "@/types/template";
 import { clampContentTransformToFillBounds } from "@/core/rendering/frameFitEngine";
 import type { Asset, Document, Page } from "@/types/document";
 import type { LinkedGroupPatch } from "@/core/layers/linkedGroups";
-import type { ContentTransform, FrameLayer, ImageLayer, LinkedGroup, VisualLayer } from "@/types/layers";
+import type { ContentTransform, FrameLayer, ImageLayer, LinkedGroup, TextLayer, VisualLayer } from "@/types/layers";
 import { createImageAdjustment, createPageLookLayer } from "@/types/imageAdjustments";
 import type {
   AppliedPresetInstance,
@@ -2042,30 +2042,79 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         alignment: sourceLayer.alignment,
         direction: sourceLayer.direction
       };
+      const visualPatch: ClassPhotoTextVisualStyle = {
+        fontStyle: sourceLayer.fontStyle,
+        fillOpacity: sourceLayer.fillOpacity,
+        opacity: sourceLayer.opacity,
+        blendMode: sourceLayer.blendMode,
+        stroke: sourceLayer.stroke,
+        shadow: sourceLayer.shadow,
+        gradient: sourceLayer.gradient,
+        effects: sourceLayer.effects,
+        textEffects: sourceLayer.textEffects,
+        autoContrast: sourceLayer.autoContrast,
+        autoContrastOverridden: sourceLayer.autoContrastOverridden
+      };
+      const layerPatch: Partial<TextLayer> = {
+        ...patch,
+        ...visualPatch
+      };
+      const matchesTarget = (layer: TextLayer): boolean => {
+        const nameMeta = layer.metadata["classPhotoName"] as { ruleId?: string; role?: string } | undefined;
+        if (nameMeta?.ruleId === ruleId) {
+          if (nameMeta.role === "child") return target === "child" || target === "all_names" || target === "all";
+          if (nameMeta.role === "staff") return target === "staff" || target === "all_names" || target === "all";
+        }
+        if (layer.metadata["classPhotoTitle"] !== undefined) return target === "title" || target === "all";
+        if (layer.metadata["classPhotoFooter"] !== undefined) return target === "footer" || target === "all";
+        return false;
+      };
 
       let updatedRule = rule;
       if (target === "child" || target === "all_names" || target === "all") {
-        updatedRule = { ...updatedRule, childNameTextStyle: { ...updatedRule.childNameTextStyle, ...patch } };
+        updatedRule = {
+          ...updatedRule,
+          childNameTextStyle: { ...updatedRule.childNameTextStyle, ...patch },
+          metadata: {
+            ...updatedRule.metadata,
+            childNameTextVisualStyle: classPhotoTextVisualStyleToMetadata(visualPatch)
+          }
+        };
       }
       if (target === "staff" || target === "all_names" || target === "all") {
-        updatedRule = { ...updatedRule, staffNameTextStyle: { ...updatedRule.staffNameTextStyle, ...patch } };
+        updatedRule = {
+          ...updatedRule,
+          staffNameTextStyle: { ...updatedRule.staffNameTextStyle, ...patch },
+          metadata: {
+            ...updatedRule.metadata,
+            staffNameTextVisualStyle: classPhotoTextVisualStyleToMetadata(visualPatch)
+          }
+        };
       }
       if (target === "title" || target === "all") {
-        updatedRule = { ...updatedRule, titleTextStyle: { ...updatedRule.titleTextStyle, ...patch } };
+        updatedRule = { ...updatedRule, titleTextStyle: { ...updatedRule.titleTextStyle, ...patch }, titleTextEffects: sourceLayer.effects };
       }
       if (target === "footer" || target === "all") {
-        updatedRule = { ...updatedRule, footerTextStyle: { ...updatedRule.footerTextStyle, ...patch } };
+        updatedRule = { ...updatedRule, footerTextStyle: { ...updatedRule.footerTextStyle, ...patch }, footerTextEffects: sourceLayer.effects };
       }
 
-      const { page: newPage, rule: finalRule } = syncClassPhotoToPage(page, updatedRule);
       return commitDocumentAction(
         state,
         createInlineAction(
           "ApplyClassPhotoTextStyleToGroupAction",
           (doc) => ({
             ...doc,
-            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? finalRule : r),
-            pages: doc.pages.map((p) => p.id === pageId ? newPage : p)
+            classPhotoRules: doc.classPhotoRules.map((r) => r.id === ruleId ? updatedRule : r),
+            pages: doc.pages.map((p) => p.id === pageId
+              ? {
+                  ...p,
+                  layers: p.layers.map((layer) =>
+                    layer.type === "text" && matchesTarget(layer)
+                      ? { ...layer, ...layerPatch }
+                      : layer
+                  )
+                }
+              : p)
           }),
           (doc) => ({
             ...doc,

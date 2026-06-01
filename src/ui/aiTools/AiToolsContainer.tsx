@@ -3,7 +3,7 @@ import "./aiTools.css";
 import { useAiToolsStore } from "@/state/aiToolsStore";
 import { useDocumentStore } from "@/state/documentStore";
 import { createAssetPreviews } from "@/core/assets/assetManager";
-import type { ImageLayer } from "@/types/layers";
+import type { FrameLayer, ImageLayer } from "@/types/layers";
 import type { ExpansionAmounts } from "@/services/ai/genExpandService";
 import { AILoadingOverlay } from "./AILoadingOverlay";
 import { ObjectRemovePanel } from "./ObjectRemovePanel";
@@ -13,6 +13,12 @@ import { RestorationPanel } from "./RestorationPanel";
 
 interface AiToolResultOptions {
   expansion?: ExpansionAmounts;
+}
+
+type AiEditableImageLayer = ImageLayer | FrameLayer;
+
+function layerImageAssetId(layer: AiEditableImageLayer): string | undefined {
+  return layer.type === "image" ? layer.assetId : layer.imageAssetId;
 }
 
 function loadImageSize(src: string): Promise<{ width: number; height: number }> {
@@ -47,14 +53,15 @@ export function AiToolsContainer(): ReactElement | null {
       console.warn("[AiTools] page not found:", activeTarget.pageId);
       return;
     }
-    const layer = page.layers.find((l) => l.id === activeTarget.layerId) as ImageLayer | undefined;
-    if (!layer || layer.type !== "image") {
+    const layer = page.layers.find((l) => l.id === activeTarget.layerId) as AiEditableImageLayer | undefined;
+    if (!layer || (layer.type !== "image" && layer.type !== "frame")) {
       console.warn("[AiTools] image layer not found:", activeTarget.layerId);
       return;
     }
-    const asset = document.assets.find((a) => a.id === layer.assetId);
+    const sourceAssetId = layerImageAssetId(layer);
+    const asset = document.assets.find((a) => a.id === sourceAssetId);
     if (!asset) {
-      console.warn("[AiTools] asset not found:", layer.assetId);
+      console.warn("[AiTools] asset not found:", sourceAssetId);
       return;
     }
 
@@ -125,7 +132,11 @@ export function AiToolsContainer(): ReactElement | null {
               : {
                   ...p,
                   layers: p.layers.map((l) => {
-                    if (l.id !== activeTarget.layerId || l.type !== "image") return l;
+                    if (l.id !== activeTarget.layerId) return l;
+                    if (l.type === "frame") {
+                      return { ...l, imageAssetId: newAsset.id, contentType: "image" as const };
+                    }
+                    if (l.type !== "image") return l;
                     if (activeTarget.tool !== "expand") return { ...l, assetId: newAsset.id };
 
                     const expansion = options?.expansion;

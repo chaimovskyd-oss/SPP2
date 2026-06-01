@@ -72,6 +72,7 @@ export interface ClassPhotoPersonRecord extends VersionedEntity {
   orderIndex: number;
 
   manualImageCrop?: import("./primitives").CropRect;
+  manualImageScale?: number;
   manualImageRotation?: number;
   hasManualCropOverride?: boolean;
   hasManualRotationOverride?: boolean;

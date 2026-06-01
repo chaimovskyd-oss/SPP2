@@ -151,6 +151,7 @@ import {
   type SmartTextFitMode
 } from "@/core/text/smartTextFit";
 import {
+  applyTextPresetToLayer,
   BUILTIN_TEXT_PRESETS,
   createTextPresetFromLayer,
   deleteUserTextPreset,
@@ -171,7 +172,7 @@ import { ImageEditFloatingBar } from "./ImageEditFloatingBar";
 import { CropUI } from "./CropUI";
 import { useViewportStore, type ViewportStore } from "@/state/viewportStore";
 import type { Asset, Document, Page } from "@/types/document";
-import type { AdjustmentLayer, AdjustmentOperation, BlendMode, ContentTransform, FrameLayer, GroupLayer, ImageLayer, ImageLayerEffects, TextLayer, VisualLayer } from "@/types/layers";
+import type { AdjustmentLayer, AdjustmentOperation, BlendMode, ContentTransform, FaceAnchorData, FrameLayer, GroupLayer, ImageLayer, ImageLayerEffects, TextLayer, VisualLayer } from "@/types/layers";
 import { DEFAULT_IMAGE_LAYER_EFFECTS } from "@/types/layers";
 import type { GridLayoutRule } from "@/types/grid";
 import type { MaskLayoutRule } from "@/types/mask";
@@ -248,6 +249,8 @@ import { HarmonizePanel } from "@/ui/editor/HarmonizePanel";
 import { ImageAdjustmentsPanel } from "@/ui/editor/ImageAdjustmentsPanel";
 import { AiToolsContainer } from "@/ui/aiTools/AiToolsContainer";
 import { useAiToolsStore } from "@/state/aiToolsStore";
+import { AiStyleStudioContainer } from "@/ui/aiStyles/AiStyleStudioContainer";
+import { useAiStyleStore } from "@/state/aiStyleStore";
 import { PageLookPanel } from "@/ui/editor/PageLookPanel";
 import { PageAdjustmentsSection } from "@/ui/editor/PageAdjustmentsSection";
 import { ToolLibrary } from "@/ui/editor/ToolLibrary";
@@ -266,6 +269,11 @@ import { createExportRenderOptions, getExportPixelRatio, getImportPreviewMaxSide
 import { safeFilename } from "@/core";
 import { downloadDataUrl } from "@/ui/file";
 import { syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
+import {
+  analyzeFaceSizingForFrame,
+  computeFaceCenteredTransformForFrame,
+  computeFaceSizeMatchedTransformForFrame
+} from "@/core/frameSmartCrop";
 import {
   fontFamilyExists,
   getFontFavorites,
@@ -292,6 +300,16 @@ const BLEND_MODE_OPTIONS: Array<{ value: BlendMode; label: string }> = [
   { value: "darken", label: "Darken" },
   { value: "lighten", label: "Lighten" }
 ];
+
+function layerHasEditableImage(layer: VisualLayer | null | undefined): layer is ImageLayer | FrameLayer {
+  return layer?.type === "image" || (layer?.type === "frame" && layer.imageAssetId !== undefined);
+}
+
+function medianNumber(values: number[]): number | undefined {
+  const sorted = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (sorted.length === 0) return undefined;
+  return sorted[Math.floor(sorted.length / 2)];
+}
 
 type LayerEffectsClipboard = {
   effects?: ImageLayerEffects;
@@ -561,6 +579,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
   const viewport = useViewportStore();
   const lifecycle = useProjectLifecycleStore();
   const [managedImageInspectorTab, setManagedImageInspectorTab] = useState<"image" | "mode">("image");
+  const [cellSmartCropProgress, setCellSmartCropProgress] = useState<{ done: number; total: number } | null>(null);
 
   useEffect(() => {
     setManagedImageInspectorTab("image");
@@ -2371,6 +2390,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     if (isClassPhotoMode && activeClassPhotoRule !== null && layer.type === "frame" && layer.metadata["classPhotoFrame"] !== undefined) {
       const classMeta = layer.metadata["classPhotoFrame"] as { personId?: string; ruleId?: string } | undefined;
       const nextLayer = clampFrameLayerToAssetCrop(layer, currentDocument.assets.find((item) => item.id === layer.imageAssetId));
+      const contentChanged = !sameContentTransform(nextLayer.contentTransform, selectedLayer?.type === "frame" ? selectedLayer.contentTransform : undefined);
       const editParams = frameImageEditParams(nextLayer);
       applyDocumentChange(
         "UpdateClassPhotoFrameImageToolsCommand",
@@ -2385,6 +2405,13 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                 personRecords: rule.personRecords.map((record) => record.id === classMeta?.personId
                   ? {
                       ...record,
+                      manualImageCrop: contentChanged
+                        ? { x: nextLayer.contentTransform.offsetX, y: nextLayer.contentTransform.offsetY, width: 1, height: 1 }
+                        : record.manualImageCrop,
+                      manualImageScale: contentChanged ? nextLayer.contentTransform.scale : record.manualImageScale,
+                      manualImageRotation: contentChanged ? nextLayer.contentTransform.rotation : record.manualImageRotation,
+                      hasManualCropOverride: record.hasManualCropOverride || contentChanged,
+                      hasManualRotationOverride: record.hasManualRotationOverride || (contentChanged && nextLayer.contentTransform.rotation !== 0),
                       imageEditParams: editParams,
                       visualEffectsOverride: nextLayer.visualEffects
                     }
@@ -4058,6 +4085,76 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     });
   }
 
+  function patchManagedClassPhotoTextLayer(nextLayer: TextLayer, patch: Partial<VisualLayer>): boolean {
+    if (!isClassPhotoMode || activeClassPhotoRule === null || selectedLayer?.type !== "text") return false;
+    const nameMeta = selectedLayer.metadata["classPhotoName"] as { ruleId?: string; personId?: string; role?: string } | undefined;
+    const isTitle = selectedLayer.metadata["classPhotoTitle"] !== undefined;
+    const isFooter = selectedLayer.metadata["classPhotoFooter"] !== undefined;
+    if (nameMeta?.ruleId !== activeClassPhotoRule.id && !isTitle && !isFooter) return false;
+
+    const hasPatchKey = (key: keyof TextLayer): boolean => Object.prototype.hasOwnProperty.call(patch, key);
+    const stableLayer: TextLayer = {
+      ...nextLayer,
+      x: hasPatchKey("x") ? nextLayer.x : selectedLayer.x,
+      y: hasPatchKey("y") ? nextLayer.y : selectedLayer.y,
+      width: hasPatchKey("width") ? nextLayer.width : selectedLayer.width,
+      height: hasPatchKey("height") ? nextLayer.height : selectedLayer.height
+    };
+    const stylePatch = {
+      fontFamily: stableLayer.fontFamily,
+      fontWeight: stableLayer.fontWeight,
+      fontSize: stableLayer.fontSize,
+      lineHeight: stableLayer.lineHeight,
+      letterSpacing: stableLayer.letterSpacing,
+      color: stableLayer.color,
+      alignment: stableLayer.alignment,
+      direction: stableLayer.direction
+    };
+    const textPatch = (patch as Partial<TextLayer>).text;
+
+    applyDocumentChange(
+      "UpdateClassPhotoManagedTextLayerCommand",
+      (doc) => ({
+        ...doc,
+        pages: doc.pages.map((page) => page.id === currentPage.id
+          ? { ...page, layers: page.layers.map((layer) => layer.id === stableLayer.id ? stableLayer : layer) }
+          : page),
+        classPhotoRules: doc.classPhotoRules.map((rule) => {
+          if (rule.id !== activeClassPhotoRule.id) return rule;
+          if (nameMeta?.personId !== undefined) {
+            return {
+              ...rule,
+              personRecords: rule.personRecords.map((record) =>
+                record.id === nameMeta.personId && typeof textPatch === "string"
+                  ? { ...record, displayName: stableLayer.text }
+                  : record
+              )
+            };
+          }
+          if (isTitle) {
+            return {
+              ...rule,
+              titleText: typeof textPatch === "string" ? stableLayer.text : rule.titleText,
+              titleTextStyle: { ...rule.titleTextStyle, ...stylePatch },
+              titleTextEffects: stableLayer.effects
+            };
+          }
+          if (isFooter) {
+            return {
+              ...rule,
+              footerText: typeof textPatch === "string" ? stableLayer.text : rule.footerText,
+              footerTextStyle: { ...rule.footerTextStyle, ...stylePatch },
+              footerTextEffects: stableLayer.effects
+            };
+          }
+          return rule;
+        })
+      }),
+      currentPage.id
+    );
+    return true;
+  }
+
   function patchSelectedLayer(patch: Partial<VisualLayer>): void {
     if (selectedLayer === null) return;
 
@@ -4065,6 +4162,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     if (selectedLayerIds.length <= 1) {
       const nextLayer = { ...selectedLayer, ...patch } as VisualLayer;
       if (nextLayer.type === "text") {
+        if (patchManagedClassPhotoTextLayer(nextLayer, patch)) return;
         const size = measureTextLayerSize(nextLayer);
         updateLayer(currentPage.id, { ...nextLayer, width: size.width, height: size.height });
         return;
@@ -4206,6 +4304,280 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
   function handleResetGridCrops(rule: GridLayoutRule): void {
     applyDocumentChange("ResetGridCropsCommand", (doc) => resetGridCrops(doc, rule.id), currentPage.id);
     setStatus("Grid crops reset");
+  }
+
+  async function handleApplyFaceCropToManagedCells(
+    mode: "grid" | "mask" | "photoPrint" | "classPhoto",
+    ruleId: string
+  ): Promise<void> {
+    if (cellSmartCropProgress !== null) return;
+    const sourceDoc = useDocumentStore.getState().document;
+    if (sourceDoc === null) return;
+
+    const rule = sourceDoc.classPhotoRules.find((item) => item.id === ruleId);
+    const recordById = new Map(rule?.personRecords.map((record) => [record.id, record]) ?? []);
+    const frames: Array<{ pageId: string; frame: FrameLayer; personId?: string; faceData?: FaceAnchorData }> = [];
+    for (const page of sourceDoc.pages) {
+      for (const layer of page.layers) {
+        if (layer.type !== "frame" || layer.contentType !== "image" || layer.imageAssetId === undefined) continue;
+        if (mode === "grid") {
+          const meta = layer.metadata["gridCell"] as { gridId?: string } | undefined;
+          if (meta?.gridId === ruleId) frames.push({ pageId: page.id, frame: layer });
+        } else if (mode === "mask") {
+          const meta = layer.metadata["maskFrame"] as { maskId?: string } | undefined;
+          if (meta?.maskId === ruleId) frames.push({ pageId: page.id, frame: layer });
+        } else if (mode === "photoPrint") {
+          const meta = layer.metadata["photoPrintSlot"] as { photoPrintId?: string } | undefined;
+          if (meta?.photoPrintId === ruleId) frames.push({ pageId: page.id, frame: layer });
+        } else {
+          const meta = layer.metadata["classPhotoFrame"] as { ruleId?: string; personId?: string } | undefined;
+          if (meta?.ruleId === ruleId && meta.personId !== undefined) frames.push({ pageId: page.id, frame: layer, personId: meta.personId });
+        }
+      }
+    }
+
+    if (frames.length === 0) {
+      setStatus("No images found for face alignment");
+      return;
+    }
+
+    setCellSmartCropProgress({ done: 0, total: frames.length });
+    const transformByFrameId = new Map<string, ContentTransform>();
+    const personIdByFrameId = new Map<string, string>();
+    let done = 0;
+    for (const item of frames) {
+      const latestDoc = useDocumentStore.getState().document;
+      const asset = latestDoc?.assets.find((candidate) => candidate.id === item.frame.imageAssetId);
+      if (asset !== undefined) {
+        const transform = await computeFaceCenteredTransformForFrame(asset, item.frame);
+        transformByFrameId.set(item.frame.id, transform);
+        if (item.personId !== undefined) personIdByFrameId.set(item.frame.id, item.personId);
+      }
+      done += 1;
+      setCellSmartCropProgress({ done, total: frames.length });
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    }
+
+    setCellSmartCropProgress(null);
+    if (transformByFrameId.size === 0) {
+      setStatus("Face alignment skipped");
+      return;
+    }
+
+    applyDocumentChange(
+      "ApplyFaceCropToManagedCellsCommand",
+      (doc) => ({
+        ...doc,
+        pages: doc.pages.map((page) => ({
+          ...page,
+          layers: page.layers.map((layer) =>
+            layer.type === "frame" && transformByFrameId.has(layer.id)
+              ? { ...layer, contentTransform: transformByFrameId.get(layer.id)! }
+              : layer
+          )
+        })),
+        gridImageAssignments: mode === "grid"
+          ? doc.gridImageAssignments.map((assignment) => {
+              const transform = assignment.gridId === ruleId ? transformByFrameId.get(assignment.frameId) : undefined;
+              return transform === undefined
+                ? assignment
+                : {
+                    ...assignment,
+                    manualContentTransform: transform,
+                    manualFitModeOverride: assignment.manualFitModeOverride,
+                    hasManualCropOverride: true,
+                    hasManualRotationOverride: transform.rotation !== 0,
+                    manualRotation: transform.rotation
+                  };
+            })
+          : doc.gridImageAssignments,
+        maskImageAssignments: mode === "mask"
+          ? doc.maskImageAssignments.map((assignment) => {
+              const transform = assignment.maskId === ruleId ? transformByFrameId.get(assignment.frameId) : undefined;
+              return transform === undefined
+                ? assignment
+                : {
+                    ...assignment,
+                    manualContentTransform: transform,
+                    manualFitModeOverride: assignment.manualFitModeOverride,
+                    hasManualCropOverride: true,
+                    hasManualRotationOverride: transform.rotation !== 0
+                  };
+            })
+          : doc.maskImageAssignments,
+        photoPrintImageAssignments: mode === "photoPrint"
+          ? doc.photoPrintImageAssignments.map((assignment) => {
+              const transform = assignment.photoPrintId === ruleId ? transformByFrameId.get(assignment.frameId) : undefined;
+              return transform === undefined
+                ? assignment
+                : {
+                    ...assignment,
+                    manualContentTransform: transform,
+                    manualFitModeOverride: assignment.manualFitModeOverride,
+                    hasManualCropOverride: true,
+                    hasManualRotationOverride: transform.rotation !== 0
+                  };
+            })
+          : doc.photoPrintImageAssignments,
+        classPhotoRules: mode === "classPhoto"
+          ? doc.classPhotoRules.map((rule) => rule.id === ruleId
+              ? {
+                  ...rule,
+                  personRecords: rule.personRecords.map((record) => {
+                    const frameId = record.frameLayerId;
+                    const transform = frameId !== undefined ? transformByFrameId.get(frameId) : undefined;
+                    const fallbackTransform = [...personIdByFrameId.entries()].find(([, personId]) => personId === record.id);
+                    const nextTransform = transform ?? (fallbackTransform ? transformByFrameId.get(fallbackTransform[0]) : undefined);
+                    return nextTransform === undefined
+                      ? record
+                      : {
+                          ...record,
+                          manualImageCrop: { x: nextTransform.offsetX, y: nextTransform.offsetY, width: 1, height: 1 },
+                          manualImageScale: nextTransform.scale,
+                          manualImageRotation: nextTransform.rotation,
+                          hasManualCropOverride: true,
+                          hasManualRotationOverride: nextTransform.rotation !== 0
+                        };
+                  })
+                }
+              : rule)
+          : doc.classPhotoRules
+      }),
+      currentPage.id
+    );
+    setStatus(`Face alignment applied to ${transformByFrameId.size} images`);
+  }
+
+  async function handleEqualizeClassPhotoFaceSize(ruleId: string): Promise<void> {
+    if (cellSmartCropProgress !== null) return;
+    const sourceDoc = useDocumentStore.getState().document;
+    if (sourceDoc === null) return;
+
+    const rule = sourceDoc.classPhotoRules.find((item) => item.id === ruleId);
+    const recordById = new Map(rule?.personRecords.map((record) => [record.id, record]) ?? []);
+    const frames: Array<{ pageId: string; frame: FrameLayer; personId?: string; faceData?: FaceAnchorData }> = [];
+    for (const page of sourceDoc.pages) {
+      for (const layer of page.layers) {
+        if (layer.type !== "frame" || layer.contentType !== "image" || layer.imageAssetId === undefined) continue;
+        const meta = layer.metadata["classPhotoFrame"] as { ruleId?: string; personId?: string } | undefined;
+        if (meta?.ruleId === ruleId && meta.personId !== undefined) {
+          frames.push({
+            pageId: page.id,
+            frame: layer,
+            personId: meta.personId,
+            faceData: recordById.get(meta.personId)?.faceData
+          });
+        }
+      }
+    }
+
+    if (frames.length === 0) {
+      setStatus("לא נמצאו תמונות מחזור להשוואת גודל פנים");
+      return;
+    }
+
+    const selectedClassMeta =
+      selectedLayer?.type === "frame"
+        ? (selectedLayer.metadata["classPhotoFrame"] as { ruleId?: string; personId?: string } | undefined)
+        : selectedLayer?.type === "text"
+        ? (selectedLayer.metadata["classPhotoName"] as { ruleId?: string; personId?: string } | undefined)
+        : undefined;
+    const selectedReferenceFrame =
+      selectedClassMeta?.ruleId === ruleId
+        ? frames.find((item) => item.personId === selectedClassMeta.personId)?.frame
+        : undefined;
+
+    setCellSmartCropProgress({ done: 0, total: frames.length * 2 });
+    const ratioByFrameId = new Map<string, { ratio: number; detected: boolean }>();
+    let done = 0;
+    for (const item of frames) {
+      const latestDoc = useDocumentStore.getState().document;
+      const asset = latestDoc?.assets.find((candidate) => candidate.id === item.frame.imageAssetId);
+      if (asset !== undefined) {
+        const analysis = await analyzeFaceSizingForFrame(asset, item.frame, item.faceData);
+        if (analysis !== null && Number.isFinite(analysis.faceRatio) && analysis.faceRatio > 0) {
+          ratioByFrameId.set(item.frame.id, { ratio: analysis.faceRatio, detected: analysis.hasDetectedFace });
+        }
+      }
+      done += 1;
+      setCellSmartCropProgress({ done, total: frames.length * 2 });
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    }
+
+    const selectedRatio = selectedReferenceFrame !== undefined ? ratioByFrameId.get(selectedReferenceFrame.id)?.ratio : undefined;
+    const detectedRatios = [...ratioByFrameId.values()].filter((item) => item.detected).map((item) => item.ratio);
+    const fallbackRatios = [...ratioByFrameId.values()].map((item) => item.ratio);
+    const targetFaceRatio = selectedRatio ?? medianNumber(detectedRatios.length > 0 ? detectedRatios : fallbackRatios);
+    if (targetFaceRatio === undefined) {
+      setCellSmartCropProgress(null);
+      setStatus("לא זוהו פנים להשוואת גודל");
+      return;
+    }
+
+    const transformByFrameId = new Map<string, ContentTransform>();
+    const personIdByFrameId = new Map<string, string>();
+    for (const item of frames) {
+      const latestDoc = useDocumentStore.getState().document;
+      const asset = latestDoc?.assets.find((candidate) => candidate.id === item.frame.imageAssetId);
+      if (asset !== undefined) {
+        const transform = await computeFaceSizeMatchedTransformForFrame(asset, item.frame, targetFaceRatio, item.faceData);
+        if (!sameContentTransform(transform, item.frame.contentTransform)) {
+          transformByFrameId.set(item.frame.id, transform);
+        }
+        if (item.personId !== undefined) personIdByFrameId.set(item.frame.id, item.personId);
+      }
+      done += 1;
+      setCellSmartCropProgress({ done, total: frames.length * 2 });
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    }
+
+    setCellSmartCropProgress(null);
+    if (transformByFrameId.size === 0) {
+      setStatus("לא נמצאו זיהויי פנים מהימנים להשוואת גודל");
+      return;
+    }
+
+    applyDocumentChange(
+      "EqualizeClassPhotoFaceSizeCommand",
+      (doc) => ({
+        ...doc,
+        pages: doc.pages.map((page) => ({
+          ...page,
+          layers: page.layers.map((layer) =>
+            layer.type === "frame" && transformByFrameId.has(layer.id)
+              ? { ...layer, contentTransform: transformByFrameId.get(layer.id)! }
+              : layer
+          )
+        })),
+        classPhotoRules: doc.classPhotoRules.map((rule) => rule.id === ruleId
+          ? {
+              ...rule,
+              personRecords: rule.personRecords.map((record) => {
+                const frameId = record.frameLayerId;
+                const transform = frameId !== undefined ? transformByFrameId.get(frameId) : undefined;
+                const fallbackTransform = [...personIdByFrameId.entries()].find(([, personId]) => personId === record.id);
+                const nextTransform = transform ?? (fallbackTransform ? transformByFrameId.get(fallbackTransform[0]) : undefined);
+                return nextTransform === undefined
+                  ? record
+                  : {
+                      ...record,
+                      manualImageCrop: { x: nextTransform.offsetX, y: nextTransform.offsetY, width: 1, height: 1 },
+                      manualImageScale: nextTransform.scale,
+                      manualImageRotation: nextTransform.rotation,
+                      hasManualCropOverride: true,
+                      hasManualRotationOverride: nextTransform.rotation !== 0
+                    };
+              })
+            }
+          : rule)
+      }),
+      currentPage.id
+    );
+    setStatus(
+      selectedReferenceFrame !== undefined
+        ? `גודל פנים הושווה לפי התא הנבחר (${transformByFrameId.size} תמונות)`
+        : `גודל פנים הושווה לפי ממוצע (${transformByFrameId.size} תמונות)`
+    );
   }
 
   async function handleClassPhotoAddFiles(files: FileList): Promise<void> {
@@ -4389,6 +4761,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
             onAddImages={() => imageInputRef.current?.click()}
             onAddFilenameText={() => handleAddGridFilenameText(activeGridRule)}
             onApplyFit={handleApplyGridFit}
+            onApplyFaceCrop={() => void handleApplyFaceCropToManagedCells("grid", activeGridRule.id)}
             onApplySelectedText={() => handleApplySelectedTextToGrid(activeGridRule)}
             onDeleteSelectedImage={() => handleDeleteGridImage(activeGridRule)}
             onRegenerate={handleRegenerateGrid}
@@ -4409,6 +4782,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
             onAddImages={() => imageInputRef.current?.click()}
             onAddFilenameText={() => handleAddMaskFilenameText(activeMaskRule)}
             onApplyFit={handleApplyMaskFit}
+            onApplyFaceCrop={() => void handleApplyFaceCropToManagedCells("mask", activeMaskRule.id)}
             onApplySelectedText={() => handleApplySelectedTextToMask(activeMaskRule)}
             onDeleteSelectedImage={() => handleDeleteMaskImage(activeMaskRule)}
             onRegenerate={handleRegenerateMask}
@@ -4425,6 +4799,8 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
           <PhotoPrintModePanel
             rule={activePhotoPrintRule}
             document={currentDocument}
+            smartCropProgress={cellSmartCropProgress}
+            onApplyFaceCrop={() => void handleApplyFaceCropToManagedCells("photoPrint", activePhotoPrintRule.id)}
             onRegenerate={(patch) => {
               clearSelection();
               const updated = regeneratePhotoPrint(currentDocument, activePhotoPrintRule.id, patch);
@@ -4441,6 +4817,9 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
           <ClassPhotoModePanel
             rule={activeClassPhotoRule}
             selectedLayer={selectedLayer}
+            smartCropProgress={cellSmartCropProgress}
+            onApplyFaceCrop={() => void handleApplyFaceCropToManagedCells("classPhoto", activeClassPhotoRule.id)}
+            onEqualizeFaceSize={() => void handleEqualizeClassPhotoFaceSize(activeClassPhotoRule.id)}
             onBackToWizard={() => onOpenClassPhotoWizard?.()}
           />
         </div>
@@ -4861,8 +5240,14 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
         onToggleGrid={viewport.toggleGrid}
         onToggleSnap={viewport.toggleSnap}
         onOpenAiTool={(tool) => {
-          if (selectedLayer?.type === "image") {
+          if (layerHasEditableImage(selectedLayer)) {
             useAiToolsStore.getState().openTool({ tool, layerId: selectedLayer.id, pageId: currentPage.id });
+            exitImageEditMode();
+          }
+        }}
+        onOpenAiStyles={() => {
+          if (layerHasEditableImage(selectedLayer)) {
+            useAiStyleStore.getState().open({ layerId: selectedLayer.id, pageId: currentPage.id });
             exitImageEditMode();
           }
         }}
@@ -5435,6 +5820,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                 onAddImages={() => imageInputRef.current?.click()}
                 onAddFilenameText={() => handleAddGridFilenameText(activeGridRule)}
                 onApplyFit={handleApplyGridFit}
+                onApplyFaceCrop={() => void handleApplyFaceCropToManagedCells("grid", activeGridRule.id)}
                 onApplySelectedText={() => handleApplySelectedTextToGrid(activeGridRule)}
                 onDeleteSelectedImage={() => handleDeleteGridImage(activeGridRule)}
                 onRegenerate={handleRegenerateGrid}
@@ -5453,6 +5839,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                 onAddImages={() => imageInputRef.current?.click()}
                 onAddFilenameText={() => handleAddMaskFilenameText(activeMaskRule)}
                 onApplyFit={handleApplyMaskFit}
+                onApplyFaceCrop={() => void handleApplyFaceCropToManagedCells("mask", activeMaskRule.id)}
                 onApplySelectedText={() => handleApplySelectedTextToMask(activeMaskRule)}
                 onDeleteSelectedImage={() => handleDeleteMaskImage(activeMaskRule)}
                 onRegenerate={handleRegenerateMask}
@@ -5467,6 +5854,8 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
               <PhotoPrintModePanel
                 rule={activePhotoPrintRule}
                 document={currentDocument}
+                smartCropProgress={cellSmartCropProgress}
+                onApplyFaceCrop={() => void handleApplyFaceCropToManagedCells("photoPrint", activePhotoPrintRule.id)}
                 onRegenerate={(patch) => {
                   // regeneratePhotoPrint rebuilds the document with brand-new
                   // page + frame IDs. Any selection from the previous layout
@@ -5487,6 +5876,9 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
               <ClassPhotoModePanel
                 rule={activeClassPhotoRule}
                 selectedLayer={selectedLayer}
+                smartCropProgress={cellSmartCropProgress}
+                onApplyFaceCrop={() => void handleApplyFaceCropToManagedCells("classPhoto", activeClassPhotoRule.id)}
+                onEqualizeFaceSize={() => void handleEqualizeClassPhotoFaceSize(activeClassPhotoRule.id)}
                 onBackToWizard={() => onOpenClassPhotoWizard?.()}
               />
             </div>
@@ -5602,6 +5994,12 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                     modePanel={modeSpecificPanel}
                     onBatchFieldChange={(field) => handleBatchFieldChange(selectedLayer.id, field)}
                     onDelete={handleDeleteSelected}
+                    onOpenAiTool={(tool) => {
+                      useAiToolsStore.getState().openTool({ tool, layerId: selectedLayer.id, pageId: currentPage.id });
+                    }}
+                    onOpenAiStyles={() => {
+                      useAiStyleStore.getState().open({ layerId: selectedLayer.id, pageId: currentPage.id });
+                    }}
                     onPatch={patchSelectedLayer}
                     onTabChange={setManagedImageInspectorTab}
                     onUpdateAsset={updateAsset}
@@ -5614,8 +6012,11 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                     onBatchFieldChange={(selectedLayer.type === "frame" || selectedLayer.type === "image") ? (field) => handleBatchFieldChange(selectedLayer.id, field) : undefined}
                     onConvertAlphaToFrame={selectedLayer.type === "image" ? handleConvertAlphaToFrameMask : undefined}
                     onDelete={handleDeleteSelected}
-                    onOpenAiTool={selectedLayer.type === "image" ? (tool) => {
+                    onOpenAiTool={layerHasEditableImage(selectedLayer) ? (tool) => {
                       useAiToolsStore.getState().openTool({ tool, layerId: selectedLayer.id, pageId: currentPage.id });
+                    } : undefined}
+                    onOpenAiStyles={layerHasEditableImage(selectedLayer) ? () => {
+                      useAiStyleStore.getState().open({ layerId: selectedLayer.id, pageId: currentPage.id });
                     } : undefined}
                     onPatch={patchSelectedLayer}
                     onUpdateAsset={updateAsset}
@@ -5788,6 +6189,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
       })()}
 
       <AiToolsContainer />
+      <AiStyleStudioContainer />
 
     </main>
   );
@@ -6068,7 +6470,8 @@ function ContextToolbar({
   onSmartTextFit,
   onToggleGrid,
   onToggleSnap,
-  onOpenAiTool
+  onOpenAiTool,
+  onOpenAiStyles
 }: {
   canvasWidth: number;
   canvasHeight: number;
@@ -6108,6 +6511,7 @@ function ContextToolbar({
   onToggleGrid: () => void;
   onToggleSnap: () => void;
   onOpenAiTool?: (tool: import("@/state/aiToolsStore").AiTool) => void;
+  onOpenAiStyles?: () => void;
 }): ReactElement {
   if (imageEditMode && (selectedLayer?.type === "image" || selectedLayer?.type === "frame")) {
     return (
@@ -6122,6 +6526,7 @@ function ContextToolbar({
         onResetCrop={onImageEditResetCrop}
         onResetMask={onImageEditResetMask}
         onOpenAiTool={onOpenAiTool}
+        onOpenAiStyles={onOpenAiStyles}
       />
     );
   }
@@ -6341,7 +6746,9 @@ function TextContextToolbar({
   }
 
   function saveToolbarPreset(): void {
-    const preset = createTextPresetFromLayer(layer, layer.name || "Custom text preset");
+    const name = window.prompt("שם הפריסט", layer.name || "פריסט מותאם")?.trim();
+    if (!name) return;
+    const preset = createTextPresetFromLayer(layer, name);
     setUserPresets(saveUserTextPreset(preset));
     onNotify(`הפריסט "${preset.name}" נשמר`);
   }
@@ -6424,7 +6831,7 @@ function TextContextToolbar({
         <div className="context-preset-grid">
           {allPresets.map((preset) => (
             <button className="context-preset-chip" key={preset.presetId} onClick={() => applyPresetWithFontFallback(preset)} type="button">
-              <span style={presetPreviewStyle(preset)}>{layer.text.trim().slice(0, 2) || "טק"}</span>
+              <PresetThumb height={68} layer={layer} preset={preset} sample={presetSampleText(layer)} width={68} />
               <strong>{preset.name}</strong>{!preset.isBuiltin ? <em onClick={(event) => { event.stopPropagation(); removeToolbarPreset(preset); }}>Delete</em> : null}
             </button>
           ))}
@@ -7941,7 +8348,7 @@ function SmartTipsPanel({
   const [selectedCategory, setSelectedCategory] = useState(TIP_CATEGORIES[0] ?? "Light");
   const [selectedTipId, setSelectedTipId] = useState<string | null>(null);
 
-  const imageLayer = layer.type === "image" ? layer : null;
+  const imageLayer = layerHasEditableImage(layer) ? layer : null;
 
   const tipsInCategory = PHOTO_TIPS.filter((t) => t.category === selectedCategory);
   const tip = PHOTO_TIPS.find((t) => t.id === selectedTipId) ?? tipsInCategory[0] ?? null;
@@ -8086,13 +8493,16 @@ function SmartTipsPanel({
 
 function ImageAiToolsPanel({
   layer,
-  onOpenAiTool
+  onOpenAiTool,
+  onOpenAiStyles
 }: {
   layer: VisualLayer;
   onOpenAiTool?: (tool: import("@/state/aiToolsStore").AiTool) => void;
+  onOpenAiStyles?: () => void;
 }): ReactElement {
-  const isImageLayer = layer.type === "image";
-  const disabled = !isImageLayer || onOpenAiTool === undefined;
+  const hasEditableImage = layerHasEditableImage(layer);
+  const aiToolDisabled = !hasEditableImage || onOpenAiTool === undefined;
+  const aiStylesDisabled = !hasEditableImage || onOpenAiStyles === undefined;
   const tools: Array<{
     tool: import("@/state/aiToolsStore").AiTool;
     title: string;
@@ -8128,10 +8538,22 @@ function ImageAiToolsPanel({
   return (
     <div className="image-ai-tools-panel">
       <div className="image-ai-tool-grid">
+        <button
+            className="image-ai-tool-btn"
+            disabled={aiStylesDisabled}
+            type="button"
+            onClick={() => onOpenAiStyles?.()}
+          >
+            <Sparkles size={15} />
+            <span>
+              <strong>ספריית אפקטים AI</strong>
+              <small>ספריית פריסטים מסחריים, מקומי עכשיו ו-cloud בהמשך.</small>
+            </span>
+          </button>
         {tools.map(({ tool, title, description, icon: Icon }) => (
           <button
             className="image-ai-tool-btn"
-            disabled={disabled}
+            disabled={aiToolDisabled}
             key={tool}
             type="button"
             onClick={() => onOpenAiTool?.(tool)}
@@ -8145,7 +8567,7 @@ function ImageAiToolsPanel({
         ))}
       </div>
 
-      {!isImageLayer && (
+      {!hasEditableImage && (
         <p className="tip-no-image">
           כלי AI זמינים כרגע לשכבות תמונה חופשיות. למסגרות, בחר את התמונה עצמה או פתח עריכה פנימית.
         </p>
@@ -8424,6 +8846,8 @@ function ManagedImageFrameInspector({
   modePanel,
   onBatchFieldChange,
   onDelete,
+  onOpenAiTool,
+  onOpenAiStyles,
   onPatch,
   onTabChange,
   onUpdateAsset
@@ -8435,6 +8859,8 @@ function ManagedImageFrameInspector({
   modePanel: ReactNode;
   onBatchFieldChange?: (field: BatchVariableField | null) => void;
   onDelete: () => void;
+  onOpenAiTool?: (tool: import("@/state/aiToolsStore").AiTool) => void;
+  onOpenAiStyles?: () => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
   onTabChange: (tab: "image" | "mode") => void;
   onUpdateAsset: (asset: Asset) => void;
@@ -8457,6 +8883,8 @@ function ManagedImageFrameInspector({
           batchField={batchField}
           onBatchFieldChange={onBatchFieldChange}
           onDelete={onDelete}
+          onOpenAiTool={onOpenAiTool}
+          onOpenAiStyles={onOpenAiStyles}
           onPatch={onPatch}
           onUpdateAsset={onUpdateAsset}
         />
@@ -8477,6 +8905,7 @@ function ImageStudio({
   onConvertAlphaToFrame,
   onDelete,
   onOpenAiTool,
+  onOpenAiStyles,
   onPatch,
   onUpdateAsset,
 }: {
@@ -8487,6 +8916,7 @@ function ImageStudio({
   onConvertAlphaToFrame?: () => void;
   onDelete: () => void;
   onOpenAiTool?: (tool: import("@/state/aiToolsStore").AiTool) => void;
+  onOpenAiStyles?: () => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
   onUpdateAsset: (asset: Asset) => void;
 }): ReactElement {
@@ -8620,7 +9050,7 @@ function ImageStudio({
 
       {studioTab === "tips" && <SmartTipsPanel layer={layer} onPatch={onPatch} />}
 
-      {studioTab === "ai" && <ImageAiToolsPanel layer={layer} onOpenAiTool={onOpenAiTool} />}
+      {studioTab === "ai" && <ImageAiToolsPanel layer={layer} onOpenAiTool={onOpenAiTool} onOpenAiStyles={onOpenAiStyles} />}
 
       {studioTab === "quick" && (
         <>
@@ -8682,7 +9112,7 @@ function ImageStudio({
             ))}
           </AccordionSection>
 
-          {layer.type === "image" && (
+          {layerHasEditableImage(layer) && (
             <AccordionSection title="התאמות תמונה (חכם)" defaultOpen={false}>
               <ImageAdjustmentsPanel layer={layer} />
             </AccordionSection>
@@ -9053,6 +9483,7 @@ function GridModePanel({
   onAddFilenameText,
   onAddImages,
   onApplyFit,
+  onApplyFaceCrop,
   onApplySelectedText,
   onDeleteSelectedImage,
   onRegenerate,
@@ -9064,6 +9495,7 @@ function GridModePanel({
   onAddFilenameText: () => void;
   onAddImages: () => void;
   onApplyFit: (rule: GridLayoutRule, fitMode: GridLayoutRule["fitMode"]) => void;
+  onApplyFaceCrop: () => void;
   onApplySelectedText: () => void;
   onDeleteSelectedImage: () => void;
   onRegenerate: (rule: GridLayoutRule, patch: Partial<GridLayoutRule>) => void;
@@ -9102,6 +9534,10 @@ function GridModePanel({
         <NumberField label="ריווח X" min={0} max={400} value={Math.round(spacingX)} onChange={setSpacingX} />
         <NumberField label="ריווח Y" min={0} max={400} value={Math.round(spacingY)} onChange={setSpacingY} />
       </div>
+      <button className="btn btn-ghost wide" onClick={onApplyFaceCrop} type="button">
+        <Sparkles size={14} />
+        התאמה לפי פנים
+      </button>
       <button className="mini-action success" onClick={() => onRegenerate(rule, { rows, columns, spacingX, spacingY })} type="button">
         בניית גריד מחדש
       </button>
@@ -9151,6 +9587,7 @@ function MaskModePanel({
   onAddFilenameText,
   onAddImages,
   onApplyFit,
+  onApplyFaceCrop,
   onApplySelectedText,
   onDeleteSelectedImage,
   onRegenerate,
@@ -9164,6 +9601,7 @@ function MaskModePanel({
   onAddFilenameText: () => void;
   onAddImages: () => void;
   onApplyFit: (rule: MaskLayoutRule, fitMode: MaskLayoutRule["fitMode"]) => void;
+  onApplyFaceCrop: () => void;
   onApplySelectedText: () => void;
   onDeleteSelectedImage: () => void;
   onRegenerate: (rule: MaskLayoutRule, patch: Partial<MaskLayoutRule>) => void;
@@ -9368,6 +9806,10 @@ function MaskModePanel({
           </div>
         </div>
       </div>
+      <button className="btn btn-ghost wide" onClick={onApplyFaceCrop} type="button">
+        <Sparkles size={14} />
+        התאמה לפי פנים
+      </button>
       <button className="mini-action success" onClick={commitAndRegenerate} type="button">
         בנה מחדש
       </button>
@@ -11288,7 +11730,7 @@ function TextControls({
             {allPresets.map((preset) => (
               <div className="preset-chip-wrap" key={preset.presetId}>
                 <button className="preset-chip" onClick={() => applyPresetWithFontFallback(preset)} type="button">
-                  <span style={presetPreviewStyle(preset)}>{layer.text.trim().slice(0, 2) || "טק"}</span>
+                  <PresetThumb height={44} layer={layer} preset={preset} sample={presetSampleText(layer)} width={240} />
                   <strong>{preset.name}</strong>
                 </button>
                 {!preset.isBuiltin ? (
@@ -11307,33 +11749,58 @@ function TextControls({
   );
 }
 
-function presetPreviewStyle(preset: TextPreset): CSSProperties {
-  const glow = preset.effects.find((effect) => effect.effectType === "outer_glow");
-  const sparkle = preset.effects.some((effect) => effect.effectType === "sparkle");
-  const gradient = preset.style.gradient;
-  const gradientCss = gradient === undefined
-    ? undefined
-    : gradient.type === "radial"
-    ? `radial-gradient(circle, ${gradient.stops.map((stop) => `${stop.color} ${Math.round(stop.offset * 100)}%`).join(", ")})`
-    : `linear-gradient(${gradient.angle ?? 0}deg, ${gradient.stops.map((stop) => `${stop.color} ${Math.round(stop.offset * 100)}%`).join(", ")})`;
-  const glowParams = glow?.params as Record<string, unknown> | undefined;
-  const glowShadow = glowParams === undefined
-    ? undefined
-    : `0 0 ${Number(glowParams["blur"] ?? 18)}px ${String(glowParams["outerColor"] ?? glowParams["color"] ?? "#ffffff")}`;
-  return {
-    color: preset.style.color ?? "#ffffff",
-    fontFamily: preset.style.fontFamily,
-    background: gradientCss,
-    backgroundClip: gradientCss === undefined ? undefined : "text",
-    WebkitBackgroundClip: gradientCss === undefined ? undefined : "text",
-    WebkitTextFillColor: gradientCss === undefined ? undefined : "transparent",
-    textShadow:
-      [preset.style.shadow === undefined ? undefined : `${preset.style.shadow.offsetX}px ${preset.style.shadow.offsetY}px ${preset.style.shadow.blur}px ${preset.style.shadow.color}`, glowShadow, sparkle ? "0 0 3px #fff" : undefined]
-        .filter(Boolean)
-        .join(", ") || undefined,
-    WebkitTextStroke:
-      preset.style.stroke === undefined ? undefined : `${preset.style.stroke.width}px ${preset.style.stroke.color}`
-  };
+/**
+ * Renders an accurate preset preview by applying the preset to the current text
+ * layer and rasterising it through the SAME engine the canvas uses
+ * (renderTextToAlphaCanvas). This makes the thumbnail match how the text will
+ * actually look — gradients, stroke, 3D, bevel, sparkle, pattern and all — instead
+ * of the old CSS approximation that ignored most effects.
+ */
+function PresetThumb({
+  layer,
+  preset,
+  sample,
+  width,
+  height
+}: {
+  layer: Extract<VisualLayer, { type: "text" }>;
+  preset: TextPreset;
+  sample: string;
+  width: number;
+  height: number;
+}): ReactElement {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (el === null) return;
+    const ctx = el.getContext("2d");
+    if (ctx === null) return;
+    ctx.clearRect(0, 0, width, height);
+    const applied = applyTextPresetToLayer(layer, preset);
+    const previewLayer = {
+      ...applied,
+      text: sample,
+      fontSize: 44,
+      x: 0,
+      y: 0,
+      rotation: 0,
+      // Preview the preset's look, not the layer's current warp.
+      warpSettings: { ...applied.warpSettings, enabled: false, type: "none" as const }
+    };
+    const rendered = renderTextToAlphaCanvas(previewLayer);
+    if (rendered === null || rendered.width === 0 || rendered.height === 0) return;
+    const scale = Math.min(width / rendered.width, height / rendered.height);
+    const dw = rendered.width * scale;
+    const dh = rendered.height * scale;
+    ctx.drawImage(rendered, (width - dw) / 2, (height - dh) / 2, dw, dh);
+  }, [layer, preset, sample, width, height]);
+  return <canvas className="preset-thumb" height={height} ref={canvasRef} width={width} />;
+}
+
+/** Short sample text for preset previews — the user's own text when available. */
+function presetSampleText(layer: Extract<VisualLayer, { type: "text" }>): string {
+  const firstLine = layer.text.split(/\r?\n/)[0]?.trim() ?? "";
+  return firstLine.slice(0, 10) || "אבג";
 }
 
 function Metric({ label, value }: { label: string; value: number }): ReactElement {

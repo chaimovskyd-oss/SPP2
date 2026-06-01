@@ -1,5 +1,5 @@
 import { useState, type ReactElement } from "react";
-import { Crop, Frame, Layers, Ruler } from "lucide-react";
+import { Crop, Frame, Layers, Ruler, Sparkles } from "lucide-react";
 import { mmToPx } from "@/core/units/conversion";
 import type { Document } from "@/types/document";
 import type { PhotoPrintRule } from "@/types/photoPrint";
@@ -10,12 +10,14 @@ import { isPassportPrintPreset } from "@/core/passport/passportRequirements";
 interface PhotoPrintModePanelProps {
   rule: PhotoPrintRule;
   document: Document;
+  smartCropProgress?: { done: number; total: number } | null;
+  onApplyFaceCrop: () => void;
   onRegenerate: (patch: Partial<PhotoPrintRule>) => void;
 }
 
 type PanelTab = "size" | "frame" | "margins" | "layout";
 
-export function PhotoPrintModePanel({ rule, document, onRegenerate }: PhotoPrintModePanelProps): ReactElement {
+export function PhotoPrintModePanel({ rule, document, smartCropProgress = null, onApplyFaceCrop, onRegenerate }: PhotoPrintModePanelProps): ReactElement {
   const [tab, setTab] = useState<PanelTab>("size");
 
   const dpi = (rule.metadata["dpi"] as number | undefined) ?? 300;
@@ -44,6 +46,10 @@ export function PhotoPrintModePanel({ rule, document, onRegenerate }: PhotoPrint
 
       <div className="pp-panel-body">
         <PassportCheckPanel document={document} rule={rule} />
+        <button className="pp-panel-action" disabled={smartCropProgress !== null} onClick={onApplyFaceCrop} type="button">
+          <Sparkles size={14} />
+          {smartCropProgress === null ? "התאם לפי פנים" : `מנתח ${smartCropProgress.done}/${smartCropProgress.total}`}
+        </button>
         {tab === "size" && <SizeTab rule={rule} dpi={dpi} onPatch={patchAndRegenerate} />}
         {tab === "frame" && <FrameTab rule={rule} onPatch={patchAndRegenerate} />}
         {tab === "margins" && <MarginsTab rule={rule} onPatch={patchAndRegenerate} />}

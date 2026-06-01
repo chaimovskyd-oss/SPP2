@@ -3,8 +3,7 @@
  * Called after wizard completion and after any layout reflow.
  */
 import { createId } from "@/core/ids";
-import { clampContentTransformToFillBounds } from "@/core/rendering/frameFitEngine";
-import { detectFocalPoint, focalPointToContentTransform } from "./collageFaceDetect";
+import { computeFaceCenteredTransformForFrame } from "@/core/frameSmartCrop";
 import type { Document, Page } from "@/types/document";
 import type { Asset } from "@/types/document";
 import type { FrameLayer } from "@/types/layers";
@@ -136,44 +135,12 @@ export async function applySmartCropToAssignment(
   frameW: number,
   frameH: number
 ): Promise<ContentTransform> {
-  if (!asset.previewPath && !asset.originalPath) {
-    return assignment.contentTransform;
-  }
-  const src = asset.previewPath ?? asset.originalPath ?? "";
-  try {
-    const img = await loadImage(src);
-    const focal = await detectFocalPoint(img, src);
-    const { offsetX, offsetY, scale } = focalPointToContentTransform(
-      focal, img.naturalWidth, img.naturalHeight, frameW, frameH
-    );
-    const nextTransform: ContentTransform = {
-      version: 1,
-      offsetX,
-      offsetY,
-      scale,
-      rotation: assignment.contentTransform.rotation ?? 0
-    };
-    return clampContentTransformToFillBounds(
-      nextTransform,
-      frameW,
-      frameH,
-      img.naturalWidth,
-      img.naturalHeight,
-      assignment.fitMode,
-      0
-    );
-  } catch {
-    return assignment.contentTransform;
-  }
-}
-
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
+  return computeFaceCenteredTransformForFrame(asset, {
+    width: frameW,
+    height: frameH,
+    fitMode: assignment.fitMode,
+    padding: 0,
+    contentTransform: assignment.contentTransform
   });
 }
 

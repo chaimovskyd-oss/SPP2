@@ -10,6 +10,55 @@ import type {
 const PIXABAY_API_BASE = "https://pixabay.com/api/";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours — required by Pixabay ToS
 const CACHE_PREFIX = "spp2_pbcache_";
+const TRANSLATE_CACHE_PREFIX = "spp2_pbtrans_";
+
+// ─── Hebrew → English translation ─────────────────────────────────────────────
+// Pixabay only indexes Latin-script terms, so a Hebrew query returns nothing.
+// We detect Hebrew and translate it to English behind the scenes before searching.
+
+const HEBREW_RANGE = /[֐-׿יִ-ﭏ]/;
+
+/** True when the string contains any Hebrew letters. */
+export function hasHebrew(text: string): boolean {
+  return HEBREW_RANGE.test(text);
+}
+
+/**
+ * Translate a Hebrew query to English for Pixabay search.
+ * Non-Hebrew input is returned unchanged (no network call). Results are cached
+ * in localStorage, and any failure falls back to the original text so search
+ * still runs.
+ */
+export async function translateToEnglish(text: string): Promise<string> {
+  const trimmed = text.trim();
+  if (!trimmed || !hasHebrew(trimmed)) return trimmed;
+
+  const cacheKey =
+    TRANSLATE_CACHE_PREFIX + btoa(unescape(encodeURIComponent(trimmed.toLowerCase())));
+
+  try {
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) return cached;
+  } catch { /* ignore unavailable storage */ }
+
+  try {
+    const url =
+      "https://api.mymemory.translated.net/get?langpair=he|en&q=" +
+      encodeURIComponent(trimmed);
+    const res = await fetch(url);
+    if (res.ok) {
+      const json = (await res.json()) as { responseData?: { translatedText?: string } };
+      const translated = json?.responseData?.translatedText?.trim();
+      // Reject empty / still-Hebrew / error sentinels and keep the original then.
+      if (translated && !hasHebrew(translated)) {
+        try { localStorage.setItem(cacheKey, translated); } catch { /* ignore */ }
+        return translated;
+      }
+    }
+  } catch { /* network/parse failure — fall through to original */ }
+
+  return trimmed;
+}
 
 // ─── Normalisation ────────────────────────────────────────────────────────────
 
@@ -79,13 +128,17 @@ export async function searchPixabay(
 ): Promise<PixabaySearchResult> {
   if (!apiKey) throw new Error("NO_API_KEY");
 
-  const cacheKey = buildCacheKey(params);
+  // Translate Hebrew queries to English so Pixabay returns results.
+  const q = await translateToEnglish(params.q ?? "");
+  const effectiveParams: PixabaySearchParams = { ...params, q };
+
+  const cacheKey = buildCacheKey(effectiveParams);
   const cached = getCachedSearch(cacheKey);
   if (cached) return cached;
 
   const url = new URL(PIXABAY_API_BASE);
   url.searchParams.set("key", apiKey);
-  url.searchParams.set("q", params.q ?? "");
+  url.searchParams.set("q", q);
   url.searchParams.set("image_type", params.image_type ?? "all");
   url.searchParams.set("orientation", params.orientation ?? "all");
   url.searchParams.set("safesearch", String(params.safesearch ?? true));

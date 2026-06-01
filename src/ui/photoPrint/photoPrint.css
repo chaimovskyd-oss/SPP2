@@ -127,6 +127,24 @@
 .pp-panel-tab:hover { color: var(--text-primary); }
 .pp-panel-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 .pp-panel-body { padding: 0 2px; }
+.pp-panel-action {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.pp-panel-action:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
 .pp-panel-section { display: flex; flex-direction: column; gap: 8px; }
 .pp-panel-label {
   font-size: 11px; font-weight: 600;

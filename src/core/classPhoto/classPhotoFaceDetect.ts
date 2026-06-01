@@ -46,6 +46,46 @@ async function detectFaceWithMediaPipe(img: HTMLImageElement): Promise<FaceAncho
   }
 }
 
+async function detectFaceWithSidecar(imageUrl: string, img: HTMLImageElement): Promise<FaceAnchorData | null> {
+  const spp = (typeof window !== "undefined"
+    ? (window as unknown as { spp?: SppFaceBridge }).spp
+    : undefined);
+  if (!spp?.smartSelection?.detectFaces || !spp.smartSelection.loadImage) return null;
+
+  try {
+    const imagePath = await resolveImagePathForSidecar(imageUrl, spp);
+    if (imagePath === null) return null;
+
+    const imageId = `class-face-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const loaded = await spp.smartSelection.loadImage(imageId, imagePath, imageId);
+    if (!loaded?.ok) return null;
+
+    try {
+      const result = await spp.smartSelection.detectFaces(imageId);
+      if (!result?.ok || !Array.isArray(result.faces) || result.faces.length === 0) return null;
+      const best = result.faces.reduce((a, b) =>
+        a.width * a.height >= b.width * b.height ? a : b
+      );
+      const w = result.width || img.naturalWidth || 1;
+      const h = result.height || img.naturalHeight || 1;
+      return {
+        version: 1,
+        faceBox: {
+          x: best.x / w,
+          y: best.y / h,
+          width: best.width / w,
+          height: best.height / h
+        },
+        confidence: best.score ?? 0.8
+      };
+    } finally {
+      spp.smartSelection.unloadImage?.(imageId).catch(() => undefined);
+    }
+  } catch {
+    return null;
+  }
+}
+
 function portraitHeuristicFaceBox(img: HTMLImageElement): FaceAnchorData {
   // Portrait heuristic: face is typically in upper 35% center of image
   const faceBox = {
@@ -70,6 +110,8 @@ function loadImageElement(url: string): Promise<HTMLImageElement> {
 export async function detectFaceForAsset(imageUrl: string): Promise<FaceAnchorData | null> {
   try {
     const img = await loadImageElement(imageUrl);
+    const sidecar = await detectFaceWithSidecar(imageUrl, img);
+    if (sidecar) return sidecar;
     const result = await detectFaceWithMediaPipe(img);
     if (result) return result;
     // Fallback: portrait heuristic
@@ -77,6 +119,33 @@ export async function detectFaceForAsset(imageUrl: string): Promise<FaceAnchorDa
   } catch {
     return null;
   }
+}
+
+async function resolveImagePathForSidecar(src: string, spp: SppFaceBridge): Promise<string | null> {
+  if (src.startsWith("file://")) return decodeURIComponent(src.replace(/^file:\/\//, ""));
+  if (/^[a-zA-Z]:[\\/]/.test(src) || src.startsWith("/")) return src;
+  if (src.startsWith("data:")) {
+    if (!spp.writeTempImage) return null;
+    const match = /^data:image\/(png|jpeg|jpg|webp|bmp);/i.exec(src);
+    const ext = match ? match[1].toLowerCase().replace("jpeg", "jpg") : "png";
+    return spp.writeTempImage(src, ext);
+  }
+  return null;
+}
+
+interface SppFaceBridge {
+  writeTempImage?: (dataUrl: string, ext: string) => Promise<string>;
+  smartSelection?: {
+    loadImage: (imageId: string, path: string, sourceHash: string) => Promise<{ ok?: boolean }>;
+    unloadImage?: (imageId: string) => Promise<{ ok: boolean }>;
+    detectFaces: (imageId: string) => Promise<{
+      ok: boolean;
+      width: number;
+      height: number;
+      backend: string;
+      faces: { x: number; y: number; width: number; height: number; score: number }[];
+    }>;
+  };
 }
 
 export interface FaceDetectProgress {

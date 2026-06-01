@@ -147,7 +147,7 @@ export function ToolLibrary({
 
   const selected = selectedKey === null ? null : items.find((i) => i.key === selectedKey) ?? null;
   const selectedIsPreset = selected !== null && (selected.kind === "imagePreset" || selected.kind === "pageLookPreset");
-  const isTool = context === "image" && selected !== null && selected.kind === "tool";
+  const isTool = selected !== null && selected.kind === "tool";
   const isAiTool = selected !== null && selected.kind === "aiTool";
   const defaultPct =
     selected !== null && selected.presetId !== undefined
@@ -166,12 +166,11 @@ export function ToolLibrary({
   const [aiHasFace, setAiHasFace] = useState(false);
 
   const effectivePct = strengthPct ?? defaultPct;
-  const isImagePreset = context === "image" && selected !== null && selected.kind === "imagePreset";
-  const canApplyToAll = isImagePreset && previewSrc !== undefined;
-  const canDuplicate = isImagePreset && previewSrc !== undefined;
+  const isImagePreset = selected !== null && selected.kind === "imagePreset";
+  const canApplyToAll = isImagePreset;
+  const canDuplicate = context === "image" && isImagePreset && previewSrc !== undefined;
   // Tools and AI tools can also be applied to every image on the page.
-  const toolCanApplyToAll = (isTool || isAiTool) && previewSrc !== undefined;
-  const applyToAll = applyMode === "all";
+  const toolCanApplyToAll = isTool || (isAiTool && previewSrc !== undefined);
   const duplicate = applyMode === "duplicate";
   // Fine-tune offsets become extra MANUAL adjustments appended on Apply (image presets only).
   const extraTemplates = isImagePreset ? fineTuneTemplates(fineTune) : [];
@@ -207,7 +206,7 @@ export function ToolLibrary({
   const handleSelect = (item: LibraryItem): void => {
     setSelectedKey(item.key);
     setStrengthPct(null);
-    setApplyMode("layer");
+    setApplyMode(context === "page" && (item.kind === "imagePreset" || item.kind === "tool") ? "all" : "layer");
     setFineTune(NEUTRAL_FINE_TUNE);
     setSavingName(null);
     setAiState("idle");
@@ -247,15 +246,16 @@ export function ToolLibrary({
 
   const handleApply = (item: LibraryItem): void => {
     markUsed(item.key);
+    const shouldApplyToAll = context === "page" || applyMode === "all";
     if (item.kind === "tool" && item.toolType !== undefined) {
-      onApply(item, 1, toolCanApplyToAll && applyMode === "all", false, [
+      onApply(item, 1, toolCanApplyToAll && shouldApplyToAll, false, [
         buildToolTemplate(item.toolType, toolDraft, curvePreset)
       ]);
     } else if (item.kind === "aiTool") {
       if (aiTemplates.length === 0) return;
-      onApply(item, 1, toolCanApplyToAll && applyMode === "all", false, aiTemplates);
+      onApply(item, 1, toolCanApplyToAll && shouldApplyToAll, false, aiTemplates);
     } else {
-      onApply(item, effectivePct / 100, canApplyToAll && applyToAll, canDuplicate && duplicate, extraTemplates);
+      onApply(item, effectivePct / 100, canApplyToAll && shouldApplyToAll, canDuplicate && duplicate, extraTemplates);
     }
   };
 

@@ -39,9 +39,9 @@ export const FONT_LIST: FontEntry[] = [
   { family: "Anton", label: "Anton", lang: "la", weights: [400] },
   { family: "Bebas Neue", label: "Bebas Neue", lang: "la", weights: [400] },
   { family: "Righteous", label: "Righteous", lang: "la", weights: [400] },
-  { family: "Arial", label: "Arial (System)", lang: "both", weights: [400, 700] },
-  { family: "Times New Roman", label: "Times New Roman (System)", lang: "both", weights: [400, 700] },
-  { family: "Georgia", label: "Georgia (System)", lang: "both", weights: [400, 700] },
+  { family: "Arial", label: "Arial", lang: "both", weights: [400, 700] },
+  { family: "Times New Roman", label: "Times New Roman", lang: "both", weights: [400, 700] },
+  { family: "Georgia", label: "Georgia", lang: "both", weights: [400, 700] },
 ];
 
 const FAVORITES_KEY = "spp2_font_favorites";
@@ -63,7 +63,7 @@ function makeSystemFontEntry(family: string): FontEntry | null {
   if (normalized.length === 0) return null;
   return {
     family: normalized,
-    label: `${normalized} (System)`,
+    label: normalized,
     lang: looksHebrew(normalized) ? "he" : "both",
     weights: SYSTEM_FONT_WEIGHTS,
     source: "system"
