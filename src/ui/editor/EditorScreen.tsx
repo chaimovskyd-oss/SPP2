@@ -276,6 +276,7 @@ import {
 } from "@/core/frameSmartCrop";
 import {
   fontFamilyExists,
+  FONT_LIST,
   getFontFavorites,
   getGroupedFonts,
   loadSystemFonts,
@@ -509,6 +510,9 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
   const addLayer = useDocumentStore((state) => state.addLayer);
   const addAssetAndLayer = useDocumentStore((state) => state.addAssetAndLayer);
   const updateLayer = useDocumentStore((state) => state.updateLayer);
+  const updateTextLayerStore = useDocumentStore((state) => state.updateTextLayer);
+  const attachTextToFrame = useDocumentStore((state) => state.attachTextToFrame);
+  const detachTextFromFrame = useDocumentStore((state) => state.detachTextFromFrame);
   const applySmartArrange = useDocumentStore((state) => state.applySmartArrange);
   const removeLayer = useDocumentStore((state) => state.removeLayer);
   const moveLayer = useDocumentStore((state) => state.moveLayer);
@@ -1320,6 +1324,29 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     setSelection([layer.id]);
     setTool("text");
     setStatus("נוספה שכבת טקסט");
+  }
+
+  function handleFillFrameWithText(frame: FrameLayer): void {
+    const base = createTextLayer({
+      text: "טקסט",
+      rect: { x: frame.x, y: frame.y, width: frame.width, height: frame.height }
+    });
+    const layer = {
+      ...base,
+      color: useColorStore.getState().currentColor,
+      textFlow: { mode: "fitInsideShape" as const }
+    };
+    addLayer(currentPage.id, layer);
+    attachTextToFrame(currentPage.id, frame.id, layer.id);
+    setSelection([layer.id]);
+    setStatus("הפריים מולא בטקסט");
+  }
+
+  function patchFrameTextFlow(textLayerId: string, patch: Partial<NonNullable<TextLayer["textFlow"]>>): void {
+    const textLayer = currentPage.layers.find((item) => item.id === textLayerId);
+    if (textLayer === undefined || textLayer.type !== "text") return;
+    const nextFlow = { mode: "fitInsideShape" as const, ...(textLayer.textFlow ?? {}), ...patch };
+    updateTextLayerStore(currentPage.id, textLayerId, { textFlow: nextFlow });
   }
 
   function layerZIndexAboveSelection(): number {
@@ -3621,7 +3648,12 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
       },
       behaviorMode: "freeform",
       shape: "customMask",
-      contentType: "empty",
+      // Keep the original artwork visible inside the mask (colours preserved): the composed
+      // RGBA asset IS the original silhouette, so use it as the frame's image content. The same
+      // asset's alpha drives the destination-in clip. A red heart stays a red heart, and text
+      // dropped in later turns this into a "mixed" image+text mask.
+      contentType: "image",
+      imageAssetId: maskAsset.id,
       fitMode: "fill",
       contentTransform: { ...defaultContentTransform },
       lockedFrame: layer.locked,
@@ -3662,7 +3694,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
       } : page)
     }), currentPage.id);
     setSelection([frame.id]);
-    setStatus("Converted layer alpha to an empty image frame");
+    setStatus("נוצרה מסיכה השומרת על המראה המקורי — אפשר לגרור לתוכה טקסט");
   }
 
   function handleConvertAlphaToFrameMask(): void {
@@ -5704,6 +5736,9 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                 onToggleLock={() => {
                   if (ctxLayer !== undefined) updateLayer(currentPage.id, { ...ctxLayer, locked: !ctxLayer.locked });
                 }}
+                onSetBlendMode={(mode) => {
+                  if (ctxLayer !== undefined) updateLayer(currentPage.id, { ...ctxLayer, blendMode: mode });
+                }}
                 onMoveForward={() => moveLayer(currentPage.id, layerContextMenu.layerId, "forward")}
                 onMoveBackward={() => moveLayer(currentPage.id, layerContextMenu.layerId, "backward")}
                 onMoveToFront={() => moveLayer(currentPage.id, layerContextMenu.layerId, "front")}
@@ -5983,8 +6018,121 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                       <Maximize2 size={12} />
                       ערוך פנימה
                     </button>
+                    {selectedLayer.textLayerId === undefined && (
+                      <button
+                        className="rs-frame-mask-btn"
+                        title="מלא את הצורה בטקסט"
+                        type="button"
+                        onClick={() => handleFillFrameWithText(selectedLayer)}
+                      >
+                        <Type size={12} />
+                        מלא במלל
+                      </button>
+                    )}
+                    {(selectedLayer.contentType === "text" || selectedLayer.contentType === "mixed") && (
+                      <button
+                        className="rs-frame-mask-btn"
+                        title="נתק את הטקסט מהפריים"
+                        type="button"
+                        onClick={() => detachTextFromFrame(currentPage.id, selectedLayer.id)}
+                      >
+                        <X size={12} />
+                        נתק טקסט
+                      </button>
+                    )}
                   </div>
                 )}
+                {selectedLayer.type === "frame" && (selectedLayer.contentType === "text" || selectedLayer.contentType === "mixed") && selectedLayer.textLayerId !== undefined && (() => {
+                  const linkedText = currentPage.layers.find(
+                    (item): item is TextLayer => item.id === selectedLayer.textLayerId && item.type === "text"
+                  );
+                  if (linkedText === undefined) return null;
+                  const flow = linkedText.textFlow ?? { mode: "fitInsideShape" as const };
+                  const textLayerId = linkedText.id;
+                  return (
+                    <div className="rs-frame-text-flow">
+                      <label className="context-menu-section-label">תוכן הטקסט</label>
+                      <textarea
+                        className="context-select full"
+                        rows={2}
+                        style={{ resize: "vertical", fontFamily: "inherit" }}
+                        value={linkedText.text}
+                        onChange={(event) => updateTextLayerStore(currentPage.id, textLayerId, { text: event.target.value })}
+                      />
+                      <label className="context-menu-section-label">גופן</label>
+                      <select
+                        className="context-select full"
+                        value={linkedText.fontFamily}
+                        onChange={(event) => updateTextLayerStore(currentPage.id, textLayerId, { fontFamily: event.target.value })}
+                      >
+                        {FONT_LIST.map((font) => <option key={font.family} value={font.family}>{font.label}</option>)}
+                      </select>
+                      <div className="context-group">
+                        <input
+                          className="context-color wide"
+                          type="color"
+                          value={linkedText.color}
+                          onChange={(event) => updateTextLayerStore(currentPage.id, textLayerId, { color: event.target.value })}
+                        />
+                        <select
+                          className="context-select"
+                          value={String(linkedText.fontWeight)}
+                          onChange={(event) => updateTextLayerStore(currentPage.id, textLayerId, { fontWeight: Number(event.target.value) })}
+                        >
+                          <option value="400">רגיל</option>
+                          <option value="700">מודגש</option>
+                        </select>
+                        <select
+                          className="context-select"
+                          value={linkedText.alignment}
+                          onChange={(event) => updateTextLayerStore(currentPage.id, textLayerId, { alignment: event.target.value as TextLayer["alignment"] })}
+                        >
+                          <option value="right">ימין</option>
+                          <option value="center">מרכז</option>
+                          <option value="left">שמאל</option>
+                        </select>
+                      </div>
+                      <label className="context-menu-section-label">מצב מילוי טקסט</label>
+                      <select
+                        className="context-select full"
+                        value={flow.mode}
+                        onChange={(event) => patchFrameTextFlow(textLayerId, { mode: event.target.value as NonNullable<TextLayer["textFlow"]>["mode"] })}
+                      >
+                        <option value="fitInsideShape">מלא את הצורה</option>
+                        <option value="fitBox">התאם למלבן</option>
+                        <option value="normal">רגיל</option>
+                      </select>
+                      <label className="context-menu-section-label">יישור אנכי</label>
+                      <select
+                        className="context-select full"
+                        value={flow.verticalAlign ?? "center"}
+                        onChange={(event) => patchFrameTextFlow(textLayerId, { verticalAlign: event.target.value as NonNullable<TextLayer["textFlow"]>["verticalAlign"] })}
+                      >
+                        <option value="top">למעלה</option>
+                        <option value="center">מרכז</option>
+                        <option value="bottom">למטה</option>
+                      </select>
+                      <label className="context-menu-section-label">צפיפות שורות</label>
+                      <select
+                        className="context-select full"
+                        value={flow.density ?? "normal"}
+                        onChange={(event) => patchFrameTextFlow(textLayerId, { density: event.target.value as NonNullable<TextLayer["textFlow"]>["density"] })}
+                      >
+                        <option value="relaxed">מרווח</option>
+                        <option value="normal">רגיל</option>
+                        <option value="tight">צפוף</option>
+                      </select>
+                      <SliderField
+                        label="ריפוד"
+                        min={0}
+                        max={40}
+                        value={flow.padding ?? selectedLayer.padding}
+                        onChange={(value) => patchFrameTextFlow(textLayerId, { padding: value })}
+                        unit=" px"
+                      />
+                    </div>
+                  );
+                })()}
                 {selectedUsesManagedModeTabs && selectedLayer.type === "frame" ? (
                   <ManagedImageFrameInspector
                     activeTab={managedImageInspectorTab}
@@ -12100,7 +12248,6 @@ function LayerList({
     { id: "hidden", label: "Hidden" },
     { id: "locked", label: "Locked" }
   ];
-  const blendModeOptions: BlendMode[] = ["normal", "multiply", "screen", "overlay", "darken", "lighten"];
 
   function renderLayerRow(layer: VisualLayer, isChild = false): ReactElement {
     const isFM = isFrameMaskLayer(layer);
@@ -12188,17 +12335,6 @@ function LayerList({
             {layer.blendMode !== "normal" ? <em className="layer-blend-badge">{layer.blendMode}</em> : null}
             {hasLayerFx(layer) ? <em className="layer-fx-pill">fx</em> : null}
             {variableLayerIds.has(layer.id) ? <em className="layer-var-pill">VAR</em> : null}
-            <select
-              aria-label="Blend mode"
-              className="layer-blend-select"
-              onChange={(event) => onPatchLayer({ ...layer, blendMode: event.target.value as BlendMode })}
-              onClick={(event) => event.stopPropagation()}
-              value={layer.blendMode}
-            >
-              {blendModeOptions.map((mode) => (
-                <option key={mode} value={mode}>{mode}</option>
-              ))}
-            </select>
           </div>
           <button
             aria-label={layer.visible ? "הסתר שכבה" : "הצג שכבה"}
@@ -12502,6 +12638,7 @@ function LayerContextMenu({
   onRename,
   onToggleVisibility,
   onToggleLock,
+  onSetBlendMode,
   onMoveForward,
   onMoveBackward,
   onMoveToFront,
@@ -12527,6 +12664,7 @@ function LayerContextMenu({
   onRename: () => void;
   onToggleVisibility: () => void;
   onToggleLock: () => void;
+  onSetBlendMode: (mode: BlendMode) => void;
   onMoveForward: () => void;
   onMoveBackward: () => void;
   onMoveToFront: () => void;
@@ -12595,6 +12733,20 @@ function LayerContextMenu({
       <button className="ctx-item" onClick={action(onToggleLock)} type="button">
         {layer?.locked === true ? "Unlock Layer" : "Lock Layer"}
       </button>
+      <div className="ctx-blend-row">
+        <span className="ctx-blend-label">מצב מיזוג</span>
+        <select
+          aria-label="Blend mode"
+          className="ctx-blend-select"
+          value={layer?.blendMode ?? "normal"}
+          onChange={(event) => { onSetBlendMode(event.target.value as BlendMode); }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {BLEND_MODE_OPTIONS.map((mode) => (
+            <option key={mode.value} value={mode.value}>{mode.label}</option>
+          ))}
+        </select>
+      </div>
       <div className="ctx-divider" />
       <button className="ctx-item" onClick={action(onMoveForward)} type="button">
         Bring Forward

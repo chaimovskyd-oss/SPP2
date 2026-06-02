@@ -26,6 +26,8 @@ import { collageAdjToKonva, EMPTY_EXTRA_QUICK_EFFECTS, extractExtraQuickEffects,
 import { buildAdjustmentFilters, stackNeedsFilters } from "@/core/rendering/konvaCustomFilters";
 import { ENABLE_IMAGE_LEVEL_ADJUSTMENTS } from "@/core/features/adjustmentFlags";
 import { renderTextToCanvas } from "./warpText";
+import { renderFrameTextToCanvas } from "./shapeTextRenderer";
+import { useDocumentStore } from "@/state/documentStore";
 import { markDebugEvent, trackDebugMount } from "@/debug/sppDiagnostics";
 
 export interface CanvasContextMenuTarget {
@@ -1390,6 +1392,15 @@ function FrameNode({
     : undefined;
   const frameMaskImage = useKonvaImage(resolveCanvasAssetPath(frameMaskAsset));
   const frameMaskGroupRef = useRef<Konva.Group | null>(null);
+  // Text content for "text" frames: resolve the referenced TextLayer from the document store.
+  const frameTextLayer = useDocumentStore((state) => {
+    if ((layer.contentType !== "text" && layer.contentType !== "mixed") || layer.textLayerId === undefined) return undefined;
+    for (const page of state.document?.pages ?? []) {
+      const found = page.layers.find((item) => item.id === layer.textLayerId);
+      if (found !== undefined) return found.type === "text" ? found : undefined;
+    }
+    return undefined;
+  });
   const enterMaskContentEditFrame = useMaskContentEditStore((s) => s.enter);
   const isFrameContentEditMode = useMaskContentEditStore((s) => s.active && s.editingLayerId === layer.id);
   const fx = useMemo(
@@ -1731,6 +1742,24 @@ function FrameNode({
     }
   };
 
+  // Render text content into the frame's content rect (fitBox / fitInsideShape).
+  // clipFunc is reused to derive the shape occupancy so the fit matches the visual clip.
+  const frameTextCanvas = useMemo(() => {
+    if (frameTextLayer === undefined) return null;
+    const mode = frameTextLayer.textFlow?.mode === "fitBox" ? "fitBox" : "fitInsideShape";
+    return renderFrameTextToCanvas(frameTextLayer, {
+      width: layer.width,
+      height: layer.height,
+      padding: frameTextLayer.textFlow?.padding ?? layer.padding,
+      mode,
+      density: frameTextLayer.textFlow?.density,
+      verticalAlign: frameTextLayer.textFlow?.verticalAlign,
+      drawClip: mode === "fitInsideShape" ? clipFunc : undefined,
+      maskImage: frameMaskImage ?? undefined
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frameTextLayer, layer.width, layer.height, layer.padding, layer.shape, layer.cornerRadius, frameMaskImage]);
+
   const maskFrameStyle = (layer.metadata["maskFrame"] as { maskStyle?: import("@/types/mask").MaskStyle } | undefined)?.maskStyle;
   const maskWideShadow = isMaskFrame && maskFrameStyle?.shadow?.enabled === true ? maskFrameStyle.shadow : null;
   const shadowProps = maskWideShadow !== null
@@ -1949,6 +1978,17 @@ function FrameNode({
               // keep its pointer bookkeeping while still preventing exposed gaps.
             }}
             onDragEnd={handleContentDragEnd}
+          />
+        )}
+        {/* טקסט בתוך הפריים/מסיכה */}
+        {frameTextCanvas !== null && (
+          <KonvaImage
+            x={0}
+            y={0}
+            width={layer.width}
+            height={layer.height}
+            image={frameTextCanvas}
+            listening={false}
           />
         )}
         {/* overlays */}

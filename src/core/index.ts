@@ -52,6 +52,7 @@ export * from "./text/measurement";
 export * from "./text/migration";
 export * from "./text/presets";
 export * from "./text/smartTextFit";
+export * from "./text/shapeTextFit";
 export * from "./transform/alignmentEngine";
 export * from "./units/conversion";
 export * from "./workers/workerBridge";

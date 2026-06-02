@@ -106,6 +106,10 @@ export interface DocumentState {
   applyTextPreset: (pageId: string, layerId: string, preset: TextPreset) => void;
   copyTextStyle: (pageId: string, layerId: string) => void;
   pasteTextStyle: (pageId: string, layerIds: string[]) => void;
+  /** Attach a text layer as a frame's content (fitInsideShape) — one undo record. */
+  attachTextToFrame: (pageId: string, frameId: string, textLayerId: string) => void;
+  /** Detach a text layer from a frame, restoring it to a free text layer — one undo record. */
+  detachTextFromFrame: (pageId: string, frameId: string) => void;
   // ─── Image Adjustments (Phase 2) ──────────────────────────────────────────
   addImageAdjustment: (pageId: string, layerId: string, template: ImageAdjustmentTemplate) => void;
   updateImageAdjustment: (pageId: string, layerId: string, adjustmentId: string, patch: Partial<ImageAdjustment>) => void;
@@ -424,6 +428,70 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       }
       const previous = findLayer(state.document, pageId, layer.id);
       return previous === undefined ? state : commitDocumentAction(state, changeLayerAction(pageId, previous, layer, "ChangeLayerPropertyAction"));
+    }),
+  attachTextToFrame: (pageId, frameId, textLayerId) =>
+    set((state) => {
+      if (state.document === null) {
+        return state;
+      }
+      const page = state.document.pages.find((item) => item.id === pageId);
+      if (page === undefined) {
+        return state;
+      }
+      const frame = page.layers.find((item) => item.id === frameId);
+      const text = page.layers.find((item) => item.id === textLayerId);
+      if (frame === undefined || frame.type !== "frame" || text === undefined || text.type !== "text") {
+        return state;
+      }
+      // A frame that already holds an image becomes "mixed" (image behind + text in front).
+      const nextContentType = frame.imageAssetId !== undefined ? "mixed" : "text";
+      const nextLayers = page.layers.map((item) => {
+        if (item.id === frameId) {
+          return { ...(item as FrameLayer), contentType: nextContentType, textLayerId } as VisualLayer;
+        }
+        if (item.id === textLayerId) {
+          const textItem = item as TextLayer;
+          return {
+            ...textItem,
+            parentFrameId: frameId,
+            textFlow: { ...(textItem.textFlow ?? {}), mode: "fitInsideShape" as const }
+          } as VisualLayer;
+        }
+        return item;
+      });
+      return commitDocumentAction(state, changeLayersAction(pageId, page.layers, nextLayers, "AttachTextToFrameAction"));
+    }),
+  detachTextFromFrame: (pageId, frameId) =>
+    set((state) => {
+      if (state.document === null) {
+        return state;
+      }
+      const page = state.document.pages.find((item) => item.id === pageId);
+      if (page === undefined) {
+        return state;
+      }
+      const frame = page.layers.find((item) => item.id === frameId);
+      if (frame === undefined || frame.type !== "frame" || (frame.contentType !== "text" && frame.contentType !== "mixed")) {
+        return state;
+      }
+      const linkedTextId = frame.textLayerId;
+      // Mixed frames keep their image after detaching the text; text-only frames go back to empty.
+      const nextContentType = frame.imageAssetId !== undefined ? "image" : "empty";
+      const nextLayers = page.layers.map((item) => {
+        if (item.id === frameId) {
+          return { ...(item as FrameLayer), contentType: nextContentType, textLayerId: undefined } as VisualLayer;
+        }
+        if (linkedTextId !== undefined && item.id === linkedTextId && item.type === "text") {
+          const textItem = item as TextLayer;
+          return {
+            ...textItem,
+            parentFrameId: null,
+            textFlow: { ...(textItem.textFlow ?? {}), mode: "normal" as const }
+          } as VisualLayer;
+        }
+        return item;
+      });
+      return commitDocumentAction(state, changeLayersAction(pageId, page.layers, nextLayers, "DetachTextFromFrameAction"));
     }),
   applySmartArrange: (pageId, updates, label = "SmartArrangeAction") =>
     set((state) => {

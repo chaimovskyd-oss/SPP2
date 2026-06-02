@@ -501,7 +501,7 @@ function createGridCellFrame(rule: GridLayoutRule, rect: GridCellRect, pageIndex
     fitMode: rule.fitMode,
     linkedGroup: rule.linkedGroupId,
     batchIndex: globalIndex,
-    lockedFrame: true,
+    lockedFrame: false,
     zIndex: globalIndex,
     metadata: { gridCell: metadata }
   });

@@ -142,6 +142,27 @@ export interface WarpSettings extends VersionedEntity {
   bend: number;
 }
 
+/** How a text layer flows into its container. "normal" = free text; "fitBox" = fit a rectangle; "fitInsideShape" = fill the host frame's mask/shape per-line. */
+export interface TextFlowSettings {
+  mode: "normal" | "fitBox" | "fitInsideShape";
+  padding?: number;
+  density?: "relaxed" | "normal" | "tight";
+  verticalAlign?: "top" | "center" | "bottom";
+}
+
+/** Text-on-path settings. Binding is snapshot-only in V1: pathDataSnapshot holds the SVG path captured at attach time. */
+export interface PathTextSettings {
+  enabled: boolean;
+  pathDataSnapshot: string;
+  pathSourceLayerId?: ID;
+  align: "start" | "center" | "end";
+  side: "above" | "below";
+  offset: number;
+  letterSpacingMode: "normal" | "fitToPath";
+  reverseDirection: boolean;
+  keepGlyphsUpright: boolean;
+}
+
 export interface TextLayer extends BaseLayer {
   type: "text";
   layerType: "text";
@@ -174,6 +195,8 @@ export interface TextLayer extends BaseLayer {
   dynamicTemplate?: string;
   linkedGroup?: ID;
   linkedSlotId?: ID;
+  textFlow?: TextFlowSettings;
+  pathText?: PathTextSettings;
 }
 
 export interface Filter extends VersionedEntity {

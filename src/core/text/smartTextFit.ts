@@ -29,6 +29,21 @@ export interface TextFitResult {
   mode: SmartTextFitMode;
 }
 
+export interface FitTextToBoxOptions {
+  /** Inner padding subtracted from the usable width/height. Defaults to BOX_PADDING. */
+  padding?: number;
+  minFontSize?: number;
+  maxFontSize?: number;
+}
+
+export interface FitTextToBoxResult {
+  fontSize: number;
+  lines: string[];
+  widestLine: number;
+  totalHeight: number;
+  overflows: boolean;
+}
+
 interface MeasureResult {
   measuredWidth: number;
   measuredHeight: number;
@@ -51,6 +66,32 @@ export function getTextFitSafeRect(page: Pick<Page, "width" | "height">): TextFi
     y: marginY,
     width: Math.max(1, page.width - marginX * 2),
     height: Math.max(1, page.height - marginY * 2)
+  };
+}
+
+/**
+ * Generic box fit: shrink the font (binary search) so the layer's text wraps inside an
+ * arbitrary boxWidth × boxHeight rectangle. Container-agnostic — used by frame "fitBox" mode.
+ * Does not mutate the layer; returns the chosen font size and wrapped lines.
+ */
+export function fitTextToBox(
+  layer: TextLayer,
+  boxWidth: number,
+  boxHeight: number,
+  options: FitTextToBoxOptions = {}
+): FitTextToBoxResult {
+  const padding = Math.max(0, options.padding ?? BOX_PADDING);
+  const minFontSize = Math.max(1, options.minFontSize ?? MIN_FONT_SIZE);
+  const maxFontSize = Math.max(minFontSize, options.maxFontSize ?? Math.max(layer.fontSize, DEFAULT_MAX_FONT_SIZE));
+  const width = Math.max(1, boxWidth);
+  const height = Math.max(1, boxHeight);
+  const fitted = fitFontSize(layer, width, height, minFontSize, maxFontSize, padding);
+  return {
+    fontSize: fitted.fontSize,
+    lines: fitted.measure.lines,
+    widestLine: fitted.measure.widestLine,
+    totalHeight: fitted.measure.measuredHeight,
+    overflows: fitted.overflows
   };
 }
 
@@ -177,17 +218,18 @@ function fitFontSize(
   boxWidth: number,
   boxHeight: number,
   minFontSize: number,
-  maxFontSize: number
+  maxFontSize: number,
+  padding = BOX_PADDING
 ): { fontSize: number; measure: MeasureResult; overflows: boolean } {
   let lo = minFontSize;
   let hi = Math.max(minFontSize, Math.round(maxFontSize));
   let bestFont = minFontSize;
-  let bestMeasure = measureTextInBox(layer, boxWidth, minFontSize);
+  let bestMeasure = measureTextInBox(layer, boxWidth, minFontSize, padding);
 
   while (lo <= hi) {
     const mid = Math.floor((lo + hi) / 2);
-    const measure = measureTextInBox(layer, boxWidth, mid);
-    const fits = measure.measuredHeight <= boxHeight && measure.widestLine <= Math.max(1, boxWidth - BOX_PADDING * 2);
+    const measure = measureTextInBox(layer, boxWidth, mid, padding);
+    const fits = measure.measuredHeight <= boxHeight && measure.widestLine <= Math.max(1, boxWidth - padding * 2);
     if (fits) {
       bestFont = mid;
       bestMeasure = measure;
@@ -197,18 +239,18 @@ function fitFontSize(
     }
   }
 
-  const overflows = bestMeasure.measuredHeight > boxHeight || bestMeasure.widestLine > Math.max(1, boxWidth - BOX_PADDING * 2);
+  const overflows = bestMeasure.measuredHeight > boxHeight || bestMeasure.widestLine > Math.max(1, boxWidth - padding * 2);
   return { fontSize: bestFont, measure: bestMeasure, overflows };
 }
 
-function measureTextInBox(layer: TextLayer, boxWidth: number, fontSize: number): MeasureResult {
-  const usableWidth = Math.max(1, boxWidth - BOX_PADDING * 2);
+function measureTextInBox(layer: TextLayer, boxWidth: number, fontSize: number, padding = BOX_PADDING): MeasureResult {
+  const usableWidth = Math.max(1, boxWidth - padding * 2);
   const lines = wrapText(layer.text, layer, fontSize, usableWidth);
   const widths = lines.map((line) => measureLineWidth(line || " ", layer, fontSize));
   const widestLine = Math.max(0, ...widths);
   return {
-    measuredWidth: Math.ceil(widestLine + BOX_PADDING * 2),
-    measuredHeight: Math.ceil(lines.length * fontSize * layer.lineHeight + BOX_PADDING * 2),
+    measuredWidth: Math.ceil(widestLine + padding * 2),
+    measuredHeight: Math.ceil(lines.length * fontSize * layer.lineHeight + padding * 2),
     lineCount: lines.length,
     widestLine,
     lines
@@ -263,7 +305,7 @@ function splitLongWord(word: string, layer: TextLayer, fontSize: number, maxWidt
   return pieces.length > 0 ? pieces : [word];
 }
 
-function measureLineWidth(text: string, layer: TextLayer, fontSize: number): number {
+export function measureLineWidth(text: string, layer: TextLayer, fontSize: number): number {
   const canvas = getMeasureCanvas();
   if (canvas !== null) {
     const context = canvas.getContext("2d");

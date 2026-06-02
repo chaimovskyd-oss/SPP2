@@ -154,7 +154,7 @@ export { renderWarpedText };
 // ─── RTL detection ────────────────────────────────────────────────────────────
 
 /** Returns true when text should be rendered right-to-left. */
-function isRTLText(layer: TextLayer, text: string): boolean {
+export function isRTLText(layer: TextLayer, text: string): boolean {
   if (layer.direction === "ltr") return false;
   if (layer.direction === "rtl") return true;
   // "auto": detect from the first Hebrew / Arabic character in the string
@@ -163,7 +163,7 @@ function isRTLText(layer: TextLayer, text: string): boolean {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function buildFontString(layer: TextLayer): string {
+export function buildFontString(layer: TextLayer): string {
   const parts: string[] = [];
   if (layer.fontStyle === "italic") parts.push("italic");
   parts.push(String(layer.fontWeight));
@@ -185,7 +185,7 @@ function hexToRgba(hex: string, opacity: number): string {
   return `rgba(${r},${g},${b},${Math.max(0, Math.min(1, opacity))})`;
 }
 
-function setupCtx(
+export function setupCtx(
   ctx: CanvasRenderingContext2D,
   layer: TextLayer,
   fontStr: string
@@ -271,7 +271,7 @@ function drawCharLeft(
   drawCharAt(ctx, layer, char, 0, 0);
 }
 
-function drawCharAt(
+export function drawCharAt(
   ctx: CanvasRenderingContext2D,
   layer: TextLayer,
   char: string,

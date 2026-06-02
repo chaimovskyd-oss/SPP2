@@ -90,6 +90,13 @@ function isRenderableLayer(layer: VisualLayer): boolean {
   return VISUAL_LAYER_TYPES.has(layer.type) && layer.type !== "adjustment-layer";
 }
 
+/** A frame that carries a non-rect shape or an alpha mask — a valid drop target for text fill. */
+function isShapeMaskFrame(frame: FrameLayer): boolean {
+  if (frame.shape !== "rect") return true;
+  if (frame.maskSource !== undefined) return true;
+  return isMaskFrameLayer(frame);
+}
+
 // ─── Guide color palette ──────────────────────────────────────────────────────
 const GUIDE_COLORS: Partial<Record<SnapLineKind, string>> = {
   page:     "#7C6FE0",   // purple — page edges / center
@@ -228,6 +235,8 @@ export function CanvasStage({
   // ── Paint Bucket ──────────────────────────────────────────────────────────
   const updatePage = useDocumentStore((s) => s.updatePage);
   const addLayerToDoc = useDocumentStore((s) => s.addLayer);
+  const attachTextToFrame = useDocumentStore((s) => s.attachTextToFrame);
+  const detachTextFromFrame = useDocumentStore((s) => s.detachTextFromFrame);
 
   // ── Free-hand Brush stroke recording (no-selection tool) ───────────────────
   const brushPointsRef = useRef<Array<{ x: number; y: number }>>([]);
@@ -686,6 +695,50 @@ export function CanvasStage({
     // Position is already snapped by handleStageDragMove; just commit.
     // For transform-end (resize), we still snap the position component.
     const previous = page.layers.find((item) => item.id === layer.id);
+
+    // Drag a free text layer into an existing mask/shape frame → auto-attach as its content.
+    // No new "text mask" is created: the existing mask keeps acting as the visual clip and the
+    // text flows inside it (fitInsideShape). Dragging back out detaches it.
+    if (layer.type === "text" && previous !== undefined && previous.type === "text") {
+      const textMoved = previous.x !== layer.x || previous.y !== layer.y;
+      if (textMoved) {
+        const cx = layer.x + layer.width / 2;
+        const cy = layer.y + layer.height / 2;
+        // A mask/shape frame with no text yet accepts the dropped text. If it already holds an
+        // image the frame becomes "mixed" (image behind + text in front).
+        const targetFrame = page.layers.find(
+          (item): item is FrameLayer =>
+            item.type === "frame" &&
+            isShapeMaskFrame(item) &&
+            item.textLayerId === undefined &&
+            cx >= item.x &&
+            cx <= item.x + item.width &&
+            cy >= item.y &&
+            cy <= item.y + item.height
+        );
+        if (targetFrame !== undefined) {
+          onLayerChange(layer);
+          attachTextToFrame(page.id, targetFrame.id, layer.id);
+          return;
+        }
+        if (typeof previous.parentFrameId === "string") {
+          const stillInside = page.layers.some(
+            (item) =>
+              item.id === previous.parentFrameId &&
+              cx >= item.x &&
+              cx <= item.x + item.width &&
+              cy >= item.y &&
+              cy <= item.y + item.height
+          );
+          if (!stillInside) {
+            onLayerChange(layer);
+            detachTextFromFrame(page.id, previous.parentFrameId);
+            return;
+          }
+        }
+      }
+    }
+
     if (previous !== undefined && isGridCellLayer(previous) && layer.type === "frame") {
       onLayerChange({
         ...layer,
@@ -1599,8 +1652,16 @@ export function CanvasStage({
                 .filter((l) => l.type === "group")
                 .map((l) => [l.id, l as import("@/types/layers").GroupLayer])
             );
+            // Text layers that are a frame's content are drawn inside the frame's clip — skip
+            // their standalone render to avoid a duplicate copy outside the mask.
+            const frameTextLayerIds = new Set(
+              allLayers
+                .filter((l) => l.type === "frame" && (l.contentType === "text" || l.contentType === "mixed") && l.textLayerId !== undefined)
+                .map((l) => (l as FrameLayer).textLayerId as string)
+            );
             const renderLayers = allLayers.filter((layer) => {
               if (layer.type === "group") return false;
+              if (layer.type === "text" && frameTextLayerIds.has(layer.id)) return false;
               if (layer.parentId !== undefined) {
                 const parentGroup = groupMap.get(layer.parentId);
                 if (parentGroup !== undefined && parentGroup.visible === false) return false;

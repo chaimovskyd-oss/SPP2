@@ -3716,6 +3716,29 @@ input[type="range"]::-webkit-slider-runnable-track {
   margin: 5px 4px;
   background: var(--border-soft, #3a3845);
 }
+.ctx-blend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  direction: rtl;
+}
+.ctx-blend-label {
+  flex: 0 0 auto;
+  font-size: 12.5px;
+  color: var(--text, #e8e5e1);
+}
+.ctx-blend-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border-soft, #3a3845);
+  background: var(--surface, #2a2833);
+  color: var(--text, #e8e5e1);
+  font-size: 12px;
+}
 .ctx-icon {
   font-size: 15px;
   flex-shrink: 0;
