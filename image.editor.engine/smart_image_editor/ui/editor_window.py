@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from smart_image_editor.ai.face_detection_service import detect_faces, has_mediapipe_face_detection
+from smart_image_editor.ai.face_detection_service import detect_faces, has_mediapipe_face_detection, has_scrfd_face_detection
 from smart_image_editor.ai.face_restore_service import restore_faces
 from smart_image_editor.ai.segmentation_service import has_mediapipe_segmentation
 from smart_image_editor.ai.smart_auto_fix_service import suggest_smart_auto_fix
@@ -962,7 +962,10 @@ class EditorWindow(QMainWindow):
         )
 
     def _ai_status_text(self) -> str:
-        face = f"{self.tr_ui('Face')}: MediaPipe" if has_mediapipe_face_detection() else f"{self.tr_ui('Face')}: OpenCV"
+        if has_scrfd_face_detection():
+            face = f"{self.tr_ui('Face')}: SCRFD"
+        else:
+            face = f"{self.tr_ui('Face')}: MediaPipe" if has_mediapipe_face_detection() else f"{self.tr_ui('Face')}: OpenCV"
         segment = f"{self.tr_ui('Segment')}: MediaPipe" if has_mediapipe_segmentation() else f"{self.tr_ui('Segment')}: {self.tr_ui('fallback')}"
         return f"{face} | {segment}"
 

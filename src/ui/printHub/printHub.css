@@ -1,0 +1,672 @@
+.print-hub-panel {
+  width: 560px;
+  max-width: 92vw;
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Standalone management window (opened from the tray app) — fill the window. */
+.spp-print-hub-standalone {
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  background: var(--bg, #0f172a);
+}
+
+.spp-print-hub-standalone .print-hub-panel {
+  width: 100%;
+  max-width: 100%;
+  max-height: 100vh;
+  border-radius: 0;
+}
+
+.print-hub-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.print-hub-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 14px 0;
+  border-bottom: 1px solid var(--line, #2b3346);
+}
+
+.print-hub-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: none;
+  background: transparent;
+  color: var(--muted, #9aa6bd);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  font-size: 0.9rem;
+}
+
+.print-hub-tab.active {
+  color: var(--text, #f1f5f9);
+  border-bottom-color: var(--accent, #38bdf8);
+}
+
+.print-hub-body {
+  flex: 1;
+  min-height: 0; /* allow the flex child to shrink so overflow:auto actually scrolls */
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.print-hub-hint,
+.print-hub-error,
+.print-hub-empty {
+  font-size: 0.85rem;
+  color: var(--muted, #9aa6bd);
+  line-height: 1.5;
+}
+
+.print-hub-error {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.print-hub-empty {
+  text-align: center;
+  padding: 28px 0;
+}
+
+.print-hub-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.print-hub-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+
+.print-hub-field > span {
+  color: var(--muted, #9aa6bd);
+}
+
+.print-hub-field select,
+.print-hub-field input[type="text"] {
+  background: var(--card2, #1b2233);
+  border: 1px solid var(--line, #2b3346);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--text, #f1f5f9);
+  width: 100%;
+}
+
+.print-hub-path {
+  display: flex;
+  gap: 6px;
+}
+
+.print-hub-path input {
+  flex: 1;
+}
+
+/* ── LAN transport: status light, diagnostics, upload progress ───────────────── */
+.lan-light {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--muted, #9aa6bd);
+}
+.lan-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #9aa6bd;
+}
+.lan-light-ok .lan-dot { background: #2da44e; box-shadow: 0 0 6px #2da44e; }
+.lan-light-down .lan-dot { background: #e5534b; box-shadow: 0 0 6px #e5534b; }
+.lan-light-checking .lan-dot { background: #d2a106; animation: lan-pulse 1s ease-in-out infinite; }
+.lan-light-ok { color: #2da44e; }
+.lan-light-down { color: #e5534b; }
+@keyframes lan-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+.print-hub-lan {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line, #2b3346);
+  border-radius: 10px;
+}
+.print-hub-lan-row {
+  display: flex;
+  gap: 8px;
+}
+.print-hub-lan-row .print-hub-field:first-child { width: 110px; flex: none; }
+.print-hub-lan-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.print-hub-lan-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.print-hub-lan-check {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 0.83rem;
+}
+.print-hub-lan-check .ok { color: #2da44e; flex: none; margin-top: 2px; }
+.print-hub-lan-check .bad { color: #e5534b; flex: none; margin-top: 2px; }
+.print-hub-lan-check .unknown { color: #9aa6bd; flex: none; }
+
+.print-hub-lan-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #2da44e55;
+  background: rgba(45, 164, 78, 0.08);
+  border-radius: 10px;
+  font-size: 0.85rem;
+}
+.print-hub-lan-info-title { font-weight: 600; color: var(--text, #f1f5f9); }
+.print-hub-lan-info button { align-self: flex-start; margin-top: 4px; }
+
+.print-hub-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 0.85rem;
+  color: var(--text, #f1f5f9);
+}
+.print-hub-upload-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.2);
+  overflow: hidden;
+}
+.print-hub-upload-fill {
+  height: 100%;
+  background: var(--accent, #38bdf8);
+  transition: width 0.2s ease;
+}
+
+/* ── Cloud status (cross-machine queue) ─────────────────────────────────────── */
+.print-hub-cloud {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.print-hub-cloud-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line, #2b3346);
+  border-radius: 8px;
+}
+.print-hub-cloud-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.print-hub-cloud-err { color: #fca5a5; font-size: 0.8rem; }
+.cloud-state {
+  flex: none;
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.15);
+  color: var(--muted, #9aa6bd);
+}
+.cloud-state-printing { background: rgba(56, 189, 248, 0.18); color: #38bdf8; }
+.cloud-state-done { background: rgba(45, 164, 78, 0.18); color: #2da44e; }
+.cloud-state-failed, .cloud-state-rejected { background: rgba(229, 83, 75, 0.18); color: #e5534b; }
+.cloud-state-waiting_approval { background: rgba(210, 161, 6, 0.18); color: #d2a106; }
+
+.print-hub-queue-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.print-hub-count {
+  font-size: 0.82rem;
+  color: var(--muted, #9aa6bd);
+}
+
+.print-hub-group {
+  margin-bottom: 14px;
+}
+
+.print-hub-group-head {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  background: var(--card2, #1b2233);
+  color: var(--text, #f1f5f9);
+}
+
+.print-hub-group-head.state-waiting_approval { background: #422006; color: #fdba74; }
+.print-hub-group-head.state-printing { background: #082f49; color: #7dd3fc; }
+.print-hub-group-head.state-failed { background: #450a0a; color: #fca5a5; }
+.print-hub-group-head.state-done { background: #052e16; color: #86efac; }
+
+.print-hub-job {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line, #2b3346);
+  border-radius: 8px;
+  margin-bottom: 6px;
+}
+
+.print-hub-job-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.print-hub-job-line1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.print-hub-job-id {
+  font-family: monospace;
+  font-size: 0.82rem;
+  color: var(--text, #f1f5f9);
+  direction: ltr;
+}
+
+.print-hub-job-line2 {
+  font-size: 0.8rem;
+  color: var(--muted, #9aa6bd);
+  margin-top: 2px;
+}
+
+.print-hub-job-note {
+  font-size: 0.78rem;
+  color: #fca5a5;
+  margin-top: 2px;
+}
+
+.print-hub-badge {
+  font-size: 0.7rem;
+  padding: 1px 7px;
+  border-radius: 999px;
+}
+
+.print-hub-badge.high { background: #7c2d12; color: #fed7aa; }
+
+.print-hub-job-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.print-hub-job-actions .ok { color: #86efac; }
+.print-hub-job-actions .bad { color: #fca5a5; }
+
+/* Print actions dropdown */
+.print-actions {
+  position: relative;
+  display: inline-flex;
+}
+
+.print-actions-main {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.print-actions-caret {
+  padding-inline: 6px;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.print-actions-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  inset-inline-end: 0;
+  min-width: 210px;
+  background: var(--card, #111827);
+  border: 1px solid var(--line, #2b3346);
+  border-radius: 10px;
+  padding: 6px;
+  z-index: 50;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+}
+
+.print-actions-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text, #f1f5f9);
+  cursor: pointer;
+  border-radius: 7px;
+  font-size: 0.88rem;
+  text-align: start;
+}
+
+.print-actions-item:hover {
+  background: var(--card2, #1b2233);
+}
+
+.print-hub-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--text, #f1f5f9);
+  cursor: pointer;
+}
+
+/* Send dialog */
+.print-hub-send {
+  width: 480px;
+  max-width: 92vw;
+  display: flex;
+  flex-direction: column;
+}
+
+.print-hub-send-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+}
+
+.print-hub-send-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.print-hub-preflight {
+  border: 1px solid var(--line, #2b3346);
+  border-radius: 8px;
+  background: var(--card2, #1b2233);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.print-hub-preflight-title {
+  color: var(--text, #f1f5f9);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.print-hub-preflight-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 10px;
+  align-items: baseline;
+  font-size: 0.78rem;
+}
+
+.print-hub-preflight-grid span {
+  color: var(--muted, #9aa6bd);
+}
+
+.print-hub-preflight-grid strong {
+  color: var(--text, #f1f5f9);
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.print-hub-preflight-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  color: #facc15;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.print-hub-preflight-warning svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.print-hub-send-footer {
+  display: flex;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line, #2b3346);
+}
+
+/* Printers & presets tab */
+.print-hub-printers {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.print-hub-coverage {
+  background: var(--card2, #1b2233);
+  border: 1px solid var(--line, #2b3346);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.print-hub-coverage-title {
+  font-size: 0.82rem;
+  color: var(--muted, #9aa6bd);
+  margin-bottom: 8px;
+}
+
+.print-hub-coverage-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  padding: 3px 0;
+}
+
+.print-hub-coverage-row.ok { color: #86efac; }
+.print-hub-coverage-row.bad { color: #fca5a5; }
+.print-hub-coverage-status { margin-inline-start: auto; opacity: 0.8; font-size: 0.78rem; }
+
+.print-hub-printer-card {
+  border: 1px solid var(--line, #2b3346);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.print-hub-printer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.print-hub-printer-name {
+  flex: 1;
+  background: var(--card2, #1b2233);
+  border: 1px solid var(--line, #2b3346);
+  border-radius: 8px;
+  padding: 7px 10px;
+  color: var(--text, #f1f5f9);
+  font-weight: 600;
+}
+
+.print-hub-paper-load {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.print-hub-paper-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.print-hub-paper-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.76rem;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line, #2b3346);
+  background: var(--card2, #1b2233);
+  color: var(--text, #f1f5f9);
+  cursor: pointer;
+}
+
+.print-hub-paper-chip:hover {
+  border-color: var(--accent, #38bdf8);
+}
+
+.print-hub-presets-title {
+  font-size: 0.8rem;
+  color: var(--muted, #9aa6bd);
+  margin-top: 4px;
+}
+
+.print-hub-preset-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.print-hub-preset-row select {
+  background: var(--card2, #1b2233);
+  border: 1px solid var(--line, #2b3346);
+  border-radius: 8px;
+  padding: 6px 8px;
+  color: var(--text, #f1f5f9);
+}
+
+.print-hub-dpi {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.78rem;
+  color: var(--muted, #9aa6bd);
+}
+
+.print-hub-dpi input {
+  width: 64px;
+  background: var(--card2, #1b2233);
+  border: 1px solid var(--line, #2b3346);
+  border-radius: 8px;
+  padding: 5px 6px;
+  color: var(--text, #f1f5f9);
+}
+
+.print-hub-printers-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  position: sticky;
+  bottom: 0;
+  padding-top: 8px;
+  background: linear-gradient(to top, var(--card, #111827), transparent);
+}
+
+.print-hub-media-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line, #2b3346);
+  border-radius: 8px;
+}
+
+.print-hub-media-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  font-size: 0.88rem;
+}
+
+.print-hub-media-unit {
+  font-size: 0.78rem;
+  color: var(--muted, #9aa6bd);
+}
+
+.print-hub-history {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.print-hub-log {
+  background: #020617;
+  border: 1px solid var(--line, #2b3346);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  max-height: 220px;
+  overflow: auto;
+  direction: ltr;
+  text-align: left;
+}
+
+.print-hub-log-line {
+  font-family: monospace;
+  font-size: 0.74rem;
+  color: #cbd5e1;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.print-hub-toast {
+  position: fixed;
+  bottom: 20px;
+  inset-inline-start: 20px;
+  z-index: 9999;
+  background: var(--card, #111827);
+  color: var(--text, #f1f5f9);
+  border: 1px solid var(--accent, #38bdf8);
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-size: 0.88rem;
+  max-width: 360px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+}
+
+.spin { animation: print-hub-spin 1s linear infinite; }
+
+@keyframes print-hub-spin {
+  to { transform: rotate(360deg); }
+}

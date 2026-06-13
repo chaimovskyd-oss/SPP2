@@ -12,6 +12,7 @@ export type FontSubset = "all" | "hebrew" | "latin" | "cyrillic";
 const FAVORITES_STORAGE_KEY = "spp-google-font-favorites";
 const RECENT_STORAGE_KEY = "spp-google-font-recent";
 const CACHE_STORAGE_KEY = "spp-google-fonts-cache-v1";
+const API_KEY_STORAGE_KEY = "spp-google-fonts-api-key";
 const CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
 
 interface FontsCachePayload {
@@ -36,7 +37,49 @@ const FALLBACK_FONTS: GoogleFontItem[] = [
 ];
 
 function readApiKey(): string {
+  // A user-supplied key (saved in the app, survives rebuilds) takes priority over
+  // the build-time env var, so the full font library works without a .env file.
+  try {
+    const stored = localStorage.getItem(API_KEY_STORAGE_KEY);
+    if (stored !== null && stored.trim() !== "") return stored.trim();
+  } catch {
+    // localStorage unavailable — fall through to env.
+  }
   return (import.meta.env.VITE_GOOGLE_FONTS_API_KEY ?? "").trim();
+}
+
+/** Whether a Google Fonts API key is configured (stored or via env). */
+export function hasGoogleFontsApiKey(): boolean {
+  return readApiKey() !== "";
+}
+
+/** The currently-stored user key (empty string if none). Env keys are not returned. */
+export function getStoredGoogleFontsApiKey(): string {
+  try {
+    return (localStorage.getItem(API_KEY_STORAGE_KEY) ?? "").trim();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Save (or clear, when blank) the user's Google Fonts API key and reset caches so
+ * the next getFontList() call refetches the full library with the new key.
+ */
+export function setGoogleFontsApiKey(key: string): void {
+  const trimmed = key.trim();
+  try {
+    if (trimmed === "") {
+      localStorage.removeItem(API_KEY_STORAGE_KEY);
+    } else {
+      localStorage.setItem(API_KEY_STORAGE_KEY, trimmed);
+    }
+    localStorage.removeItem(CACHE_STORAGE_KEY);
+  } catch {
+    // Ignore storage errors; the in-memory reset below still applies.
+  }
+  memoryFontList = null;
+  pendingFontListRequest = null;
 }
 
 function readCachedFonts(): GoogleFontItem[] | null {

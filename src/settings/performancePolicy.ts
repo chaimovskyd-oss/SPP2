@@ -10,6 +10,35 @@ export interface EffectivePerformanceSettings extends PerformanceSettings {
 export interface ExportRenderOptions {
   renderQuality: PerformanceSettings["renderQuality"];
   jpgQuality?: number;
+  /** Optional cap on the exported long-side in pixels (used by the "compact" PDF preset). */
+  maxLongSidePx?: number;
+}
+
+export type PdfQualityPreset = "high" | "balanced" | "compact";
+
+export interface PdfExportProfile {
+  mimeType: "image/jpeg";
+  /** 0..1 JPEG quality passed to canvas/offscreen export. */
+  jpgQuality: number;
+  /** Optional long-side cap to downscale heavy pages. */
+  maxLongSidePx?: number;
+}
+
+/**
+ * Map a user-facing PDF quality preset to concrete render settings.
+ * All presets embed JPEG (instead of uncompressed PNG) which is the main
+ * file-size win; lower presets additionally trade quality / resolution.
+ */
+export function resolvePdfExportProfile(preset: PdfQualityPreset): PdfExportProfile {
+  switch (preset) {
+    case "high":
+      return { mimeType: "image/jpeg", jpgQuality: 0.95 };
+    case "compact":
+      return { mimeType: "image/jpeg", jpgQuality: 0.75, maxLongSidePx: 1654 };
+    case "balanced":
+    default:
+      return { mimeType: "image/jpeg", jpgQuality: 0.85 };
+  }
 }
 
 const PREVIEW_MAX_SIDE_BY_QUALITY: Record<PerformanceSettings["previewQuality"], number> = {
@@ -49,16 +78,23 @@ export function getImportPreviewMaxSide(settings: PerformanceSettings): number {
   return resolveEffectivePerformanceSettings(settings).effectiveMaxPreviewSizePx;
 }
 
-export function getExportPixelRatio(page: Page, settings: PerformanceSettings): number {
+export function getExportPixelRatio(page: Page, settings: PerformanceSettings, maxLongSidePx?: number): number {
   const baseRatio =
     settings.renderQuality === "standard" ? 1 :
     settings.renderQuality === "high" ? 2 :
     1;
   const pixelsAtRatio = page.width * page.height * baseRatio * baseRatio;
-  if (pixelsAtRatio <= MAX_EXPORT_PIXELS) {
-    return baseRatio;
+  const ratio = pixelsAtRatio <= MAX_EXPORT_PIXELS
+    ? baseRatio
+    : Math.max(1, Math.sqrt(MAX_EXPORT_PIXELS / Math.max(1, page.width * page.height)));
+  // Optional downscale: keep the exported long side within maxLongSidePx (compact PDF).
+  if (maxLongSidePx !== undefined && maxLongSidePx > 0) {
+    const longSide = Math.max(page.width, page.height);
+    if (longSide * ratio > maxLongSidePx) {
+      return Math.max(0.1, maxLongSidePx / longSide);
+    }
   }
-  return Math.max(1, Math.sqrt(MAX_EXPORT_PIXELS / Math.max(1, page.width * page.height)));
+  return ratio;
 }
 
 export function getJpegQuality(jpgQualityPercent: number | undefined): number {

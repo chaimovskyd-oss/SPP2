@@ -66,7 +66,7 @@ export function validatePortableAssetCoverage(project: ProjectEnvelope, payloads
   };
 }
 
-function createZipStore(files: Map<string, Uint8Array>): Uint8Array {
+export function createZipStore(files: Map<string, Uint8Array>): Uint8Array {
   const chunks: Uint8Array[] = [];
   const central: Uint8Array[] = [];
   let offset = 0;

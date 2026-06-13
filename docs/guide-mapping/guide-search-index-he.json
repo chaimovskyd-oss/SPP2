@@ -1,0 +1,256 @@
+{
+  "version": 1,
+  "language": "he",
+  "direction": "rtl",
+  "updatedAt": "2026-06-06",
+  "entries": [
+    {
+      "id": "guide-home",
+      "title": "דף הבית של המדריך",
+      "category": "ניווט",
+      "href": "spp2-user-guide-he.html#guide-home",
+      "keywords": ["דף הבית", "שער", "מדריך", "התחלה", "ניווט", "חיפוש", "נושאים"],
+      "aliases": ["guide home", "start here", "מרכז מדריך"],
+      "summary": "שער כניסה למדריך עם קיצורים לפי פעולה: מצבי עבודה, עריכה, שמירה, הדפסה, מושגים והגדרות."
+    },
+    {
+      "id": "annotated-tours",
+      "title": "סיורים מסומנים",
+      "category": "ניווט",
+      "href": "spp2-user-guide-he.html#annotated-tours",
+      "keywords": ["צילומים מסומנים", "סיור", "מספור", "כפתורים", "חיצים", "markers", "קישורים"],
+      "aliases": ["annotated screenshots", "מסך מסומן", "סיור מודרך"],
+      "summary": "צילומי מסך עם מספרים וקישורים ישירים לפרקים שמסבירים כל כפתור או אזור."
+    },
+    {
+      "id": "home",
+      "title": "מסך בית",
+      "category": "ניווט",
+      "href": "spp2-user-guide-he.html#home",
+      "keywords": ["בית", "פתיחת פרויקט", "ייבוא PSD", "ענן", "פרויקטים אחרונים", "מצבי עבודה"],
+      "aliases": ["home", "start", "dashboard"],
+      "summary": "מסך הפתיחה של SPP2: יצירת פרויקט, פתיחה, ייבוא, ענן וכלי עזר."
+    },
+    {
+      "id": "image-edit-crop",
+      "title": "Crop / חיתוך תמונה",
+      "category": "עריכת תמונה",
+      "href": "spp2-user-guide-he.html#image-edit",
+      "keywords": ["חיתוך", "קרופ", "crop", "יחס", "נעילת יחס", "reset crop"],
+      "aliases": ["חתוך", "trim", "crop image"],
+      "summary": "חיתוך גבולות התמונה או שינוי החלק הנראה מתוך התמונה."
+    },
+    {
+      "id": "image-edit-select",
+      "title": "בחירת אובייקט",
+      "category": "עריכת תמונה",
+      "href": "spp2-user-guide-he.html#button-details",
+      "keywords": ["בחירה", "אובייקט", "smart select", "magic wand", "rect select", "brush select", "שרביט קסם", "מכחול"],
+      "aliases": ["select object", "object selection", "סימון"],
+      "summary": "כלי בחירה חכמה, שרביט קסם, בחירה מלבנית ומכחול סימון."
+    },
+    {
+      "id": "content-aware-fill",
+      "title": "מילוי חכם",
+      "category": "AI",
+      "href": "spp2-user-guide-he.html#button-details",
+      "keywords": ["מילוי חכם", "content aware fill", "inpaint", "lama", "sd inpaint", "texture fill", "quick heal", "הסרת אובייקט"],
+      "aliases": ["מחק ומלא", "remove object", "object remove", "smart fill"],
+      "summary": "מחיקת אזור נבחר ומילוי שלו לפי הסביבה."
+    },
+    {
+      "id": "color-basic-tone",
+      "title": "טון בסיסי",
+      "category": "כיוון צבע",
+      "href": "spp2-user-guide-he.html#color-tools",
+      "keywords": ["בהירות", "חשיפה", "קונטרסט", "גמא", "היסט", "brightness", "exposure", "contrast", "gamma", "offset"],
+      "aliases": ["tone", "basic tone", "אור", "תמונה כהה", "תמונה בהירה"],
+      "summary": "תיקון כללי של בהירות, חשיפה וקונטרסט."
+    },
+    {
+      "id": "color-highlights-shadows",
+      "title": "אורות וצללים",
+      "category": "כיוון צבע",
+      "href": "spp2-user-guide-he.html#color-tools",
+      "keywords": ["אורות", "צללים", "לבנים", "שחורים", "highlights", "shadows", "whites", "blacks"],
+      "aliases": ["שרוף", "כהה", "פתח צללים", "recover highlights"],
+      "summary": "שליטה באזורים בהירים וכהים בלי לשנות את כל התמונה באותה מידה."
+    },
+    {
+      "id": "color-color",
+      "title": "צבע",
+      "category": "כיוון צבע",
+      "href": "spp2-user-guide-he.html#color-tools",
+      "keywords": ["רוויה", "חיות", "טמפרטורה", "tint", "hue", "saturation", "vibrance", "temperature", "גוון"],
+      "aliases": ["תמונה צהובה", "תמונה כחולה", "תמונה ירוקה", "white balance", "איזון צבע"],
+      "summary": "תיקון צבעים, תאורה צהובה/כחולה, ירקרקות ורוויה."
+    },
+    {
+      "id": "color-detail",
+      "title": "פרטים וחדות",
+      "category": "כיוון צבע",
+      "href": "spp2-user-guide-he.html#color-tools",
+      "keywords": ["חדות", "clarity", "sharpness", "noise reduction", "רעש", "גרעיניות", "פרטים"],
+      "aliases": ["detail", "sharpen", "תמונה רכה", "תמונה מטושטשת"],
+      "summary": "חיזוק פרטים, קצוות וטקסטורה לצד הפחתת רעש."
+    },
+    {
+      "id": "presets",
+      "title": "פריסטים",
+      "category": "ספריית כלים",
+      "href": "spp2-user-guide-he.html#presets",
+      "keywords": ["פריסט", "preset", "photo rescue", "hdr", "portrait", "print", "looks", "duotone"],
+      "aliases": ["מתכון", "אפקט מוכן", "פילטר"],
+      "summary": "מתכונים מוכנים לכיוון תמונה, דפוס, תיקון תמונות וסגנונות."
+    },
+    {
+      "id": "print-dpi",
+      "title": "DPI והכנה לדפוס",
+      "category": "דפוס",
+      "href": "spp2-user-guide-he.html#print-terms",
+      "keywords": ["dpi", "דפוס", "הדפסה", "רזולוציה", "פיקסלים", "איכות"],
+      "aliases": ["print resolution", "300dpi", "תמונה מפוקסלת"],
+      "summary": "בדיקה שהתמונה מתאימה לגודל ההדפסה ולא תצא רכה או מפוקסלת."
+    },
+    {
+      "id": "print-bleed-safe-area",
+      "title": "Bleed ו-Safe Area",
+      "category": "דפוס",
+      "href": "spp2-user-guide-he.html#print-terms",
+      "keywords": ["bleed", "גלישה", "safe area", "אזור בטוח", "שוליים", "margins", "חיתוך"],
+      "aliases": ["קו חיתוך", "לא לחתוך טקסט", "print margins"],
+      "summary": "שמירה על רקע עד הגלישה ועל תוכן חשוב בתוך האזור הבטוח."
+    },
+    {
+      "id": "save-export",
+      "title": "שמירה וייצוא",
+      "category": "קבצים",
+      "href": "spp2-user-guide-he.html#save-export",
+      "keywords": ["שמירה", "save", "שמירה בשם", "ייצוא", "export", "png", "jpg", "pdf", "גיבוי", "פרויקט נייד"],
+      "aliases": ["שמור", "save as", "קובץ סופי", "portable project"],
+      "summary": "הבדל בין שמירת פרויקט להמשך עריכה לבין ייצוא קובץ סופי ללקוח או לדפוס."
+    },
+    {
+      "id": "cloud-save",
+      "title": "שמירה בענן",
+      "category": "ענן",
+      "href": "spp2-user-guide-he.html#cloud-save",
+      "keywords": ["ענן", "cloud", "שמירה בענן", "העלאה", "הורדה", "מחיקה", "מייל", "קוד", "quota", "סנכרון"],
+      "aliases": ["cloud library", "upload project", "download project", "סנכרון פרויקט"],
+      "summary": "התחברות לענן, העלאת פרויקט, הורדה לפתיחה בעמדה אחרת, מחיקה ובדיקת נפח."
+    },
+    {
+      "id": "print-tools",
+      "title": "כלי הדפסה",
+      "category": "דפוס",
+      "href": "spp2-user-guide-he.html#print-tools",
+      "keywords": ["הדפסה", "print", "הדפס עותק אחד", "טווח עמודים", "תצוגה מקדימה", "מרכז הדפסות", "print hub", "שליחה מרוחקת"],
+      "aliases": ["print actions", "print range", "remote print", "הדפסה מרוחקת"],
+      "summary": "הדפסה מהירה, בחירת עמודים, תצוגה מקדימה, שליחה למרכז הדפסות וניהול תור."
+    },
+    {
+      "id": "class-photo-role",
+      "title": "תמונת מחזור - תלמיד או צוות",
+      "category": "מצבי עבודה",
+      "href": "spp2-user-guide-he.html#class-photo-deep",
+      "keywords": ["תמונת מחזור", "תלמיד", "ילד", "צוות", "איש צוות", "role", "child", "staff", "סקירת אנשים"],
+      "aliases": ["כיתה", "גננת", "מורה", "מי ילד מי צוות"],
+      "summary": "בשלב סקירת אנשים עורכים שם ובוחרים לכל תמונה אם האדם הוא תלמיד או איש צוות."
+    },
+    {
+      "id": "class-photo-sliders",
+      "title": "תמונת מחזור - סליידרים וריווח",
+      "category": "מצבי עבודה",
+      "href": "spp2-user-guide-he.html#class-photo-deep",
+      "keywords": ["רווח אופקי", "רווח אנכי", "רווח מסגרת לשם", "רווח צוות ילדים", "סליידרים", "איזון שורות", "auto"],
+      "aliases": ["spacing", "horizontal spacing", "vertical spacing", "center staff row"],
+      "summary": "הסליידרים שולטים במרחקים בין תמונות, שורות, שמות ואזור הצוות, עם איפוס לחישוב אוטומטי."
+    },
+    {
+      "id": "class-photo-face-detection",
+      "title": "תמונת מחזור - זיהוי פנים",
+      "category": "מצבי עבודה",
+      "href": "spp2-user-guide-he.html#class-photo-deep",
+      "keywords": ["זיהוי פנים", "face detection", "חיתוך מרכזי", "פנים", "crop", "תמונת מחזור"],
+      "aliases": ["face crop", "מרכז פנים", "חיתוך פנים"],
+      "summary": "זיהוי פנים ממקד את החיתוך בפנים; כשהוא כבוי, התוכנה משתמשת בחיתוך מרכזי."
+    },
+    {
+      "id": "collage-deep",
+      "title": "קולאז׳ - פריסות והגדרות",
+      "category": "מצבי עבודה",
+      "href": "spp2-user-guide-he.html#collage-deep",
+      "keywords": ["קולאז׳", "קולאז", "collage", "פריסות", "layout", "מרווח", "שוליים", "smart crop", "grid", "hero", "mosaic", "puzzle"],
+      "aliases": ["פריסת קולאז", "תאים", "מצב קבוצות", "batch collage"],
+      "summary": "העלאת תמונות, בחירת גודל, מרווחים, שוליים, מצב פשוט/יצירתי, Smart Crop ומשפחות פריסה."
+    },
+    {
+      "id": "batch-production-deep",
+      "title": "ייצור סדרתי ותבניות",
+      "category": "מצבי עבודה",
+      "href": "spp2-user-guide-he.html#batch-production-deep",
+      "keywords": ["ייצור סדרתי", "batch production", "תבנית", "template", "רשומות", "שדות משתנים", "csv", "txt", "החלף תמונה"],
+      "aliases": ["תבניות ייצור", "יצירת עיצובים בכמות", "רשימת שמות"],
+      "summary": "בחירת תבנית, מילוי רשומות מתמונות או TXT/CSV, עריכת שדות וסיכום לפני יצירת עיצובים."
+    },
+    {
+      "id": "blessing-deep",
+      "title": "ברכות",
+      "category": "מצבי עבודה",
+      "href": "spp2-user-guide-he.html#blessing-deep",
+      "keywords": ["ברכות", "ברכה", "blessing", "רקע", "תבנית", "מסגרת", "מקורות", "כתיבה חופשית", "חתימה"],
+      "aliases": ["כרטיס ברכה", "ברכה מוכנה", "ציטוט", "אירוע"],
+      "summary": "בחירת גודל, רקע, תבנית, מסגרת וטקסט ברכה מתוך ברכות מוכנות, מקורות או כתיבה חופשית."
+    },
+    {
+      "id": "photo-print-deep",
+      "title": "פיתוח תמונות",
+      "category": "מצבי עבודה",
+      "href": "spp2-user-guide-he.html#photo-print-deep",
+      "keywords": ["פיתוח תמונות", "photo print", "עותקים", "גודל הדפסה", "split", "fixed", "fit", "fill", "דרכון", "קו חיתוך"],
+      "aliases": ["הדפסת תמונות", "כמה בדף", "תמונת פספורט", "מסגרת"],
+      "summary": "העלאת תמונות, עותקים, גודל דף, מצב Fixed או Split, Fit/Fill, מסגרת, קו חיתוך וזיהוי פנים."
+    },
+    {
+      "id": "mask-grid-product-pdf-deep",
+      "title": "מסיכות, גריד, מוצרים ו-PDF",
+      "category": "מצבי עבודה",
+      "href": "spp2-user-guide-he.html#mask-grid-product-pdf-deep",
+      "keywords": ["מסיכות", "mask", "גריד", "grid", "ספריית מוצרים", "product library", "safe area", "bleed", "PDF Studio", "סיבוב", "שינוי גודל"],
+      "aliases": ["מסיכה", "תאים", "מוצרים", "מיזוג PDF", "ייבוא PDF"],
+      "summary": "שלד מדריך עומק למסיכות, גריד, ספריית מוצרים ו-PDF Studio עם מושגים מרכזיים לכל מצב."
+    },
+    {
+      "id": "settings-performance",
+      "title": "הגדרות ביצועים",
+      "category": "הגדרות",
+      "href": "spp2-user-guide-he.html#settings",
+      "keywords": ["ביצועים", "performance", "preview", "render", "מודלי AI", "זיכרון", "איכות"],
+      "aliases": ["איטי", "מהירות", "תקוע", "quality"],
+      "summary": "הגדרות איכות תצוגה, רינדור, קבצים גדולים ומודלי AI."
+    }
+  ],
+  "synonyms": {
+    "קרופ": ["crop", "חיתוך", "חתוך"],
+    "צבע": ["color", "רוויה", "חיות", "טמפרטורה", "tint", "hue"],
+    "בהירות": ["brightness", "חשיפה", "exposure", "gamma"],
+    "חדות": ["sharpness", "clarity", "detail"],
+    "מילוי": ["content aware fill", "inpaint", "lama", "sd inpaint"],
+    "דפוס": ["print", "dpi", "bleed", "safe area"],
+    "שמירה": ["save", "export", "ייצוא", "גיבוי", "פרויקט נייד"],
+    "ענן": ["cloud", "שמירה בענן", "העלאה", "הורדה", "סנכרון"],
+    "תמונת מחזור": ["כיתה", "תלמיד", "ילד", "צוות", "זיהוי פנים", "ריווח"],
+    "קולאז": ["collage", "קולאז׳", "פריסות", "layout", "smart crop"],
+    "קולאז׳": ["collage", "קולאז", "פריסה", "תאים", "מרווח"],
+    "ייצור סדרתי": ["batch production", "תבנית", "רשומות", "csv", "txt"],
+    "ברכה": ["blessing", "ברכות", "רקע", "מסגרת", "מקורות"],
+    "פיתוח תמונות": ["photo print", "עותקים", "fit", "fill", "דרכון"],
+    "מסיכה": ["mask", "מסיכות", "png", "svg"],
+    "גריד": ["grid", "שורות", "עמודות", "תאים"],
+    "מוצר": ["product library", "safe area", "bleed", "אזור הדפסה"],
+    "pdf": ["PDF Studio", "מיזוג", "סיבוב", "שינוי גודל"],
+    "סיור": ["צילומים מסומנים", "מספור", "markers", "כפתורים"],
+    "צילומים מסומנים": ["סיור", "מסך מסומן", "annotated screenshots", "קישורים"],
+    "פריסט": ["preset", "מתכון", "אפקט מוכן"]
+  }
+}

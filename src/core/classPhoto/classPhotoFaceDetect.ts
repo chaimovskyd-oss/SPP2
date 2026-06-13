@@ -1,7 +1,7 @@
 import type { FaceAnchorData } from "@/types/layers";
 
-// Reuses the same face detection approach as collage mode (collageFaceDetect.ts)
-// MediaPipe FaceDetector Web API → canvas saliency → portrait heuristic fallback
+// Reuses the same face detection sidecar as collage mode:
+// SCRFD_2.5G_KPS → MediaPipe/Haar fallback → FaceDetector Web API → portrait heuristic.
 
 async function detectFaceWithMediaPipe(img: HTMLImageElement): Promise<FaceAnchorData | null> {
   try {
@@ -68,6 +68,9 @@ async function detectFaceWithSidecar(imageUrl: string, img: HTMLImageElement): P
       );
       const w = result.width || img.naturalWidth || 1;
       const h = result.height || img.naturalHeight || 1;
+      const landmarks = Array.isArray(best.landmarks) ? best.landmarks : [];
+      const leftEye = landmarks[0];
+      const rightEye = landmarks[1];
       return {
         version: 1,
         faceBox: {
@@ -76,6 +79,8 @@ async function detectFaceWithSidecar(imageUrl: string, img: HTMLImageElement): P
           width: best.width / w,
           height: best.height / h
         },
+        leftEye: leftEye ? { x: leftEye.x / w, y: leftEye.y / h } : undefined,
+        rightEye: rightEye ? { x: rightEye.x / w, y: rightEye.y / h } : undefined,
         confidence: best.score ?? 0.8
       };
     } finally {
@@ -142,10 +147,83 @@ interface SppFaceBridge {
       ok: boolean;
       width: number;
       height: number;
-      backend: string;
-      faces: { x: number; y: number; width: number; height: number; score: number }[];
+      backend: "scrfd_2.5g_kps" | "mediapipe" | "haar" | "none";
+      faces: { x: number; y: number; width: number; height: number; score: number; landmarks?: { x: number; y: number }[] }[];
     }>;
   };
+}
+
+/** A single detected face box in normalised 0..1 coords plus its score. */
+export interface DetectedFaceBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  score: number;
+}
+
+/**
+ * Detect ALL faces in an image (normalised boxes), for group/class photos where
+ * Smart Shadow/Highlights V2 must recover every under-exposed face. Reuses the
+ * same SCRFD/MediaPipe sidecar chain as single-face detection; falls back to the
+ * Web FaceDetector, then to the portrait heuristic (one box) when nothing else
+ * is available. Returns [] only when the image itself can't be loaded.
+ */
+export async function detectAllFacesForAsset(imageUrl: string): Promise<DetectedFaceBox[]> {
+  try {
+    const img = await loadImageElement(imageUrl);
+
+    const spp = typeof window !== "undefined" ? (window as unknown as { spp?: SppFaceBridge }).spp : undefined;
+    if (spp?.smartSelection?.detectFaces && spp.smartSelection.loadImage) {
+      try {
+        const imagePath = await resolveImagePathForSidecar(imageUrl, spp);
+        if (imagePath !== null) {
+          const imageId = `sh-faces-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          const loaded = await spp.smartSelection.loadImage(imageId, imagePath, imageId);
+          if (loaded?.ok) {
+            try {
+              const result = await spp.smartSelection.detectFaces(imageId);
+              if (result?.ok && Array.isArray(result.faces) && result.faces.length > 0) {
+                const w = result.width || img.naturalWidth || 1;
+                const h = result.height || img.naturalHeight || 1;
+                return result.faces.map((f) => ({
+                  x: f.x / w, y: f.y / h, width: f.width / w, height: f.height / h, score: f.score ?? 0.8
+                }));
+              }
+            } finally {
+              spp.smartSelection.unloadImage?.(imageId).catch(() => undefined);
+            }
+          }
+        }
+      } catch {
+        // fall through to Web API / heuristic
+      }
+    }
+
+    if ("FaceDetector" in window) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const FaceDetectorCtor = (window as any).FaceDetector as new (opts: object) => { detect: (img: HTMLImageElement) => Promise<Array<{ boundingBox: { x: number; y: number; width: number; height: number } }>> };
+        const detector = new FaceDetectorCtor({ fastMode: true, maxDetectedFaces: 16 });
+        const results = await detector.detect(img);
+        if (results && results.length > 0) {
+          const sx = 1 / (img.naturalWidth || 1);
+          const sy = 1 / (img.naturalHeight || 1);
+          return results.map((r) => ({
+            x: r.boundingBox.x * sx, y: r.boundingBox.y * sy,
+            width: r.boundingBox.width * sx, height: r.boundingBox.height * sy, score: 0.8
+          }));
+        }
+      } catch {
+        // fall through to heuristic
+      }
+    }
+
+    const heuristic = portraitHeuristicFaceBox(img);
+    return [{ ...heuristic.faceBox, score: heuristic.confidence }];
+  } catch {
+    return [];
+  }
 }
 
 export interface FaceDetectProgress {

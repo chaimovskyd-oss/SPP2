@@ -5,6 +5,13 @@ import { buildShapedCollageSlots, buildDiamondCenterSlots, buildFrameCollageSlot
 import { buildPuzzleSlots } from "./collagePuzzle";
 import { buildSteppedMosaicSlots, buildTrapezoidSplitSlots, buildWaveSplitSlots } from "./collageV6Layouts";
 import { buildDynamicCollageSlots } from "./collageDynamicLayouts";
+import {
+  generateHexFlowSlots,
+  generateDiamondGridSlots,
+  generateInterlockingSlots,
+  generateRibbonFlowSlots,
+  generateOrganicPolygonSlots,
+} from "./collageGeometricEngines";
 import type { CollageLayoutFamily, CollageLayoutParams, CollageSlot } from "@/types/collage";
 
 // ─── Core building block (port of Python _make_grid_cells) ──────────────────
@@ -452,6 +459,12 @@ export const LAYOUT_REGISTRY: CollageLayoutFamilyDef[] = [
   { family: "freeformClusters", name: "Freeform Clusters", nameHe: "קבוצות חופשיות",   minImages: 8,  maxImages: 60,  mode: "creative", generate: generateFreeformClustersSlots },
   { family: "softVoronoi",     name: "Soft Voronoi",    nameHe: "וורונוי רך",         minImages: 5,  maxImages: 28,  mode: "creative", generate: generateSoftVoronoiSlots },
   { family: "customMaskShape", name: "Shape Template", nameHe: "תבנית צורה", minImages: 1, maxImages: 80, mode: "creative", generate: generateCustomMaskShapeSlots },
+  // ─── Geometric Engines V1 (premium, additive) ───────────────────────────────
+  { family: "hexFlow",         name: "Hex Flow",        nameHe: "כוורת",          minImages: 3,  maxImages: 40,  mode: "creative", generate: generateHexFlowSlots },
+  { family: "diamondGrid",     name: "Diamond Grid",    nameHe: "רשת יהלומים",    minImages: 2,  maxImages: 60,  mode: "both",     generate: generateDiamondGridSlots },
+  { family: "interlocking",    name: "Interlocking",    nameHe: "משולשים משתלבים", minImages: 2,  maxImages: 50,  mode: "creative", generate: generateInterlockingSlots },
+  { family: "ribbonFlow",      name: "Ribbon Flow",     nameHe: "סרט זורם",       minImages: 3,  maxImages: 40,  mode: "creative", generate: generateRibbonFlowSlots },
+  { family: "organicPolygon",  name: "Organic Polygon", nameHe: "פסיפס אורגני",   minImages: 4,  maxImages: 30,  mode: "creative", generate: generateOrganicPolygonSlots },
 ];
 
 export function computeSlots(family: CollageLayoutFamily, params: CollageLayoutParams): CollageSlot[] {

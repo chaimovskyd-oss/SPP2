@@ -13,7 +13,7 @@ import type {
   ShapeLayer,
   TextLayer
 } from "@/types/layers";
-import { DEFAULT_IMAGE_LAYER_EFFECTS } from "@/types/layers";
+import { DEFAULT_EDGE_FADE_SETTINGS, DEFAULT_IMAGE_LAYER_EFFECTS } from "@/types/layers";
 import type { CropRect, FitMode, Metadata, Rect } from "@/types/primitives";
 import { createDefaultTextModelFields } from "../text/defaults";
 
@@ -191,7 +191,8 @@ export function createImageLayer(options: {
       temperature: 0,
       tint: 0
     },
-    effects: { ...DEFAULT_IMAGE_LAYER_EFFECTS }
+    effects: { ...DEFAULT_IMAGE_LAYER_EFFECTS },
+    edgeFade: { ...DEFAULT_EDGE_FADE_SETTINGS }
   };
 }
 

@@ -1,0 +1,10 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.2.2
+numpy<2
+# Stable Diffusion inpainting (high-quality Content-Aware fill). Version ranges
+# match the combination verified to load AutoPipelineForInpainting together.
+diffusers>=0.27,<0.31
+transformers>=4.44,<4.47
+accelerate>=0.30,<0.35
+huggingface-hub>=0.23,<0.27
+safetensors>=0.4,<0.5

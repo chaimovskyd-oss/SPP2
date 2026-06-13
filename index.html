@@ -12,8 +12,63 @@
     <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800;900&family=Rubik:ital,wght@0,300;0,400;0,500;0,700;0,900;1,400&family=Assistant:wght@300;400;600;700;800&family=Frank+Ruhl+Libre:wght@300;400;500;700;900&family=Secular+One&family=Alef:wght@400;700&family=David+Libre:wght@400;500;700&family=Miriam+Libre:wght@400;700&family=Noto+Sans+Hebrew:wght@300;400;600;700;900&family=Suez+One&family=Amatic+SC:wght@400;700&display=swap" rel="stylesheet" />
     <!-- Latin fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,300;0,400;0,700;1,400&family=Open+Sans:ital,wght@0,300;0,400;0,700;1,400&family=Montserrat:ital,wght@0,400;0,600;0,700;0,800;0,900;1,400&family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Lato:ital,wght@0,300;0,400;0,700;1,400&family=Nunito:ital,wght@0,300;0,400;0,600;0,700;0,800;1,400&family=Poppins:ital,wght@0,300;0,400;0,600;0,700;0,800;1,400&family=Oswald:wght@300;400;500;700&family=Raleway:ital,wght@0,300;0,400;0,700;0,900;1,400&family=Ubuntu:ital,wght@0,300;0,400;0,700;1,400&family=Merriweather:ital,wght@0,300;0,400;0,700;1,400&family=Anton&family=Bebas+Neue&family=Righteous&display=swap" rel="stylesheet" />
+    <!-- AI preload splash: painted immediately on launch, before the React bundle runs. -->
+    <style>
+      #ai-splash {
+        position: fixed; inset: 0; z-index: 99999; background: #0f0e14;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
+      }
+      #ai-splash video { max-width: 70vw; max-height: 58vh; object-fit: contain; border-radius: 12px; }
+      #ai-splash .ai-splash-msg {
+        max-width: 580px; text-align: center; color: #e8e8f0;
+        font-family: "Heebo", "Assistant", sans-serif; font-size: 16px; line-height: 1.6; padding: 0 24px;
+      }
+      #ai-splash .ai-splash-hint { color: #9a9aa8; font-size: 12.5px; margin-top: -10px; font-family: "Heebo", "Assistant", sans-serif; }
+      #ai-splash .ai-splash-btn {
+        padding: 10px 26px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.25);
+        background: rgba(255,255,255,0.08); color: #fff; font-size: 14px; cursor: pointer;
+        font-family: "Heebo", "Assistant", sans-serif;
+      }
+      #ai-splash .ai-splash-btn:hover { background: rgba(255,255,255,0.16); }
+    </style>
   </head>
   <body>
+    <div id="ai-splash" dir="rtl" role="status" aria-live="polite">
+      <video src="assets/magnific_create-a-video_2991535441.mp4" autoplay muted loop playsinline></video>
+      <div class="ai-splash-msg">טוען מודלים של AI כדי שכל הכלים יפעלו מהר יותר…</div>
+      <div class="ai-splash-hint">אפשר לבטל את הסרטון בהגדרות › ביצועים</div>
+      <button type="button" class="ai-splash-btn" id="ai-splash-bg">טען מודלים ברקע</button>
+    </div>
+    <script>
+      // Decide immediately (before React mounts) whether to keep the loading video.
+      (function () {
+        function hide() {
+          var n = document.getElementById("ai-splash");
+          if (n && n.parentNode) n.parentNode.removeChild(n);
+          window.__sppAiSplashDismissed = true;
+        }
+        window.__sppHideAiSplash = hide;
+        // Outside Electron (plain browser dev) there is no AI sidecar — don't block the UI.
+        if (!window.spp || !window.spp.smartSelection) { hide(); return; }
+        try {
+          var raw = localStorage.getItem("spp-app-settings");
+          var show = true, mode = "balanced";
+          if (raw) {
+            var s = JSON.parse(raw);
+            var p = s && s.state && s.state.settings && s.state.settings.performance;
+            if (p) {
+              if (p.aiShowLoadingVideo === false) show = false;
+              if (p.aiPerformanceMode) mode = p.aiPerformanceMode;
+            }
+          }
+          if (!show || mode === "lazy") { hide(); return; }
+        } catch (e) { /* on any error, keep the splash visible */ }
+        var btn = document.getElementById("ai-splash-bg");
+        if (btn) btn.addEventListener("click", hide);
+        // Safety net: never trap the user if preload stalls.
+        setTimeout(hide, 120000);
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -113,8 +113,72 @@ function frameStyleShapeToLayerShape(
 
 // ─── Name text height estimate ────────────────────────────────────────────────
 
-function estimateNameHeight(textStyle: TextStyle): number {
-  return Math.round(textStyle.fontSize * textStyle.lineHeight * 1.1);
+function clampScale(value: number | undefined): number {
+  return Math.max(0.5, Math.min(1.6, Number.isFinite(value) ? value ?? 1 : 1));
+}
+
+function hasTitleText(rule: ClassPhotoLayoutRule): boolean {
+  return rule.titleText.trim().length > 0;
+}
+
+function hasFooterText(rule: ClassPhotoLayoutRule): boolean {
+  return rule.footerText.trim().length > 0;
+}
+
+function effectiveTopTitleAreaHeight(rule: ClassPhotoLayoutRule): number {
+  return hasTitleText(rule) ? rule.layoutSettings.topTitleAreaHeight : 0;
+}
+
+function effectiveBottomFooterAreaHeight(rule: ClassPhotoLayoutRule): number {
+  return hasFooterText(rule) ? rule.layoutSettings.bottomFooterAreaHeight : 0;
+}
+
+function effectiveTitleToContentSpacing(rule: ClassPhotoLayoutRule): number {
+  return hasTitleText(rule) ? rule.layoutSettings.titleToContentSpacing : 0;
+}
+
+function effectiveContentToFooterSpacing(rule: ClassPhotoLayoutRule): number {
+  return hasFooterText(rule) ? rule.layoutSettings.contentToFooterSpacing : 0;
+}
+
+function estimateNameLineCount(text: string, textStyle: TextStyle, boxW: number): number {
+  const usableW = Math.max(1, boxW - 8);
+  const avgCharW = Math.max(1, textStyle.fontSize * 0.56 + Math.max(0, textStyle.letterSpacing));
+  const maxCharsPerLine = Math.max(1, Math.floor(usableW / avgCharW));
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return 1;
+  let lines = 1;
+  let current = 0;
+  for (const word of words) {
+    const parts = Math.max(1, Math.ceil(word.length / maxCharsPerLine));
+    for (let part = 0; part < parts; part++) {
+      const partLength = part === parts - 1 ? Math.max(1, word.length - part * maxCharsPerLine) : maxCharsPerLine;
+      const nextLength = current === 0 ? partLength : current + 1 + partLength;
+      if (nextLength <= maxCharsPerLine) {
+        current = nextLength;
+      } else {
+        lines++;
+        current = partLength;
+      }
+    }
+  }
+  return lines;
+}
+
+const MAX_NAME_LAYOUT_LINES = 2;
+const MAX_NAME_TO_FRAME_RATIO = 0.32;
+
+function estimateNameHeight(textStyle: TextStyle, names: string[] = [], boxW = Number.POSITIVE_INFINITY): number {
+  const rawLineCount = Number.isFinite(boxW)
+    ? Math.max(1, ...names.map((name) => estimateNameLineCount(name, textStyle, boxW)))
+    : 1;
+  const lineCount = Math.min(MAX_NAME_LAYOUT_LINES, rawLineCount);
+  const naturalHeight = lineCount <= 1
+    ? Math.round(textStyle.fontSize * textStyle.lineHeight * 1.1)
+    : Math.ceil(lineCount * textStyle.fontSize * textStyle.lineHeight + Math.max(6, textStyle.fontSize * 0.28));
+  if (!Number.isFinite(boxW)) return naturalHeight;
+  const maxLayoutHeight = Math.max(textStyle.fontSize * textStyle.lineHeight * 1.1, boxW * MAX_NAME_TO_FRAME_RATIO);
+  return Math.round(Math.min(naturalHeight, maxLayoutHeight));
 }
 
 // ─── Compute row Y positions ──────────────────────────────────────────────────
@@ -142,11 +206,82 @@ function maxRowCount(rows: number[]): number {
 
 function estimateScaledNameRatio(textStyle: TextStyle, frameSize: number, fallback: number): number {
   if (frameSize <= 0) return fallback;
-  return Math.max(0, estimateNameHeight(textStyle) / frameSize);
+  return Math.max(0, estimateNameHeight(textStyle, [], frameSize) / frameSize);
 }
 
 function rowWidth(rowCount: number, frameW: number, spacing: number): number {
   return rowCount * frameW + Math.max(0, rowCount - 1) * spacing;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
+function constrainLayoutSettingsToPage(
+  pageW: number,
+  pageH: number,
+  rule: ClassPhotoLayoutRule
+): ClassPhotoLayoutSettings {
+  const s = rule.layoutSettings;
+  const minPageSide = Math.max(1, Math.min(pageW, pageH));
+  const maxHorizontalMargin = Math.max(0, pageW * 0.18);
+  const maxVerticalMargin = Math.max(0, pageH * 0.14);
+  const maxPersonSpacing = Math.max(0, minPageSide * 0.045);
+  const maxAreaSpacing = Math.max(0, minPageSide * 0.06);
+  const maxFrameToName = Math.max(0, minPageSide * 0.025);
+
+  return {
+    ...s,
+    margins: {
+      top: clampNumber(s.margins.top, 0, maxVerticalMargin),
+      right: clampNumber(s.margins.right, 0, maxHorizontalMargin),
+      bottom: clampNumber(s.margins.bottom, 0, maxVerticalMargin),
+      left: clampNumber(s.margins.left, 0, maxHorizontalMargin)
+    },
+    topTitleAreaHeight: hasTitleText(rule) ? clampNumber(s.topTitleAreaHeight, 0, pageH * 0.16) : 0,
+    bottomFooterAreaHeight: hasFooterText(rule) ? clampNumber(s.bottomFooterAreaHeight, 0, pageH * 0.11) : 0,
+    horizontalSpacing: clampNumber(s.horizontalSpacing, 0, maxPersonSpacing),
+    verticalSpacing: clampNumber(s.verticalSpacing, 0, maxPersonSpacing),
+    staffToChildrenSpacing: clampNumber(s.staffToChildrenSpacing, 0, maxAreaSpacing),
+    frameToNameSpacing: clampNumber(s.frameToNameSpacing, 0, maxFrameToName),
+    titleToContentSpacing: hasTitleText(rule) ? clampNumber(s.titleToContentSpacing, 0, maxAreaSpacing) : 0,
+    contentToFooterSpacing: hasFooterText(rule) ? clampNumber(s.contentToFooterSpacing, 0, maxAreaSpacing) : 0
+  };
+}
+
+function buildPlanSafeRule(pageW: number, pageH: number, rule: ClassPhotoLayoutRule): ClassPhotoLayoutRule {
+  let safeRule: ClassPhotoLayoutRule = {
+    ...rule,
+    layoutSettings: constrainLayoutSettingsToPage(pageW, pageH, rule)
+  };
+  if (computeOptimalClassPhotoLayout(pageW, pageH, safeRule) !== null) return safeRule;
+
+  const attempts = [0.75, 0.5, 0.3, 0.15, 0];
+  for (const ratio of attempts) {
+    const s = safeRule.layoutSettings;
+    safeRule = {
+      ...safeRule,
+      layoutSettings: {
+        ...s,
+        margins: {
+          top: Math.round(s.margins.top * ratio),
+          right: Math.round(s.margins.right * ratio),
+          bottom: Math.round(s.margins.bottom * ratio),
+          left: Math.round(s.margins.left * ratio)
+        },
+        horizontalSpacing: Math.round(s.horizontalSpacing * ratio),
+        verticalSpacing: Math.round(s.verticalSpacing * ratio),
+        staffToChildrenSpacing: Math.round(s.staffToChildrenSpacing * ratio),
+        frameToNameSpacing: Math.round(s.frameToNameSpacing * ratio),
+        titleToContentSpacing: Math.round(s.titleToContentSpacing * ratio),
+        contentToFooterSpacing: Math.round(s.contentToFooterSpacing * ratio)
+      }
+    };
+    if (computeOptimalClassPhotoLayout(pageW, pageH, safeRule) !== null) return safeRule;
+  }
+
+  return safeRule;
 }
 
 export function computeOptimalClassPhotoLayout(
@@ -164,15 +299,17 @@ export function computeOptimalClassPhotoLayout(
     pageH -
     s.margins.top -
     s.margins.bottom -
-    s.topTitleAreaHeight -
-    s.bottomFooterAreaHeight -
-    s.titleToContentSpacing -
-    s.contentToFooterSpacing;
+    effectiveTopTitleAreaHeight(rule) -
+    effectiveBottomFooterAreaHeight(rule) -
+    effectiveTitleToContentSpacing(rule) -
+    effectiveContentToFooterSpacing(rule);
 
   if (availW <= 0 || availH <= 0) return null;
 
   const staffEnabled = s.staffRowEnabled && staffCount > 0;
   const staffScale = s.staffScale || 1.3;
+  const childNames = rule.personRecords.filter((p) => p.role === "child").map((p) => p.displayName);
+  const staffNames = rule.personRecords.filter((p) => p.role === "staff").map((p) => p.displayName);
   const childNameRatio = estimateScaledNameRatio(rule.childNameTextStyle, s.childFrameSize.width, 0.18);
   const staffNameRatio = estimateScaledNameRatio(rule.staffNameTextStyle, s.staffFrameSize.width, 0.18);
   const childCellFactor = s.namePosition === "insideBottom" || s.namePosition === "insideTop"
@@ -221,8 +358,8 @@ export function computeOptimalClassPhotoLayout(
       if (!Number.isFinite(fittedChild) || fittedChild <= 0) continue;
 
       const fittedStaff = Math.round(fittedChild * staffScale);
-      const childNameH = Math.round(fittedChild * childNameRatio);
-      const staffNameH = Math.round(fittedStaff * staffNameRatio);
+      const childNameH = estimateNameHeight(rule.childNameTextStyle, childNames, fittedChild);
+      const staffNameH = estimateNameHeight(rule.staffNameTextStyle, staffNames, fittedStaff);
       const childCellH = computeCellHeight(fittedChild, childNameH, s.frameToNameSpacing, s.namePosition);
       const staffCellH = computeCellHeight(fittedStaff, staffNameH, s.frameToNameSpacing, s.namePosition);
       const usedContentWidth = Math.max(
@@ -271,6 +408,89 @@ export function computeOptimalClassPhotoLayout(
   return best;
 }
 
+function scaledPlanFitsPage(
+  pageW: number,
+  pageH: number,
+  rule: ClassPhotoLayoutRule,
+  plan: ClassPhotoAutoLayoutPlan,
+  childFrameSize: number,
+  staffFrameSize: number,
+  childTextStyle: TextStyle,
+  staffTextStyle: TextStyle
+): boolean {
+  const s = rule.layoutSettings;
+  const availW = pageW - s.margins.left - s.margins.right;
+  const availH =
+    pageH -
+    s.margins.top -
+    s.margins.bottom -
+    effectiveTopTitleAreaHeight(rule) -
+    effectiveBottomFooterAreaHeight(rule) -
+    effectiveTitleToContentSpacing(rule) -
+    effectiveContentToFooterSpacing(rule);
+  const childNames = rule.personRecords.filter((p) => p.role === "child").map((p) => p.displayName);
+  const staffNames = rule.personRecords.filter((p) => p.role === "staff").map((p) => p.displayName);
+  const childNameH = estimateNameHeight(childTextStyle, childNames, childFrameSize);
+  const staffNameH = estimateNameHeight(staffTextStyle, staffNames, staffFrameSize);
+  const childCellH = computeCellHeight(childFrameSize, childNameH, s.frameToNameSpacing, s.namePosition);
+  const staffCellH = computeCellHeight(staffFrameSize, staffNameH, s.frameToNameSpacing, s.namePosition);
+  const totalRows = plan.childRows.length + plan.staffRows.length;
+  const rowGaps = Math.max(0, totalRows - 1) * s.verticalSpacing;
+  const staffToChildrenGap = plan.staffRows.length > 0 && plan.childRows.length > 0 ? s.staffToChildrenSpacing : 0;
+  const usedContentWidth = Math.max(
+    plan.childRows.length > 0 ? Math.max(...plan.childRows.map((count) => rowWidth(count, childFrameSize, s.horizontalSpacing))) : 0,
+    plan.staffRows.length > 0 ? Math.max(...plan.staffRows.map((count) => rowWidth(count, staffFrameSize, s.horizontalSpacing))) : 0
+  );
+  const usedContentHeight =
+    plan.childRows.length * childCellH +
+    plan.staffRows.length * staffCellH +
+    rowGaps +
+    staffToChildrenGap;
+
+  return usedContentWidth <= availW + 0.01 && usedContentHeight <= availH + 0.01;
+}
+
+function scaledNameTextStyle(textStyle: TextStyle, ratio: number, minFontSize: number): TextStyle {
+  return {
+    ...textStyle,
+    fontSize: Math.max(minFontSize, Math.round(textStyle.fontSize * ratio))
+  };
+}
+
+export function canApplyClassPhotoGroupScale(
+  pageW: number,
+  pageH: number,
+  rule: ClassPhotoLayoutRule,
+  scales: { childGroupScale?: number; staffGroupScale?: number }
+): boolean {
+  const baseRule = buildPlanSafeRule(pageW, pageH, {
+    ...rule,
+    layoutSettings: {
+      ...rule.layoutSettings,
+      childGroupScale: 1,
+      staffGroupScale: 1
+    }
+  });
+  const plan = computeOptimalClassPhotoLayout(pageW, pageH, baseRule);
+  if (!plan) return false;
+  const childScale = clampScale(scales.childGroupScale ?? rule.layoutSettings.childGroupScale);
+  const staffScale = clampScale(scales.staffGroupScale ?? rule.layoutSettings.staffGroupScale);
+  const childFrameSize = Math.max(16, Math.round(plan.childFrameSize * childScale));
+  const staffFrameSize = Math.max(16, Math.round(plan.staffFrameSize * staffScale));
+  const childRatio = rule.layoutSettings.childFrameSize.width > 0 ? childFrameSize / rule.layoutSettings.childFrameSize.width : 1;
+  const staffRatio = rule.layoutSettings.staffFrameSize.width > 0 ? staffFrameSize / rule.layoutSettings.staffFrameSize.width : childRatio;
+  return scaledPlanFitsPage(
+    pageW,
+    pageH,
+    baseRule,
+    plan,
+    childFrameSize,
+    staffFrameSize,
+    scaledNameTextStyle(baseRule.childNameTextStyle, childRatio, 8),
+    scaledNameTextStyle(baseRule.staffNameTextStyle, staffRatio, 9)
+  );
+}
+
 // ─── Auto-fit: compute largest frame size that fits the page ─────────────────
 
 /**
@@ -285,40 +505,58 @@ export function fitLayoutToPage(
   pageH: number,
   rule: ClassPhotoLayoutRule
 ): ClassPhotoLayoutRule {
-  const s = rule.layoutSettings;
-  const plan = computeOptimalClassPhotoLayout(pageW, pageH, rule);
-  if (!plan) return rule;
+  const safeRule = buildPlanSafeRule(pageW, pageH, rule);
+  const s = safeRule.layoutSettings;
+  const plan = computeOptimalClassPhotoLayout(pageW, pageH, safeRule);
+  if (!plan) return safeRule;
 
   // Apply the selected grid plan as the single source for frame sizing.
-  const MIN_FRAME = 40;
-  const fittedChildW = Math.max(MIN_FRAME, plan.childFrameSize);
-  const fittedStaffW = Math.max(MIN_FRAME, plan.staffFrameSize);
+  const MIN_FRAME = 16;
+  const baseChildW = Math.max(MIN_FRAME, plan.childFrameSize);
+  const baseStaffW = Math.max(MIN_FRAME, plan.staffFrameSize);
+  const requestedChildW = Math.max(MIN_FRAME, Math.round(baseChildW * clampScale(s.childGroupScale)));
+  const requestedStaffW = Math.max(MIN_FRAME, Math.round(baseStaffW * clampScale(s.staffGroupScale)));
 
   // ── Fit title/footer font sizes to their areas (light override) ─────────────
   // Cap font size so it never exceeds 70% of the allotted area height (single line comfort)
-  const titleFontMax = Math.floor(s.topTitleAreaHeight * 0.62);
-  const footerFontMax = Math.floor(s.bottomFooterAreaHeight * 0.62);
-  const fittedTitleStyle = rule.titleTextStyle.fontSize > titleFontMax
-    ? { ...rule.titleTextStyle, fontSize: titleFontMax }
-    : rule.titleTextStyle;
-  const fittedFooterStyle = rule.footerTextStyle.fontSize > footerFontMax
-    ? { ...rule.footerTextStyle, fontSize: footerFontMax }
-    : rule.footerTextStyle;
+  const titleFontMax = Math.floor(effectiveTopTitleAreaHeight(safeRule) * 0.62);
+  const footerFontMax = Math.floor(effectiveBottomFooterAreaHeight(safeRule) * 0.62);
+  const fittedTitleStyle = titleFontMax > 0 && safeRule.titleTextStyle.fontSize > titleFontMax
+    ? { ...safeRule.titleTextStyle, fontSize: titleFontMax }
+    : safeRule.titleTextStyle;
+  const fittedFooterStyle = footerFontMax > 0 && safeRule.footerTextStyle.fontSize > footerFontMax
+    ? { ...safeRule.footerTextStyle, fontSize: footerFontMax }
+    : safeRule.footerTextStyle;
   // Update name text styles proportionally
-  const sizeRatio = s.childFrameSize.width > 0 ? fittedChildW / s.childFrameSize.width : 1;
-  const updatedChildNameStyle = {
-    ...rule.childNameTextStyle,
-    fontSize: Math.max(14, Math.round(rule.childNameTextStyle.fontSize * sizeRatio))
-  };
-  const updatedStaffNameStyle = {
-    ...rule.staffNameTextStyle,
-    fontSize: Math.max(16, Math.round(rule.staffNameTextStyle.fontSize * sizeRatio))
-  };
+  const requestedChildRatio = s.childFrameSize.width > 0 ? requestedChildW / s.childFrameSize.width : 1;
+  const requestedStaffRatio = s.staffFrameSize.width > 0 ? requestedStaffW / s.staffFrameSize.width : requestedChildRatio;
+  const requestedChildNameStyle = scaledNameTextStyle(safeRule.childNameTextStyle, requestedChildRatio, 8);
+  const requestedStaffNameStyle = scaledNameTextStyle(safeRule.staffNameTextStyle, requestedStaffRatio, 9);
+  const scaledFits = scaledPlanFitsPage(
+    pageW,
+    pageH,
+    safeRule,
+    plan,
+    requestedChildW,
+    requestedStaffW,
+    requestedChildNameStyle,
+    requestedStaffNameStyle
+  );
+  const fittedChildW = scaledFits ? requestedChildW : baseChildW;
+  const fittedStaffW = scaledFits ? requestedStaffW : baseStaffW;
+  const updatedChildNameStyle = scaledFits
+    ? requestedChildNameStyle
+    : scaledNameTextStyle(safeRule.childNameTextStyle, s.childFrameSize.width > 0 ? baseChildW / s.childFrameSize.width : 1, 8);
+  const updatedStaffNameStyle = scaledFits
+    ? requestedStaffNameStyle
+    : scaledNameTextStyle(safeRule.staffNameTextStyle, s.staffFrameSize.width > 0 ? baseStaffW / s.staffFrameSize.width : 1, 9);
 
   return {
-    ...rule,
+    ...safeRule,
     layoutSettings: {
       ...s,
+      childGroupScale: scaledFits ? clampScale(s.childGroupScale) : 1,
+      staffGroupScale: scaledFits ? clampScale(s.staffGroupScale) : 1,
       childFrameSize: { width: fittedChildW, height: fittedChildW },
       staffFrameSize: { width: fittedStaffW, height: fittedStaffW }
     },
@@ -372,11 +610,11 @@ export function computeClassPhotoPositions(
 
   // Available content area
   const availX = s.margins.left;
-  const availY = s.margins.top + s.topTitleAreaHeight + s.titleToContentSpacing;
+  const availY = s.margins.top + effectiveTopTitleAreaHeight(rule) + effectiveTitleToContentSpacing(rule);
   const availW = pageW - s.margins.left - s.margins.right;
 
-  const childNameH = estimateNameHeight(rule.childNameTextStyle);
-  const staffNameH = estimateNameHeight(rule.staffNameTextStyle);
+  const childNameH = estimateNameHeight(rule.childNameTextStyle, childRecords.map((p) => p.displayName), s.childFrameSize.width);
+  const staffNameH = estimateNameHeight(rule.staffNameTextStyle, staffRecords.map((p) => p.displayName), s.staffFrameSize.width);
 
   const childCellH = computeCellHeight(s.childFrameSize.height, childNameH, s.frameToNameSpacing, s.namePosition);
   const staffCellH = computeCellHeight(s.staffFrameSize.height, staffNameH, s.frameToNameSpacing, s.namePosition);
@@ -461,7 +699,7 @@ export function computeClassPhotoPositions(
   }
 
   // Overflow check
-  const footerTop = pageH - s.margins.bottom - s.bottomFooterAreaHeight - s.contentToFooterSpacing;
+  const footerTop = pageH - s.margins.bottom - effectiveBottomFooterAreaHeight(rule) - effectiveContentToFooterSpacing(rule);
   const contentBottom = currentY - s.verticalSpacing;
   const overflows = contentBottom > footerTop;
 
@@ -703,7 +941,7 @@ export function makeTitleLayer(
     zIndex,
     selected: false,
     parentFrameId: null,
-    text: rule.titleText || "תמונת כיתה",
+    text: rule.titleText,
     fontFamily: ts.fontFamily,
     fontWeight: ts.fontWeight,
     fontStyle: "normal",
@@ -822,10 +1060,14 @@ export function syncClassPhotoToPage(
   const existingFooterId = rule.footerTextLayerId;
 
   // Title — reuse existing ID to prevent Konva remount
-  const titleLayer = { ...makeTitleLayer(page.width, rule, zIdx++), id: existingTitleId ?? crypto.randomUUID() };
+  const titleLayer = hasTitleText(rule)
+    ? { ...makeTitleLayer(page.width, rule, zIdx++), id: existingTitleId ?? crypto.randomUUID() }
+    : null;
 
   // Footer — reuse existing ID
-  const footerLayer = { ...makeFooterLayer(page.width, page.height, rule, zIdx++), id: existingFooterId ?? crypto.randomUUID() };
+  const footerLayer = hasFooterText(rule)
+    ? { ...makeFooterLayer(page.width, page.height, rule, zIdx++), id: existingFooterId ?? crypto.randomUUID() }
+    : null;
 
   // Staff frames + names
   const updatedStaffRecords: ClassPhotoPersonRecord[] = [];
@@ -870,7 +1112,8 @@ export function syncClassPhotoToPage(
   }
 
   // Add title/footer on top
-  newLayers.push(titleLayer, footerLayer);
+  if (titleLayer) newLayers.push(titleLayer);
+  if (footerLayer) newLayers.push(footerLayer);
 
   const updatedRule: ClassPhotoLayoutRule = {
     ...rule,
@@ -878,8 +1121,8 @@ export function syncClassPhotoToPage(
       ...updatedStaffRecords,
       ...updatedChildRecords
     ],
-    titleTextLayerId: titleLayer.id,
-    footerTextLayerId: footerLayer.id
+    titleTextLayerId: titleLayer?.id,
+    footerTextLayerId: footerLayer?.id
   };
 
   const updatedPage: Page = { ...page, layers: newLayers };

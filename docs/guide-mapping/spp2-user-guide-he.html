@@ -1,0 +1,1159 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>מדריך SPP2</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111018;
+      --panel: #1b1925;
+      --panel-2: #242130;
+      --text: #f6f2ff;
+      --muted: #b8adc9;
+      --soft: #817893;
+      --line: #393447;
+      --accent: #8b6ff0;
+      --accent-2: #4cc9a6;
+      --danger: #ff7a90;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+    }
+    a { color: inherit; }
+    .layout {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      border-left: 1px solid var(--line);
+      background: #15131d;
+      padding: 18px;
+    }
+    main {
+      width: min(1220px, calc(100vw - 320px));
+      margin: 0 auto;
+      padding: 28px 28px 80px;
+    }
+    h1, h2, h3 { line-height: 1.2; margin: 0; }
+    h1 { font-size: 34px; }
+    h2 { font-size: 24px; margin-top: 44px; padding-top: 10px; }
+    h3 { font-size: 17px; margin-top: 20px; }
+    p { color: var(--muted); margin: 8px 0 0; }
+    .brand {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+      font-weight: 800;
+    }
+    .brand span {
+      color: var(--accent);
+      letter-spacing: 0;
+    }
+    .search {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 16px;
+      font-size: 14px;
+    }
+    .search-results {
+      display: none;
+      margin: -6px 0 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      overflow: hidden;
+    }
+    .search-results.active { display: grid; }
+    .search-result {
+      display: grid;
+      gap: 2px;
+      padding: 9px 10px;
+      color: var(--muted);
+      text-decoration: none;
+      border-bottom: 1px solid var(--line);
+    }
+    .search-result:last-child { border-bottom: 0; }
+    .search-result:hover {
+      background: var(--panel-2);
+      color: var(--text);
+    }
+    .search-result strong {
+      color: var(--text);
+      font-size: 13px;
+    }
+    .search-result span {
+      font-size: 12px;
+      color: var(--soft);
+    }
+    nav {
+      display: grid;
+      gap: 6px;
+    }
+    nav a {
+      display: block;
+      text-decoration: none;
+      color: var(--muted);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 14px;
+    }
+    nav a:hover, nav a.active {
+      background: var(--panel-2);
+      color: var(--text);
+    }
+    .hero {
+      display: grid;
+      gap: 12px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 26px;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .pill {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 999px;
+      padding: 3px 10px;
+    }
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 18px 0;
+    }
+    .tab {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--muted);
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font: inherit;
+    }
+    .tab[aria-selected="true"] {
+      background: rgba(139,111,240,0.18);
+      color: var(--text);
+      border-color: var(--accent);
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 14px;
+      margin-top: 14px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .card-body { padding: 14px; }
+    .card img {
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 10;
+      object-fit: cover;
+      border-bottom: 1px solid var(--line);
+      background: #09080d;
+    }
+    .card h3 { margin: 0; }
+    .card p { font-size: 14px; }
+    .shot-link {
+      display: inline-flex;
+      margin-top: 10px;
+      color: var(--accent-2);
+      text-decoration: none;
+      font-size: 13px;
+    }
+    .steps {
+      counter-reset: step;
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .step {
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 10px;
+      align-items: start;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+    .step::before {
+      counter-increment: step;
+      content: counter(step);
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 700;
+    }
+    .note {
+      margin-top: 16px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-right: 3px solid var(--accent);
+      background: var(--panel);
+      border-radius: 8px;
+      color: var(--muted);
+    }
+    .details-table {
+      display: grid;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .detail-row {
+      display: grid;
+      grid-template-columns: 160px 1fr 1fr 1fr;
+      gap: 10px;
+      align-items: start;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+    .detail-row strong { color: var(--text); }
+    .detail-row span { color: var(--muted); font-size: 13px; }
+    .detail-row.header {
+      background: transparent;
+      border-color: transparent;
+      padding-block: 0;
+      color: var(--soft);
+      font-size: 12px;
+    }
+    .hidden-by-search { display: none !important; }
+    .home-map {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .home-link {
+      display: grid;
+      gap: 6px;
+      min-height: 118px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      text-decoration: none;
+    }
+    .home-link:hover {
+      border-color: var(--accent);
+      background: var(--panel-2);
+    }
+    .home-link strong { font-size: 16px; }
+    .home-link span { color: var(--muted); font-size: 13px; }
+    .guide-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .guide-actions a {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+      padding: 8px 11px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 13px;
+    }
+    .guide-actions a:hover {
+      color: var(--text);
+      border-color: var(--accent);
+    }
+    .annotated-shot {
+      margin: 16px 0 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      overflow: hidden;
+    }
+    .annotated-media {
+      position: relative;
+      background: #09080d;
+    }
+    .annotated-media img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+    .marker {
+      position: absolute;
+      inset-inline-start: var(--x);
+      top: var(--y);
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      translate: -50% -50%;
+      border: 2px solid #fff;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 800;
+      text-decoration: none;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+    }
+    .marker:hover {
+      background: var(--accent-2);
+      color: #06100d;
+    }
+    .annotated-legend {
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+    }
+    .legend-item {
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 8px;
+      align-items: start;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 13px;
+    }
+    .legend-num {
+      display: grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      background: rgba(139,111,240,0.22);
+      color: var(--text);
+      font-weight: 700;
+    }
+    .legend-item strong {
+      color: var(--text);
+      display: block;
+      font-size: 14px;
+    }
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; }
+      aside { position: static; height: auto; border-left: 0; border-bottom: 1px solid var(--line); }
+      main { width: 100%; padding: 20px 14px 60px; }
+      h1 { font-size: 28px; }
+      .detail-row { grid-template-columns: 1fr; }
+      .detail-row.header { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside>
+      <div class="brand">SPP <span>v2</span></div>
+      <input id="search" class="search" type="search" placeholder="חיפוש במדריך...">
+      <div id="searchResults" class="search-results" aria-live="polite"></div>
+      <nav id="nav">
+        <a href="#guide-home">דף הבית</a>
+        <a href="#overview">סקירה</a>
+        <a href="#home">מסך בית</a>
+        <a href="#modes">מצבי עבודה</a>
+        <a href="#editor">עורך חופשי</a>
+        <a href="#image-edit">עריכת תמונה</a>
+        <a href="#tool-library">ספריית כלים</a>
+        <a href="#button-details">כפתורים וכלים</a>
+        <a href="#concepts">מושגים</a>
+        <a href="#color-tools">כיוון צבע</a>
+        <a href="#presets">פריסטים</a>
+        <a href="#save-export">שמירה וייצוא</a>
+        <a href="#cloud-save">שמירה בענן</a>
+        <a href="#print-tools">כלי הדפסה</a>
+        <a href="#class-photo-deep">תמונת מחזור</a>
+        <a href="#collage-deep">קולאז׳</a>
+        <a href="#batch-production-deep">ייצור סדרתי</a>
+        <a href="#blessing-deep">ברכות</a>
+        <a href="#photo-print-deep">פיתוח תמונות</a>
+        <a href="#mask-grid-product-pdf-deep">שאר המצבים</a>
+        <a href="#print-terms">דפוס</a>
+        <a href="#utilities">כלי עזר</a>
+        <a href="#settings">הגדרות</a>
+        <a href="#next">המשך עבודה</a>
+      </nav>
+    </aside>
+
+    <main>
+      <section id="guide-home" class="hero searchable" data-search="דף הבית מדריך שער התחלה ניווט נושאים צילומים מסומנים סיור מהיר">
+        <h1>מרכז מדריך SPP2</h1>
+        <p>שער כניסה למדריך המלא: מתחילים לפי פעולה, לפי מצב עבודה, לפי כלי עריכה או לפי הכנה לדפוס. אפשר להשתמש בחיפוש בצד, או לפתוח סיור מסומן עם מספרים על צילום המסך.</p>
+        <div class="meta">
+          <span class="pill">מדריך אינטראקטיבי</span>
+          <span class="pill">חיפוש חכם בהכנה</span>
+          <span class="pill">צילומים מסומנים</span>
+        </div>
+        <div class="guide-actions">
+          <a href="#annotated-tours">סיורים מסומנים</a>
+          <a href="#modes">מצבי עבודה</a>
+          <a href="#button-details">כל הכפתורים</a>
+          <a href="#save-export">שמירה וייצוא</a>
+          <a href="#print-tools">הדפסה</a>
+          <a href="#concepts">מילון מושגים</a>
+        </div>
+        <div class="home-map">
+          <a class="home-link searchable" href="#modes" data-search="אני רוצה ליצור פרויקט חדש מצב עבודה גריד קולאז תמונת מחזור ברכות">
+            <strong>להתחיל עבודה חדשה</strong>
+            <span>בחירת מצב עבודה: חופשי, גריד, מסיכות, קולאז׳, תמונת מחזור, פיתוח תמונות, מוצרים וברכות.</span>
+          </a>
+          <a class="home-link searchable" href="#editor" data-search="אני רוצה לערוך עיצוב קנבס שכבות טקסט תמונה">
+            <strong>להבין את העורך</strong>
+            <span>קנבס, שכבות, עמודים, טקסט, תמונות, מאפייני שכבה וכלי עריכה.</span>
+          </a>
+          <a class="home-link searchable" href="#image-edit" data-search="אני רוצה לערוך תמונה חיתוך מחיקה בחירה מילוי חכם">
+            <strong>לערוך תמונה</strong>
+            <span>Crop, Eraser, בחירת אובייקט, מילוי חכם, AI FX ופריסטים.</span>
+          </a>
+          <a class="home-link searchable" href="#save-export" data-search="איך שומרים איך מייצאים איך שומרים בענן">
+            <strong>לשמור, לייצא או לענן</strong>
+            <span>שמירת פרויקט, שמירה בשם, ייצוא PNG/PDF, פרויקט נייד ושמירה בענן.</span>
+          </a>
+          <a class="home-link searchable" href="#print-tools" data-search="איך מדפיסים מרכז הדפסות שליחה מרוחקת">
+            <strong>להדפיס</strong>
+            <span>הדפסה מהירה, בחירת עמודים, תצוגה מקדימה, שליחה מרוחקת ומרכז הדפסות.</span>
+          </a>
+          <a class="home-link searchable" href="#settings" data-search="הגדרות ביצועים קבצים ייצוא הדפסה">
+            <strong>להגדיר את התוכנה</strong>
+            <span>כללי, סביבת עבודה, קיצורים, מראה, ביצועים, קבצים, ייצוא והדפסה.</span>
+          </a>
+        </div>
+      </section>
+
+      <section id="annotated-tours" class="searchable" data-search="צילומים מסומנים סיור מסך מספרים חיצים כפתורים קישורים">
+        <h2>סיורים מסומנים</h2>
+        <p>כאן מתחילה מערכת הצילומים המסומנים. כל מספר על התמונה הוא קישור לפרק שמסביר את הפעולה. בשלב הבא נוסיף סימונים כאלה לכל צילום מרכזי במדריך.</p>
+
+        <figure class="annotated-shot searchable" data-search="מסך בית מסומן פתיחת פרויקט מצבי עבודה ענן כלי עזר פרויקטים אחרונים">
+          <div class="annotated-media">
+            <img src="../../output/playwright/guide-mapping/screenshots/01-home.png" alt="מסך בית מסומן">
+            <a class="marker" style="--x: 82%; --y: 25%;" href="#modes" title="מצבי עבודה">1</a>
+            <a class="marker" style="--x: 55%; --y: 28%;" href="#cloud-save" title="ענן">2</a>
+            <a class="marker" style="--x: 32%; --y: 30%;" href="#utilities" title="כלי עזר">3</a>
+            <a class="marker" style="--x: 50%; --y: 72%;" href="#save-export" title="פרויקטים ושמירה">4</a>
+          </div>
+          <figcaption class="annotated-legend">
+            <a class="legend-item" href="#modes"><span class="legend-num">1</span><span><strong>מצבי עבודה</strong>בחירה איך להתחיל פרויקט חדש: חופשי, גריד, מסיכות, קולאז׳ ועוד.</span></a>
+            <a class="legend-item" href="#cloud-save"><span class="legend-num">2</span><span><strong>ענן</strong>כניסה לספריית ענן, העלאה והורדת פרויקטים.</span></a>
+            <a class="legend-item" href="#utilities"><span class="legend-num">3</span><span><strong>כלי עזר</strong>כלים חיצוניים כמו הכנה לדפוס, QR, הסרת רקע ומרכז הדפסות.</span></a>
+            <a class="legend-item" href="#save-export"><span class="legend-num">4</span><span><strong>פרויקטים אחרונים</strong>פתיחה חוזרת של עבודות ושמירה מסודרת בהמשך.</span></a>
+          </figcaption>
+        </figure>
+
+        <figure class="annotated-shot searchable" data-search="עורך חופשי מסומן קנבס שכבות עמודים צבע ייצוא הדפסה">
+          <div class="annotated-media">
+            <img src="../../output/playwright/guide-mapping/screenshots/30-editor-empty.png" alt="עורך חופשי מסומן">
+            <a class="marker" style="--x: 50%; --y: 48%;" href="#editor" title="קנבס">1</a>
+            <a class="marker" style="--x: 86%; --y: 42%;" href="#editor" title="פאנל מאפיינים">2</a>
+            <a class="marker" style="--x: 14%; --y: 55%;" href="#editor" title="שכבות ועמודים">3</a>
+            <a class="marker" style="--x: 62%; --y: 8%;" href="#save-export" title="שמירה וייצוא">4</a>
+            <a class="marker" style="--x: 44%; --y: 8%;" href="#print-tools" title="הדפסה">5</a>
+          </div>
+          <figcaption class="annotated-legend">
+            <a class="legend-item" href="#editor"><span class="legend-num">1</span><span><strong>קנבס</strong>אזור העבודה שעליו מניחים תמונות, טקסטים וצורות.</span></a>
+            <a class="legend-item" href="#editor"><span class="legend-num">2</span><span><strong>מאפייני עמוד/שכבה</strong>גודל, יחידות, DPI, צבעים והגדרות לפי הבחירה.</span></a>
+            <a class="legend-item" href="#editor"><span class="legend-num">3</span><span><strong>שכבות ועמודים</strong>ניהול בחירה, סדר, נראות, נעילה ועמודים.</span></a>
+            <a class="legend-item" href="#save-export"><span class="legend-num">4</span><span><strong>שמירה וייצוא</strong>שמירת פרויקט או יצירת קובץ סופי.</span></a>
+            <a class="legend-item" href="#print-tools"><span class="legend-num">5</span><span><strong>הדפסה</strong>הדפסה מהירה, טווח עמודים או שליחה למרכז הדפסות.</span></a>
+          </figcaption>
+        </figure>
+
+        <figure class="annotated-shot searchable" data-search="סרגל עריכת תמונה מסומן apply cancel crop eraser smart select magic wand brush fill">
+          <div class="annotated-media">
+            <img src="../../output/playwright/guide-mapping/screenshots/34-editor-image-edit-toolbar.png" alt="סרגל עריכת תמונה מסומן">
+            <a class="marker" style="--x: 84%; --y: 16%;" href="#button-details" title="Apply">1</a>
+            <a class="marker" style="--x: 76%; --y: 16%;" href="#button-details" title="Cancel">2</a>
+            <a class="marker" style="--x: 65%; --y: 16%;" href="#image-edit" title="Crop">3</a>
+            <a class="marker" style="--x: 55%; --y: 16%;" href="#button-details" title="Eraser">4</a>
+            <a class="marker" style="--x: 43%; --y: 16%;" href="#button-details" title="Smart Select">5</a>
+            <a class="marker" style="--x: 30%; --y: 16%;" href="#button-details" title="מילוי חכם">6</a>
+          </div>
+          <figcaption class="annotated-legend">
+            <a class="legend-item" href="#button-details"><span class="legend-num">1</span><span><strong>Apply</strong>מאשר את השינוי במצב עריכת תמונה.</span></a>
+            <a class="legend-item" href="#button-details"><span class="legend-num">2</span><span><strong>Cancel</strong>יוצא מהכלי בלי להחיל את השינוי האחרון.</span></a>
+            <a class="legend-item" href="#image-edit"><span class="legend-num">3</span><span><strong>Crop</strong>חיתוך תמונה או שינוי החלק הנראה ממנה.</span></a>
+            <a class="legend-item" href="#button-details"><span class="legend-num">4</span><span><strong>Eraser</strong>מחיקת אזורים בעזרת מסיכה.</span></a>
+            <a class="legend-item" href="#button-details"><span class="legend-num">5</span><span><strong>Smart Select</strong>בחירה חכמה של אובייקט או אזור.</span></a>
+            <a class="legend-item" href="#button-details"><span class="legend-num">6</span><span><strong>מילוי חכם</strong>הסרה ומילוי טבעי של אזור נבחר.</span></a>
+          </figcaption>
+        </figure>
+      </section>
+
+      <section id="overview" class="hero searchable" data-search="סקירה מדריך SPP2 התחלה">
+        <h1>מדריך משתמש SPP2</h1>
+        <p>גרסת מיפוי ראשונה למדריך HTML אינטראקטיבי. המדריך מחולק לפי מסכי התוכנה, מצבי עבודה, כלי עריכה, כלי AI, הכנה לדפוס והגדרות.</p>
+        <div class="meta">
+          <span class="pill">28+ צילומי מסך</span>
+          <span class="pill">עברית RTL</span>
+          <span class="pill">מתאים להטמעה בתוכנה</span>
+        </div>
+      </section>
+
+      <section id="home" class="searchable" data-search="בית פתיחת פרויקט ייבוא PSD ענן מצבי עבודה">
+        <h2>מסך בית</h2>
+        <p>נקודת הפתיחה של התוכנה: יצירת פרויקט חדש, פתיחת פרויקט קיים, ייבוא PSD, ענן, כלי עזר ופרויקטים אחרונים.</p>
+        <div class="grid">
+          <article class="card">
+            <img src="../../output/playwright/guide-mapping/screenshots/01-home.png" alt="מסך בית">
+            <div class="card-body">
+              <h3>מה רואים כאן</h3>
+              <p>כרטיסי מצבי עבודה, פעולות פרויקט, חיפוש פרויקטים, כלים חיצוניים וכלי עזר.</p>
+              <a class="shot-link" href="../../output/playwright/guide-mapping/screenshots/01-home.png">פתח צילום מלא</a>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="modes" class="searchable" data-search="מצבי עבודה חופשי גריד מסיכות קולאז PDF תמונת מחזור פיתוח תמונות מוצרים ברכות">
+        <h2>מצבי עבודה</h2>
+        <div class="tabs" role="tablist" aria-label="מצבי עבודה">
+          <button class="tab" aria-selected="true" data-tab="modes-1">בסיסיים</button>
+          <button class="tab" aria-selected="false" data-tab="modes-2">ייצור ותבניות</button>
+          <button class="tab" aria-selected="false" data-tab="modes-3">מסמכים ו-PDF</button>
+        </div>
+        <div id="modes-1" class="tab-panel active">
+          <div class="grid">
+            <guide-card title="עיצוב חופשי" img="02-mode-free-setup.png" text="בחירת גודל דף, יחידות, DPI ויצירת קנבס חופשי."></guide-card>
+            <guide-card title="גריד" img="03-mode-grid-setup.png" text="סידור תמונות אוטומטי בתאים עם שורות, עמודות וריווח."></guide-card>
+            <guide-card title="מסיכות" img="04-mode-mask-wizard.png" text="יצירת מסמך עם צורות/מסיכות וחיתוכי תמונות."></guide-card>
+            <guide-card title="קולאז׳" img="05-mode-collage-wizard.png" text="אשף קולאז׳ לתמונות מרובות ופריסות חכמות."></guide-card>
+          </div>
+        </div>
+        <div id="modes-2" class="tab-panel">
+          <div class="grid">
+            <guide-card title="תמונת מחזור" img="07-class-photo-wizard.png" text="אשף כיתתי עם שמות, פנים, צוות ופריסת מחזור."></guide-card>
+            <guide-card title="פיתוח תמונות" img="08-photo-print-wizard.png" text="הכנת תמונות להדפסה במידות מדויקות."></guide-card>
+            <guide-card title="ספריית מוצרים" img="09-product-library.png" text="עיצוב על מוצרים מוגדרים עם אזורי ביטחון."></guide-card>
+            <guide-card title="ייצור סדרתי" img="10-batch-production-library.png" text="תבניות ייצור והפקת עיצובים מרשומות."></guide-card>
+            <guide-card title="מצב ברכות" img="11-blessing-wizard.png" text="כרטיסי ברכה עם רקעים, מסגרות וטקסטים מוכנים."></guide-card>
+          </div>
+        </div>
+        <div id="modes-3" class="tab-panel">
+          <div class="grid">
+            <guide-card title="PDF Studio" img="06-pdf-studio.png" text="סידור, מיזוג, שינוי גודל והמרת קבצים ל-PDF."></guide-card>
+          </div>
+        </div>
+      </section>
+
+      <section id="editor" class="searchable" data-search="עורך חופשי קנבס שכבות טקסט תמונה סרגל עליון">
+        <h2>עורך חופשי</h2>
+        <p>סביבת העריכה המרכזית כוללת קנבס, סרגל עליון, פאנלי צד, שכבות, צבע, כלים כלליים וסרגל הקשר לפי הבחירה.</p>
+        <div class="grid">
+          <guide-card title="עורך ריק" img="30-editor-empty.png" text="קנבס חדש עם פאנל צבע, שכבות, עמודים וכלים כלליים."></guide-card>
+          <guide-card title="טקסט נבחר" img="31-editor-text-selected.png" text="סרגל טקסט, Type, FX, Warp, Presets ומאפייני טקסט."></guide-card>
+          <guide-card title="תמונה מיובאת" img="32-editor-image-imported.png" text="שכבת תמונה, מיקום, גודל, התאמה לקנבס ואפשרויות תמונה."></guide-card>
+          <guide-card title="תמונה נבחרת" img="33-editor-image-selected.png" text="מאפייני שכבת תמונה, עריכה מהירה, AI וטיפים."></guide-card>
+        </div>
+      </section>
+
+      <section id="image-edit" class="searchable" data-search="עריכת תמונה crop eraser smart select magic wand brush fill מילוי חכם">
+        <h2>עריכת תמונה</h2>
+        <div class="steps">
+          <div class="step"><div><h3>בחר תמונה</h3><p>לחיצה על שכבת תמונה בקנבס או בפאנל השכבות מציגה את סרגל התמונה.</p></div></div>
+          <div class="step"><div><h3>היכנס לעריכה</h3><p>הכפתור עריכת תמונה פותח את מצב Image Edit עם Apply ו-Cancel.</p></div></div>
+          <div class="step"><div><h3>בחר כלי</h3><p>Crop, Eraser, Remove white background, Smart Select, Magic Wand, Rect Select או Brush Select.</p></div></div>
+          <div class="step"><div><h3>אשר שינוי</h3><p>Apply מחיל את השינוי על השכבה. Cancel מחזיר למצב הקודם.</p></div></div>
+        </div>
+        <div class="grid">
+          <guide-card title="סרגל Image Edit" img="34-editor-image-edit-toolbar.png" text="כל כלי העריכה הבסיסיים והחכמים במקום אחד."></guide-card>
+          <guide-card title="מכחול בחירה" img="35-editor-image-edit-brush-select.png" text="בחירה ידנית עם גודל מכחול והוספה/הסרה מהבחירה."></guide-card>
+          <guide-card title="Crop" img="36-editor-image-edit-crop.png" text="חיתוך תמונה, איפוס Crop ונעילת יחס."></guide-card>
+        </div>
+      </section>
+
+      <section id="button-details" class="searchable" data-search="כפתורים כלים apply cancel crop eraser magic wand smart select brush select ai fx reset mask reset crop copy cut delete clear fill">
+        <h2>כפתורים וכלים - פירוט פעולה</h2>
+        <p>טבלת עומק ראשונה. בהמשך כל שורה תקושר לצילום מסומן עם מספר על הכפתור.</p>
+        <div class="details-table">
+          <div class="detail-row header"><span>כפתור/כלי</span><span>מה עושה</span><span>מתי להשתמש</span><span>טיפ או אזהרה</span></div>
+          <div class="detail-row searchable" data-search="Apply אשר החל שמור שינוי עריכת תמונה">
+            <strong>Apply</strong><span>מאשר את השינויים במצב העריכה הנוכחי.</span><span>בסיום Crop, מחיקה, בחירה או מילוי חכם.</span><span>לפני Apply השינוי עדיין נחשב מצב עבודה זמני.</span>
+          </div>
+          <div class="detail-row searchable" data-search="Cancel ביטול עריכת תמונה">
+            <strong>Cancel</strong><span>יוצא ממצב העריכה בלי להחיל את השינויים האחרונים.</span><span>כשנכנסת לכלי בטעות או התוצאה לא טובה.</span><span>לא מחליף Undo כללי של הפרויקט.</span>
+          </div>
+          <div class="detail-row searchable" data-search="Crop חיתוך תמונה קרופ יחס נעילה">
+            <strong>Crop</strong><span>חותך את גבולות התמונה או משנה איזה חלק ממנה נראה.</span><span>כשצריך להתמקד בנושא או להסיר שוליים מיותרים.</span><span>שמור פנים וטקסט בתוך האזור הבטוח.</span>
+          </div>
+          <div class="detail-row searchable" data-search="Eraser מחק מחיקה מסיכה רקע">
+            <strong>Eraser</strong><span>מוחק חלקים מהתמונה בעזרת מסיכה.</span><span>לניקוי ידני של קצוות או אזורים לא רצויים.</span><span>עדיף לעבוד בזום גבוה ליד קצוות עדינים.</span>
+          </div>
+          <div class="detail-row searchable" data-search="Remove white background הסרת רקע לבן">
+            <strong>Remove white background</strong><span>מנסה להסיר רקע לבן או בהיר סביב אובייקט.</span><span>לתמונות מוצר על רקע לבן.</span><span>לא מתאים לרקע מורכב או לאובייקט לבן.</span>
+          </div>
+          <div class="detail-row searchable" data-search="Smart Select בחירה חכמה אובייקט ai">
+            <strong>Smart Select</strong><span>מנסה לבחור אובייקט חשוב בתמונה באופן אוטומטי.</span><span>לפני מילוי חכם, העתקת אובייקט או חיתוך אובייקט.</span><span>אחרי בחירה אוטומטית כדאי לתקן עם Brush Select.</span>
+          </div>
+          <div class="detail-row searchable" data-search="Magic Wand שרביט קסם צבע דומה בחירה">
+            <strong>Magic Wand</strong><span>בוחר אזורים עם צבע או בהירות דומים.</span><span>להסרת רקע אחיד או בחירת אזורים פשוטים.</span><span>פחות מתאים לתמונות עם רקע מגוון.</span>
+          </div>
+          <div class="detail-row searchable" data-search="Rect Select בחירה מלבנית">
+            <strong>Rect Select</strong><span>יוצר בחירה מלבנית.</span><span>לבחירה מהירה של אזור גאומטרי.</span><span>טוב להכנה למילוי חכם באזור מוגדר.</span>
+          </div>
+          <div class="detail-row searchable" data-search="Brush Select מכחול סימון הוסף הסר בחירה">
+            <strong>Brush Select</strong><span>מסמן ידנית אזור לבחירה, עם מצב הוספה או הסרה.</span><span>לתיקון בחירה אוטומטית או עבודה מדויקת.</span><span>גודל מכחול קטן מתאים לקצוות; גדול מתאים לאזורים רחבים.</span>
+          </div>
+          <div class="detail-row searchable" data-search="מילוי חכם content aware fill lama sd inpaint texture quick heal">
+            <strong>מילוי חכם</strong><span>מוחק אזור נבחר וממלא אותו לפי הסביבה.</span><span>להסרת אובייקטים, לכלוך, רקע או טקסט לא רצוי.</span><span>LaMa מהיר, SD איכותי יותר, Texture מתאים לדפוסים.</span>
+          </div>
+          <div class="detail-row searchable" data-search="AI FX אפקטים פריסטים ai">
+            <strong>AI FX</strong><span>פותח כלים/אפקטים חכמים או סגנוניים לתמונה.</span><span>לשיפור, הרחבה, הסרה, שחזור או אפקטים מתקדמים.</span><span>חלק מהיכולות עשויות לדרוש שירות AI או מודל זמין.</span>
+          </div>
+          <div class="detail-row searchable" data-search="Reset Crop Reset Mask איפוס חיתוך מסיכה">
+            <strong>Reset Crop / Reset Mask</strong><span>מחזיר את החיתוך או המסיכה למצב נקי.</span><span>כשחיתוך או מחיקה הסתבכו.</span><span>איפוס מסיכה עשוי להחזיר אזורים שמחקת.</span>
+          </div>
+          <div class="detail-row searchable" data-search="Copy Layer Cut Layer שכבה חדשה העתק גזור בחירה">
+            <strong>Copy / Cut Layer</strong><span>יוצר שכבה חדשה מתוך הבחירה. Copy משאיר מקור; Cut מסיר מהמקור.</span><span>לבידוד אובייקט או יצירת קומפוזיציה חדשה.</span><span>אחרי Cut כדאי לבדוק שאין חור לא רצוי בשכבה המקורית.</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="tool-library" class="searchable" data-search="ספריית כלים פריסטים AI FX HDR before after עוצמה">
+        <h2>ספריית כלים ופריסטים</h2>
+        <p>ספרייה מאוחדת לפריסטים, אפקטים, כלי תיקון ופעולות AI. נפתחת מתפריט הוספת שכבה בפאנל השכבות.</p>
+        <div class="grid">
+          <guide-card title="ספריית כלים" img="37-editor-tool-library.png" text="חיפוש, קטגוריות, פריסטים מומלצים, תצוגה מקדימה ומצב החלה."></guide-card>
+        </div>
+      </section>
+
+      <section id="concepts" class="searchable" data-search="מושגים קנבס שכבה עמוד dpi bleed safe area fit fill smart crop">
+        <h2>מושגים בסיסיים</h2>
+        <p>מילון קצר למושגים שחוזרים בתוכנה. השפה כאן מיועדת למשתמשים, לא למפתחים.</p>
+        <div class="grid">
+          <article class="card"><div class="card-body"><h3>קנבס</h3><p>אזור העבודה שעליו מניחים תמונות, טקסטים וצורות. מה שרואים על הקנבס הוא בסיס התוצאה שתישמר או תודפס.</p></div></article>
+          <article class="card"><div class="card-body"><h3>עמוד</h3><p>דף אחד בתוך הפרויקט. פרויקט יכול להכיל עמוד יחיד, כמה עמודים, או דפי הדפסה שנוצרו אוטומטית.</p></div></article>
+          <article class="card"><div class="card-body"><h3>שכבה</h3><p>כל פריט בעיצוב: תמונה, טקסט, צורה, מסגרת, פריים או אפקט. שכבות עליונות מסתירות שכבות שמתחתיהן.</p></div></article>
+          <article class="card"><div class="card-body"><h3>DPI</h3><p>רמת פירוט להדפסה. 300DPI הוא ערך נפוץ להדפסה איכותית. DPI נמוך מדי עלול ליצור הדפסה רכה או מפוקסלת.</p></div></article>
+          <article class="card"><div class="card-body"><h3>Bleed / גלישה</h3><p>שטח עודף מעבר לגודל הסופי. משתמשים בו כשיש חיתוך פיזי אחרי הדפסה, כדי שלא יישאר פס לבן בקצה.</p></div></article>
+          <article class="card"><div class="card-body"><h3>Safe Area</h3><p>האזור הבטוח לתוכן חשוב. פנים, לוגו וטקסטים צריכים להישאר בפנים כדי שלא ייחתכו בהדפסה או במוצר.</p></div></article>
+          <article class="card"><div class="card-body"><h3>Fit</h3><p>מציג את כל התמונה בתוך המסגרת. ייתכן שיישארו שוליים ריקים, אבל שום חלק מהתמונה לא נחתך.</p></div></article>
+          <article class="card"><div class="card-body"><h3>Fill</h3><p>ממלא את כל המסגרת בתמונה. מתאים למסגרות מלאות, אבל חלק מהתמונה עשוי להיחתך.</p></div></article>
+          <article class="card"><div class="card-body"><h3>Smart Crop</h3><p>חיתוך חכם שמנסה לשמור על הנושא החשוב בתמונה, למשל פנים או מרכז עניין.</p></div></article>
+        </div>
+      </section>
+
+      <section id="color-tools" class="searchable" data-search="צבע בהירות חשיפה קונטרסט גמא אורות צללים רוויה חיות טמפרטורה tint hue sharpness clarity noise curves threshold gradient map sepia invert">
+        <h2>כלי כיוון צבע ותמונה</h2>
+        <p>אלה הכלים שחשוב להסביר בצורה פשוטה למשתמש. כל כלי משנה סוג אחר של מידע בתמונה.</p>
+        <div class="tabs" role="tablist" aria-label="כלי צבע">
+          <button class="tab" aria-selected="true" data-tab="color-1">טון ואור</button>
+          <button class="tab" aria-selected="false" data-tab="color-2">צבע</button>
+          <button class="tab" aria-selected="false" data-tab="color-3">חדות ואפקטים</button>
+        </div>
+        <div id="color-1" class="tab-panel active">
+          <div class="grid">
+            <article class="card"><div class="card-body"><h3>בהירות</h3><p>מבהיר או מכהה את כל התמונה. טוב לתיקון מהיר, אבל פחות מדויק מחשיפה או צללים.</p></div></article>
+            <article class="card"><div class="card-body"><h3>חשיפה</h3><p>מדמה שינוי חשיפה של מצלמה. מתאים לתמונה כהה מדי או בהירה מדי.</p></div></article>
+            <article class="card"><div class="card-body"><h3>קונטרסט</h3><p>מגדיל את ההבדל בין כהה לבהיר. מוסיף עומק, אבל יותר מדי עלול לשרוף לבנים ולסתום שחורים.</p></div></article>
+            <article class="card"><div class="card-body"><h3>גמא</h3><p>משנה בעיקר את אזורי הביניים. שימושי כשרוצים לפתוח תמונה בלי להזיז את הקצוות בצורה חזקה.</p></div></article>
+            <article class="card"><div class="card-body"><h3>אורות</h3><p>אזורים בהירים כמו שמיים, חלון או חולצה לבנה. הורדה שלהם מחזירה פרטים באזורים שרופים.</p></div></article>
+            <article class="card"><div class="card-body"><h3>צללים</h3><p>אזורים כהים כמו שיער, רקע חשוך או פנים בצל. העלאה שלהם פותחת פרטים.</p></div></article>
+            <article class="card"><div class="card-body"><h3>לבנים ושחורים</h3><p>שליטה בנקודות הקצה של התמונה. לבנים משפיעים על הבהיר ביותר, שחורים על הכהה ביותר.</p></div></article>
+          </div>
+        </div>
+        <div id="color-2" class="tab-panel">
+          <div class="grid">
+            <article class="card"><div class="card-body"><h3>רוויה</h3><p>כמות הצבע הכללית. העלאה חזקה מדי גורמת לעור וצבעים להיראות מלאכותיים.</p></div></article>
+            <article class="card"><div class="card-body"><h3>חיות</h3><p>מחזקת בעיקר צבעים חלשים בצורה עדינה. בדרך כלל בטוחה יותר מרוויה לתמונות אנשים.</p></div></article>
+            <article class="card"><div class="card-body"><h3>טמפרטורה</h3><p>מקררת לכיוון כחול או מחממת לכיוון צהוב/כתום. מתקנת תאורה צהובה או כחולה מדי.</p></div></article>
+            <article class="card"><div class="card-body"><h3>Tint</h3><p>מתקן נטייה ירוקה או ורדרדה. לתמונה ירוקה מדי מעלים לכיוון מג'נטה.</p></div></article>
+            <article class="card"><div class="card-body"><h3>Hue</h3><p>מסובב את הצבעים עצמם. זה כלי יצירתי יותר מכלי תיקון, וכדאי להשתמש בו בעדינות.</p></div></article>
+          </div>
+        </div>
+        <div id="color-3" class="tab-panel">
+          <div class="grid">
+            <article class="card"><div class="card-body"><h3>חדות</h3><p>מדגישה קצוות ופרטים. יותר מדי חדות יוצרת הילות ורעש.</p></div></article>
+            <article class="card"><div class="card-body"><h3>Clarity</h3><p>קונטרסט מקומי שמוסיף תחושת עומק וטקסטורה. מעולה למוצרים, מסוכן לפנים בעוצמה גבוהה.</p></div></article>
+            <article class="card"><div class="card-body"><h3>הפחתת רעש</h3><p>מרככת גרעיניות ופיקסלים. יותר מדי יוצר מראה מרוח ומוחק פרטים.</p></div></article>
+            <article class="card"><div class="card-body"><h3>Curves</h3><p>עקומות טונים. S-Curve מוסיפה קונטרסט; Lift Blacks מרכך שחורים; Matte נותן מראה שטוח-קולנועי.</p></div></article>
+            <article class="card"><div class="card-body"><h3>Threshold</h3><p>הופך תמונה לשחור-לבן חד לפי סף בהירות. שימושי ללייזר, חותמות ואפקטים גרפיים.</p></div></article>
+            <article class="card"><div class="card-body"><h3>Gradient Map</h3><p>מחליף כהים ובהירים בצבעים. זה הבסיס למראות Duotone כמו זהב-שחור או ניאון.</p></div></article>
+          </div>
+        </div>
+      </section>
+
+      <section id="presets" class="searchable" data-search="פריסטים photo rescue hdr detail product portrait print looks duotone creative laser sublimation canvas">
+        <h2>פריסטים</h2>
+        <p>פריסט הוא מתכון מוכן שמפעיל כמה כיווני צבע ביחד. המשתמש שולט בעוצמה, ובוחר אם להחיל על תמונה אחת, כמה תמונות או כל העמוד.</p>
+        <div class="grid">
+          <article class="card"><div class="card-body"><h3>Photo Rescue</h3><p>תיקון תמונות בעייתיות: כהות, שרופות, צהובות, כחולות, ירוקות, דחוסות או מצולמות בתאורה קשה.</p></div></article>
+          <article class="card"><div class="card-body"><h3>HDR / Detail / Product</h3><p>חיזוק עומק, פרטים וקונטרסט. מתאים למוצרים ונוף. בתמונות פנים עדיף להשתמש בעדינות.</p></div></article>
+          <article class="card"><div class="card-body"><h3>Portrait</h3><p>תיקון עדין לפנים, עם פחות חדות ו-Clarity כדי לשמור על עור טבעי.</p></div></article>
+          <article class="card"><div class="card-body"><h3>Print</h3><p>התאמות להדפסה: סובלימציה, קנבס, לייזר, עץ ותיקון מדפסות שמוציאות צבע לא מאוזן.</p></div></article>
+          <article class="card"><div class="card-body"><h3>Looks</h3><p>מראות סגנוניים כמו Vintage, Sepia, Soft Glow או Cinematic. מיועד לאופי עיצובי, לא בהכרח לתיקון.</p></div></article>
+          <article class="card"><div class="card-body"><h3>Duotone</h3><p>המרת תמונה למראה פוסטר עם שניים או שלושה צבעים, למשל Gold Noir או Neon Duo.</p></div></article>
+        </div>
+        <div class="note">המלצה למדריך: לכל פריסט להוסיף שורה קבועה: מתאים ל..., לא מומלץ ל..., עוצמת התחלה, והאם להחיל על תמונה אחת או על כל התמונות.</div>
+      </section>
+
+      <section id="save-export" class="searchable" data-search="שמירה save export ייצוא שמירה בשם קובץ פרויקט גיבוי אוטומטי png jpg jpeg pdf spp נייד">
+        <h2>שמירה, גיבוי וייצוא</h2>
+        <p>שמירה שומרת את הפרויקט כדי לחזור לעריכה. ייצוא יוצר קובץ סופי ללקוח, לשליחה או להדפסה. חשוב להפריד בין שני הדברים במדריך כדי שמשתמש לא יחשוב שקובץ PNG או PDF מחליף קובץ פרויקט.</p>
+        <div class="details-table">
+          <div class="detail-row header"><span>פעולה</span><span>מה היא עושה</span><span>מתי משתמשים</span><span>הערה למדריך</span></div>
+          <div class="detail-row searchable" data-search="שמירה save project שמור פרויקט">
+            <strong>שמירה</strong><span>מעדכנת את קובץ הפרויקט הנוכחי עם העמודים, השכבות, הטקסטים, התמונות וההגדרות.</span><span>במהלך עבודה רגילה, לפני מעבר למסך אחר, ולפני סגירת התוכנה.</span><span>שמירה מיועדת להמשך עריכה, לא לשליחה ללקוח.</span>
+          </div>
+          <div class="detail-row searchable" data-search="שמירה בשם save as עותק פרויקט">
+            <strong>שמירה בשם</strong><span>יוצרת עותק חדש של הפרויקט בשם או מיקום אחר.</span><span>כשמכינים גרסה נוספת, לקוח נוסף, או וריאציה בלי לדרוס את המקור.</span><span>מומלץ להסביר: אם מתלבטים, עדיף ליצור עותק לפני שינוי גדול.</span>
+          </div>
+          <div class="detail-row searchable" data-search="שמירה אוטומטית autosave backup גיבוי">
+            <strong>שמירה אוטומטית</strong><span>גיבוי שמנסה לשמור מצב עבודה כדי לצמצם אובדן במקרה של תקלה.</span><span>כמעט תמיד פועל ברקע, בהתאם להגדרות הקבצים.</span><span>להדגיש שזה גיבוי עזר, לא תחליף לשמירה מסודרת בסוף עבודה.</span>
+          </div>
+          <div class="detail-row searchable" data-search="ייצוא export png jpg jpeg pdf קובץ סופי">
+            <strong>ייצוא</strong><span>מפיק קובץ תמונה או PDF מתוך העיצוב.</span><span>לשליחה ללקוח, העברה לדפוס, ארכיון או העלאה לאתר.</span><span>בייצוא חשוב לבדוק פורמט, איכות, DPI, עמוד נוכחי או כל העמודים.</span>
+          </div>
+          <div class="detail-row searchable" data-search="spp נייד portable project assets תמונות מצורפות">
+            <strong>פרויקט נייד</strong><span>שומר פרויקט עם החומרים הדרושים כדי לפתוח אותו גם במחשב אחר.</span><span>כשמעבירים עבודה בין עמדות או שומרים תיק לקוח מלא.</span><span>להסביר שזה שימושי במיוחד כשיש תמונות מקור שלא נמצאות באותו נתיב במחשב השני.</span>
+          </div>
+        </div>
+        <div class="note">המלצת ניסוח במדריך: "שמור כדי להמשיך לערוך. יצא כדי לקבל קובץ סופי. שמור בענן כדי לפתוח את העבודה מעמדות אחרות."</div>
+      </section>
+
+      <section id="cloud-save" class="searchable" data-search="ענן cloud שמירה בענן התחברות מייל magic link otp העלאה הורדה פרויקט מחיקה quota">
+        <h2>שמירה בענן וספריית ענן</h2>
+        <p>הענן מיועד לסנכרון פרויקטים בין עמדות, גיבוי, והמשך עבודה ממחשב אחר. במסך הענן המשתמש מתחבר עם מייל, רואה פרויקטים שהועלו, מעלה פרויקט מקומי, מוריד פרויקט, מוחק פרויקט ובודק ניצול נפח.</p>
+        <div class="grid">
+          <article class="card"><div class="card-body"><h3>התחברות</h3><p>המשתמש מזין מייל ומקבל קישור התחברות או קוד. אם שירות הענן לא מוגדר, מוצגת הודעה שהענן אינו זמין בסביבה הנוכחית.</p></div></article>
+          <article class="card"><div class="card-body"><h3>העלאת פרויקט</h3><p>מעלה את הפרויקט המקומי לחשבון הענן. מתאים אחרי שמירה מקומית, או כשמסיימים שלב ורוצים שהעבודה תהיה זמינה בעמדה אחרת.</p></div></article>
+          <article class="card"><div class="card-body"><h3>פתיחה או הורדה</h3><p>מוריד פרויקט מהענן ופותח אותו לעריכה. אם כבר קיימת גרסה מקומית, חשוב לבדוק שלא פותחים גרסה ישנה בטעות.</p></div></article>
+          <article class="card"><div class="card-body"><h3>חיפוש ורענון</h3><p>מסייע למצוא פרויקט לפי שם, תאריך או לקוח, ולרענן את הרשימה אחרי העלאה מעמדה אחרת.</p></div></article>
+          <article class="card"><div class="card-body"><h3>מחיקה</h3><p>מסירה פרויקט מהענן. זו פעולה שצריכה אזהרה ברורה במדריך, כי היא אינה זהה להסרת פרויקט מהרשימה המקומית.</p></div></article>
+          <article class="card"><div class="card-body"><h3>נפח ושגיאות</h3><p>אם המכסה מלאה או החיבור נכשל, המשתמש צריך לדעת לבדוק אינטרנט, התחברות, הרשאות, וגודל קובץ.</p></div></article>
+        </div>
+      </section>
+
+      <section id="print-tools" class="searchable" data-search="כלי הדפסה print actions הדפס עותק אחד טווח עמודים preview print hub שליחה להדפסה מרוחקת תור מדפסות פריסטים תחנות הרשאות מלאי">
+        <h2>כלי ההדפסה</h2>
+        <p>הדפסה בתוכנה מחולקת לשלוש רמות: הדפסה ישירה מהעורך, בחירת טווח עמודים ותצוגה מקדימה, ושליחה למרכז הדפסות לניהול תור, מדפסות, פריסטים ותחנות.</p>
+        <div class="details-table">
+          <div class="detail-row header"><span>כלי</span><span>מה הוא עושה</span><span>מתי להשתמש</span><span>מה להסביר למשתמש</span></div>
+          <div class="detail-row searchable" data-search="הדפס עותק אחד print one copy last settings">
+            <strong>הדפס עותק אחד</strong><span>שולח עותק יחיד לפי ההגדרות האחרונות.</span><span>להדפסת ניסיון מהירה או עבודה פשוטה.</span><span>אם התוצאה לא נכונה, לפתוח את בחירת העמודים וההגדרות במקום להדפיס שוב מהר.</span>
+          </div>
+          <div class="detail-row searchable" data-search="בחר עמודים print range current all custom טווח עמודים">
+            <strong>הדפסה - בחר עמודים</strong><span>פותח דיאלוג לבחירת עמוד נוכחי, כל העמודים או טווח מותאם.</span><span>כשבפרויקט יש כמה עמודים, ורוצים לשלוט במה יוצא למדפסת.</span><span>להדגים עם פרויקט רב עמודים: עמוד נוכחי, הכל, וטווח כמו 1-3.</span>
+          </div>
+          <div class="detail-row searchable" data-search="תצוגה מקדימה preview low resolution full quality final print">
+            <strong>תצוגה מקדימה</strong><span>מציגה תמונות ממוזערות לפני הדפסה.</span><span>לבדיקת סדר עמודים, כיוון דף וחיתוך כללי.</span><span>התצוגה עשויה להיות באיכות נמוכה לצורך מהירות; ההדפסה הסופית נשלחת באיכות מלאה.</span>
+          </div>
+          <div class="detail-row searchable" data-search="שלח להדפסה מרוחקת remote print hub copies finish border approval customer note">
+            <strong>שליחה להדפסה מרוחקת</strong><span>יוצרת עבודת הדפסה עם גודל, גימור, שוליים, עותקים, פרטי לקוח, הערה ואופן אישור.</span><span>כשעמדת עיצוב שולחת עבודות לעמדת הדפסה או ייצור.</span><span>להסביר את ההבדל בין שליחה לתור לבין הדפסה מיידית במדפסת המקומית.</span>
+          </div>
+        </div>
+        <div class="grid">
+          <article class="card"><div class="card-body"><h3>תור הדפסות</h3><p>רשימת עבודות שממתינות, מאושרות, בהדפסה או הסתיימו. מתאים לניהול עבודה יומיומית במעבדה.</p></div></article>
+          <article class="card"><div class="card-body"><h3>מדפסות ופריסטים</h3><p>הגדרת שם מדפסת Windows, טעינת ניירות, וגודל/גימור/שוליים/זמן ייצור לכל פריסט.</p></div></article>
+          <article class="card"><div class="card-body"><h3>תחנות והרשאות</h3><p>קובעות אילו עמדות רשאיות לשלוח או להדפיס אוטומטית. חשוב במקומות עם כמה מחשבים.</p></div></article>
+          <article class="card"><div class="card-body"><h3>מדיה ומלאי</h3><p>ניהול ניירות, חומרים ומלאי, כדי להבין מה זמין ומה עומד להיגמר.</p></div></article>
+          <article class="card"><div class="card-body"><h3>זמן ייצור והיסטוריה</h3><p>סיכום הדפסות לפי יום, גודל, סטטוס וזמן. שימושי לתפעול, עומסים ובדיקת טעויות.</p></div></article>
+          <article class="card"><div class="card-body"><h3>הגדרות מרכז הדפסות</h3><p>תפקיד תחנה, תיקיית רשת, מצב אישור ברירת מחדל, שמירת היסטוריה וחיבור לתפריט Explorer. חלק מהיכולות זמינות רק בגרסת Desktop/Electron.</p></div></article>
+        </div>
+      </section>
+
+      <section id="class-photo-deep" class="searchable" data-search="תמונת מחזור כיתה תלמיד צוות ילד איש צוות זיהוי פנים סליידרים ריווח אופקי אנכי מסגרת שם צוות ילדים רקע כותרת תחתית">
+        <h2>תמונת מחזור - מדריך עומק</h2>
+        <p>אשף תמונת מחזור עובד בשלבים: פרטי לקוח, גודל דף, כותרת ותחתית, העלאת תמונות, סקירת אנשים, זיהוי פנים, צורת מסגרת, ריווח ופריסה, ורקע. המדריך צריך להסביר כל שלב גם למשתמש שלא מכיר מושגים מקצועיים.</p>
+        <div class="steps">
+          <div class="step"><div><h3>1. פרטי לקוח</h3><p>שם, טלפון ומייל נשמרים עם הפרויקט ועוזרים לזהות עבודה בהמשך, במיוחד בענן או במרכז הדפסות.</p></div></div>
+          <div class="step"><div><h3>2. גודל דף</h3><p>בחירת פריסט, כיוון עמוד או גודל מותאם. כאן מחליטים מראש מה יהיה גודל ההדפסה הסופי.</p></div></div>
+          <div class="step"><div><h3>3. כותרת ותחתית</h3><p>טקסט ראשי, טקסט תחתון, פונטים ופריסטים. מתאים לשם גן/כיתה, שנה, ברכה או שם מוסד.</p></div></div>
+          <div class="step"><div><h3>4. העלאת תמונות</h3><p>מעלים תמונות תלמידים וצוות. תמונות חדשות נכנסות כברירת מחדל כתלמידים, ואפשר לשנות תפקיד בשלב הבא.</p></div></div>
+          <div class="step"><div><h3>5. סקירת אנשים</h3><p>לכל תמונה עורכים שם ובוחרים תפקיד: תלמיד או צוות. כך התוכנה יודעת מי נמצא בגריד הילדים ומי בשורת/אזור הצוות.</p></div></div>
+          <div class="step"><div><h3>6. זיהוי פנים</h3><p>כשמפעילים זיהוי פנים, החיתוך מנסה להתמקד בפנים. כשהוא כבוי, התוכנה משתמשת בחיתוך מרכזי.</p></div></div>
+          <div class="step"><div><h3>7. מסגרות</h3><p>מגדירים בנפרד מסגרת לתלמידים ולצוות: עיגול, מלבן מעוגל, מלבן, אליפסה, כוכב או ענן, כולל צל, קו והילה.</p></div></div>
+          <div class="step"><div><h3>8. ריווח ופריסה</h3><p>הסליידרים שולטים במרחקים. Auto מחזיר את החישוב החכם לפי כמות אנשים וגודל הדף.</p></div></div>
+          <div class="step"><div><h3>9. רקע</h3><p>אפשר להשאיר לבן או לבחור תמונת רקע. רקע צריך להיות איכותי ולא עמוס כדי שהשמות והפנים יישארו קריאים.</p></div></div>
+        </div>
+        <div class="details-table">
+          <div class="detail-row header"><span>הגדרה</span><span>מה היא עושה</span><span>מתי לשנות</span><span>טיפ</span></div>
+          <div class="detail-row searchable" data-search="תלמיד צוות ילד איש צוות role child staff">
+            <strong>תלמיד / צוות</strong><span>קובע לאיזו קבוצה האדם שייך בפריסה.</span><span>בשלב סקירת אנשים, אחרי העלאת התמונות.</span><span>אם איש צוות מופיע בין הילדים, לשנות את התפקיד שלו ל"צוות".</span>
+          </div>
+          <div class="detail-row searchable" data-search="רווח אופקי horizontal spacing סליידר">
+            <strong>רווח אופקי</strong><span>המרחק בין תמונה לתמונה באותה שורה.</span><span>להגדיל אם התמונות צפופות, להקטין אם חסר מקום.</span><span>שינוי קטן משפיע מאוד כשיש הרבה ילדים.</span>
+          </div>
+          <div class="detail-row searchable" data-search="רווח אנכי vertical spacing שורות">
+            <strong>רווח אנכי</strong><span>המרחק בין שורות התמונות.</span><span>להגדיל לקריאות ושמות ברורים, להקטין כדי להכניס יותר אנשים.</span><span>לבדוק שלא נוצר עומס סביב הכותרת והתחתית.</span>
+          </div>
+          <div class="detail-row searchable" data-search="רווח מסגרת לשם frame to name spacing">
+            <strong>רווח מסגרת לשם</strong><span>המרחק בין תחתית התמונה לבין שם הילד או איש הצוות.</span><span>כששם נוגע במסגרת או רחוק מדי ממנה.</span><span>שם צריך להרגיש שייך לתמונה שמתחת/מעליו.</span>
+          </div>
+          <div class="detail-row searchable" data-search="רווח צוות ילדים staff spacing">
+            <strong>רווח צוות-ילדים</strong><span>המרחק בין אזור הצוות לבין גריד התלמידים.</span><span>כשצוות וילדים נראים מחוברים מדי או רחוקים מדי.</span><span>בדרך כלל כדאי לתת לצוות מרווח מעט ברור יותר.</span>
+          </div>
+          <div class="detail-row searchable" data-search="איזון שורות center partial rows balance last rows center staff row">
+            <strong>איזון שורות</strong><span>מרכז שורות חלקיות, מאזן שורות אחרונות וממרכז את שורת הצוות.</span><span>כשהשורה האחרונה נראית עקומה או ריקה בצד אחד.</span><span>להפעיל ולבדוק בעין, כי הפריסה תלויה במספר האנשים.</span>
+          </div>
+          <div class="detail-row searchable" data-search="סדר העלאה א-ב alphabetical manual order">
+            <strong>סדר אנשים</strong><span>סדר העלאה שומר את סדר התמונות; א-ב מסדר לפי שם.</span><span>כשיש דרישה לסדר שמי או כשמעלים לפי רשימה מוכנה.</span><span>אם רוצים סדר ידני, להעלות מראש לפי הסדר הרצוי.</span>
+          </div>
+        </div>
+        <div class="note">הכנת תמונות מומלצת: פנים ברורות, תאורה דומה, קובץ לא קטן מדי, בלי חיתוך ראש, שם קובץ מסודר, והסרת כפילויות לפני ההעלאה. אם יש תמונות HEIC, התוכנה מנסה להמיר אותן בזמן הייבוא.</div>
+      </section>
+
+      <section id="collage-deep" class="searchable" data-search="קולאז׳ קולאז פריסות layout family גריד hero magazine mosaic strip split tree diagonal puzzle creative simple smart crop מרווח שוליים קבוצות אצווה">
+        <h2>קולאז׳ - מדריך עומק</h2>
+        <p>מצב קולאז׳ בונה עמוד עם תאים לתמונות לפי כמות התמונות, גודל הדף, מרווחים וסוג הפריסה. המדריך צריך להסביר גם את האשף הראשוני וגם את העריכה אחרי שהקולאז׳ נוצר.</p>
+        <div class="steps">
+          <div class="step"><div><h3>1. העלאת תמונות</h3><p>מעלים תמונות או גוררים אותן לאשף. התוכנה מסננת קבצים נתמכים, מנסה להמיר HEIC ומונעת כפילויות לפי קובץ.</p></div></div>
+          <div class="step"><div><h3>2. גודל דף</h3><p>בוחרים פריסט כמו A4/גודל צילום או גודל מותאם. הגודל משפיע ישירות על כמה מקום יש לכל תמונה.</p></div></div>
+          <div class="step"><div><h3>3. הגדרות פריסה</h3><p>מרווח בין תאים, שוליים, מצב פשוט או יצירתי, ובמצב קבוצות גם Smart Crop וסוגי פריסות מותרים.</p></div></div>
+          <div class="step"><div><h3>4. בחירת פריסה</h3><p>התוכנה מציעה פריסות מדורגות. בוחרים כרטיס פריסה ואז יוצרים קולאז׳. אם קיימות תבניות צורה אישיות, הן מופיעות מעל ההצעות.</p></div></div>
+        </div>
+        <div class="details-table">
+          <div class="detail-row header"><span>מושג</span><span>מה הוא עושה</span><span>מתי לבחור</span><span>טיפ למדריך</span></div>
+          <div class="detail-row searchable" data-search="קולאז׳ מרווח בין תאים spacing">
+            <strong>מרווח בין תאים</strong><span>הרווח הלבן או הרקע שנמצא בין תמונה לתמונה.</span><span>כשצריך מראה נקי ומופרד או להפך, קולאז׳ צפוף ודינמי.</span><span>מרווח 0 יוצר תחושה של תמונות צמודות; מרווח גדול מתאים לאלבום נקי.</span>
+          </div>
+          <div class="detail-row searchable" data-search="קולאז׳ שוליים margin canvas">
+            <strong>שוליים</strong><span>המרחק בין הקולאז׳ לקצה הדף.</span><span>כשצריך להשאיר מקום לחיתוך, מסגרת או כותרת.</span><span>בדפוס מומלץ לא להצמיד פנים או פרטים חשובים לקצה.</span>
+          </div>
+          <div class="detail-row searchable" data-search="פשוט יצירתי simple creative complexity">
+            <strong>פשוט / יצירתי</strong><span>פשוט נותן פריסות בטוחות ומסודרות; יצירתי פותח פריסות מורכבות יותר.</span><span>פשוט מתאים ללקוחות ותמונות משפחה; יצירתי מתאים לפוסטרים, אירועים ועיצוב חופשי.</span><span>להדגים לפני/אחרי עם אותן תמונות כדי להבין את ההבדל.</span>
+          </div>
+          <div class="detail-row searchable" data-search="Smart Crop קולאז׳ חיתוך חכם פנים">
+            <strong>Smart Crop</strong><span>מנסה למקם את התמונה בתוך התא בצורה טובה, בעיקר סביב פנים או מרכז עניין.</span><span>כשיש הרבה תמונות אנשים או תמונות ביחסים שונים.</span><span>אחרי יצירה עדיין כדאי לבדוק ידנית תמונות חשובות.</span>
+          </div>
+          <div class="detail-row searchable" data-search="פריסות קולאז׳ grid hero magazine mosaic strip split tree diagonal puzzle">
+            <strong>משפחות פריסה</strong><span>Grid מסודר, Hero מדגיש תמונה אחת, Magazine/Mosaic יוצרים מבנה מגזיני, Strip שורה, Split Tree חלוקות, Diagonal אלכסונים, Puzzle חלקי פאזל.</span><span>לפי האופי: מוצר נקי, אלבום משפחתי, פוסטר אירוע או עיצוב יצירתי.</span><span>במדריך כדאי להוסיף גלריית דוגמאות לכל משפחה.</span>
+          </div>
+          <div class="detail-row searchable" data-search="קולאז׳ קבוצות batch collage קבוצה ילד">
+            <strong>מצב קבוצות</strong><span>יוצר כמה קולאז׳ים ברצף, קבוצה לכל ילד/לקוח/סט תמונות.</span><span>בסטודיו, גנים, אירועים או הפקת הרבה קולאז׳ים דומים.</span><span>שם "הוסף ילד / קבוצה" אומר: כל קבוצה תהפוך לקולאז׳ נפרד.</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="batch-production-deep" class="searchable" data-search="ייצור סדרתי תבניות יצור batch production template רשומות שדות משתנים תמונות CSV TXT שמות החלף תמונה צור עיצובים">
+        <h2>ייצור סדרתי ותבניות ייצור</h2>
+        <p>ייצור סדרתי לוקח תבנית מוכנה ומייצר ממנה הרבה עיצובים, לפי רשומות. כל רשומה יכולה להכיל תמונה, שם ושדות טקסט נוספים, בהתאם למה שהתבנית הגדירה כשדות משתנים.</p>
+        <div class="steps">
+          <div class="step"><div><h3>1. בחירת תבנית</h3><p>מתחילים מספריית תבניות. התבנית קובעת אילו שדות קיימים: תמונה, שם, כיתה, תאריך, מחיר או כל טקסט משתנה אחר.</p></div></div>
+          <div class="step"><div><h3>2. העלאת רשומות</h3><p>אם לתבנית יש שדה תמונה, גוררים תמונות. אם זו תבנית טקסט, מייבאים TXT/CSV או מדביקים רשימה ידנית.</p></div></div>
+          <div class="step"><div><h3>3. עריכת טבלה</h3><p>לכל רשומה עורכים את השדות בטבלה. שדה ראשי ריק מסומן באזהרה כדי שלא ייווצר עיצוב בלי שם או מידע מרכזי.</p></div></div>
+          <div class="step"><div><h3>4. סיכום ויצירה</h3><p>המסך מציג כמה רשומות ייווצרו, אילו שדות יש בתבנית, ותצוגת דוגמאות ראשונות. בסוף לוחצים "צור עיצובים".</p></div></div>
+        </div>
+        <div class="details-table">
+          <div class="detail-row header"><span>נושא</span><span>מה הוא עושה</span><span>מתי משתמשים</span><span>טיפ</span></div>
+          <div class="detail-row searchable" data-search="שדות משתנים variable fields תבנית">
+            <strong>שדות משתנים</strong><span>מקומות בתבנית שמתחלפים לכל רשומה, כמו שם או תמונה.</span><span>כשמייצרים הרבה עיצובים מאותו מבנה.</span><span>שם השדה בתבנית צריך להיות ברור כדי שהטבלה תהיה מובנת.</span>
+          </div>
+          <div class="detail-row searchable" data-search="TXT CSV ייבוא רשימות שמות">
+            <strong>ייבוא TXT/CSV</strong><span>TXT מתאים לשם אחד בכל שורה. CSV מתאים לעמודות: שם, כיתה, טלפון ועוד.</span><span>כשיש רשימה מוכנה מלקוח או אקסל.</span><span>להסביר ש-CSV צריך כותרות/עמודות עקביות כדי למנוע בלבול.</span>
+          </div>
+          <div class="detail-row searchable" data-search="החלף תמונה replace image רשומה">
+            <strong>החלפת תמונה</strong><span>מחליפה את קובץ התמונה של רשומה אחת בלי למחוק את כל השורה.</span><span>כשיש תמונה לא נכונה או לקוח שלח תיקון.</span><span>שדות הטקסט נשארים, רק התמונה מתחלפת.</span>
+          </div>
+          <div class="detail-row searchable" data-search="אזהרת שדה ריק warning empty field">
+            <strong>אזהרת שדה ריק</strong><span>מסמנת רשומות שחסר בהן שדה ראשי.</span><span>לפני יצירה סופית.</span><span>עדיף לתקן אזהרות לפני יצירת עשרות עמודים.</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="blessing-deep" class="searchable" data-search="ברכות מצב ברכות blessing רקע תבנית מסגרת ברכה מקורות כתיבה חופשית אירוע סגנון אורך חתימה">
+        <h2>ברכות - מדריך עומק</h2>
+        <p>מצב ברכות מיועד להכנת כרטיס ברכה מעוצב במהירות: בוחרים גודל, רקע, תבנית, מסגרת וטקסט. המשתמש יכול לבחור ברכה מוכנה, מקור, או לכתוב לבד.</p>
+        <div class="steps">
+          <div class="step"><div><h3>1. גודל</h3><p>בחירת גודל כרטיס או גודל מותאם. זה קובע את יחס העיצוב ואת גודל ההדפסה.</p></div></div>
+          <div class="step"><div><h3>2. רקע</h3><p>בחירת רקע מתוך ספריית הרקעים. הרקע צריך להתאים לאירוע ולהשאיר מקום לקריאות הטקסט.</p></div></div>
+          <div class="step"><div><h3>3. תבנית ומסגרת</h3><p>בחירת מבנה טקסט ועיצוב. אפשר להפעיל מסגרת ולבחור מסגרת מתוך האפשרויות.</p></div></div>
+          <div class="step"><div><h3>4. ברכה</h3><p>בחירה בין ברכות מוכנות, מקורות או כתיבה חופשית. אפשר לסנן לפי אירוע, סגנון ואורך, לערוך כותרת, גוף וחתימה.</p></div></div>
+        </div>
+        <div class="details-table">
+          <div class="detail-row header"><span>אפשרות</span><span>מה היא עושה</span><span>מתי לבחור</span><span>טיפ</span></div>
+          <div class="detail-row searchable" data-search="ברכות מוכנות אירוע סגנון אורך">
+            <strong>ברכות מוכנות</strong><span>רשימת טקסטים מוכנים לפי אירוע, סגנון ואורך.</span><span>כשצריך תוצאה מהירה ורהוטה.</span><span>אחרי בחירה עדיין לערוך ולדייק לשם הלקוח.</span>
+          </div>
+          <div class="detail-row searchable" data-search="מקורות ציטוטים sources quote">
+            <strong>מקורות</strong><span>ציטוטים או טקסטים ממקורות שמתאימים לברכות מסוימות.</span><span>לברכות מסורתיות, אירועים או טקסט עם אופי רשמי.</span><span>לבדוק התאמה לאירוע ולנוסח הרצוי.</span>
+          </div>
+          <div class="detail-row searchable" data-search="כתיבה חופשית free blessing">
+            <strong>כתיבה חופשית</strong><span>המשתמש כותב את הברכה בעצמו.</span><span>כשיש נוסח אישי מהלקוח או טקסט מדויק.</span><span>אם הטקסט ארוך מדי, אחרי יצירה בעורך אפשר לכוון גודל ופונט.</span>
+          </div>
+          <div class="detail-row searchable" data-search="חתימה ידנית signature">
+            <strong>חתימה ידנית</strong><span>טקסט חתימה נפרד שמופיע באזור החתימה של התבנית.</span><span>למשל "באהבה, המשפחה" או שם העסק.</span><span>עדיף קצר, כדי לא להעמיס על תחתית הכרטיס.</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="photo-print-deep" class="searchable" data-search="פיתוח תמונות photo print תמונות עותקים גודל דף סידור fixed split fill fit דרכון תז מסגרת קו חיתוך שוליים מרווחים זיהוי פנים">
+        <h2>פיתוח תמונות - מדריך עומק</h2>
+        <p>פיתוח תמונות יוצר דפי הדפסה מתמונות רבות. הוא מתאים גם להדפסות רגילות, גם לחלוקה של דף לכמה הדפסות, וגם לגדלי דרכון/תעודה.</p>
+        <div class="steps">
+          <div class="step"><div><h3>1. תמונות ועותקים</h3><p>מעלים תמונות, מגדירים ברירת מחדל לעותקים, ואפשר לשנות עותקים לכל תמונה בנפרד. תמונה חלשה לרזולוציה הנבחרת מקבלת אזהרה.</p></div></div>
+          <div class="step"><div><h3>2. גודל דף</h3><p>בחירת נייר או גיליון הדפסה, כולל כיוון אנכי/אופקי וגודל מותאם.</p></div></div>
+          <div class="step"><div><h3>3. סידור</h3><p>Fixed בוחר גודל הדפסה קבוע. Split מחלק דף למספר חריצים כמו 2, 4, 6, 8 או 9 בדף.</p></div></div>
+          <div class="step"><div><h3>4. מסגרת וחיתוך</h3><p>הגדרת מסגרת, קו חיתוך, סיבוב אוטומטי, זיהוי פנים, שוליים סביב הגיליון ומרווח בין הדפסות.</p></div></div>
+        </div>
+        <div class="details-table">
+          <div class="detail-row header"><span>כלי</span><span>מה הוא עושה</span><span>מתי להשתמש</span><span>הערה</span></div>
+          <div class="detail-row searchable" data-search="fill fit מלא התאמה חיתוך">
+            <strong>מלא / התאמה</strong><span>מלא ממלא את כל המסגרת ויכול לחתוך קצוות. התאמה מציגה את כל התמונה ויכולה להשאיר שוליים.</span><span>מלא לתמונה ללא שוליים; התאמה כשאסור לחתוך ראשים או מוצר.</span><span>זה אחד ההסברים החשובים ביותר למשתמשים.</span>
+          </div>
+          <div class="detail-row searchable" data-search="split כמה בדף חריץ targets per page">
+            <strong>חלוקה לכמה בדף</strong><span>מחלקת גיליון למספר הדפסות שוות.</span><span>לתמונות פספורט, מגנטים, מדבקות או חיסכון בנייר.</span><span>האשף מציג מיד את גודל כל חריץ במ״מ.</span>
+          </div>
+          <div class="detail-row searchable" data-search="קו חיתוך cut line מסגרת border">
+            <strong>קו חיתוך ומסגרת</strong><span>מסגרת יוצרת גבול סביב כל תמונה; קו חיתוך עוזר לגזור אחרי הדפסה.</span><span>כשמדפיסים כמה תמונות על גיליון אחד.</span><span>להבדיל בין מסגרת עיצובית לבין קו עזר לחיתוך.</span>
+          </div>
+          <div class="detail-row searchable" data-search="דרכון תז passport guidelines">
+            <strong>דרכון / תעודה</strong><span>גדלים רשמיים שיכולים להציג קווי עזר ודרישות.</span><span>לתמונות מסמכים.</span><span>להדגיש שעדיין צריך לבדוק דרישות עדכניות לפי מדינה/מוסד.</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="mask-grid-product-pdf-deep" class="searchable" data-search="מסיכות גריד ספריית מוצרים PDF Studio masks grid product library safe area bleed import office rotate duplicate delete resize fit fill">
+        <h2>שאר המצבים - מסיכות, גריד, מוצרים ו-PDF</h2>
+        <p>אלה מצבים חשובים עם מדריך עומק משלהם. בשלב הזה הוספנו שלד מפורט, כדי שכל אחד מהם יקבל בהמשך צילומי מסך מסומנים לפי פעולה.</p>
+        <div class="details-table">
+          <div class="detail-row header"><span>מצב</span><span>מה הוא עושה</span><span>מה לפרט במדריך</span><span>מושגים חשובים</span></div>
+          <div class="detail-row searchable" data-search="מסיכות mask עיגול לב מלבן מעוגל כוכב ספרייה אישית PNG SVG רווח">
+            <strong>מסיכות</strong><span>יוצר פרויקט עם תאי תמונה בצורת מסיכה.</span><span>בחירת צורה מובנית או מסיכה מהספרייה, ייבוא PNG/SVG, גודל דף, כיוון, יחידות, גודל מסיכה ורווח בין מסיכות.</span><span>מסיכה, ספרייה אישית, גודל פרופורציונלי, רווח בין מסיכות.</span>
+          </div>
+          <div class="detail-row searchable" data-search="גריד grid שורות עמודות תאים ריווח">
+            <strong>גריד</strong><span>מסדר תמונות בתאים קבועים ושווים יחסית.</span><span>בחירת גודל דף, מספר שורות/עמודות, ריווח, התאמת תמונות לתאים, החלפת תמונות ועריכה אחרי יצירה.</span><span>תא, שורה, עמודה, Fit/Fill, ריווח.</span>
+          </div>
+          <div class="detail-row searchable" data-search="ספריית מוצרים product library safe area bleed print zones קולאז׳ מוצר">
+            <strong>ספריית מוצרים</strong><span>פותחת עיצוב לפי מוצר מוגדר מראש עם אזורי הדפסה והנחיות.</span><span>חיפוש מוצר, סינון קטגוריה, בחירת מוצר, פתיחה כעיצוב רגיל או קולאז׳, אזורי הדפסה, Safe Area, Bleed והוראות ייצור.</span><span>מוצר, אזור הדפסה, אזור בטוח, גלישה, פתיחה רגילה/קולאז׳.</span>
+          </div>
+          <div class="detail-row searchable" data-search="PDF Studio מיזוג PDF תמונות Office סיבוב מחיקה שכפול שינוי גודל export print">
+            <strong>PDF Studio</strong><span>מרכז עבודה למסמכי PDF, תמונות וקבצי Office שמומרים ל-PDF.</span><span>ייבוא PDF/תמונות/Office, בחירת עמודים, בחירה מרובה, שכפול, מחיקה, סיבוב, שינוי גודל עמוד, Fit/Fill, עריכת שכבות-על, ייצוא והדפסה.</span><span>עמוד פעיל, עמודים נבחרים, טווח, שינוי גודל, התאמה/מילוי.</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="print-terms" class="searchable" data-search="דפוס הדפסה dpi bleed margins safe area sublimation canvas laser cmyk print hub">
+        <h2>הכנה לדפוס</h2>
+        <div class="grid">
+          <article class="card"><div class="card-body"><h3>בדיקת גודל</h3><p>לוודא שהמידות בעמוד תואמות למוצר או לנייר, ושאין שינוי יחידות בין מ״מ, ס״מ, אינץ׳ ופיקסלים.</p></div></article>
+          <article class="card"><div class="card-body"><h3>בדיקת DPI</h3><p>אם תמונה קטנה מדי ביחס לגודל ההדפסה, היא תיראה רכה. עדיף להקטין או להשתמש ב-Upscale.</p></div></article>
+          <article class="card"><div class="card-body"><h3>גלישה ושוליים</h3><p>רקע צריך להמשיך עד ה-Bleed. טקסטים ופנים צריכים להישאר בתוך Safe Area.</p></div></article>
+          <article class="card"><div class="card-body"><h3>סובלימציה</h3><p>תהליך שנוטה לבלוע מעט צבע/קונטרסט. פריסט Sublimation Boost מחזק צבעים בצורה מבוקרת.</p></div></article>
+          <article class="card"><div class="card-body"><h3>קנבס</h3><p>קנבס בולע פרטים וצבע. בדרך כלל מוסיפים קונטרסט, חדות וחיות בעדינות.</p></div></article>
+          <article class="card"><div class="card-body"><h3>לייזר</h3><p>לעיתים מדפיס צהוב מדי או עם קונטרסט קשה. משתמשים בפריסטים ייעודיים ובבדיקת ניסיון קטנה.</p></div></article>
+        </div>
+      </section>
+
+      <section id="utilities" class="searchable" data-search="כלי עזר הכנה חכמה לדפוס מסיכות הסרת רקע QR מרכז הדפסות">
+        <h2>כלי עזר</h2>
+        <div class="grid">
+          <guide-card title="הכנה חכמה לדפוס" img="13-smart-print-prepare.png" text="בדיקת תמונות, Crop, צבע, DPI, פרופיל והרצת recipe."></guide-card>
+          <guide-card title="ספריית מסיכות" img="14-mask-library.png" text="ניהול מסיכות SVG/PNG לשימוש בעיצובים."></guide-card>
+          <guide-card title="הסרת רקע כמותית" img="15-batch-background-remove.png" text="עיבוד קבצים רבים והפקת PNG שקוף."></guide-card>
+          <guide-card title="QR" img="16-qr-generator.png" text="יצירת QR והוספה לקנבס או הורדה."></guide-card>
+          <guide-card title="קישורים מהירים" img="17-quick-links.png" text="גישה מהירה לשירותים חיצוניים."></guide-card>
+          <guide-card title="חיפוש מהיר" img="18-quick-search.png" text="חיפוש מקורות ותמונות."></guide-card>
+          <guide-card title="מרכז הדפסות" img="20-print-hub-standalone.png" text="תור הדפסות, מדפסות, תחנות, היסטוריה וזמן ייצור."></guide-card>
+        </div>
+      </section>
+
+      <section id="settings" class="searchable" data-search="הגדרות כללי סביבת עבודה קיצורי מקלדת ביצועים קבצים ייצוא הדפסה פספורט מתקדם">
+        <h2>הגדרות</h2>
+        <div class="grid">
+          <guide-card title="כללי" img="12-settings-window.png" text="יחידות, מסך פתיחה, תיקיית פרויקטים ופרטי לקוח."></guide-card>
+          <guide-card title="סביבת עבודה" img="12b-settings-workspace.png" text="ברירות מחדל למסמכים, גריד, מסיכות וסביבת עבודה."></guide-card>
+          <guide-card title="קיצורי מקלדת" img="12c-settings-shortcuts.png" text="צפייה ועריכת קיצורים."></guide-card>
+          <guide-card title="מראה" img="12d-settings-appearance.png" text="ערכת תצוגה, צפיפות ומראה."></guide-card>
+          <guide-card title="ביצועים" img="12e-settings-performance.png" text="איכות תצוגה, רינדור, מגבלות קבצים ומודלי AI."></guide-card>
+          <guide-card title="קבצים ושמירה" img="12f-settings-files.png" text="שמירה אוטומטית, נתיבים ואזהרות."></guide-card>
+          <guide-card title="ייצוא והדפסה" img="12g-settings-export.png" text="DPI, איכות, פורמטים ופרופילי הדפסה."></guide-card>
+          <guide-card title="פספורט" img="12h-settings-passport.png" text="ברירות מחדל ובדיקות לתמונות פספורט."></guide-card>
+          <guide-card title="מתקדם" img="12i-settings-advanced.png" text="אבחון, איפוס וייבוא/ייצוא הגדרות."></guide-card>
+        </div>
+      </section>
+
+      <section id="next" class="searchable" data-search="המשך עבודה צילומי מסך סימונים מדריך מלא HTML">
+        <h2>המשך עבודה</h2>
+        <div class="note">
+          מערכת הצילומים המסומנים כבר התחילה בפרק "סיורים מסומנים". מכאן ממשיכים להוסיף לכל צילום מסך מספרים מדויקים, חיצים, מסגרות הסבר וקישורים ישירים לכל כפתור או אזור בתוכנה.
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    customElements.define("guide-card", class extends HTMLElement {
+      connectedCallback() {
+        const title = this.getAttribute("title") || "";
+        const img = this.getAttribute("img") || "";
+        const text = this.getAttribute("text") || "";
+        const src = `../../output/playwright/guide-mapping/screenshots/${img}`;
+        this.outerHTML = `
+          <article class="card searchable" data-search="${title} ${text}">
+            <img src="${src}" alt="${title}">
+            <div class="card-body">
+              <h3>${title}</h3>
+              <p>${text}</p>
+              <a class="shot-link" href="${src}">פתח צילום מלא</a>
+            </div>
+          </article>`;
+      }
+    });
+
+    document.querySelectorAll(".tab").forEach((button) => {
+      button.addEventListener("click", () => {
+        const panelId = button.dataset.tab;
+        const group = button.parentElement;
+        group.querySelectorAll(".tab").forEach((tab) => tab.setAttribute("aria-selected", String(tab === button)));
+        group.parentElement.querySelectorAll(".tab-panel").forEach((panel) => {
+          panel.classList.toggle("active", panel.id === panelId);
+        });
+      });
+    });
+
+    const SMART_TERMS = {
+      "קרופ": ["crop", "חיתוך", "חתוך"],
+      "חיתוך": ["crop", "קרופ", "trim"],
+      "צבע": ["color", "רוויה", "חיות", "טמפרטורה", "tint", "hue"],
+      "בהירות": ["brightness", "חשיפה", "exposure", "gamma", "גמא"],
+      "קונטרסט": ["contrast", "עומק", "curves", "עקומות"],
+      "חדות": ["sharpness", "clarity", "פרטים", "detail"],
+      "רעש": ["noise", "noise reduction", "גרעיניות"],
+      "רקע": ["background", "remove white background", "הסרת רקע"],
+      "אובייקט": ["object", "smart select", "בחירה חכמה"],
+      "מילוי": ["content aware fill", "lama", "sd inpaint", "quick heal", "inpaint"],
+      "דפוס": ["print", "dpi", "bleed", "safe area", "סובלימציה", "לייזר", "קנבס"],
+      "הדפסה": ["print", "דפוס", "dpi", "print hub"],
+      "שמירה": ["save", "export", "ייצוא", "גיבוי", "פרויקט"],
+      "ענן": ["cloud", "שמירה בענן", "העלאה", "הורדה", "סנכרון"],
+      "תמונת מחזור": ["כיתה", "תלמיד", "ילד", "צוות", "זיהוי פנים", "ריווח"],
+      "תלמיד": ["ילד", "child", "role", "תמונת מחזור"],
+      "צוות": ["staff", "איש צוות", "תמונת מחזור", "שורת צוות"],
+      "קולאז": ["collage", "קולאז׳", "פריסה", "layout", "מרווח", "שוליים", "smart crop"],
+      "קולאז׳": ["collage", "קולאז", "פריסות", "layout", "hero", "grid", "mosaic"],
+      "פריסה": ["layout", "grid", "hero", "magazine", "mosaic", "split tree", "puzzle"],
+      "ייצור סדרתי": ["batch production", "תבנית", "רשומות", "csv", "txt", "שדות משתנים"],
+      "תבנית": ["template", "ייצור סדרתי", "שדות משתנים", "ברכות"],
+      "ברכה": ["blessing", "ברכות", "רקע", "מסגרת", "מקורות", "חתימה"],
+      "פיתוח תמונות": ["photo print", "עותקים", "גודל הדפסה", "fit", "fill", "דרכון"],
+      "מסיכה": ["mask", "מסיכות", "png", "svg", "רווח בין מסיכות"],
+      "גריד": ["grid", "שורות", "עמודות", "תאים"],
+      "מוצר": ["product", "ספריית מוצרים", "safe area", "bleed", "אזור הדפסה"],
+      "pdf": ["pdf studio", "מיזוג", "סיבוב", "שינוי גודל", "ייצוא"],
+      "סיור": ["צילומים מסומנים", "מספרים", "חיצים", "כפתורים", "annotated"],
+      "צילומים מסומנים": ["סיור", "מספור", "markers", "כפתורים", "קישורים"],
+      "פריסט": ["preset", "photo rescue", "hdr", "duotone", "look"],
+      "שחור לבן": ["black white", "threshold", "laser"],
+      "ai": ["בינה", "חכם", "smart", "upscale", "restore", "expand"]
+    };
+
+    function normalizeSearchText(value) {
+      return String(value || "")
+        .toLowerCase()
+        .normalize("NFKD")
+        .replace(/[\u0591-\u05C7]/g, "")
+        .replace(/[״"׳']/g, "")
+        .replace(/[\-_/.,:;()[\]{}]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function expandQuery(query) {
+      const base = normalizeSearchText(query);
+      const terms = new Set(base.split(" ").filter(Boolean));
+      for (const [key, values] of Object.entries(SMART_TERMS)) {
+        const normalizedKey = normalizeSearchText(key);
+        if (base.includes(normalizedKey)) {
+          terms.add(normalizedKey);
+          values.forEach((value) => normalizeSearchText(value).split(" ").forEach((term) => terms.add(term)));
+        }
+        for (const value of values) {
+          const normalizedValue = normalizeSearchText(value);
+          if (normalizedValue && base.includes(normalizedValue)) {
+            terms.add(normalizedKey);
+            normalizedValue.split(" ").forEach((term) => terms.add(term));
+            values.forEach((alias) => normalizeSearchText(alias).split(" ").forEach((term) => terms.add(term)));
+          }
+        }
+      }
+      return [...terms].filter((term) => term.length > 1);
+    }
+
+    function buildSearchItems() {
+      return [...document.querySelectorAll(".searchable")].map((el) => {
+        const heading = el.querySelector("h1,h2,h3,strong")?.textContent?.trim() || el.id || "תוצאה";
+        const text = normalizeSearchText(`${heading} ${el.textContent} ${el.dataset.search || ""}`);
+        const section = el.closest("section[id]") || el;
+        return {
+          el,
+          id: section.id || el.id,
+          title: heading,
+          text,
+          snippet: (el.querySelector("p,span")?.textContent || "").trim()
+        };
+      });
+    }
+
+    let searchItems = [];
+    requestAnimationFrame(() => { searchItems = buildSearchItems(); });
+
+    const search = document.getElementById("search");
+    const searchResults = document.getElementById("searchResults");
+    search.addEventListener("input", () => {
+      const terms = expandQuery(search.value);
+      const hasQuery = terms.length > 0;
+      const scored = [];
+      document.querySelectorAll(".searchable").forEach((el) => {
+        const haystack = normalizeSearchText(`${el.textContent} ${el.dataset.search || ""}`);
+        const score = terms.reduce((sum, term) => sum + (haystack.includes(term) ? 1 : 0), 0);
+        el.classList.toggle("hidden-by-search", hasQuery && score === 0);
+      });
+      if (!hasQuery) {
+        searchResults.classList.remove("active");
+        searchResults.innerHTML = "";
+        return;
+      }
+      searchItems = buildSearchItems();
+      for (const item of searchItems) {
+        const score = terms.reduce((sum, term) => sum + (item.text.includes(term) ? 1 : 0), 0);
+        if (score > 0) scored.push({ ...item, score });
+      }
+      scored.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, "he"));
+      searchResults.innerHTML = scored.slice(0, 8).map((item) => `
+        <a class="search-result" href="#${item.id}">
+          <strong>${item.title}</strong>
+          <span>${item.snippet || "פתח פרק במדריך"}</span>
+        </a>
+      `).join("");
+      searchResults.classList.toggle("active", scored.length > 0);
+    });
+
+    const navLinks = [...document.querySelectorAll("nav a")];
+    const sections = navLinks.map((a) => document.querySelector(a.getAttribute("href"))).filter(Boolean);
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+      if (!visible) return;
+      navLinks.forEach((a) => a.classList.toggle("active", a.getAttribute("href") === `#${visible.target.id}`));
+    }, { rootMargin: "-20% 0px -65% 0px", threshold: [0.1, 0.25, 0.5] });
+    sections.forEach((section) => observer.observe(section));
+  </script>
+</body>
+</html>

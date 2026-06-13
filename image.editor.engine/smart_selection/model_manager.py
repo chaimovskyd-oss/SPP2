@@ -6,6 +6,7 @@ import os
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -15,6 +16,7 @@ MANIFEST_VERSION = 1
 DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 BIREFNET_LITE_ONNX_URL = "https://huggingface.co/onnx-community/BiRefNet_lite-ONNX/resolve/main/onnx/model.onnx?download=true"
 SAM2_SMALL_BASE_URL = "https://huggingface.co/onnx-community/sam2.1-hiera-small-ONNX/resolve/main/onnx"
+SCRFD_25G_NUGET_URL = "https://packages.nuget.org/api/v2/package/FaceAiSharp.Models.Scrfd.2dot5g_kps_640x640/0.20230205.2"
 ProgressCallback = Callable[[dict[str, Any]], None]
 
 
@@ -80,6 +82,22 @@ DEFAULT_MODELS: dict[str, dict[str, Any]] = {
         ],
         "requiredFor": ["predict_mask"],
         "profile": ["balanced", "quality"],
+    },
+    "scrfd_2.5g_kps": {
+        "id": "scrfd_2.5g_kps",
+        "label": "Face Detection (SCRFD 2.5G KPS)",
+        "filename": "scrfd/scrfd_2.5g_kps_640x640.onnx",
+        "version": "FaceAiSharp.Models.Scrfd.2dot5g_kps_640x640@0.20230205.2",
+        "repo": "georg-jung/FaceAiSharp.Models",
+        "sourceFile": "contentFiles/any/any/onnx/scrfd_2.5g_kps_640x640.onnx",
+        "url": SCRFD_25G_NUGET_URL,
+        "archiveMember": "contentFiles/any/any/onnx/scrfd_2.5g_kps_640x640.onnx",
+        "sha256": "6e23f1a85a558b8cc48d25b79e4d40a3380a66a9ac671215505b105b868f587f",
+        "sizeBytes": 3291773,
+        "archiveSizeBytes": 3066165,
+        "license": "non-commercial-research",
+        "requiredFor": ["detect_faces", "class_photo"],
+        "profile": ["performance", "balanced", "quality"],
     },
     "sam2_hiera_large": {
         "id": "sam2_hiera_large",
@@ -315,12 +333,22 @@ class ModelManager:
                     })
 
                 path = self.model_path(spec)
-                self.download_model(
-                    url,
-                    path,
-                    progress=file_progress if progress is not None else None,
-                    expected_size=int(spec.get("sizeBytes") or 0) or None,
-                )
+                archive_member = str(spec.get("archiveMember") or "")
+                if archive_member:
+                    self.download_archive_member(
+                        url,
+                        archive_member,
+                        path,
+                        progress=file_progress if progress is not None else None,
+                        expected_size=int(spec.get("archiveSizeBytes") or spec.get("sizeBytes") or 0) or None,
+                    )
+                else:
+                    self.download_model(
+                        url,
+                        path,
+                        progress=file_progress if progress is not None else None,
+                        expected_size=int(spec.get("sizeBytes") or 0) or None,
+                    )
                 completed_bytes += int(spec.get("sizeBytes") or path.stat().st_size)
             except Exception as exc:
                 failures.append(f"{spec.get('filename')}: {exc}")
@@ -492,6 +520,40 @@ class ModelManager:
             })
         tmp_path.replace(path)
 
+    def download_archive_member(
+        self,
+        url: str,
+        member_name: str,
+        path: Path,
+        *,
+        progress: ProgressCallback | None = None,
+        expected_size: int | None = None,
+    ) -> None:
+        """Download a zip-compatible package and extract one model file from it."""
+        archive_path = path.with_suffix(path.suffix + ".archive.download")
+        self.download_model(url, archive_path, progress=progress, expected_size=expected_size)
+        try:
+            with zipfile.ZipFile(archive_path) as archive:
+                normalized = member_name.replace("\\", "/")
+                candidates = {name.replace("\\", "/"): name for name in archive.namelist()}
+                archive_member = candidates.get(normalized)
+                if archive_member is None:
+                    raise RuntimeError(f"Archive member not found: {member_name}")
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp_path = path.with_suffix(path.suffix + ".extract")
+                with archive.open(archive_member) as source, tmp_path.open("wb") as target:
+                    while True:
+                        chunk = source.read(DOWNLOAD_CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        target.write(chunk)
+                tmp_path.replace(path)
+        finally:
+            try:
+                archive_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
 
 def normalize_sha(value: Any) -> str | None:
     if not isinstance(value, str):
@@ -515,7 +577,7 @@ def merge_default_model_metadata(current: Any, default: dict[str, Any]) -> bool:
     for key, value in default.items():
         current_value = current.get(key)
         should_fill = current_value is None or current_value == "" or current_value == "unconfigured"
-        if key in {"url", "sha256", "sizeBytes", "version", "repo", "sourceFile", "license", "variant"} and should_fill:
+        if key in {"url", "sha256", "sizeBytes", "archiveSizeBytes", "archiveMember", "version", "repo", "sourceFile", "license", "variant"} and should_fill:
             current[key] = value
             changed = True
         elif key not in current:

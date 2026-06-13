@@ -1,0 +1,772 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SPP2 – תוכנית עסקית וטכנית: רישיונות, AI, ענן וקרדיטים</title>
+  <style>
+    :root{
+      --bg:#0f172a; --panel:#111827; --card:#182237; --card2:#0b1220; --text:#eef2ff; --muted:#b6c2d9;
+      --blue:#38bdf8; --gold:#fbbf24; --red:#fb7185; --green:#34d399; --orange:#fb923c; --line:#2b3a55;
+      --white:#fff; --soft:#e7eefb; --ink:#172033;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Arial,'Noto Sans Hebrew','Segoe UI',sans-serif;background:linear-gradient(160deg,#0f172a,#111827 45%,#0b1220);color:var(--text);line-height:1.65}
+    a{color:var(--blue)}
+    .wrap{max-width:1180px;margin:0 auto;padding:28px 18px 80px}
+    .hero{border:1px solid var(--line);background:radial-gradient(circle at top left,rgba(56,189,248,.18),transparent 32%),radial-gradient(circle at bottom right,rgba(251,191,36,.16),transparent 30%),rgba(17,24,39,.92);border-radius:28px;padding:34px;box-shadow:0 25px 80px rgba(0,0,0,.28)}
+    h1{font-size:clamp(30px,5vw,54px);margin:0 0 8px;line-height:1.1}
+    h2{font-size:30px;margin:52px 0 16px;color:#fff;border-bottom:1px solid var(--line);padding-bottom:10px}
+    h3{font-size:22px;margin:28px 0 10px;color:#fff}
+    h4{font-size:18px;margin:20px 0 8px;color:#fff}
+    p{margin:8px 0;color:var(--soft)}
+    .sub{font-size:20px;color:var(--muted);max-width:900px}
+    .badge{display:inline-block;border:1px solid rgba(255,255,255,.18);border-radius:999px;padding:7px 12px;margin:6px 0 0 8px;background:rgba(255,255,255,.06);color:#eaf6ff;font-size:14px}
+    .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:18px 0}
+    .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:18px 0}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,.055),rgba(255,255,255,.025));border:1px solid var(--line);border-radius:22px;padding:20px;box-shadow:0 14px 35px rgba(0,0,0,.18)}
+    .card strong{color:#fff}
+    .accent{border-color:rgba(56,189,248,.45);box-shadow:0 0 0 1px rgba(56,189,248,.1),0 14px 35px rgba(0,0,0,.18)}
+    .warn{border-color:rgba(251,191,36,.45);background:rgba(251,191,36,.08)}
+    .ok{border-color:rgba(52,211,153,.45);background:rgba(52,211,153,.08)}
+    .danger{border-color:rgba(251,113,133,.45);background:rgba(251,113,133,.08)}
+    table{width:100%;border-collapse:collapse;margin:14px 0 26px;background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+    th,td{padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:top;text-align:right;color:var(--soft)}
+    th{background:rgba(56,189,248,.12);color:#fff;font-weight:700}
+    tr:last-child td{border-bottom:0}
+    .price{font-size:28px;color:var(--gold);font-weight:800}
+    .small{font-size:13px;color:#aebbd2}
+    .toc{columns:2;column-gap:30px;margin:18px 0 0}
+    .toc a{display:block;margin:4px 0;text-decoration:none;color:#dbeafe}
+    code,pre{direction:ltr;text-align:left;background:#071020;color:#dbeafe;border:1px solid #1e2e4a;border-radius:14px}
+    code{padding:2px 6px;font-size:.95em}
+    pre{padding:16px;overflow:auto;white-space:pre-wrap;line-height:1.45}
+    .prompt{background:#061426;border:1px solid rgba(56,189,248,.35);border-radius:18px;padding:16px;margin:12px 0 26px}
+    .prompt h4{margin-top:0;color:#7dd3fc}
+    .pill{display:inline-block;padding:4px 10px;border-radius:999px;background:rgba(56,189,248,.12);color:#bfdbfe;border:1px solid rgba(56,189,248,.25);font-size:13px;margin:3px}
+    .decision{font-size:19px;color:#fff;background:linear-gradient(90deg,rgba(52,211,153,.18),rgba(56,189,248,.12));border:1px solid rgba(52,211,153,.35);border-radius:20px;padding:18px;margin:18px 0}
+    .print-note{display:none}
+    @media(max-width:800px){.grid,.grid2{grid-template-columns:1fr}.toc{columns:1}.hero{padding:24px}table{font-size:14px}}
+    @media print{body{background:#fff;color:#111}.wrap{max-width:none}.hero,.card,.prompt{box-shadow:none;background:#fff;color:#111}.hero,.card,.prompt,table{border-color:#ddd}h1,h2,h3,h4,p,td,th{color:#111}.toc a,a{color:#0645ad}.print-note{display:block}.badge,.pill{border-color:#ddd;color:#111;background:#f6f6f6}pre,code{background:#f6f8fa;color:#111;border-color:#ddd}}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <span class="badge">SPP2</span>
+      <span class="badge">רישיונות</span>
+      <span class="badge">AI Credits</span>
+      <span class="badge">Cloud</span>
+      <span class="badge">Staging / Testing</span>
+      <h1>תוכנית עסקית וטכנית להפצת SPP2</h1>
+      <p class="sub">מסמך עבודה מסודר ליישום מודל Freemium, רישיון Pro חד־פעמי, חבילת Business ל־3 מחשבים, מנוי AI לפי קרדיטים, ושירותי ענן בתשלום — כולל שלבי עבודה ופרומפטים מוכנים לקלוד/מפתח.</p>
+      <div class="decision"><strong>החלטת בסיס מומלצת:</strong> בסיס חינמי בלי הרשמה חובה, Pro חד־פעמי לכלים מקומיים מתקדמים, AI בתשלום לפי קרדיטים, Cloud בתשלום לפי נפח/סנכרון, וסביבת בדיקות אמיתית עם משתמשי Free/Pro/Business/Admin.</div>
+      <div class="toc">
+        <a href="#summary">1. תקציר החלטות</a>
+        <a href="#plans">2. תוכניות ומחירים</a>
+        <a href="#features">3. חלוקת פיצ׳רים</a>
+        <a href="#credits">4. מערכת קרדיטים ל־AI</a>
+        <a href="#cloud">5. שירות ענן ועלויות</a>
+        <a href="#accounts">6. משתמשים, הרשמה והרשאות</a>
+        <a href="#devices">7. רישיון עסקי ל־3 מחשבים</a>
+        <a href="#architecture">8. ארכיטקטורה טכנית</a>
+        <a href="#testing">9. סביבת בדיקות והרשאות על</a>
+        <a href="#implementation">10. שלבי יישום</a>
+        <a href="#prompts">11. פרומפטים מוכנים</a>
+        <a href="#risks">12. סיכונים וחוקים</a>
+      </div>
+    </section>
+
+    <section id="summary">
+      <h2>1. תקציר החלטות</h2>
+      <div class="grid">
+        <div class="card ok"><h3>מה חינם?</h3><p>עבודה מקומית בסיסית: פתיחת תמונות, עימוד בסיסי, הדפסה בסיסית, קולאז׳ים פשוטים, שמירה מקומית, מעט תבניות חינמיות.</p></div>
+        <div class="card accent"><h3>מה בתשלום חד־פעמי?</h3><p>כלים מקומיים מתקדמים שלא עולים כסף בכל שימוש: תבניות קולאז׳ איכותיות, Batch, Variable Data, תבניות ייצור, Product Library, PDF Studio מקומי, Smart Arrange.</p></div>
+        <div class="card warn"><h3>מה במנוי?</h3><p>כל מה שיוצר לך עלות שוטפת: AI בענן, גיבוי וסנכרון בענן, שיתוף קישורים, אחסון, תבניות מתעדכנות אם יהיו בעתיד.</p></div>
+      </div>
+
+      <table>
+        <thead><tr><th>עיקרון</th><th>החלטה מומלצת</th><th>למה</th></tr></thead>
+        <tbody>
+          <tr><td>כניסה למוצר</td><td>Freemium בלי הרשמה חובה</td><td>מוריד חסם. נותן לאנשים להרגיש את התוכנה לפני תשלום.</td></tr>
+          <tr><td>הכנסה ראשונית</td><td>Pro חד־פעמי 199–249₪</td><td>מרגיש הוגן: ״קניתי תוכנה והיא שלי״.</td></tr>
+          <tr><td>לקוחות עסקיים</td><td>Business חד־פעמי 399–499₪ עד 3 מחשבים</td><td>נותן תחושת הנחה וערך אמיתי לחנות/דפוס קטן.</td></tr>
+          <tr><td>AI</td><td>מנוי או קרדיטים בנפרד</td><td>מגן עליך מעלויות משתנות.</td></tr>
+          <tr><td>Cloud</td><td>תוספת חודשית לפי נפח/סנכרון</td><td>אחסון, תעבורה, תמיכה ואבטחה הם שירות מתמשך.</td></tr>
+          <tr><td>בדיקות</td><td>משתמשי Test + Admin דרך שרת</td><td>בודקים הגבלות אמיתיות בלי לעקוף בקוד.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="plans">
+      <h2>2. תוכניות ומחירים מוצעים</h2>
+      <p>המחירים כאן הם נקודת התחלה. כדאי להתחיל במחיר השקה נמוך, למדוד שימוש אמיתי, ואז לעדכן.</p>
+      <div class="grid">
+        <div class="card"><h3>SPP2 Basic</h3><div class="price">חינם</div><p>למשתמש ביתי/ניסיון. בלי הרשמה חובה.</p><p><span class="pill">שמירה מקומית</span><span class="pill">הדפסה בסיסית</span><span class="pill">קולאז׳ בסיסי</span></p></div>
+        <div class="card accent"><h3>SPP2 Pro</h3><div class="price">199–249₪</div><p>תשלום חד־פעמי. מחשב אחד. פותח כלים מקומיים מתקדמים.</p><p><span class="pill">תבניות Pro</span><span class="pill">Batch</span><span class="pill">PDF מתקדם</span></p></div>
+        <div class="card accent"><h3>SPP2 Business</h3><div class="price">399–499₪</div><p>תשלום חד־פעמי. עד 3 מחשבים. מתאים לחנות/סטודיו.</p><p><span class="pill">3 עמדות</span><span class="pill">ייצור כמותי</span><span class="pill">שימוש עסקי</span></p></div>
+      </div>
+      <div class="grid2">
+        <div class="card warn"><h3>SPP2 AI Pack</h3><div class="price">19–49₪ / חודש</div><p>חבילת קרדיטים או מנוי חודשי לפעולות AI. מתאים להרחבת תמונה, מילוי חכם, שיפור תמונה, רקעים, סגנונות וכו׳.</p></div>
+        <div class="card warn"><h3>SPP2 Cloud</h3><div class="price">9–39₪ / חודש</div><p>גיבוי, פתיחה מהענן, סנכרון בין מחשבים, תבניות אישיות, נכסים ושיתוף ללקוחות.</p></div>
+      </div>
+
+      <h3>חבילות אפשריות ליום השקה</h3>
+      <table>
+        <thead><tr><th>חבילה</th><th>מחיר</th><th>כולל</th><th>הערה שיווקית</th></tr></thead>
+        <tbody>
+          <tr><td>Basic</td><td>0₪</td><td>כלים בסיסיים, שמירה מקומית, תבניות חינמיות</td><td>״התחילו לעצב ולהדפיס בחינם״</td></tr>
+          <tr><td>Pro</td><td>249₪ חד־פעמי</td><td>כלים מתקדמים, תבניות, ייצור, Batch, PDF</td><td>״קנייה חד־פעמית לכלי העבודה המקצועיים״</td></tr>
+          <tr><td>Business</td><td>449₪ חד־פעמי</td><td>Pro עד 3 מחשבים + רישיון עסקי</td><td>״משתלם לחנות עם כמה עמדות״</td></tr>
+          <tr><td>AI Plus</td><td>29₪/חודש</td><td>פעולות חכמות + קרדיטי AI מתקדמים</td><td>״AI לפי שימוש בלי התחייבות יקרה״</td></tr>
+          <tr><td>Cloud Plus</td><td>19₪/חודש</td><td>50GB, גיבוי, פתיחה מהענן, עד 2 מחשבים</td><td>״הפרויקטים שלך זמינים ומגובים״</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="features">
+      <h2>3. חלוקת פיצ׳רים בין Free / Pro / AI / Cloud</h2>
+      <table>
+        <thead><tr><th>פיצ׳ר</th><th>Free</th><th>Pro חד־פעמי</th><th>AI</th><th>Cloud</th></tr></thead>
+        <tbody>
+          <tr><td>פתיחת תמונות, עריכה בסיסית, הדפסה בסיסית</td><td>כן</td><td>כן</td><td>לא קשור</td><td>לא קשור</td></tr>
+          <tr><td>קולאז׳ים בסיסיים</td><td>כן</td><td>כן</td><td>לא</td><td>לא</td></tr>
+          <tr><td>תבניות קולאז׳ מתקדמות</td><td>מוגבל</td><td>כן</td><td>לא</td><td>אפשר לסנכרן</td></tr>
+          <tr><td>תבניות ייצור למוצרים</td><td>לא</td><td>כן</td><td>לא</td><td>אפשר לשמור ולסנכרן</td></tr>
+          <tr><td>Batch Collage / גנים / כיתות</td><td>לא</td><td>כן</td><td>לא</td><td>אפשר גיבוי</td></tr>
+          <tr><td>Variable Data / ייצור כמותי</td><td>לא</td><td>כן</td><td>לא</td><td>אפשר גיבוי</td></tr>
+          <tr><td>Smart Arrange מקומי</td><td>גרסה בסיסית</td><td>כן</td><td>לא</td><td>לא</td></tr>
+          <tr><td>הסרת רקע מקומית</td><td>ניסיון/מוגבל</td><td>מכסה בסיסית או כלול</td><td>שיפור ענן בתשלום</td><td>לא</td></tr>
+          <tr><td>Generative Expand / Fill</td><td>לא</td><td>לא כלול</td><td>כן, קרדיטים</td><td>לא</td></tr>
+          <tr><td>גיבוי פרויקטים</td><td>לא/500MB ניסיון</td><td>לא כלול</td><td>לא</td><td>כן</td></tr>
+          <tr><td>סנכרון בין מחשבים</td><td>לא</td><td>לא כלול</td><td>לא</td><td>כן</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="credits">
+      <h2>4. מערכת קרדיטים ל־AI</h2>
+      <div class="decision"><strong>המלצה:</strong> לא לקרוא לזה רק ״AI credits״ אם חלק מהפעולות מקומיות. עדיף ״Smart/AI Credits״ או ״פעולות חכמות״, עם הפרדה בין פעולות בסיסיות לבין קרדיטים מתקדמים.</div>
+      <h3>עלות בסיס לפי ההנחה שלך</h3>
+      <table>
+        <thead><tr><th>סוג פעולה</th><th>עלות משוערת בדולר</th><th>עלות בש״ח לפי 3.5₪</th><th>חיוב ללקוח</th></tr></thead>
+        <tbody>
+          <tr><td>פעולה בסיסית זולה</td><td>$0.04</td><td>0.14₪</td><td>1 קרדיט</td></tr>
+          <tr><td>פעולה בינונית</td><td>$0.07–0.08</td><td>0.25–0.28₪</td><td>2 קרדיטים</td></tr>
+          <tr><td>פעולה כבדה</td><td>$0.10</td><td>0.35₪</td><td>3–5 קרדיטים</td></tr>
+          <tr><td>פעולה פרימיום/מורכבת</td><td>$0.10+</td><td>0.35₪+</td><td>6–10 קרדיטים</td></tr>
+        </tbody>
+      </table>
+
+      <h3>הצעת חבילות AI</h3>
+      <table>
+        <thead><tr><th>חבילה</th><th>מחיר</th><th>מה הלקוח מקבל</th><th>הערת רווחיות</th></tr></thead>
+        <tbody>
+          <tr><td>AI Starter</td><td>19₪/חודש</td><td>50 פעולות חכמות בסיסיות + 20 קרדיטי AI מתקדמים</td><td>מוצר כניסה זול</td></tr>
+          <tr><td>AI Plus</td><td>29₪/חודש</td><td>100 פעולות חכמות בסיסיות + 40–60 קרדיטי AI מתקדמים</td><td>חבילה מרכזית</td></tr>
+          <tr><td>AI Studio</td><td>49₪/חודש</td><td>250 פעולות חכמות + 100–150 קרדיטי AI מתקדמים</td><td>לעסקים, דורש תמחור כבד נכון</td></tr>
+          <tr><td>קרדיטים חד־פעמיים</td><td>25–89₪</td><td>100/250/500 קרדיטים לפי חבילה</td><td>טוב למי שלא רוצה מנוי</td></tr>
+        </tbody>
+      </table>
+
+      <h3>חיוב לפי פעולה</h3>
+      <table>
+        <thead><tr><th>פעולה</th><th>מנוע מועדף</th><th>חיוב מומלץ</th><th>הערה</th></tr></thead>
+        <tbody>
+          <tr><td>Auto Enhance רגיל</td><td>מקומי</td><td>0 או 1 פעולה חכמה</td><td>אפשר לכלול ב־Pro כדי שירגיש נדיב</td></tr>
+          <tr><td>הסרת רקע מקומית</td><td>BiRefNet/RMBG מקומי</td><td>1 פעולה חכמה</td><td>הוגן אם מוצג ככלי חכם, לא כעלות ענן</td></tr>
+          <tr><td>הסרת רקע ענן</td><td>API זול</td><td>1–2 קרדיטים</td><td>רק אם המקומי לא מספיק טוב</td></tr>
+          <tr><td>Generative Expand פשוט</td><td>מודל זול</td><td>2–4 קרדיטים</td><td>ברירת מחדל חסכונית</td></tr>
+          <tr><td>Generative Expand איכותי</td><td>מודל חזק</td><td>5–8 קרדיטים</td><td>למקרים עם אנשים/פרטים מורכבים</td></tr>
+          <tr><td>AI Style Preset</td><td>מודל לפי סגנון</td><td>2–6 קרדיטים</td><td>Preview קטן לפני Final</td></tr>
+          <tr><td>Upscale איכותי</td><td>ענן/מקומי לפי איכות</td><td>2–5 קרדיטים</td><td>לפי גודל סופי</td></tr>
+        </tbody>
+      </table>
+
+      <h3>חוקים חשובים למערכת הקרדיטים</h3>
+      <ul>
+        <li>לא לשים מפתחות API בתוך Electron. כל AI עובר דרך השרת שלך.</li>
+        <li>לא לחייב על כשל טכני, אבל להגביל retry אוטומטי.</li>
+        <li>להציג לפני הפעולה: כמה קרדיטים יירדו וכמה נשאר.</li>
+        <li>לשמור לוג פעולות ו־credit_transactions.</li>
+        <li>לעשות cache לפי image_hash + tool + settings_hash.</li>
+        <li>לשלוח crop/preview/רזולוציה נמוכה כשאפשר כדי להוריד עלות.</li>
+      </ul>
+    </section>
+
+    <section id="cloud">
+      <h2>5. שירות ענן ועלויות</h2>
+      <div class="decision"><strong>המלצה:</strong> להתחיל מ־Cloud Backup פשוט: ״גבה לענן״ ו־״פתח מהענן״. רק אחר כך להוסיף Sync מלא בין מחשבים.</div>
+      <h3>חוויית משתמש בענן</h3>
+      <table>
+        <thead><tr><th>פעולה בתוכנה</th><th>איך זה נראה למשתמש</th><th>מה קורה מאחורי הקלעים</th></tr></thead>
+        <tbody>
+          <tr><td>שמור מקומית</td><td>שמירה רגילה במחשב</td><td>קובץ SPP2 נשמר בדיסק</td></tr>
+          <tr><td>גבה לענן</td><td>״נשמר בענן לפני 2 דקות״</td><td>נוצר spp2pack עם assets ומועלה לאחסון</td></tr>
+          <tr><td>פתח מהענן</td><td>מסך ״הענן שלי״ עם thumbnails</td><td>הורדת הפרויקט והנכסים למחשב</td></tr>
+          <tr><td>סנכרן עכשיו</td><td>עדכון ידני בין מחשבים</td><td>בדיקת גרסה אחרונה, העלאה/הורדה</td></tr>
+          <tr><td>שתף עם לקוח</td><td>קישור לצפייה/הורדה</td><td>Signed URL מוגבל בזמן או share token</td></tr>
+        </tbody>
+      </table>
+
+      <h3>חבילות Cloud</h3>
+      <table>
+        <thead><tr><th>חבילה</th><th>מחיר</th><th>נפח</th><th>מכשירים</th><th>הערה</th></tr></thead>
+        <tbody>
+          <tr><td>Cloud Trial</td><td>חינם לחשבון רשום</td><td>500MB–1GB</td><td>1</td><td>רק טעימה, לא פתרון מלא</td></tr>
+          <tr><td>Cloud Basic</td><td>9–19₪/חודש</td><td>10GB</td><td>1</td><td>גיבוי בסיסי</td></tr>
+          <tr><td>Cloud Plus</td><td>19₪/חודש</td><td>50GB</td><td>עד 2</td><td>החבילה המרכזית</td></tr>
+          <tr><td>Cloud Business</td><td>39₪/חודש</td><td>100GB</td><td>עד 3</td><td>לחנות/סטודיו</td></tr>
+        </tbody>
+      </table>
+
+      <h3>אומדן עלות אחסון ישירה</h3>
+      <p class="small">אומדן לפי נתונים ציבוריים שנבדקו ביוני 2026. העלות בפועל תלויה באזור, בקשות API, תעבורה, שכבות אחסון, מסים ושימוש אמיתי.</p>
+      <table>
+        <thead><tr><th>ספק</th><th>מחיר אחסון ציבורי</th><th>10GB</th><th>50GB</th><th>100GB</th><th>הערה</th></tr></thead>
+        <tbody>
+          <tr><td>Cloudflare R2</td><td>$0.015 / GB-month</td><td>~0.53₪</td><td>~2.63₪</td><td>~5.25₪</td><td>אין egress רגיל, יש עלויות פעולות</td></tr>
+          <tr><td>Supabase Storage</td><td>$0.0213 / GB-month</td><td>~0.75₪</td><td>~3.73₪</td><td>~7.45₪</td><td>נוח לפיתוח עם Auth/DB</td></tr>
+          <tr><td>AWS S3</td><td>~$0.0265 / GB בחלק ממסלולי Standard/Table</td><td>~0.93₪</td><td>~4.64₪</td><td>~9.28₪</td><td>יש לשים לב לבקשות ותעבורה</td></tr>
+        </tbody>
+      </table>
+
+      <h3>ספקים מומלצים</h3>
+      <div class="grid2">
+        <div class="card ok"><h3>התחלה נוחה</h3><p><strong>Supabase</strong> לניהול משתמשים, רישיונות, מסד נתונים, webhooks בסיסיים והרשאות.</p></div>
+        <div class="card ok"><h3>אחסון משתלם</h3><p><strong>Cloudflare R2</strong> לקבצי פרויקטים, תמונות, assets ותוצרים, במיוחד אם יהיו הורדות ושיתוף.</p></div>
+      </div>
+      <p><strong>שילוב מומלץ:</strong> Supabase Auth/Postgres לניהול משתמשים ורישיונות + Cloudflare R2 לאחסון קבצים.</p>
+
+      <h3>חוקים לשירות ענן</h3>
+      <ul>
+        <li>הענן מיועד לפרויקטים ונכסים של SPP2, לא ככונן גיבוי כללי.</li>
+        <li>קבצי AI זמניים נמחקים אחרי 7–30 יום.</li>
+        <li>היסטוריית גרסאות מוגבלת, למשל עד 10 גרסאות לפרויקט.</li>
+        <li>קובץ בודד מוגבל, למשל 500MB/1GB לפי תוכנית.</li>
+        <li>אם יש התנגשות בין מחשבים: פתח גרסת ענן / שמור כעותק / החלף גרסת ענן.</li>
+      </ul>
+    </section>
+
+    <section id="accounts">
+      <h2>6. משתמשים, הרשמה והרשאות</h2>
+      <div class="decision"><strong>המלצה:</strong> משתמש חינמי לא חייב להירשם כדי לעבוד מקומית. הרשמה נדרשת רק ל־Pro, AI, Cloud, תבניות פרימיום מתעדכנות, וניהול מכשירים.</div>
+      <table>
+        <thead><tr><th>מצב משתמש</th><th>צריך חשבון?</th><th>מה מותר</th><th>מה נעול</th></tr></thead>
+        <tbody>
+          <tr><td>Anonymous / ללא חשבון</td><td>לא</td><td>עבודה בסיסית מקומית</td><td>Pro, AI, Cloud, רישיון</td></tr>
+          <tr><td>Free Registered</td><td>כן</td><td>פרופיל, ניסיון AI קטן, מעט ענן, תבניות חינמיות</td><td>Pro מלא, AI שוטף, Cloud מלא</td></tr>
+          <tr><td>Pro</td><td>כן</td><td>כלים מקומיים מתקדמים</td><td>AI/Cloud אם לא נרכשו</td></tr>
+          <tr><td>Business</td><td>כן</td><td>Pro עד 3 מחשבים</td><td>AI/Cloud אם לא נרכשו</td></tr>
+          <tr><td>Internal/Admin</td><td>כן</td><td>הכול לפי הרשאות שרת</td><td>לא לעקוף בקוד</td></tr>
+        </tbody>
+      </table>
+
+      <h3>מודל Entitlements לדוגמה</h3>
+      <pre>{
+  "userId": "u_123",
+  "role": "user",
+  "plan": "business",
+  "license": {
+    "type": "business",
+    "status": "active",
+    "deviceLimit": 3,
+    "updatesUntil": "2027-06-01"
+  },
+  "features": {
+    "collageAdvanced": true,
+    "templatesPremium": true,
+    "batchProduction": true,
+    "variableData": true,
+    "pdfStudioAdvanced": true,
+    "ai": false,
+    "cloud": true
+  },
+  "ai": {
+    "plan": "none",
+    "smartActionsRemaining": 0,
+    "creditsRemaining": 0
+  },
+  "cloud": {
+    "plan": "business",
+    "quotaGb": 100,
+    "usedGb": 12.4
+  }
+}</pre>
+    </section>
+
+    <section id="devices">
+      <h2>7. רישיון עסקי ל־3 מחשבים</h2>
+      <p>החבילה העסקית נותנת ערך ברור: בעל החנות מרגיש שהוא מקבל הנחה אמיתית ל־3 עמדות.</p>
+      <table>
+        <thead><tr><th>פריט</th><th>מחשב אחד</th><th>3 מחשבים בנפרד</th><th>Business</th></tr></thead>
+        <tbody>
+          <tr><td>מחיר דוגמה</td><td>249₪</td><td>747₪</td><td>449₪</td></tr>
+          <tr><td>תחושת לקוח</td><td>סביר</td><td>יקר</td><td>משתלם</td></tr>
+          <tr><td>תועלת עבורך</td><td>הכנסה רגילה</td><td>אולי חסם</td><td>מעלה הכנסה ממוצעת</td></tr>
+        </tbody>
+      </table>
+      <h3>איך זה עובד טכנית?</h3>
+      <pre>user_devices
+- user_id
+- device_id
+- device_name
+- license_id
+- created_at
+- last_seen
+- revoked_at</pre>
+      <ul>
+        <li>בכניסה ראשונה המחשב מקבל device_id מקומי.</li>
+        <li>בעת התחברות השרת בודק כמה מכשירים כבר רשומים.</li>
+        <li>אם יש מקום — רושם את המכשיר.</li>
+        <li>אם אין מקום — מציג ניהול מכשירים: ״הסר מחשב ישן״ או ״שדרג״.</li>
+      </ul>
+    </section>
+
+    <section id="architecture">
+      <h2>8. ארכיטקטורה טכנית מומלצת</h2>
+      <div class="card accent">
+        <h3>הכלל החשוב ביותר</h3>
+        <p><strong>AI לא יוצא ישירות מהתוכנה לספקים חיצוניים.</strong> אין API keys בתוך Electron. כל פעולה עוברת דרך השרת שלך.</p>
+      </div>
+      <pre>SPP2 Electron App
+  ↓ login/token
+SPP2 API Server
+  ↓ checks entitlements / credits / device limit / cloud quota
+AI Gateway / Cloud Service
+  ↓
+Fal / Replicate / OpenAI / Stability / Local workers
+  ↓
+Result stored in R2/Supabase and returned to app</pre>
+
+      <h3>רכיבי מערכת</h3>
+      <table>
+        <thead><tr><th>רכיב</th><th>אחריות</th><th>טכנולוגיה אפשרית</th></tr></thead>
+        <tbody>
+          <tr><td>Auth</td><td>הרשמה, התחברות, tokens</td><td>Supabase Auth / Clerk / Auth.js</td></tr>
+          <tr><td>Licensing API</td><td>Pro/Business, מכשירים, הרשאות</td><td>Node/Fastify + Postgres</td></tr>
+          <tr><td>Payments</td><td>תשלום חד־פעמי, מנויים, webhooks</td><td>Stripe / Lemon Squeezy / Paddle</td></tr>
+          <tr><td>AI Gateway</td><td>בדיקת קרדיטים, route למודל, לוגים</td><td>Node/Python worker</td></tr>
+          <tr><td>Storage</td><td>פרויקטים, assets, thumbnails</td><td>Cloudflare R2 / Supabase Storage</td></tr>
+          <tr><td>Entitlement Client</td><td>בדיקת canUseFeature באפליקציה</td><td>TypeScript service</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Database בסיסי</h3>
+      <pre>users
+- id
+- email
+- role
+- created_at
+
+licenses
+- id
+- user_id
+- type            // pro, business, internal
+- status          // active, expired, revoked
+- device_limit
+- updates_until
+
+subscriptions
+- id
+- user_id
+- type            // ai, cloud
+- plan
+- status
+- renews_at
+
+ai_balances
+- user_id
+- smart_actions_remaining
+- credits_remaining
+- resets_at
+
+credit_transactions
+- id
+- user_id
+- amount
+- reason
+- job_id
+- created_at
+
+ai_jobs
+- id
+- user_id
+- tool
+- model
+- status
+- estimated_credits
+- charged_credits
+- provider_cost_usd
+- input_hash
+- settings_hash
+- result_path
+
+cloud_projects
+- id
+- user_id
+- name
+- size_bytes
+- storage_path
+- thumbnail_path
+- version
+- updated_at
+- device_id</pre>
+    </section>
+
+    <section id="testing">
+      <h2>9. סביבת בדיקות והרשאות על</h2>
+      <div class="decision"><strong>לא לעקוף בקוד.</strong> גם משתמש Admin שלך צריך לקבל הרשאות מהשרת, כדי שהבדיקות יעברו באותו מנגנון כמו לקוח אמיתי.</div>
+      <h3>משתמשי בדיקה מומלצים</h3>
+      <table>
+        <thead><tr><th>משתמש</th><th>מטרה</th><th>מה לבדוק</th></tr></thead>
+        <tbody>
+          <tr><td>free@test.spp2</td><td>משתמש חינמי</td><td>פיצ׳רים נעולים באמת</td></tr>
+          <tr><td>pro@test.spp2</td><td>Pro פעיל</td><td>כלים מקומיים פתוחים, AI/Cloud נעולים אם לא נרכשו</td></tr>
+          <tr><td>business@test.spp2</td><td>Business</td><td>עד 3 מחשבים וניהול מכשירים</td></tr>
+          <tr><td>ai@test.spp2</td><td>AI פעיל</td><td>קרדיטים, חיוב, חסימה כשנגמר</td></tr>
+          <tr><td>cloud@test.spp2</td><td>Cloud פעיל</td><td>גיבוי, פתיחה מהענן, quota</td></tr>
+          <tr><td>expired@test.spp2</td><td>מנוי שפג</td><td>התנהגות נעילה ועדכון UI</td></tr>
+          <tr><td>admin@test.spp2</td><td>הרשאות על</td><td>הכול פתוח דרך Entitlements</td></tr>
+        </tbody>
+      </table>
+
+      <h3>מצבי סימולציה בסביבת Dev בלבד</h3>
+      <ul>
+        <li>Free user</li>
+        <li>Pro active</li>
+        <li>Pro expired</li>
+        <li>AI active with credits</li>
+        <li>AI active with 0 credits</li>
+        <li>Cloud quota available</li>
+        <li>Cloud quota exceeded</li>
+        <li>Business 2/3 devices</li>
+        <li>Business trying 4th device</li>
+        <li>Offline mode</li>
+        <li>Server unavailable</li>
+      </ul>
+    </section>
+
+    <section id="implementation">
+      <h2>10. שלבי עבודה ליישום</h2>
+      <table>
+        <thead><tr><th>שלב</th><th>מטרה</th><th>תוצר</th><th>הערה</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>Entitlement Service מקומי</td><td>canUseFeature(featureKey)</td><td>לפני תשלומים ושרת מלא</td></tr>
+          <tr><td>2</td><td>UI נעילות אחיד</td><td>UpgradeDialog / LockedFeatureBadge</td><td>לא לפזר בדיקות בכל רכיב</td></tr>
+          <tr><td>3</td><td>Auth בסיסי</td><td>Login/Register/Token refresh</td><td>אנונימי עדיין עובד</td></tr>
+          <tr><td>4</td><td>רישיונות Pro/Business</td><td>טבלאות licenses + devices</td><td>כולל 3 מחשבים</td></tr>
+          <tr><td>5</td><td>Admin/Staging</td><td>משתמשי בדיקה וסימולטור Dev</td><td>לא קיים ב־Production</td></tr>
+          <tr><td>6</td><td>AI Credits</td><td>Balances, transactions, jobs</td><td>עדיין אפשר mock בלי ספק אמיתי</td></tr>
+          <tr><td>7</td><td>AI Gateway</td><td>שרת שמפעיל ספק AI ומחייב קרדיטים</td><td>API keys רק בשרת</td></tr>
+          <tr><td>8</td><td>Cloud Backup</td><td>Save to Cloud / Open from Cloud</td><td>לא Sync מלא בשלב ראשון</td></tr>
+          <tr><td>9</td><td>Cloud Library UI</td><td>מסך ״הענן שלי״</td><td>פרויקטים, נכסים, תבניות</td></tr>
+          <tr><td>10</td><td>Payments</td><td>Stripe/Lemon/Paddle + webhooks</td><td>אפשר להתחיל ידנית/קופונים ב־Beta</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="prompts">
+      <h2>11. פרומפטים מוכנים לקלוד / מפתח</h2>
+
+      <div class="prompt">
+        <h4>Prompt 1 — הקמת מערכת הרשאות מרכזית</h4>
+        <pre>Build a centralized entitlement and licensing system for SPP2.
+
+Context:
+SPP2 is an Electron + React + TypeScript desktop app. The app must support a free local mode, paid Pro/Business licenses, AI credits, cloud quotas, and internal admin/testing users.
+
+Requirements:
+1. Do not hardcode feature access inside UI components.
+2. Create a central entitlement service with canUseFeature(featureKey).
+3. Support these account modes:
+   - anonymous local free user
+   - free registered user
+   - pro license
+   - business license with device limit
+   - AI subscription/credits
+   - Cloud subscription/quota
+   - internal admin
+   - expired/revoked states
+4. Define a typed FeatureKey enum/object, including:
+   - collage.advanced
+   - templates.premium
+   - production.batch
+   - production.variableData
+   - productLibrary.advanced
+   - pdfStudio.advanced
+   - smartArrange.advanced
+   - ai.removeBackground
+   - ai.generativeExpand
+   - ai.stylePresets
+   - cloud.backup
+   - cloud.sync
+5. Every premium UI action must call canUseFeature before running.
+6. If blocked, show one consistent UpgradeDialog with a reason and suggested plan.
+7. Add developer-only entitlement simulator available only in development builds.
+8. Production builds must not expose the simulator.
+9. Never unlock features based on email hardcoding.
+10. Keep all existing local/free functionality working without login.</pre>
+      </div>
+
+      <div class="prompt">
+        <h4>Prompt 2 — UI נעילות ושדרוג</h4>
+        <pre>Add a consistent premium feature locking UI across SPP2.
+
+Requirements:
+1. Create LockedFeatureBadge, UpgradeDialog, PlanBadge and CreditsBadge components.
+2. Locked buttons should remain visible but clearly marked as Pro/AI/Cloud.
+3. When a user clicks a locked feature, do not silently fail. Show UpgradeDialog.
+4. The dialog should explain:
+   - feature name
+   - why it is locked
+   - which plan unlocks it
+   - options: Upgrade / Login / Maybe later
+5. Do not block the whole app if the user is anonymous.
+6. Add header/account area showing:
+   - current plan
+   - AI credits
+   - cloud used/quota
+   - device count if business
+7. Use RTL Hebrew-friendly labels, but keep internal keys in English.</pre>
+      </div>
+
+      <div class="prompt">
+        <h4>Prompt 3 — רישיון Business ל־3 מחשבים</h4>
+        <pre>Implement device-based license management for SPP2 Business.
+
+Requirements:
+1. Generate a stable local device_id per installation and store it securely.
+2. On login/license refresh, register this device with the licensing API.
+3. The entitlement model must include deviceLimit and activeDevicesCount.
+4. If the user exceeds the device limit, block Pro/Business features on the new device and show Manage Devices dialog.
+5. Manage Devices dialog should show device name, last seen, and a remove/revoke action.
+6. Business plan should allow 3 active devices by default.
+7. Internal/admin plan may allow a high device limit for testing.
+8. Add tests for:
+   - first device activation
+   - third device activation
+   - fourth device blocked
+   - revoking an old device then activating new device.</pre>
+      </div>
+
+      <div class="prompt">
+        <h4>Prompt 4 — מערכת AI Credits</h4>
+        <pre>Build the AI Credits infrastructure for SPP2.
+
+Important:
+The desktop app must never call external AI providers directly and must never contain provider API keys. All AI jobs go through our backend AI Gateway.
+
+Requirements:
+1. Add AI balance model:
+   - smartActionsRemaining
+   - aiCreditsRemaining
+   - resetsAt
+2. Add AI job model:
+   - jobId
+   - userId
+   - tool
+   - estimatedCredits
+   - chargedCredits
+   - status
+   - inputHash
+   - settingsHash
+   - resultUrl/resultPath
+   - providerCostUsd
+3. Before running an AI action, call estimateAiCost(tool, settings).
+4. Show a confirmation UI: cost, remaining credits, expected mode.
+5. If credits are insufficient, block and show purchase/upgrade dialog.
+6. If the job fails technically, do not charge credits.
+7. If the user cancels after provider work started, follow configured policy.
+8. Implement result cache based on inputHash + tool + settingsHash.
+9. Support local smart actions separately from cloud AI credits.
+10. Add mock provider for development/staging.</pre>
+      </div>
+
+      <div class="prompt">
+        <h4>Prompt 5 — AI Router לחיסכון בעלויות</h4>
+        <pre>Build an AI Router layer that chooses the cheapest acceptable execution path for each AI feature.
+
+Goal:
+Reduce AI costs while preserving good results.
+
+Routing rules:
+1. For remove background:
+   - try local model first when available
+   - if confidence/quality is acceptable, return local result
+   - if not, offer cloud enhancement or automatically route if user chose premium mode
+2. For generative expand:
+   - use economical model for simple backgrounds
+   - use premium model only for people/faces/complex content or when user selects High Quality
+3. For style presets:
+   - create low-res preview first
+   - run final only after confirmation
+4. For all tools:
+   - crop to relevant area where possible
+   - downscale preview jobs
+   - cache repeated results
+   - log provider cost and credits charged
+5. User should choose quality level, not provider/model name:
+   - Fast
+   - Balanced
+   - High Quality
+6. Add provider abstraction so models can be replaced later without touching UI.</pre>
+      </div>
+
+      <div class="prompt">
+        <h4>Prompt 6 — Cloud Backup בסיסי</h4>
+        <pre>Implement the first version of SPP2 Cloud Backup.
+
+Scope:
+This is not real-time sync yet. It is manual Save to Cloud and Open from Cloud.
+
+Requirements:
+1. Add menu actions:
+   - Backup to Cloud
+   - Open from Cloud
+   - Cloud Library
+2. Project cloud format should be a self-contained package:
+   - project metadata
+   - project JSON
+   - required assets/images
+   - thumbnail preview
+3. Upload package to storage provider using backend-issued signed upload URLs.
+4. Save metadata in database:
+   - projectId
+   - userId
+   - name
+   - sizeBytes
+   - thumbnailPath
+   - storagePath
+   - version
+   - updatedAt
+   - deviceId
+5. Enforce cloud quota before upload.
+6. If quota exceeded, show Cloud Upgrade dialog.
+7. Add basic conflict handling:
+   - cloud version newer
+   - local version newer
+   - save as copy
+   - overwrite cloud
+8. Do not auto-upload every opened image. Upload only project packages and explicitly included assets.</pre>
+      </div>
+
+      <div class="prompt">
+        <h4>Prompt 7 — מסך ״הענן שלי״</h4>
+        <pre>Build the Cloud Library screen for SPP2.
+
+Requirements:
+1. Add tabs:
+   - Projects
+   - Templates
+   - Assets
+   - Exports
+2. Each cloud item should show:
+   - thumbnail
+   - name
+   - last updated
+   - size
+   - source device
+   - actions: Open, Download, Share, Rename, Delete
+3. Show cloud usage at the top:
+   - used GB / quota GB
+   - plan name
+   - upgrade button
+4. Support search and sort by name/date/size.
+5. Delete should move to trash/soft delete where possible.
+6. Sharing should create a limited share link, not public permanent file URLs.
+7. Keep the UI RTL and beginner-friendly.</pre>
+      </div>
+
+      <div class="prompt">
+        <h4>Prompt 8 — סביבת Staging ומשתמשי בדיקה</h4>
+        <pre>Create a staging/testing setup for SPP2 licensing, AI, and cloud.
+
+Requirements:
+1. Add environment separation:
+   - development
+   - staging
+   - production
+2. Development/staging must use test accounts and mock payment/AI providers by default.
+3. Add seed test users:
+   - free@test.spp2
+   - pro@test.spp2
+   - business@test.spp2
+   - ai@test.spp2
+   - cloud@test.spp2
+   - expired@test.spp2
+   - admin@test.spp2
+4. Add admin/internal entitlement type that unlocks all features through the normal entitlement service.
+5. Do not add email-based unlock logic to the app.
+6. Add a development-only entitlement simulator UI:
+   - Free
+   - Pro
+   - Business 3/3 devices
+   - AI active no credits
+   - Cloud quota exceeded
+   - Offline
+7. Simulator must be completely absent in production builds.
+8. Add automated checks that premium features remain blocked for free users.</pre>
+      </div>
+
+      <div class="prompt">
+        <h4>Prompt 9 — Payment Webhooks</h4>
+        <pre>Design and implement payment webhook handling for SPP2.
+
+Requirements:
+1. Support one-time purchase for Pro and Business licenses.
+2. Support recurring subscriptions for AI Pack and Cloud Pack.
+3. On successful payment:
+   - create/update user license or subscription
+   - update entitlement record
+   - add initial AI credits if relevant
+4. On subscription renewal:
+   - reset/add monthly credits
+   - extend subscription status
+5. On payment failure/cancellation:
+   - keep local/free features available
+   - disable AI/Cloud after grace period
+6. Never rely only on client-side payment success.
+7. All entitlement changes must be processed server-side from verified webhooks.
+8. Add admin screen/log for payment events and entitlement changes.</pre>
+      </div>
+
+      <div class="prompt">
+        <h4>Prompt 10 — Offline License Grace</h4>
+        <pre>Implement safe offline behavior for SPP2 licenses.
+
+Requirements:
+1. If a Pro/Business license was verified recently, allow offline use for a grace period.
+2. Recommended grace period: 7–30 days, configurable.
+3. AI and Cloud must require internet and server checks.
+4. Show non-blocking warning when the app could not refresh license status.
+5. Do not lock users out of local project files.
+6. Store signed entitlement snapshot locally with expiry.
+7. When online returns, refresh entitlement and reconcile status.
+8. If license is expired/revoked, keep Basic local features working and lock only premium features.</pre>
+      </div>
+    </section>
+
+    <section id="risks">
+      <h2>12. סיכונים, החלטות פתוחות וחוקים</h2>
+      <div class="grid2">
+        <div class="card danger"><h3>לא לשבור אמון</h3><p>לא לנעול פרויקטים קיימים של משתמש אם הפסיק לשלם. לנעול רק פיצ׳רים מתקדמים, AI ו־Cloud.</p></div>
+        <div class="card danger"><h3>לא לשים API keys באפליקציה</h3><p>Electron ניתן לפירוק. כל מפתח סודי שנמצא באפליקציה ייחשב חשוף.</p></div>
+        <div class="card warn"><h3>לא להתחיל מ־Sync מלא</h3><p>סנכרון בזמן אמת מסובך בגלל התנגשויות, קבצים גדולים וגרסאות. להתחיל מגיבוי ידני.</p></div>
+        <div class="card warn"><h3>לא יותר מדי חבילות ביום הראשון</h3><p>Free / Pro / Business + AI Pack + Cloud Pack מספיק. פיצול מוגזם מבלבל לקוחות.</p></div>
+      </div>
+
+      <h3>נוסח שיווקי מומלץ</h3>
+      <pre>SPP2 Basic — חינם לעיצוב והדפסה בסיסיים.
+SPP2 Pro — רכישה חד־פעמית שפותחת את כלי העבודה המקצועיים.
+SPP2 Business — רישיון עסקי עד 3 מחשבים לחנויות וסטודיו.
+SPP2 AI — שירות אופציונלי לפעולות חכמות בענן לפי קרדיטים.
+SPP2 Cloud — גיבוי וסנכרון פרויקטים בתשלום חודשי.</pre>
+
+      <h3>מקורות/הערות על מחירי ענן</h3>
+      <p class="small">המסמך משתמש באומדן מחירים ציבורי נכון לזמן הכנת המסמך: Cloudflare R2 storage סביב $0.015/GB-month עם 10GB חינמיים ועלויות פעולות; Supabase Storage סביב $0.0213/GB-month; AWS S3 pricing משתנה לפי מסלול/אזור/תעבורה, ובדוגמאות ציבוריות מופיע גם $0.0265/GB בחלק ממסלולי Standard/Table. יש לבדוק שוב לפני התחייבות מסחרית.</p>
+      <p class="print-note">מסמך זה נועד כתוכנית עבודה פנימית ואינו ייעוץ משפטי/חשבונאי/מסחרי.</p>
+    </section>
+  </main>
+</body>
+</html>

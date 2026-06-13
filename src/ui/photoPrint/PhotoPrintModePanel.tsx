@@ -63,7 +63,19 @@ export function PhotoPrintModePanel({ rule, document, smartCropProgress = null, 
 
 function SizeTab({ rule, onPatch }: { rule: PhotoPrintRule; dpi: number; onPatch: (p: Partial<PhotoPrintRule>) => void }): ReactElement {
   const photoPresets = PRINT_SIZE_PRESETS.filter((p) => p.category !== "custom");
-  const selectedPreset = photoPresets.find((p) => p.widthMm === rule.printWidthMm && p.heightMm === rule.printHeightMm);
+  const orient = (widthMm: number, heightMm: number, policy = rule.orientationPolicy): { widthMm: number; heightMm: number } => {
+    if (policy === "auto") return { widthMm, heightMm };
+    const min = Math.min(widthMm, heightMm);
+    const max = Math.max(widthMm, heightMm);
+    return policy === "portrait"
+      ? { widthMm: min, heightMm: max }
+      : { widthMm: max, heightMm: min };
+  };
+  const matchesRuleSize = (widthMm: number, heightMm: number): boolean => {
+    const dims = orient(widthMm, heightMm);
+    return dims.widthMm === rule.printWidthMm && dims.heightMm === rule.printHeightMm;
+  };
+  const selectedPreset = photoPresets.find((p) => matchesRuleSize(p.widthMm, p.heightMm));
 
   return (
     <div className="pp-panel-section">
@@ -76,9 +88,9 @@ function SizeTab({ rule, onPatch }: { rule: PhotoPrintRule; dpi: number; onPatch
         {PRINT_SIZE_PRESETS.filter((p) => p.category === "photo").map((p) => (
           <button
             key={p.id}
-            className={`pp-preset-sm${rule.printWidthMm === p.widthMm && rule.printHeightMm === p.heightMm ? " active" : ""}`}
+            className={`pp-preset-sm${matchesRuleSize(p.widthMm, p.heightMm) ? " active" : ""}`}
             type="button"
-            onClick={() => onPatch({ printWidthMm: p.widthMm, printHeightMm: p.heightMm, targetsPerPage: 0, passportPresetId: undefined, passportRequirementId: undefined, passportSizeMm: undefined, showPassportGuidelines: undefined, metadata: { ...rule.metadata, printPresetId: p.id } })}
+            onClick={() => onPatch({ ...orient(p.widthMm, p.heightMm), targetsPerPage: 0, passportPresetId: undefined, passportRequirementId: undefined, passportSizeMm: undefined, showPassportGuidelines: undefined, metadata: { ...rule.metadata, printPresetId: p.id } })}
           >
             {p.name}
           </button>
@@ -112,7 +124,7 @@ function SizeTab({ rule, onPatch }: { rule: PhotoPrintRule; dpi: number; onPatch
       <div className="pp-panel-divider" />
       <div className="pp-panel-label">פיצול חכם (כמה בדף)</div>
       <div className="pp-split-row">
-        {[0, 1, 2, 4, 6, 8, 9].map((count) => (
+        {[0, 1, 2, 4, 6, 8, 9, 12, 15, 18, 20, 24, 30, 35, 40, 45, 50, 60].map((count) => (
           <button
             key={count}
             className={`pp-split-count-btn${rule.targetsPerPage === count ? " active" : ""}`}
@@ -132,7 +144,7 @@ function SizeTab({ rule, onPatch }: { rule: PhotoPrintRule; dpi: number; onPatch
             key={policy}
             className={`pp-toggle-btn${rule.orientationPolicy === policy ? " active" : ""}`}
             type="button"
-            onClick={() => onPatch({ orientationPolicy: policy })}
+            onClick={() => onPatch({ ...orient(rule.printWidthMm, rule.printHeightMm, policy), orientationPolicy: policy })}
           >
             {policy === "auto" ? "אוטו" : policy === "portrait" ? "לגובה" : "לרוחב"}
           </button>

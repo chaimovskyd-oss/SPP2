@@ -51,6 +51,13 @@ export interface CollageEdgeConfig {
   outlineWidth?: number;
 }
 
+export interface CellFeatherSettings {
+  enabled: boolean;
+  amountMm: number;
+  /** 0..1, higher values make the alpha transition more gradual. */
+  softness: number;
+}
+
 // ─── Slot type ────────────────────────────────────────────────────────────────
 
 export type CollageSlotType = "image" | "empty";
@@ -115,6 +122,12 @@ export type CollageLayoutFamily =
   | "radialHero"
   | "freeformClusters"
   | "softVoronoi"
+  // ─── Geometric Engines V1 (premium, additive) ───
+  | "hexFlow"        // honeycomb of regular hexagons
+  | "diamondGrid"    // grid with diamond (rotated-square) masks
+  | "interlocking"   // squares split into interlocking triangles
+  | "ribbonFlow"     // snaking parallelogram ribbon rows
+  | "organicPolygon" // Voronoi + Lloyd relaxation mosaic
   | "customMaskShape"
   | "custom";        // template-applied
 
@@ -202,6 +215,7 @@ export interface CollageImageAssignment extends VersionedEntity {
   imageEditParams?: Record<string, number | boolean | string>;
   visualEffects?: VisualEffectStack;
   edgeConfig?: CollageEdgeConfig;
+  cellFeather?: CellFeatherSettings;
   hasManualCrop?: boolean;
   hasManualTransform?: boolean;
   metadata: Metadata;
@@ -225,6 +239,7 @@ export interface CollageCanvasSettings extends VersionedEntity {
   globalShadowBlur: number;
   globalShadowOpacity: number;
   globalEdgeConfig: CollageEdgeConfig;
+  globalCellFeather?: CellFeatherSettings;
   bleedMM: number;
   safeAreaMM: number;
 }
@@ -345,6 +360,7 @@ export interface CollageFrameMetadata {
   pathData?: string;
   puzzleTabs?: PuzzleTabs;
   edgeConfig?: CollageEdgeConfig;
+  cellFeather?: CellFeatherSettings;
   rotationDeg?: number;
   zIndex?: number;
 }

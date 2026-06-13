@@ -1,0 +1,41 @@
+- main [ref=e247]:
+  - generic [ref=e248]:
+    - generic [ref=e249]:
+      - generic [ref=e250]:
+        - text: מצב גריד
+        - heading "הגדרת הגריד" [level=1] [ref=e307]
+      - button "חזרה" [ref=e252] [cursor=pointer]
+    - generic "שלבי הגדרה" [ref=e253]:
+      - generic [ref=e254]: 1. דף
+      - generic [ref=e255]: 2. גריד
+    - generic [ref=e308]:
+      - generic [ref=e309]: הגדרת גריד
+      - generic [ref=e310]:
+        - generic [ref=e311]:
+          - generic [ref=e312]: שורות
+          - spinbutton "שורות" [ref=e313]: "2"
+        - generic [ref=e314]:
+          - generic [ref=e315]: עמודות
+          - spinbutton "עמודות" [ref=e316]: "3"
+        - generic [ref=e317]:
+          - generic [ref=e318]: ריווח (mm)
+          - spinbutton "ריווח (mm)" [ref=e319]: "8"
+        - generic [ref=e320]:
+          - generic [ref=e321]: כיוון מילוי
+          - generic [ref=e322]:
+            - button "מימין לשמאל" [ref=e323] [cursor=pointer]
+            - button "משמאל לימין" [ref=e324] [cursor=pointer]
+      - generic [ref=e325]:
+        - generic [ref=e326]: "1"
+        - generic [ref=e327]: "2"
+        - generic [ref=e328]: "3"
+        - generic [ref=e329]: "4"
+        - generic [ref=e330]: "5"
+        - generic [ref=e331]: "6"
+    - generic [ref=e301]:
+      - generic [ref=e302]: 2480 x 3508 px
+      - generic [ref=e303]: 300 DPI
+      - generic [ref=e304]: press
+    - generic [ref=e305]:
+      - button "חזרה להגדרת דף" [ref=e332] [cursor=pointer]
+      - button "צור מסמך" [active] [ref=e333] [cursor=pointer]

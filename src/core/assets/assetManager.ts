@@ -2,6 +2,7 @@ import { createAppError } from "@/core/errors/errors";
 import { analyzeScreenshotCrop } from "@/core/image/screenshotCropDetector";
 import { writeLog } from "@/core/logging/logger";
 import type { Asset } from "@/types/document";
+import type { ProjectEnvelope } from "@/types/project";
 import type { JsonValue } from "@/types/primitives";
 
 export interface AssetImportOptions {
@@ -109,6 +110,15 @@ export async function importImageAsset(file: File, existingAssets: Asset[] = [],
         ...(duplicate === undefined ? {} : { duplicateOf: duplicate.id })
       }
     };
+    // Persist the original to an on-disk cache (Electron only) so autosave —
+    // which strips inline data URLs to stay under the localStorage quota — can
+    // recover the full image later from a stable path. See
+    // rehydrateAssetsFromDiskCache + App.restoreRecovery.
+    const diskCachePath = await cacheOriginalToDisk(bytes, hash, file);
+    if (diskCachePath !== undefined) {
+      asset.metadata.diskCachePath = diskCachePath;
+    }
+
     writeLog("import", "info", "נכס תמונה יובא", { assetId: asset.id, name: asset.name, duplicateOf: duplicate?.id });
     return { asset, duplicateOf: duplicate?.id };
   } catch (error) {
@@ -168,6 +178,160 @@ export async function createAssetPreviews(source: string, previewMaxSize = 1600,
   return { previewPath, thumbnailPath };
 }
 
+// ─── On-disk asset cache (autosave recovery) ──────────────────────────────────
+
+function isDataUrl(value: string | undefined): value is string {
+  return typeof value === "string" && value.startsWith("data:");
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+function extensionForAsset(file: File): string {
+  const fromName = file.name.includes(".") ? file.name.split(".").pop() : undefined;
+  if (fromName !== undefined && fromName.length > 0 && fromName.length <= 5) {
+    return fromName.toLowerCase();
+  }
+  const sub = (file.type || "").split("/")[1];
+  return sub !== undefined && sub.length > 0 ? sub.toLowerCase() : "bin";
+}
+
+async function cacheOriginalToDisk(bytes: Uint8Array, hash: string, file: File): Promise<string | undefined> {
+  const api = typeof window !== "undefined" ? window.spp : undefined;
+  if (api?.cacheAssetFile === undefined) return undefined;
+  try {
+    const res = await api.cacheAssetFile(bytesToBase64(bytes), `${hash}.${extensionForAsset(file)}`);
+    return res.success ? res.filePath : undefined;
+  } catch (error) {
+    writeLog("import", "debug", "Asset disk-cache write skipped", {
+      message: error instanceof Error ? error.message : String(error)
+    });
+    return undefined;
+  }
+}
+
+function dataUrlParts(dataUrl: string): { mime: string; bytes: Uint8Array } | null {
+  const match = dataUrl.match(/^data:([^;,]+)(;base64)?,(.*)$/s);
+  if (match === null) return null;
+  const [, mime, b64Flag, body] = match;
+  if (b64Flag !== undefined) {
+    const binary = atob(body);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return { mime, bytes };
+  }
+  return { mime, bytes: new TextEncoder().encode(decodeURIComponent(body)) };
+}
+
+function extFromMime(mime: string): string {
+  const sub = mime.split("/")[1];
+  if (sub === undefined || sub.length === 0) return "bin";
+  if (sub === "jpeg") return "jpg";
+  return sub.replace(/\+.*$/, "").toLowerCase();
+}
+
+// Assets already written to the disk cache this session — avoids re-hashing and
+// re-encoding the same image on every autosave flush.
+const diskCachedAssetIds = new Set<string>();
+
+/**
+ * Ensure every inline (data-URL) image asset is mirrored to the on-disk cache so
+ * autosave can recover it. Unlike importImageAsset (which caches File-based
+ * imports eagerly), this is the safety net that also covers *derived* assets with
+ * no source file — masks, flattened/merged layers, rasterized output, AI results.
+ *
+ * Returns a copy with `metadata.diskCachePath` filled in for newly-cached assets,
+ * or the original envelope when nothing changed / not running in Electron. Does
+ * not mutate the live document; the path lands in the autosave skeleton only.
+ */
+export async function ensureAssetsCachedToDisk(envelope: ProjectEnvelope): Promise<ProjectEnvelope> {
+  const api = typeof window !== "undefined" ? window.spp : undefined;
+  const cacheAssetFile = api?.cacheAssetFile;
+  if (cacheAssetFile === undefined) return envelope;
+
+  let mutated = false;
+  const assets = await Promise.all(
+    envelope.document.assets.map(async (asset): Promise<Asset> => {
+      if (asset.kind !== "image") return asset;
+      if (typeof asset.metadata?.diskCachePath === "string") return asset;
+      if (diskCachedAssetIds.has(asset.id)) return asset;
+      const src = [asset.originalPath, asset.previewPath, asset.thumbnailPath].find((p): p is string => isDataUrl(p));
+      if (src === undefined) return asset;
+      try {
+        const parts = dataUrlParts(src);
+        if (parts === null) return asset;
+        const hash = asset.hash ?? asset.checksum ?? (await hashBytes(parts.bytes));
+        const res = await cacheAssetFile(bytesToBase64(parts.bytes), `${hash}.${extFromMime(parts.mime)}`);
+        if (res.success && res.filePath !== undefined) {
+          diskCachedAssetIds.add(asset.id);
+          mutated = true;
+          return { ...asset, metadata: { ...asset.metadata, diskCachePath: res.filePath } };
+        }
+        return asset;
+      } catch (error) {
+        writeLog("recovery", "debug", "Asset disk-cache sweep skipped", {
+          assetId: asset.id,
+          message: error instanceof Error ? error.message : String(error)
+        });
+        return asset;
+      }
+    })
+  );
+
+  return mutated ? { ...envelope, document: { ...envelope.document, assets } } : envelope;
+}
+
+/**
+ * Re-load images that autosave stripped, using the on-disk asset cache.
+ *
+ * Autosave removes inline data URLs (original/preview/thumbnail) but preserves
+ * `metadata.diskCachePath`. On recovery this reads each cached original back,
+ * regenerates the preview/thumbnail, and marks the asset ready. Assets without a
+ * cache path (or whose cache file is gone) are returned untouched and remain
+ * flagged for manual re-linking.
+ */
+export async function rehydrateAssetsFromDiskCache(envelope: ProjectEnvelope): Promise<ProjectEnvelope> {
+  const api = typeof window !== "undefined" ? window.spp : undefined;
+  if (api?.readFileBase64 === undefined) return envelope;
+
+  const assets = await Promise.all(
+    envelope.document.assets.map(async (asset): Promise<Asset> => {
+      const diskPath = asset.metadata?.diskCachePath;
+      const needsRehydrate =
+        asset.originalPath === undefined &&
+        asset.previewPath === undefined &&
+        asset.thumbnailPath === undefined;
+      if (typeof diskPath !== "string" || !needsRehydrate) return asset;
+      try {
+        const base64 = await api.readFileBase64(diskPath);
+        const dataUrl = `data:${asset.mimeType || "image/jpeg"};base64,${base64}`;
+        const previews = await createAssetPreviews(dataUrl);
+        return {
+          ...asset,
+          status: "ready",
+          originalPath: dataUrl,
+          previewPath: previews.previewPath,
+          thumbnailPath: previews.thumbnailPath
+        };
+      } catch (error) {
+        writeLog("recovery", "warn", "Asset disk-cache rehydrate failed", {
+          assetId: asset.id,
+          message: error instanceof Error ? error.message : String(error)
+        });
+        return asset;
+      }
+    })
+  );
+
+  return { ...envelope, document: { ...envelope.document, assets } };
+}
+
 export function markMissingAsset(asset: Asset): Asset {
   return {
     ...asset,
@@ -196,6 +360,28 @@ export function createMaskAsset(dataUrl: string, width: number, height: number, 
     height,
     fileSize: Math.round(dataUrl.length * 0.75),
     metadata: { isMask: true, layerId }
+  };
+}
+
+/**
+ * Builds an image Asset from a rasterized data URL (e.g. the output of
+ * Merge Layers / Flatten). Mirrors createMaskAsset but without the mask flag.
+ */
+export function createImageAssetFromDataUrl(dataUrl: string, width: number, height: number, name: string): Asset {
+  return {
+    version: 1,
+    id: crypto.randomUUID(),
+    name,
+    kind: "image",
+    status: "ready",
+    originalPath: dataUrl,
+    previewPath: dataUrl,
+    thumbnailPath: dataUrl,
+    mimeType: "image/png",
+    width,
+    height,
+    fileSize: Math.round(dataUrl.length * 0.75),
+    metadata: { source: "rasterized" }
   };
 }
 

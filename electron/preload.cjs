@@ -27,6 +27,18 @@ contextBridge.exposeInMainWorld("spp", {
   savePdfDialog: (pdfBase64, suggestedName) =>
     ipcRenderer.invoke("spp:save-pdf-dialog", pdfBase64, suggestedName),
 
+  exportPagesToFolder: (payload) =>
+    ipcRenderer.invoke("spp:export-pages-to-folder", payload),
+
+  saveProjectDialog: (suggestedName) =>
+    ipcRenderer.invoke("spp:save-project-dialog", suggestedName),
+
+  writeProjectFile: (filePath, content) =>
+    ipcRenderer.invoke("spp:write-project-file", filePath, content),
+
+  cacheAssetFile: (base64, fileName) =>
+    ipcRenderer.invoke("spp:cache-asset-file", base64, fileName),
+
   convertOfficeToPdf: (inputPath) =>
     ipcRenderer.invoke("spp:convert-office-to-pdf", inputPath),
 
@@ -59,6 +71,9 @@ contextBridge.exposeInMainWorld("spp", {
 
   smartSelection: {
     health: () => ipcRenderer.invoke("spp:smart-selection:health"),
+    accelerationStatus: (providers) => ipcRenderer.invoke("spp:smart-selection:acceleration-status", providers),
+    sdAccelerationStatus: () => ipcRenderer.invoke("spp:smart-selection:sd-acceleration-status"),
+    benchmark: (options) => ipcRenderer.invoke("spp:smart-selection:benchmark", options),
     setPerformanceProfile: (profile) => ipcRenderer.invoke("spp:smart-selection:set-performance-profile", profile),
     ensureModel: (modelId) => ipcRenderer.invoke("spp:smart-selection:ensure-model", modelId),
     listModels: () => ipcRenderer.invoke("spp:smart-selection:list-models"),
@@ -68,6 +83,11 @@ contextBridge.exposeInMainWorld("spp", {
     predictMask: (imageId, options) => ipcRenderer.invoke("spp:smart-selection:predict-mask", imageId, options),
     refineMask: (imageId, options) => ipcRenderer.invoke("spp:smart-selection:refine-mask", imageId, options),
     inpaintRemove: (imageId, options) => ipcRenderer.invoke("spp:smart-selection:inpaint-remove", imageId, options),
+    warmInpaint: () => ipcRenderer.invoke("spp:smart-selection:warm-inpaint"),
+    warmSdInpaint: () => ipcRenderer.invoke("spp:smart-selection:warm-sd-inpaint"),
+    preloadModels: (level) => ipcRenderer.invoke("spp:smart-selection:preload-models", level),
+    modelsStatus: () => ipcRenderer.invoke("spp:smart-selection:models-status"),
+    reloadModels: (level) => ipcRenderer.invoke("spp:smart-selection:reload-models", level),
     unloadImage: (imageId) => ipcRenderer.invoke("spp:smart-selection:unload-image", imageId),
     detectFaces: (imageId) => ipcRenderer.invoke("spp:smart-selection:detect-faces", imageId),
     cancel: (requestId) => ipcRenderer.invoke("spp:smart-selection:cancel", requestId),
@@ -76,6 +96,85 @@ contextBridge.exposeInMainWorld("spp", {
       ipcRenderer.on("spp:smart-selection:progress", handler);
       return () => ipcRenderer.removeListener("spp:smart-selection:progress", handler);
     },
+  },
+
+  raw: {
+    decode: (bytes, fileName) => ipcRenderer.invoke("spp:raw:decode", bytes, fileName),
+  },
+
+  components: {
+    list: () => ipcRenderer.invoke("spp:component:list"),
+    health: (id) => ipcRenderer.invoke("spp:component:health", id),
+    install: (id) => ipcRenderer.invoke("spp:component:install", id),
+    repair: (id) => ipcRenderer.invoke("spp:component:repair", id),
+    remove: (id) => ipcRenderer.invoke("spp:component:remove", id),
+    openLogs: () => ipcRenderer.invoke("spp:component:open-logs"),
+    openModels: () => ipcRenderer.invoke("spp:component:open-models"),
+    gpuInfo: () => ipcRenderer.invoke("spp:system:gpu-info"),
+  },
+
+  batchBackgroundRemove: {
+    chooseImages: () => ipcRenderer.invoke("spp:batch-background-remove:choose-images"),
+    chooseOutputDir: (defaultPath) => ipcRenderer.invoke("spp:batch-background-remove:choose-output-dir", defaultPath),
+    run: (payload) => ipcRenderer.invoke("spp:batch-background-remove:run", payload),
+    onProgress: (callback) => {
+      const handler = (_event, payload) => callback(payload);
+      ipcRenderer.on("spp:batch-background-remove:progress", handler);
+      return () => ipcRenderer.removeListener("spp:batch-background-remove:progress", handler);
+    },
+  },
+
+  smartPrintPrepare: {
+    chooseOutputDir: (defaultPath) => ipcRenderer.invoke("spp:smart-print-prepare:choose-output-dir", defaultPath),
+    saveBatch: (payload) => ipcRenderer.invoke("spp:smart-print-prepare:save-batch", payload),
+  },
+
+  printHub: {
+    submitJob: (payload) => ipcRenderer.invoke("spp:printHub:submit-job", payload),
+    flushOutbox: () => ipcRenderer.invoke("spp:printHub:flush-outbox"),
+    outboxCount: () => ipcRenderer.invoke("spp:printHub:outbox-count"),
+    stationInfo: () => ipcRenderer.invoke("spp:printHub:station-info"),
+    getServerHub: () => ipcRenderer.invoke("spp:printHub:get-server-hub"),
+    setServerHub: (hubRoot) => ipcRenderer.invoke("spp:printHub:set-server-hub", hubRoot),
+    lanInfo: () => ipcRenderer.invoke("spp:printHub:lan-info"),
+    setCloudSession: (payload) => ipcRenderer.invoke("spp:printHub:set-cloud-session", payload),
+    readServerLog: (hubRoot) => ipcRenderer.invoke("spp:printHub:read-server-log", hubRoot),
+    listQueue: (hubRoot) => ipcRenderer.invoke("spp:printHub:list-queue", hubRoot),
+    jobAction: (payload) => ipcRenderer.invoke("spp:printHub:job-action", payload),
+    openJobFolder: (payload) => ipcRenderer.invoke("spp:printHub:open-job-folder", payload),
+    installContextMenu: () => ipcRenderer.invoke("spp:printHub:install-context-menu"),
+    uninstallContextMenu: () => ipcRenderer.invoke("spp:printHub:uninstall-context-menu"),
+    getPrinters: () => ipcRenderer.invoke("spp:printHub:get-printers"),
+    getPrinterPapers: (printerName) => ipcRenderer.invoke("spp:printHub:get-printer-papers", printerName),
+    loadProfiles: (hubRoot) => ipcRenderer.invoke("spp:printHub:load-profiles", hubRoot),
+    saveProfiles: (payload) => ipcRenderer.invoke("spp:printHub:save-profiles", payload),
+    loadStations: (hubRoot) => ipcRenderer.invoke("spp:printHub:load-stations", hubRoot),
+    saveStations: (payload) => ipcRenderer.invoke("spp:printHub:save-stations", payload),
+    loadMedia: (hubRoot) => ipcRenderer.invoke("spp:printHub:load-media", hubRoot),
+    saveMedia: (payload) => ipcRenderer.invoke("spp:printHub:save-media", payload),
+    readProductionLog: (payload) => ipcRenderer.invoke("spp:printHub:read-production-log", payload),
+    onQuickPrintFiles: (callback) => {
+      const handler = (_event, files) => callback(files);
+      ipcRenderer.on("spp:printHub:quick-print-files", handler);
+      return () => ipcRenderer.removeListener("spp:printHub:quick-print-files", handler);
+    },
+  },
+
+  advancedPrint: {
+    health: () => ipcRenderer.invoke("spp:advancedPrint:health"),
+    listPrinters: () => ipcRenderer.invoke("spp:advancedPrint:list-printers"),
+    getCapabilities: (printerName) => ipcRenderer.invoke("spp:advancedPrint:get-capabilities", printerName),
+    listIccProfiles: () => ipcRenderer.invoke("spp:advancedPrint:list-icc-profiles"),
+    getPrintableArea: (printerName, devmodeBase64) => ipcRenderer.invoke("spp:advancedPrint:get-printable-area", printerName, devmodeBase64),
+    openDriverDialog: (printerName, devmodeBase64) => ipcRenderer.invoke("spp:advancedPrint:open-driver-dialog", printerName, devmodeBase64),
+    getDefaultDevmode: (printerName) => ipcRenderer.invoke("spp:advancedPrint:get-default-devmode", printerName),
+    print: (job) => ipcRenderer.invoke("spp:advancedPrint:print", job),
+    testPage: (job) => ipcRenderer.invoke("spp:advancedPrint:test-page", job),
+    applyColor: (payload) => ipcRenderer.invoke("spp:advancedPrint:apply-color", payload),
+    colorPreview: (payload) => ipcRenderer.invoke("spp:advancedPrint:color-preview", payload),
+    writeTempImage: (dataUrl, ext) => ipcRenderer.invoke("spp:advancedPrint:write-temp-image", dataUrl, ext),
+    writeLog: (entry) => ipcRenderer.invoke("spp:advancedPrint:write-log", entry),
+    readLog: (day) => ipcRenderer.invoke("spp:advancedPrint:read-log", day),
   },
 
   pixabaySaveAsset: (args) =>
@@ -107,6 +206,9 @@ contextBridge.exposeInMainWorld("spp", {
   openPath: (filePath) =>
     ipcRenderer.invoke("spp:open-path", filePath),
 
+  openUserGuide: () =>
+    ipcRenderer.invoke("spp:open-user-guide"),
+
   openExternalApp: (execPath, fileArg) =>
     ipcRenderer.invoke("spp:open-external-app", execPath, fileArg),
 
@@ -130,6 +232,20 @@ contextBridge.exposeInMainWorld("spp", {
     ipcRenderer.on("spp:open-file-path", handler);
     return () => ipcRenderer.removeListener("spp:open-file-path", handler);
   },
+
+  /**
+   * Subscribe to the main process asking the window to close (the X button).
+   * The renderer must decide whether to prompt about unsaved work, then call
+   * confirmClose() to actually close. Returns an unsubscribe function.
+   */
+  onCloseRequested: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("spp:close-requested", handler);
+    return () => ipcRenderer.removeListener("spp:close-requested", handler);
+  },
+
+  /** Tell the main process it is now safe to close this window. */
+  confirmClose: () => ipcRenderer.send("spp:confirm-close"),
 
   /** Batch Production Templates — stored as full SPP packages in userData. */
   batchTemplates: {

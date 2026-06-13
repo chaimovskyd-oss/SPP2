@@ -13,11 +13,14 @@ export interface SliderConfig {
   min: number;
   max: number;
   step?: number;
+  /** Render under a collapsible "מתקדם" section instead of the main list. */
+  advanced?: boolean;
 }
 
 export const ADJUSTMENT_LABELS: Record<ImageAdjustmentType, string> = {
   basicTone: "טון בסיסי",
   highlightsShadows: "אורות וצללים",
+  shadowHighlights: "צללים / אורות (מקומי)",
   color: "צבע",
   detail: "פרטים וחדות",
   blackWhite: "שחור־לבן",
@@ -41,6 +44,14 @@ export const PARAM_CONFIG: Record<ImageAdjustmentType, SliderConfig[]> = {
     { key: "shadows", label: "צללים", min: -100, max: 100 },
     { key: "whites", label: "לבנים", min: -100, max: 100 },
     { key: "blacks", label: "שחורים", min: -100, max: 100 }
+  ],
+  shadowHighlights: [
+    { key: "shadows", label: "צללים", min: 0, max: 100 },
+    { key: "highlights", label: "אורות", min: 0, max: 100 },
+    { key: "radius", label: "רדיוס", min: 0, max: 200, advanced: true },
+    { key: "localContrast", label: "קונטרסט מקומי", min: 0, max: 100, advanced: true },
+    { key: "colorCorrection", label: "תיקון צבע", min: -50, max: 50, advanced: true },
+    { key: "midtoneContrast", label: "קונטרסט גוונים", min: -50, max: 50, advanced: true }
   ],
   color: [
     { key: "saturation", label: "רוויה", min: -100, max: 100 },

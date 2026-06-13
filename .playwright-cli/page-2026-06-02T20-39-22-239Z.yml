@@ -1,0 +1,79 @@
+- main [ref=e270]:
+  - generic [ref=e271]:
+    - generic [ref=e272]:
+      - generic [ref=e273]:
+        - text: עיצוב חופשי
+        - heading "הגדרת דף" [level=1] [ref=e274]
+      - button "חזרה" [ref=e275] [cursor=pointer]
+    - region "Customer / Project Info" [ref=e276]:
+      - generic [ref=e277]: Customer / Project Info
+      - generic [ref=e278]:
+        - generic [ref=e279]:
+          - generic [ref=e280]: Customer Name
+          - textbox "Customer Name" [ref=e281]
+        - generic [ref=e282]:
+          - generic [ref=e283]: Phone Number
+          - textbox "Phone Number" [ref=e284]
+        - generic [ref=e285]:
+          - generic [ref=e286]: Email
+          - textbox "Email" [ref=e287]
+    - generic [ref=e288]:
+      - generic [ref=e289]:
+        - generic [ref=e290]: מידת דף
+        - combobox "מידת דף" [ref=e291]:
+          - option "A5"
+          - option "A4" [selected]
+          - option "A3"
+          - option "Letter"
+          - option "Legal"
+          - option "10x15"
+          - option "13x18"
+          - option "15x20"
+          - option "20×20"
+          - option "20x30"
+          - option "Instagram"
+          - option "סטורי"
+          - option "ריבוע"
+          - option "ספל סובלימציה 11oz"
+          - option "חולצת סובלימציה A3"
+          - option "Mitsubishi 10x15"
+          - option "מותאם אישית"
+      - generic [ref=e292]:
+        - generic [ref=e293]: יחידות
+        - combobox "יחידות" [ref=e294]:
+          - option "מ\"מ" [selected]
+          - option "ס\"מ"
+          - option "אינץ'"
+          - option "פיקסלים"
+      - generic [ref=e295]:
+        - generic [ref=e296]: DPI
+        - spinbutton "DPI" [ref=e297]: "300"
+      - generic [ref=e298]:
+        - generic [ref=e299]: כיוון
+        - generic [ref=e300]:
+          - button "לאורך" [ref=e301] [cursor=pointer]
+          - button "לרוחב" [ref=e302] [cursor=pointer]
+          - button "כפולה" [disabled] [ref=e303] [cursor=pointer]
+      - generic [ref=e304]:
+        - checkbox "מידה מותאמת אישית" [ref=e305]
+        - text: מידה מותאמת אישית
+      - generic [ref=e306]:
+        - generic [ref=e307]: רוחב (mm)
+        - spinbutton "רוחב (mm)" [disabled] [ref=e308]: "210"
+      - generic [ref=e309]:
+        - generic [ref=e310]: גובה (mm)
+        - spinbutton "גובה (mm)" [disabled] [ref=e311]: "297"
+      - generic [ref=e312]:
+        - generic [ref=e313]: בליד (mm)
+        - spinbutton "בליד (mm)" [ref=e314]: "0"
+      - generic [ref=e315]:
+        - generic [ref=e316]: שוליים (mm)
+        - spinbutton "שוליים (mm)" [ref=e317]: "0"
+      - generic [ref=e318]:
+        - generic [ref=e319]: אזור בטוח (mm)
+        - spinbutton "אזור בטוח (mm)" [ref=e320]: "0"
+    - generic [ref=e321]:
+      - generic [ref=e322]: 2480 x 3508 px
+      - generic [ref=e323]: 300 DPI
+      - generic [ref=e324]: press
+    - button "צור מסמך" [ref=e326] [cursor=pointer]

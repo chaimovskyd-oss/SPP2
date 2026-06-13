@@ -14,6 +14,7 @@ import type {
   AnchorPoint,
   AutoContrastConfig,
   OverflowPolicy,
+  RichTextSettings,
   TextAlignment,
   TextDirection,
   TextEffect,
@@ -62,6 +63,20 @@ export interface BaseLayer extends VersionedEntity {
   smartArrangeLocked?: boolean;
   /** Manually-pinned Smart Arrange role (Phase 3). Unset = inferred per run. */
   smartArrangeRole?: SmartArrangeRole;
+  /**
+   * Unified "Layer Edits" persisted state. Holds synthetic ids of edits that the
+   * user disabled from the Layer Edits panel for edit-sources that have no native
+   * `enabled` flag (legacy `effects`, text shadow/stroke/…). Modern stacks
+   * (imageAdjustments / visualEffects) carry their own per-entry `enabled` and are
+   * NOT listed here. Additive/optional — absent on old projects (load unchanged).
+   * See src/core/layerEdits/.
+   */
+  editState?: LayerEditState;
+}
+
+export interface LayerEditState {
+  /** Synthetic ids (see src/core/layerEdits) of legacy/native edits the user muted. */
+  disabled?: string[];
 }
 
 export type SmartArrangeRole =
@@ -197,6 +212,7 @@ export interface TextLayer extends BaseLayer {
   linkedSlotId?: ID;
   textFlow?: TextFlowSettings;
   pathText?: PathTextSettings;
+  richText?: RichTextSettings;
 }
 
 export interface Filter extends VersionedEntity {
@@ -231,6 +247,27 @@ export interface ImageLayerOutline {
   color: string;
   width: number;
 }
+
+export type EdgeFadeShape = "rect" | "roundedRect" | "ellipse";
+
+export interface EdgeFadeSettings {
+  enabled: boolean;
+  /** 0..1, relative to the shorter image side. */
+  depth: number;
+  /** 0..1, higher values make the alpha transition more gradual. */
+  softness: number;
+  /** 0..1, 1 means the outer edge becomes fully transparent. */
+  strength: number;
+  shape: EdgeFadeShape;
+}
+
+export const DEFAULT_EDGE_FADE_SETTINGS: EdgeFadeSettings = {
+  enabled: false,
+  depth: 0.12,
+  softness: 0.7,
+  strength: 1,
+  shape: "rect"
+};
 
 export interface ImageLayerEffects extends VersionedEntity {
   brightness: number;
@@ -304,6 +341,8 @@ export interface ImageLayer extends BaseLayer {
   imageScale?: number;
   /** Non-destructive Smart-Preset adjustment stack (Phase 2+). */
   imageAdjustments?: ImageAdjustmentStack;
+  /** Non-destructive alpha fade from the image edges inward. */
+  edgeFade?: EdgeFadeSettings;
 }
 
 export interface ShapeLayer extends BaseLayer {

@@ -92,6 +92,13 @@ export const homeModes: HomeMode[] = [
     description: "עיצוב כרטיסי ברכה עם 906 ברכות, רקעים ומסגרות.",
     icon: Heart,
     color: "#E06FA8"
+  },
+  {
+    id: "smart_photo_pack",
+    title: "סידור תמונות חכם",
+    description: "סידור תמונות בגדלים שונים בדף ללא חיתוך, עם ניצול שטח מיטבי.",
+    icon: Images,
+    color: "#4FB0C6"
   }
 ];
 

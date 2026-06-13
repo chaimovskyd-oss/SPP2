@@ -97,6 +97,7 @@ const AI_ORDER: AiToolVariant[] = ["autoEnhance", "faceBrighten", "autoColor"];
 const TOOL_META: Record<ImageAdjustmentType, { name: string; description: string; icon: string }> = {
   basicTone: { name: "טון בסיסי", description: "בהירות, קונטרסט, חשיפה, גמא והיסט.", icon: "◐" },
   highlightsShadows: { name: "אורות וצללים", description: "שליטה נפרדת באורות, צללים, לבנים ושחורים.", icon: "◑" },
+  shadowHighlights: { name: "צללים / אורות (מקומי)", description: "שחזור מקומי בסגנון Photoshop — מאיר פנים בצל ומציל פרטים באורות בלי הילות.", icon: "☀" },
   color: { name: "צבע", description: "רוויה, חיות, טמפרטורה, גוון וטינט.", icon: "🎨" },
   detail: { name: "פרטים וחדות", description: "חידוד, בהירות מקומית והפחתת רעש.", icon: "✦" },
   blackWhite: { name: "שחור־לבן", description: "המרה לגווני אפור עם מיקסר ערוצים.", icon: "◍" },
@@ -110,6 +111,10 @@ const TOOL_META: Record<ImageAdjustmentType, { name: string; description: string
 const TOOL_ORDER: ImageAdjustmentType[] = [
   "basicTone",
   "highlightsShadows",
+  // NOTE: "shadowHighlights" is intentionally NOT listed here — the local Shadow/
+  // Highlights tool (V1 + Smart V2) is opened from the inspector quick-controls and
+  // the canvas right-click menu via ShadowHighlightsModal, like the Curves editor,
+  // not from the preset library. TOOL_META still has its entry (Record exhaustiveness).
   "color",
   "detail",
   "curves",

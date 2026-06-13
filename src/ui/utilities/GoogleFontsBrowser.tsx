@@ -6,7 +6,10 @@ import {
   getFontFavoritesStorage,
   getFontList,
   getRecentFontsStorage,
+  getStoredGoogleFontsApiKey,
+  hasGoogleFontsApiKey,
   loadGoogleFont,
+  setGoogleFontsApiKey,
   toggleFontFavoriteStorage,
   type FontCategory,
   type FontSubset,
@@ -48,6 +51,8 @@ export function GoogleFontsBrowser({ previewText, onUseFont, onClose }: GoogleFo
   const [loadedFonts, setLoadedFonts] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [apiKeyInput, setApiKeyInput] = useState<string>(() => getStoredGoogleFontsApiKey());
+  const [keyConfigured, setKeyConfigured] = useState<boolean>(() => hasGoogleFontsApiKey());
 
   async function loadFonts(forceRefresh = false): Promise<void> {
     setIsLoading(true);
@@ -55,8 +60,8 @@ export function GoogleFontsBrowser({ previewText, onUseFont, onClose }: GoogleFo
     try {
       const fonts = await getFontList(forceRefresh);
       setAllFonts(fonts);
-      if (fonts.length <= 20 && !import.meta.env.VITE_GOOGLE_FONTS_API_KEY) {
-        setError("לא הוגדר VITE_GOOGLE_FONTS_API_KEY, לכן מוצגת רשימת fallback קצרה בלבד.");
+      if (fonts.length <= 20 && !hasGoogleFontsApiKey()) {
+        setError("לא הוגדר מפתח Google Fonts API, לכן מוצגת רשימה מקוצרת בלבד. הדביקו מפתח למטה כדי לטעון את כל הפונטים.");
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Google Fonts API unavailable";
@@ -65,6 +70,12 @@ export function GoogleFontsBrowser({ previewText, onUseFont, onClose }: GoogleFo
     } finally {
       setIsLoading(false);
     }
+  }
+
+  function handleSaveApiKey(): void {
+    setGoogleFontsApiKey(apiKeyInput);
+    setKeyConfigured(hasGoogleFontsApiKey());
+    void loadFonts(true);
   }
 
   useEffect(() => {
@@ -168,6 +179,31 @@ export function GoogleFontsBrowser({ previewText, onUseFont, onClose }: GoogleFo
       </div>
 
       {error && <p className="util-empty-note">{error}</p>}
+
+      {(!keyConfigured || error !== null) && (
+        <div className="fonts-apikey-row">
+          <input
+            className="fonts-search-input"
+            placeholder="הדבק כאן מפתח Google Fonts API…"
+            value={apiKeyInput}
+            onChange={(e) => setApiKeyInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleSaveApiKey(); }}
+            type="text"
+            dir="ltr"
+          />
+          <button className="btn btn-accent compact" onClick={handleSaveApiKey} type="button">
+            שמור
+          </button>
+          <a
+            className="fonts-apikey-help"
+            href="https://developers.google.com/fonts/docs/developer_api#APIKey"
+            target="_blank"
+            rel="noreferrer"
+          >
+            השג מפתח
+          </a>
+        </div>
+      )}
 
       <div className="fonts-list">
         {isLoading ? (

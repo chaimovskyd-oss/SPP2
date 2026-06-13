@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { useDocumentStore } from "@/state/documentStore";
-import { applyLayoutFamily, mergeLiveFrameEditsIntoCollageRule, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
+import { useSmartExpandStore } from "@/state/smartExpandStore";
+import { applyLayoutFamily, buildCollageImageInputs, mergeLiveFrameEditsIntoCollageRule, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
+import { DEFAULT_CELL_FEATHER, maxCellFeatherMm, normalizeCellFeather } from "@/core/rendering/cellFeather";
+import { pxToMm } from "@/core/units/conversion";
 import type {
   CollageEdgeStyle,
   CollageLayoutFamily,
@@ -73,6 +76,7 @@ export function CollageRightPanel({ rule, selectedSlotId, selectedLayer, onRepla
   const applyEdgeToAll = useDocumentStore((s) => s.applyCollageEdgeConfigToAll);
   const updateCanvasSettings = useDocumentStore((s) => s.updateCollageCanvasSettings);
   const updateCachedSlots = useDocumentStore((s) => s.updateCollageCachedSlots);
+  const updateImageTransform = useDocumentStore((s) => s.updateCollageImageTransform);
 
   const resolvedSlotId = selectedSlotId ?? selectedSlotFromLayer(selectedLayer);
   const selectedSlot = resolvedSlotId ? rule.cachedSlots.find((slot) => slot.id === resolvedSlotId) : undefined;
@@ -101,11 +105,7 @@ export function CollageRightPanel({ rule, selectedSlotId, selectedLayer, onRepla
     const dpi = currentPage.setup?.dpi ?? 300;
     const liveRule = mergeLiveFrameEditsIntoCollageRule(currentRule, currentPage);
     const patchedRule: CollageRule = { ...liveRule, ...patch };
-    const imageInputs = patchedRule.imagePool.flatMap((assetId) => {
-      const imageAsset = doc.assets.find((item) => item.id === assetId);
-      if (!imageAsset) return [];
-      return [{ assetId, width: imageAsset.width ?? 800, height: imageAsset.height ?? 600 }];
-    });
+    const imageInputs = buildCollageImageInputs(doc.assets, patchedRule.imagePool, patchedRule);
     const shouldPreserveManualLayout = patchedRule.layoutMode === "manual" || patchedRule.hasManualLayoutOverrides === true;
     const relaidRule = shouldPreserveManualLayout
       ? patchedRule
@@ -217,6 +217,32 @@ export function CollageRightPanel({ rule, selectedSlotId, selectedLayer, onRepla
     );
   }
 
+  function rotateImageBy(deltaDeg: number): void {
+    if (!resolvedSlotId || !assignment) return;
+    const t = assignment.contentTransform;
+    const rotation = (((t.rotation ?? 0) + deltaDeg) % 360 + 360) % 360;
+    updateImageTransform(rule.id, resolvedSlotId, { ...t, rotation });
+  }
+
+  function handleSmartFit(): void {
+    if (!resolvedSlotId || !assignment || !selectedSlot || !page) return;
+    const frameLayerId = page.layers.find((l) => {
+      if (l.type !== "frame") return false;
+      const meta = l.metadata["collageFrame"] as { collageRuleId?: ID; slotId?: ID } | undefined;
+      return meta?.collageRuleId === rule.id && meta.slotId === resolvedSlotId;
+    })?.id;
+    if (frameLayerId === undefined) return;
+    const cellAspect = (selectedSlot.w * page.width) / Math.max(1, selectedSlot.h * page.height);
+    useSmartExpandStore.getState().open({
+      kind: "cell",
+      layerId: frameLayerId,
+      ruleId: rule.id,
+      slotId: resolvedSlotId,
+      assetId: assignment.assetId,
+      cellAspect,
+    });
+  }
+
   const effectiveDpi = useMemo(() => {
     if (!page || !selectedSlot || !asset?.width || !asset?.height) return null;
     const slotW = Math.max(1, selectedSlot.w * page.width);
@@ -226,6 +252,19 @@ export function CollageRightPanel({ rule, selectedSlotId, selectedLayer, onRepla
   }, [page, selectedSlot, asset]);
   const spacingColor = rule.canvasSettings.spacingColor ?? rule.canvasSettings.backgroundColor ?? "#ffffff";
   const marginColor = rule.canvasSettings.marginColor ?? rule.canvasSettings.backgroundColor ?? "#ffffff";
+  const collageShortestSideMm = page
+    ? rule.cachedSlots.reduce((minMm, slot) => {
+        const sideMm = pxToMm(Math.max(1, Math.min(slot.w * page.width, slot.h * page.height)), page.setup?.dpi ?? 300);
+        return Math.min(minMm, sideMm);
+      }, Number.POSITIVE_INFINITY)
+    : 100;
+  const safeShortestSideMm = Number.isFinite(collageShortestSideMm) ? collageShortestSideMm : 100;
+  const maxFeatherMm = maxCellFeatherMm(safeShortestSideMm);
+  const cellFeather = normalizeCellFeather(rule.canvasSettings.globalCellFeather, safeShortestSideMm);
+
+  function commitCellFeather(patch: Partial<typeof cellFeather>): void {
+    updateCanvasSettings(rule.id, { globalCellFeather: normalizeCellFeather({ ...cellFeather, ...patch }, safeShortestSideMm) });
+  }
 
   if (isImageSelected && assignment && resolvedSlotId) {
     return (
@@ -253,7 +292,25 @@ export function CollageRightPanel({ rule, selectedSlotId, selectedLayer, onRepla
                 <option value="smartCrop">Smart Crop</option>
               </select>
             </div>
+            <div className="panel-field">
+              <label>סיבוב תמונה (התא נשאר במקומו)</label>
+              <div className="collage-rotate-row">
+                <button type="button" className="btn btn-ghost" onClick={() => rotateImageBy(-90)} title="סובב 90° שמאלה">
+                  ↺ 90°
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={() => rotateImageBy(90)} title="סובב 90° ימינה">
+                  ↻ 90°
+                </button>
+              </div>
+            </div>
             <button type="button" className="btn btn-ghost btn-full" onClick={resetImagePosition}>איפוס מיקום / זום</button>
+
+            <button type="button" className="btn btn-primary btn-full" onClick={handleSmartFit}>
+              ✨ התאמה חכמה (מילוי AI)
+            </button>
+            <p className="panel-hint">
+              התאמה חכמה מרחיבה את התמונה בעזרת AI כך שתתמלא בתא במלואה — בלי לחתוך ראשים בקצה.
+            </p>
 
             <p className="panel-hint">
               כוונוני תאורה/צבע, אפקטים מהירים ו-FX נמצאים בלשונית כוונון תמונה.
@@ -328,6 +385,33 @@ export function CollageRightPanel({ rule, selectedSlotId, selectedLayer, onRepla
           <div className="panel-field">
             <label>Margin color / ׳¦׳‘׳¢ ׳©׳•׳׳™׳™׳</label>
             <input type="color" value={marginColor} onChange={(e) => updateStructureColors({ marginColor: e.target.value })} />
+          </div>
+          <div className="panel-subsection">
+            <div className="panel-title">{"\u05e8\u05d9\u05db\u05d5\u05da \u05d7\u05d9\u05d1\u05d5\u05e8 \u05d1\u05d9\u05df \u05ea\u05d0\u05d9\u05dd"}</div>
+            <label className="panel-checkbox">
+              <input type="checkbox" checked={cellFeather.enabled} onChange={(e) => commitCellFeather({ enabled: e.target.checked })} />
+              {"\u05e4\u05e2\u05d9\u05dc"}
+            </label>
+            <Slider
+              label={"\u05e2\u05d5\u05de\u05e7 \u05e8\u05d9\u05db\u05d5\u05da"}
+              value={cellFeather.amountMm}
+              min={0}
+              max={maxFeatherMm}
+              step={0.1}
+              suffix={"\u0020\u05de\u05f4\u05de"}
+              format={(v) => v.toFixed(1)}
+              onChange={(v) => commitCellFeather({ amountMm: v })}
+            />
+            <Slider
+              label={"\u05e8\u05db\u05d5\u05ea \u05de\u05e2\u05d1\u05e8"}
+              value={Math.round(cellFeather.softness * 100)}
+              min={0}
+              max={100}
+              step={1}
+              suffix="%"
+              onChange={(v) => commitCellFeather({ softness: v / 100 })}
+            />
+            <button type="button" className="btn btn-ghost btn-full" onClick={() => commitCellFeather({ ...DEFAULT_CELL_FEATHER })}>{"\u05d0\u05d9\u05e4\u05d5\u05e1"}</button>
           </div>
           <button type="button" className="btn btn-ghost btn-full" onClick={() => reflowWithPatch({})}>רענן מבנה לפי ההגדרות</button>
           <p className="panel-hint">פריסות עצמן נמצאות בצד שמאל בלשונית פריסות/שכבות. כאן משנים את מאפייני הקולאז׳.</p>

@@ -1,4 +1,5 @@
 import { createId } from "@/core/ids";
+import { DEFAULT_CELL_FEATHER } from "@/core/rendering/cellFeather";
 import type {
   CollageCanvasSettings,
   CollageEdgeConfig,
@@ -51,6 +52,7 @@ export function defaultCanvasSettings(): CollageCanvasSettings {
     globalShadowBlur: 8,
     globalShadowOpacity: 0.3,
     globalEdgeConfig: defaultEdgeConfig(),
+    globalCellFeather: { ...DEFAULT_CELL_FEATHER },
     bleedMM: 0,
     safeAreaMM: 0
   };

@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "language": "he",
+  "direction": "rtl",
+  "updatedAt": "2026-06-06",
+  "notes": [
+    "x/y are percentages on the displayed screenshot.",
+    "x is measured from the right side because the guide is RTL and CSS uses inset-inline-start."
+  ],
+  "screenshots": [
+    {
+      "id": "home-overview",
+      "title": "מסך בית",
+      "image": "../../output/playwright/guide-mapping/screenshots/01-home.png",
+      "markers": [
+        { "n": 1, "x": 82, "y": 25, "title": "מצבי עבודה", "href": "spp2-user-guide-he.html#modes", "summary": "בחירה איך להתחיל פרויקט חדש." },
+        { "n": 2, "x": 55, "y": 28, "title": "ענן", "href": "spp2-user-guide-he.html#cloud-save", "summary": "ספריית ענן, העלאה והורדת פרויקטים." },
+        { "n": 3, "x": 32, "y": 30, "title": "כלי עזר", "href": "spp2-user-guide-he.html#utilities", "summary": "כלים כמו הכנה לדפוס, QR, הסרת רקע ומרכז הדפסות." },
+        { "n": 4, "x": 50, "y": 72, "title": "פרויקטים אחרונים", "href": "spp2-user-guide-he.html#save-export", "summary": "פתיחה חוזרת של עבודות ושמירה מסודרת." }
+      ]
+    },
+    {
+      "id": "editor-overview",
+      "title": "עורך חופשי",
+      "image": "../../output/playwright/guide-mapping/screenshots/30-editor-empty.png",
+      "markers": [
+        { "n": 1, "x": 50, "y": 48, "title": "קנבס", "href": "spp2-user-guide-he.html#editor", "summary": "אזור העבודה המרכזי." },
+        { "n": 2, "x": 86, "y": 42, "title": "מאפייני עמוד/שכבה", "href": "spp2-user-guide-he.html#editor", "summary": "הגדרות לפי הבחירה הנוכחית." },
+        { "n": 3, "x": 14, "y": 55, "title": "שכבות ועמודים", "href": "spp2-user-guide-he.html#editor", "summary": "ניהול שכבות, סדר, נראות ועמודים." },
+        { "n": 4, "x": 62, "y": 8, "title": "שמירה וייצוא", "href": "spp2-user-guide-he.html#save-export", "summary": "שמירת פרויקט או יצירת קובץ סופי." },
+        { "n": 5, "x": 44, "y": 8, "title": "הדפסה", "href": "spp2-user-guide-he.html#print-tools", "summary": "הדפסה מהירה, טווח עמודים או מרכז הדפסות." }
+      ]
+    },
+    {
+      "id": "image-edit-toolbar",
+      "title": "סרגל עריכת תמונה",
+      "image": "../../output/playwright/guide-mapping/screenshots/34-editor-image-edit-toolbar.png",
+      "markers": [
+        { "n": 1, "x": 84, "y": 16, "title": "Apply", "href": "spp2-user-guide-he.html#button-details", "summary": "אישור שינוי במצב עריכת תמונה." },
+        { "n": 2, "x": 76, "y": 16, "title": "Cancel", "href": "spp2-user-guide-he.html#button-details", "summary": "ביטול השינוי האחרון." },
+        { "n": 3, "x": 65, "y": 16, "title": "Crop", "href": "spp2-user-guide-he.html#image-edit", "summary": "חיתוך תמונה." },
+        { "n": 4, "x": 55, "y": 16, "title": "Eraser", "href": "spp2-user-guide-he.html#button-details", "summary": "מחיקה בעזרת מסיכה." },
+        { "n": 5, "x": 43, "y": 16, "title": "Smart Select", "href": "spp2-user-guide-he.html#button-details", "summary": "בחירה חכמה של אובייקט." },
+        { "n": 6, "x": 30, "y": 16, "title": "מילוי חכם", "href": "spp2-user-guide-he.html#button-details", "summary": "הסרה ומילוי טבעי של אזור נבחר." }
+      ]
+    }
+  ]
+}

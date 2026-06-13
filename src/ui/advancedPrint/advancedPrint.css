@@ -1,0 +1,234 @@
+/* Advanced Print Engine (experimental) dialog styles. RTL, dark-theme aligned with the app. */
+
+.ape-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  direction: rtl;
+}
+
+.ape-dialog,
+.ape-wizard {
+  background: #1a1922;
+  color: #e8e6ef;
+  border: 1px solid #2e2c3a;
+  border-radius: 12px;
+  width: min(880px, 94vw);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  font-size: 13px;
+}
+
+.ape-wizard { width: min(560px, 94vw); }
+
+.ape-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #2e2c3a;
+}
+
+.ape-dialog-head h3 {
+  margin: 0;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ape-exp {
+  font-size: 10px;
+  background: #4a3d8f;
+  color: #d8d2ff;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.ape-head-actions { display: flex; align-items: center; gap: 12px; }
+
+.ape-toggle,
+.ape-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ape-dialog-body {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  overflow: auto;
+}
+
+.ape-left {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.ape-right {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ape-preview {
+  background: #0f0e13;
+  border: 1px solid #2e2c3a;
+  border-radius: 8px;
+  padding: 4px;
+}
+.ape-preview-svg { display: block; }
+
+.ape-empty,
+.ape-caps-hint,
+.ape-help {
+  color: #9b97ad;
+  font-size: 12px;
+}
+
+.ape-driver-info {
+  width: 100%;
+  background: #15211a;
+  border: 1px solid #2c4233;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: #b6dcc2;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ape-driver-info-title { color: #7fd69b; font-weight: 600; }
+
+.ape-color-toggle { margin-top: 2px; font-size: 12px; color: #c8c4d8; }
+
+.ape-page-nav { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+.ape-page-nav .ape-icon-btn { font-size: 18px; line-height: 1; padding: 2px 8px; border: 1px solid #34313f; border-radius: 6px; }
+.ape-page-indicator { font-size: 12px; color: #c8c4d8; min-width: 120px; text-align: center; }
+
+.ape-row { display: flex; align-items: center; gap: 8px; }
+.ape-row-col { display: flex; flex-direction: column; gap: 8px; }
+
+.ape-label { flex: 0 0 84px; color: #b8b4c8; }
+
+.ape-select,
+.ape-input {
+  flex: 1 1 auto;
+  background: #14131b;
+  color: #e8e6ef;
+  border: 1px solid #34313f;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+.ape-input.narrow { flex: 0 0 90px; }
+.ape-range { flex: 1 1 auto; min-width: 120px; accent-color: #8f7dff; }
+.ape-range-value { flex: 0 0 42px; color: #b8b4c8; font-size: 12px; text-align: end; }
+
+.ape-chip-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.ape-chip-grid.inline { flex: 1 1 auto; }
+
+.ape-chip-btn,
+.ape-btn {
+  background: #26243010;
+  border: 1px solid #34313f;
+  color: #d8d4e6;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.ape-chip-btn.active { background: #4a3d8f; border-color: #6b5cc0; color: #fff; }
+.ape-btn.primary { background: #5b4bd0; border-color: #6b5cc0; color: #fff; }
+.ape-btn.ghost { background: transparent; }
+.ape-btn.full { width: 100%; justify-content: center; }
+.ape-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.ape-icon-btn {
+  background: transparent;
+  border: none;
+  color: #b8b4c8;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+}
+.ape-icon-btn:hover { background: #2a2835; }
+
+.ape-dialog-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-top: 1px solid #2e2c3a;
+}
+.ape-foot-nav { display: flex; gap: 8px; }
+
+.ape-status {
+  background: #14131b;
+  border: 1px solid #34313f;
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 12px;
+  color: #c8c4d8;
+}
+
+/* Preflight */
+.ape-preflight { display: flex; flex-direction: column; gap: 8px; }
+.ape-summary {
+  background: #14131b;
+  border: 1px solid #2e2c3a;
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ape-summary-line { font-size: 12px; color: #cdc9dc; }
+
+.ape-warn-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ape-warn { display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px; border-radius: 6px; }
+.ape-warn-ok { background: #15291c; color: #9fe0b4; }
+.ape-warn-row-info { background: #15202e; }
+.ape-warn-row-warning { background: #2e2615; }
+.ape-warn-row-blocker { background: #2e1518; }
+.ape-warn-icon { flex: 0 0 auto; margin-top: 1px; }
+.ape-warn-info { color: #5aa9e6; }
+.ape-warn-warning { color: #e0b052; }
+.ape-warn-blocker { color: #e06b6b; }
+.ape-warn-message { font-size: 12px; }
+.ape-warn-hint { font-size: 11px; color: #9b97ad; margin-top: 2px; }
+
+/* Output presets / compare */
+.ape-preset-panel { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid #2e2c3a; padding-top: 10px; }
+.ape-color-mode-note { font-size: 11px; color: #b6a8f0; }
+.ape-compare { display: flex; flex-direction: column; gap: 4px; }
+.ape-compare-frame { position: relative; width: 100%; height: 120px; overflow: hidden; border-radius: 6px; border: 1px solid #2e2c3a; }
+.ape-compare-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.ape-compare-after { position: absolute; inset-block: 0; inset-inline-start: 0; overflow: hidden; }
+.ape-compare-divider { position: absolute; inset-block: 0; width: 2px; background: #6b5cc0; }
+.ape-compare-range { width: 100%; }
+.ape-compare-labels { display: flex; justify-content: space-between; font-size: 11px; color: #9b97ad; }
+
+/* Wizard */
+.ape-wizard-steps { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px; border-bottom: 1px solid #2e2c3a; }
+.ape-wizard-chip { font-size: 11px; padding: 3px 8px; border-radius: 10px; background: #14131b; color: #8b87a0; }
+.ape-wizard-chip.active { background: #4a3d8f; color: #fff; }
+.ape-wizard-chip.done { color: #9fe0b4; }
+.ape-wizard-body { padding: 16px; min-height: 160px; }

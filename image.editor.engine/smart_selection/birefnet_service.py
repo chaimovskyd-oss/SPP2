@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import threading
 from typing import Any
 
 import numpy as np
 from PIL import Image, ImageFilter
+
+from smart_selection.providers import preferred_onnx_providers, selected_provider
 
 
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
@@ -26,6 +29,7 @@ class BiRefNetService:
         self._session: Any | None = None
         self._model_path: str | None = None
         self._providers: list[str] = []
+        self._run_lock = threading.Lock()
 
     def auto_segment(
         self,
@@ -70,23 +74,24 @@ class BiRefNetService:
             return self._session
         import onnxruntime as ort  # type: ignore
 
-        available = set(ort.get_available_providers())
-        requested = [provider for provider in provider_key if provider in available]
-        if not requested:
-            preferred = [
-                "CUDAExecutionProvider",
-                "DmlExecutionProvider",
-                "DirectMLExecutionProvider",
-                "CoreMLExecutionProvider",
-                "CPUExecutionProvider",
-            ]
-            requested = [provider for provider in preferred if provider in available]
-        if not requested:
-            requested = ["CPUExecutionProvider"]
+        requested = preferred_onnx_providers(ort.get_available_providers(), provider_key)
         self._session = ort.InferenceSession(str(path), providers=requested)
         self._model_path = str(path)
         self._providers = provider_key
         return self._session
+
+    def provider(self) -> str | None:
+        return selected_provider(self._session) if self._session is not None else None
+
+    def warmup(self, session: Any) -> None:
+        meta = session.get_inputs()[0]
+        width, height = infer_input_size(meta.shape)
+        # Keep startup warmup intentionally tiny for dynamic models. For fixed
+        # 1024x1024 models this is still a real inference, so callers may skip it
+        # on CPU where it hurts launch responsiveness.
+        tensor = np.zeros((1, 3, height, width), dtype=np.float32)
+        with self._run_lock:
+            session.run(None, {meta.name: tensor})
 
     def _run_session(self, session: Any, image: Image.Image, target_width: int, target_height: int) -> np.ndarray:
         input_meta = session.get_inputs()[0]
@@ -96,7 +101,8 @@ class BiRefNetService:
         arr = np.asarray(rgb).astype(np.float32) / 255.0
         arr = (arr - IMAGENET_MEAN) / IMAGENET_STD
         tensor = np.transpose(arr, (2, 0, 1))[None, ...].astype(np.float32)
-        outputs = session.run(None, {input_name: tensor})
+        with self._run_lock:
+            outputs = session.run(None, {input_name: tensor})
         mask = output_to_mask(outputs[0])
         pil = Image.fromarray(mask, mode="L").resize((target_width, target_height), Image.Resampling.LANCZOS)
         return np.array(pil, dtype=np.uint8)

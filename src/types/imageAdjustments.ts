@@ -48,6 +48,51 @@ export interface CurvePoint {
   y: number;
 }
 
+/** Full set of control points for the multi-channel Curves editor. */
+export interface CurveChannelPoints {
+  rgb: CurvePoint[];
+  r: CurvePoint[];
+  g: CurvePoint[];
+  b: CurvePoint[];
+}
+
+/** Identity (do-nothing) curve: a straight 0→0 … 255→255 diagonal. */
+export const DEFAULT_CURVE_POINTS: readonly CurvePoint[] = [
+  { x: 0, y: 0 },
+  { x: 255, y: 255 }
+];
+
+/** Fresh, fully-neutral channel set for a new Curves adjustment. */
+export function createDefaultCurveChannels(): CurveChannelPoints {
+  const diag = (): CurvePoint[] => [
+    { x: 0, y: 0 },
+    { x: 255, y: 255 }
+  ];
+  return { rgb: diag(), r: diag(), g: diag(), b: diag() };
+}
+
+/**
+ * A curve is the identity transform when every control point lies on the y=x
+ * diagonal. The editor locks endpoints at x=0 / x=255, so checking x===y on all
+ * points (including any diagonal mid-points the user added then never moved) is
+ * sufficient to detect "no effect".
+ */
+export function isIdentityCurvePoints(points: CurvePoint[] | undefined): boolean {
+  if (points === undefined || points.length < 2) return true;
+  return points.every((p) => p.x === p.y);
+}
+
+/** True when none of the four channel curves changes the image. */
+export function isIdentityCurveChannels(channels: CurveChannelPoints | undefined): boolean {
+  if (channels === undefined) return true;
+  return (
+    isIdentityCurvePoints(channels.rgb) &&
+    isIdentityCurvePoints(channels.r) &&
+    isIdentityCurvePoints(channels.g) &&
+    isIdentityCurvePoints(channels.b)
+  );
+}
+
 export interface GradientStop {
   /** 0..1 along the luminance axis */
   position: number;
@@ -70,6 +115,104 @@ export interface HighlightsShadowsParams {
   shadows: number;
   whites: number;
   blacks: number;
+}
+
+/**
+ * Photoshop-style LOCAL Shadow/Highlights recovery (distinct from the pointwise
+ * HighlightsShadows tool above). It uses a blurred luminance "surround" map to
+ * decide, per region, how much to lift shadows / pull highlights — so dark faces
+ * brighten while already-bright backgrounds stay put, edges are protected from
+ * halos, and endpoints (true black/white) are preserved to avoid wash-out.
+ *
+ * Ranges:
+ *  - shadows / highlights: 0..100, 0 = off (amount of recovery).
+ *  - radius: 0..200 — local neighborhood size, resolution-relative so live
+ *    preview matches export. Small = stronger/local; large = smoother.
+ *  - localContrast: 0..100 — re-injects high-frequency detail lost to recovery.
+ *  - colorCorrection: -50..50 — saturation compensation in corrected regions.
+ *  - midtoneContrast: -50..50 — contrast around mid-grey to restore "punch".
+ *
+ * Smart V2/V3 (optional, all backward-compatible — absent ⇒ pure V1 behaviour):
+ * a REGION-AWARE correction layered on the V1 engine. `smart` is the master
+ * toggle. Shadow lift is no longer one global amount — it is composed per pixel:
+ *   Face Shadows (inside soft, bright-protected face masks)
+ *   > Visible-skin lift (skin-like pixels outside faces)
+ *   > Global Shadows (everywhere, weak)
+ *   > Clothing (dark non-face/non-skin areas, strongly limited so blacks stay black)
+ * then gated by a highlight-protection mask (white shirts / sky / bright faces),
+ * desaturated in deep shadow (no blue/magenta cast) and held in a natural skin
+ * band. `faceRegions` + `noiseScore` are an analysis CACHE so the deterministic
+ * pixel pipeline reproduces the result on export/print/reload (live == export).
+ */
+export interface ShadowHighlightsParams {
+  /** Global Shadows — weak base lift everywhere (0..100). */
+  shadows: number;
+  /** Highlight Recovery — pull very bright areas down to recover detail (0..100). */
+  highlights: number;
+  radius: number;
+  localContrast: number;
+  colorCorrection: number;
+  midtoneContrast: number;
+  // ── Smart V2/V3 region-aware controls (optional) ──
+  /** Master switch for scene-aware processing. Absent/false ⇒ pure V1. */
+  smart?: boolean;
+  /** When true, settings were derived by Auto Smart Shadows from analysis. */
+  auto?: boolean;
+  /** Face Shadows / Face Boost — extra lift inside face masks, ×per-face need (0..100). */
+  faceShadows?: number;
+  /** Protect Bright Faces — cut face shadow lift for already-bright faces (0..100). */
+  protectBrightFaces?: number;
+  /** Protect Highlights — block shadow lift in near-clipping areas (shirts/sky/faces) (0..100). */
+  protectHighlights?: number;
+  /** Preserve Skin Tones / Skin-tone guard — hold lifted skin in a natural band (0..100). */
+  preserveSkinTones?: number;
+  /** Shadow Saturation — reduce saturation in lifted shadows, prevents casts (-50..0). */
+  shadowSaturation?: number;
+  /** Clothing Protection — keep dark non-face/non-skin areas dark (0..100). */
+  clothingProtection?: number;
+  /** @deprecated superseded by faceShadows. Gate for the face layer. */
+  prioritizeFaces?: boolean;
+  /** @deprecated superseded by preserveSkinTones. */
+  protectSkin?: boolean;
+  /** Scale back shadow recovery where the image is noisy. */
+  noiseProtection?: boolean;
+  /** Preserve sky colour/contrast instead of flattening it to grey. */
+  protectSky?: boolean;
+  /** Detected face boxes in normalised 0..1 coords (analysis cache). */
+  faceRegions?: SmartFaceRegion[];
+  /** Estimated sensor-noise score 0..100 (analysis cache). */
+  noiseScore?: number;
+}
+
+/**
+ * A detected face box (normalised 0..1) plus per-face recovery diagnostics.
+ *
+ * Each face is evaluated INDEPENDENTLY — there is no cross-face comparison, no
+ * global/average brightness target and no skin-tone normalisation. The renderer
+ * only needs `recoveryStrength` (how much soft shadow recovery this face asked
+ * for, 0..1) and `noiseScore`; the rest is diagnostics.
+ */
+export interface SmartFaceRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** 0..100 FaceUnderexposureScore (shadow density, range compression, lack of highlights, …). */
+  underexposureScore?: number;
+  /** 0..1 soft recovery amount derived from the score's tier (renderer weight). */
+  recoveryStrength?: number;
+  /** 0..100 noise estimated WITHIN this face (scales its recovery down). */
+  noiseScore?: number;
+  /** Median luminance inside the face 0..1 (drives Protect Bright Faces). */
+  medianLuma?: number;
+  /** Fraction of face pixels already very bright 0..1 (drives per-face highlight recovery). */
+  highlightRatio?: number;
+  /** Per-face MANUAL shadow lift 0..100 (numbered-face fine-tuning); applies only inside this face. */
+  shadows?: number;
+  /** Per-face MANUAL highlight recovery 0..100 (numbered-face fine-tuning); applies only inside this face. */
+  highlights?: number;
+  /** @deprecated legacy median-based score; kept for back-compat. Use underexposureScore. */
+  exposureScore?: number;
 }
 
 export interface ColorParams {
@@ -104,6 +247,12 @@ export interface CurvesParams {
   /** explicit control points (overrides preset when present) */
   points?: CurvePoint[];
   channel?: CurveChannel;
+  /**
+   * Full multi-channel control points authored in the Curves editor. When
+   * present this takes priority over preset/points/channel: the `rgb` curve is
+   * applied to every channel first, then the per-channel r/g/b curves.
+   */
+  channels?: CurveChannelPoints;
 }
 
 export interface ThresholdParams {
@@ -136,6 +285,7 @@ interface AdjustmentMeta {
 
 export type BasicToneAdjustment = AdjustmentMeta & { type: "basicTone" } & BasicToneParams;
 export type HighlightsShadowsAdjustment = AdjustmentMeta & { type: "highlightsShadows" } & HighlightsShadowsParams;
+export type ShadowHighlightsAdjustment = AdjustmentMeta & { type: "shadowHighlights" } & ShadowHighlightsParams;
 export type ColorAdjustment = AdjustmentMeta & { type: "color" } & ColorParams;
 export type DetailAdjustment = AdjustmentMeta & { type: "detail" } & DetailParams;
 export type BlackWhiteAdjustment = AdjustmentMeta & { type: "blackWhite" } & BlackWhiteParams;
@@ -148,6 +298,7 @@ export type InvertAdjustment = AdjustmentMeta & { type: "invert" } & InvertParam
 export type ImageAdjustment =
   | BasicToneAdjustment
   | HighlightsShadowsAdjustment
+  | ShadowHighlightsAdjustment
   | ColorAdjustment
   | DetailAdjustment
   | BlackWhiteAdjustment
@@ -164,6 +315,7 @@ export type ImageAdjustmentType = ImageAdjustment["type"];
 export const IMAGE_ADJUSTMENT_DEFAULTS: {
   basicTone: BasicToneParams;
   highlightsShadows: HighlightsShadowsParams;
+  shadowHighlights: ShadowHighlightsParams;
   color: ColorParams;
   detail: DetailParams;
   blackWhite: BlackWhiteParams;
@@ -175,6 +327,16 @@ export const IMAGE_ADJUSTMENT_DEFAULTS: {
 } = {
   basicTone: { brightness: 0, contrast: 0, exposure: 0, gamma: 1, offset: 0 },
   highlightsShadows: { highlights: 0, shadows: 0, whites: 0, blacks: 0 },
+  shadowHighlights: {
+    // Lift amounts are neutral at the factory (the modal seeds the recommended
+    // values); the protection values sit at their safe recommended defaults but
+    // only do anything once there is lift, so a neutral tool stays a no-op.
+    shadows: 0, highlights: 0, radius: 40, localContrast: 20, colorCorrection: 0, midtoneContrast: 0,
+    smart: false, auto: false,
+    faceShadows: 0, protectBrightFaces: 80, protectHighlights: 75, preserveSkinTones: 60,
+    shadowSaturation: -10, clothingProtection: 80,
+    prioritizeFaces: true, protectSkin: true, noiseProtection: true, protectSky: true
+  },
   color: { saturation: 0, vibrance: 0, temperature: 0, tint: 0, hue: 0 },
   detail: { sharpness: 0, sharpnessRadius: 1, clarity: 0, noiseReduction: 0 },
   blackWhite: { strength: 0, red: 0, yellow: 0, green: 0, cyan: 0, blue: 0, magenta: 0 },
@@ -192,6 +354,7 @@ export const IMAGE_ADJUSTMENT_DEFAULTS: {
 export type ImageAdjustmentTemplate =
   | ({ type: "basicTone"; enabled?: boolean } & Partial<BasicToneParams>)
   | ({ type: "highlightsShadows"; enabled?: boolean } & Partial<HighlightsShadowsParams>)
+  | ({ type: "shadowHighlights"; enabled?: boolean } & Partial<ShadowHighlightsParams>)
   | ({ type: "color"; enabled?: boolean } & Partial<ColorParams>)
   | ({ type: "detail"; enabled?: boolean } & Partial<DetailParams>)
   | ({ type: "blackWhite"; enabled?: boolean } & Partial<BlackWhiteParams>)
@@ -210,6 +373,8 @@ export function createImageAdjustment(template: ImageAdjustmentTemplate): ImageA
       return { id, type: "basicTone", enabled, ...IMAGE_ADJUSTMENT_DEFAULTS.basicTone, ...stripMeta(template) };
     case "highlightsShadows":
       return { id, type: "highlightsShadows", enabled, ...IMAGE_ADJUSTMENT_DEFAULTS.highlightsShadows, ...stripMeta(template) };
+    case "shadowHighlights":
+      return { id, type: "shadowHighlights", enabled, ...IMAGE_ADJUSTMENT_DEFAULTS.shadowHighlights, ...stripMeta(template) };
     case "color":
       return { id, type: "color", enabled, ...IMAGE_ADJUSTMENT_DEFAULTS.color, ...stripMeta(template) };
     case "detail":
@@ -254,10 +419,34 @@ export interface AppliedPresetInstance {
   generatedAdjustments: string[];
 }
 
+/** Which Auto Fix recipe produced the current adjustments. */
+export type AutoFixMode = "full" | "color" | "contrast" | "exposure";
+
+/**
+ * Bookkeeping written by the Auto Fix tool (Photoshop-style Auto/Curves, no
+ * generative AI). It marks the layer as auto-fixed and snapshots the stack as it
+ * existed BEFORE the first Auto Fix, so re-opening the modal blends from the
+ * original (never stacks aggressively) and "Revert Auto Fix" restores cleanly.
+ */
+export interface AutoFixMeta {
+  applied: boolean;
+  /** schema/algorithm version, bump when the engine changes meaningfully. */
+  version: number;
+  mode: AutoFixMode;
+  /** 0..100 intensity the user committed at. */
+  intensity: number;
+  /** the adjustment list that existed before Auto Fix was first applied. */
+  previousStack: ImageAdjustment[];
+  /** the stack `enabled` flag before Auto Fix was first applied. */
+  previousEnabled: boolean;
+}
+
 export interface ImageAdjustmentStack {
   enabled: boolean;
   stack: ImageAdjustment[];
   presetInstances?: AppliedPresetInstance[];
+  /** Present only while the layer carries an Auto Fix result. */
+  autoFix?: AutoFixMeta;
 }
 
 // ─── Page Look effects (Phase 1.3 / Phase 4) ──────────────────────────────────

@@ -28,9 +28,10 @@ export {
   getImportPreviewMaxSide,
   getJpegQuality,
   getPreviewMaxSide,
-  resolveEffectivePerformanceSettings
+  resolveEffectivePerformanceSettings,
+  resolvePdfExportProfile
 } from "./performancePolicy";
-export type { EffectivePerformanceSettings, ExportRenderOptions } from "./performancePolicy";
+export type { EffectivePerformanceSettings, ExportRenderOptions, PdfQualityPreset, PdfExportProfile } from "./performancePolicy";
 export { useAppSettings } from "./store";
 export type { AppSettingsState } from "./store";
 

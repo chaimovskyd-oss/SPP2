@@ -27,7 +27,7 @@ import { touchProjectMetadata } from "@/core/projectMetadata";
 import { applyTextPresetToLayer, applyTextStylePatch, extractTextStylePatch } from "@/core/text/presets";
 import { measureTextLayerSize } from "@/core/text/measurement";
 import { createCollageImageAssignment, createCollageRule as collageRuleFactory } from "@/core/collage/collageFactory";
-import { applyLayoutFamily, applyNewImagePool, mergeLiveFrameEditsIntoCollageRule, normalizeCollageColorAdjustments, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
+import { applyLayoutFamily, applyNewImagePool, buildCollageImageInputs, mergeLiveFrameEditsIntoCollageRule, normalizeCollageColorAdjustments, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import { collageMaskSnapshotToJson, type CollageMaskSnapshot } from "@/core/collage/collageMaskShape";
 import { drainOverflow, pushOverflow, readOverflow, writeOverflow } from "@/core/reconcile";
 import { classPhotoTextVisualStyleToMetadata, syncClassPhotoToPage, type ClassPhotoTextVisualStyle } from "@/core/classPhoto/classPhotoLayoutEngine";
@@ -50,6 +50,7 @@ import type {
   ImageAdjustment,
   ImageAdjustmentStack,
   ImageAdjustmentTemplate,
+  PageLookEffectTemplate,
   PageLookEffect,
   PageLookLayer
 } from "@/types/imageAdjustments";
@@ -116,6 +117,27 @@ export interface DocumentState {
   removeImageAdjustment: (pageId: string, layerId: string, adjustmentId: string) => void;
   toggleImageAdjustment: (pageId: string, layerId: string, adjustmentId: string) => void;
   setImageAdjustmentStack: (pageId: string, layerId: string, stack: ImageAdjustmentStack) => void;
+  /**
+   * Replace the adjustment stacks of several image layers in ONE undo record.
+   * Pass a stable `coalesceKey` for live previews (e.g. an Auto Fix slider drag)
+   * so the whole gesture collapses into a single undo step.
+   */
+  setImageAdjustmentStacks: (
+    pageId: string,
+    updates: Array<{ layerId: string; stack: ImageAdjustmentStack }>,
+    coalesceKey?: string,
+    actionType?: string
+  ) => void;
+  /**
+   * Live-preview adjustment stacks WITHOUT recording undo history (used while an
+   * Auto Fix modal slider is being dragged). Pass `stack: undefined` to restore a
+   * layer to "no adjustments". The committing action is a single
+   * setImageAdjustmentStacks call when the user applies.
+   */
+  previewImageAdjustmentStacks: (
+    pageId: string,
+    updates: Array<{ layerId: string; stack: ImageAdjustmentStack | undefined }>
+  ) => void;
   resetImageAdjustments: (pageId: string, layerId: string) => void;
   copyImageAdjustments: (pageId: string, layerId: string) => void;
   pasteImageAdjustments: (pageId: string, layerIds: string[]) => void;
@@ -123,6 +145,7 @@ export interface DocumentState {
   applyAdjustmentToImages: (pageId: string, layerIds: string[], template: ImageAdjustmentTemplate) => void;
   /** Append one freshly-created adjustment to every image layer on the page — one undo record. */
   applyAdjustmentToAllImagesOnPage: (pageId: string, template: ImageAdjustmentTemplate) => void;
+  applyAdjustmentToAllImagesOnAllPages: (template: ImageAdjustmentTemplate) => void;
   // ─── Smart Presets (Phase 3) ──────────────────────────────────────────────
   /** Instantiate a preset's recipe onto one image layer, recording an AppliedPresetInstance. */
   applyPresetToImage: (pageId: string, layerId: string, presetId: string, strength?: number, extra?: ImageAdjustmentTemplate[]) => void;
@@ -130,6 +153,7 @@ export interface DocumentState {
   applyPresetToImages: (pageId: string, layerIds: string[], presetId: string, strength?: number) => void;
   /** Apply a preset to every image layer on the page as one undo record. */
   applyPresetToAllImagesOnPage: (pageId: string, presetId: string, strength?: number, extra?: ImageAdjustmentTemplate[]) => void;
+  applyPresetToAllImagesOnAllPages: (presetId: string, strength?: number, extra?: ImageAdjustmentTemplate[]) => void;
   /**
    * Duplicate an image layer directly above the original and apply the preset to
    * the COPY only — leaves the source untouched so the user can blend the edited
@@ -153,6 +177,8 @@ export interface DocumentState {
   reorderPageLook: (pageId: string, lookId: string, direction: "up" | "down") => void;
   /** Instantiate a preset's page-look recipe as a new overlay (one undo). */
   applyPresetAsPageLook: (pageId: string, presetId: string, strength?: number) => void;
+  addPageLookToAllPages: (effect: PageLookEffectTemplate) => void;
+  applyPresetAsPageLookToAllPages: (presetId: string, strength?: number) => void;
   updateFrameContent: (pageId: string, frameId: string, contentTransform: ContentTransform) => void;
   setFrameImage: (pageId: string, frameId: string, assetId: string) => void;
   setLinkedGroups: (groups: LinkedGroup[]) => void;
@@ -182,6 +208,7 @@ export interface DocumentState {
   updateCollageImageEditParams: (ruleId: ID, slotId: ID, params: Record<string, number>) => void;
   updateCollageImageEffects: (ruleId: ID, slotId: ID, effects: VisualEffectStack) => void;
   updateCollageEdgeConfig: (ruleId: ID, slotId: ID, edgeConfig: CollageEdgeConfig) => void;
+  updateCollageCellFeather: (ruleId: ID, slotId: ID, cellFeather: import("@/types/collage").CellFeatherSettings) => void;
   applyCollageEdgeConfigToAll: (ruleId: ID, edgeConfig: CollageEdgeConfig) => void;
   updateCollageCanvasSettings: (ruleId: ID, settings: Partial<CollageCanvasSettings>) => void;
   updateCollageCachedSlots: (ruleId: ID, newSlots: import("@/types/collage").CollageSlot[]) => void;
@@ -226,23 +253,14 @@ export interface DocumentState {
   updateBlessingTextStyle: (ruleId: ID, target: "title" | "body" | "signature", stylePatch: Partial<TextStyle>) => void;
 }
 
-function collageImageInputsFromAssets(assets: Asset[], assetIds: ID[]): CollageImageInput[] {
-  const byId = new Map(assets.map((asset) => [asset.id, asset]));
-  return assetIds.flatMap((assetId) => {
-    const asset = byId.get(assetId);
-    if (!asset) return [];
-    const faceRegions = Array.isArray(asset.metadata.faceRegions)
-      ? asset.metadata.faceRegions as CollageImageInput["faceRegions"]
-      : undefined;
-    const analysisScore = typeof asset.metadata.analysisScore === "number" ? asset.metadata.analysisScore : undefined;
-    return [{
-      assetId,
-      width: asset.width ?? 800,
-      height: asset.height ?? 600,
-      faceRegions,
-      analysisScore,
-    }];
-  });
+function collageImageInputsFromAssets(
+  assets: Asset[],
+  assetIds: ID[],
+  rule?: Pick<CollageRule, "imageAssignments">,
+): CollageImageInput[] {
+  // Delegate to the shared builder so rotated cell images contribute their
+  // displayed (W/H-swapped) aspect to scoring + slot pairing.
+  return buildCollageImageInputs(assets, assetIds, rule);
 }
 
 export const useDocumentStore = create<DocumentState>((set, get) => ({
@@ -511,6 +529,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         if (u.y !== undefined) next.y = u.y;
         if (u.width !== undefined) next.width = u.width;
         if (u.height !== undefined) next.height = u.height;
+        if (u.rotation !== undefined) next.rotation = u.rotation;
         if (next.type === "text") {
           if (u.fontSize !== undefined) next.fontSize = u.fontSize;
           if (u.alignment !== undefined) next.alignment = u.alignment;
@@ -674,6 +693,40 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       const next: AdjustableLayer = { ...layer, imageAdjustments: stack };
       return commitDocumentAction(state, changeLayerAction(pageId, layer, next, "SetImageAdjustmentStackAction"));
     }),
+  setImageAdjustmentStacks: (pageId, updates, coalesceKey, actionType) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const page = state.document.pages.find((item) => item.id === pageId);
+      if (page === undefined || updates.length === 0) return state;
+      const stackById = new Map(updates.map((u) => [u.layerId, u.stack]));
+      const nextLayers = page.layers.map((layer) =>
+        stackById.has(layer.id) && isAdjustableLayer(layer)
+          ? ({ ...layer, imageAdjustments: stackById.get(layer.id)! } as AdjustableLayer)
+          : layer
+      );
+      return commitDocumentAction(
+        state,
+        changeLayersAction(pageId, page.layers, nextLayers, actionType ?? "SetImageAdjustmentStacksAction", coalesceKey)
+      );
+    }),
+  previewImageAdjustmentStacks: (pageId, updates) =>
+    set((state) => {
+      if (state.document === null || updates.length === 0) return state;
+      const stackById = new Map(updates.map((u) => [u.layerId, u.stack]));
+      const pages = state.document.pages.map((page) =>
+        page.id !== pageId
+          ? page
+          : {
+              ...page,
+              layers: page.layers.map((layer) =>
+                stackById.has(layer.id) && isAdjustableLayer(layer)
+                  ? ({ ...layer, imageAdjustments: stackById.get(layer.id) } as AdjustableLayer)
+                  : layer
+              )
+            }
+      );
+      return { document: { ...state.document, pages }, revision: state.revision + 1 };
+    }),
   resetImageAdjustments: (pageId, layerId) =>
     set((state) => {
       if (state.document === null) return state;
@@ -720,6 +773,23 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       const nextLayers = appendAdjustmentToImageLayers(page.layers, template, () => true);
       return commitDocumentAction(state, changeLayersAction(pageId, page.layers, nextLayers, "ApplyAdjustmentToAllImagesAction"));
     }),
+  applyAdjustmentToAllImagesOnAllPages: (template) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const before = state.document;
+      const action = createInlineAction(
+        "ApplyAdjustmentToAllImagesOnAllPagesAction",
+        (document) => ({
+          ...document,
+          pages: document.pages.map((page) => ({
+            ...page,
+            layers: appendAdjustmentToImageLayers(page.layers, template, () => true)
+          }))
+        }),
+        () => before
+      );
+      return commitDocumentAction(state, action);
+    }),
   applyPresetToImage: (pageId, layerId, presetId, strength, extra) =>
     set((state) => {
       if (state.document === null) return state;
@@ -758,6 +828,30 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         isAdjustableLayer(layer) ? applyPresetToImageLayer(layer, def, effective, "allImagesOnPage", extra) : layer
       );
       return commitDocumentAction(state, changeLayersAction(pageId, page.layers, nextLayers, "ApplyPresetToAllImagesAction"));
+    }),
+  applyPresetToAllImagesOnAllPages: (presetId, strength, extra) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const def = getPreset(presetId);
+      if (def === undefined) return state;
+      const before = state.document;
+      const effective = strength ?? def.defaultStrength;
+      const action = createInlineAction(
+        "ApplyPresetToAllImagesOnAllPagesAction",
+        (document) => ({
+          ...document,
+          pages: document.pages.map((page) => ({
+            ...page,
+            layers: page.layers.map((layer) =>
+              isAdjustableLayer(layer)
+                ? applyPresetToImageLayer(layer, def, effective, "allImagesOnPage", extra)
+                : layer
+            )
+          }))
+        }),
+        () => before
+      );
+      return commitDocumentAction(state, action);
     }),
   applyPresetToDuplicatedImage: (pageId, layerId, presetId, strength, extra) =>
     set((state) => {
@@ -896,6 +990,49 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       const after = [...(before ?? []), look];
       return commitDocumentAction(state, changePageLooksAction(pageId, before, after, "ApplyPresetAsPageLookAction"));
     }),
+  addPageLookToAllPages: (effect) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const before = state.document;
+      const action = createInlineAction(
+        "AddPageLookToAllPagesAction",
+        (document) => ({
+          ...document,
+          pages: document.pages.map((page) => ({
+            ...page,
+            pageLooks: [...(page.pageLooks ?? []), createPageLookLayer(effect)]
+          }))
+        }),
+        () => before
+      );
+      return commitDocumentAction(state, action);
+    }),
+  applyPresetAsPageLookToAllPages: (presetId, strength) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const def = getPreset(presetId);
+      if (def?.pageLookEffect === undefined) return state;
+      const before = state.document;
+      const action = createInlineAction(
+        "ApplyPresetAsPageLookToAllPagesAction",
+        (document) => ({
+          ...document,
+          pages: document.pages.map((page) => ({
+            ...page,
+            pageLooks: [
+              ...(page.pageLooks ?? []),
+              createPageLookLayer(def.pageLookEffect!, {
+                name: def.name,
+                strength: strength ?? def.defaultStrength,
+                presetId: def.id
+              })
+            ]
+          }))
+        }),
+        () => before
+      );
+      return commitDocumentAction(state, action);
+    }),
   updateFrameContent: (pageId, frameId, contentTransform) =>
     set((state) => {
       if (state.document === null) return state;
@@ -972,7 +1109,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       let workingRule = baseRule;
       let nextOverflow = prevOverflow;
       if (prevOverflow.hidden.length > 0) {
-        const probe = applyLayoutFamily(baseRule, family, canvasW, canvasH, dpi, collageImageInputsFromAssets(state.document.assets, baseRule.imagePool));
+        const probe = applyLayoutFamily(baseRule, family, canvasW, canvasH, dpi, collageImageInputsFromAssets(state.document.assets, baseRule.imagePool, baseRule));
         const capacity = probe.cachedSlots.filter(s => s.type === "image").length;
         const drained = drainOverflow(baseRule.imagePool, prevOverflow, capacity);
         if (drained.drained.length > 0) {
@@ -981,7 +1118,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         }
       }
 
-      const computed = applyLayoutFamily(workingRule, family, canvasW, canvasH, dpi, collageImageInputsFromAssets(state.document.assets, workingRule.imagePool));
+      const computed = applyLayoutFamily(workingRule, family, canvasW, canvasH, dpi, collageImageInputsFromAssets(state.document.assets, workingRule.imagePool, workingRule));
       const newRule = nextOverflow !== prevOverflow
         ? { ...computed, metadata: writeOverflow(computed.metadata, nextOverflow) }
         : computed;
@@ -1039,7 +1176,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         page.width,
         page.height,
         dpi,
-        collageImageInputsFromAssets(state.document.assets, workingRule.imagePool)
+        collageImageInputsFromAssets(state.document.assets, workingRule.imagePool, workingRule)
       );
       const { page: newPage, frameIds } = syncFrameLayersToPage(page, computed, page.width, page.height);
       const finalRule = { ...computed, frameIds };
@@ -1134,7 +1271,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       const dpi = page.setup?.dpi ?? 300;
       const baseRule = mergeLiveFrameEditsIntoCollageRule(rule, page);
       const newPool = [...baseRule.imagePool, ...assetIds.filter((id) => !baseRule.imagePool.includes(id))];
-      const newRule = applyNewImagePool(baseRule, newPool, page.width, page.height, dpi, collageImageInputsFromAssets(state.document.assets, newPool));
+      const newRule = applyNewImagePool(baseRule, newPool, page.width, page.height, dpi, collageImageInputsFromAssets(state.document.assets, newPool, baseRule));
       const { page: newPage, frameIds } = syncFrameLayersToPage(page, newRule, page.width, page.height);
       const finalRule = { ...newRule, frameIds };
 
@@ -1178,7 +1315,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       // pool grows (e.g. layout family switch to a larger grid).
       const prevOverflow = readOverflow(baseRule.metadata);
       const { newOverflow } = pushOverflow(baseRule.imagePool, newPool, prevOverflow);
-      const newRule = applyNewImagePool(baseRule, newPool, page.width, page.height, dpi, collageImageInputsFromAssets(state.document.assets, newPool));
+      const newRule = applyNewImagePool(baseRule, newPool, page.width, page.height, dpi, collageImageInputsFromAssets(state.document.assets, newPool, baseRule));
       const { page: newPage, frameIds } = syncFrameLayersToPage(page, newRule, page.width, page.height);
       const finalRule = { ...newRule, frameIds, metadata: writeOverflow(newRule.metadata, newOverflow) };
 
@@ -1684,6 +1821,57 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
                 const cf = l.metadata["collageFrame"] as { slotId?: string; collageRuleId?: string } | undefined;
                 if (cf?.collageRuleId !== ruleId || cf?.slotId !== slotId) return l;
                 return { ...l, metadata: { ...l.metadata, collageEdgeConfig: (prevEdgeConfig ?? null) as unknown as import("@/types/primitives").JsonValue } };
+              })
+            }));
+            return {
+              ...doc,
+              collageRules: doc.collageRules.map((r) =>
+                r.id === ruleId ? { ...r, imageAssignments: prev?.imageAssignments ?? r.imageAssignments } : r
+              ),
+              pages: revertedPages
+            };
+          }
+        )
+      );
+    }),
+
+  updateCollageCellFeather: (ruleId, slotId, cellFeather) =>
+    set((state) => {
+      if (state.document === null) return state;
+      const prevCellFeather = state.document.collageRules
+        .find((r) => r.id === ruleId)
+        ?.imageAssignments.find((a) => a.slotId === slotId)
+        ?.cellFeather;
+      return commitDocumentAction(
+        state,
+        createInlineAction(
+          "UpdateCollageCellFeatherAction",
+          (doc) => {
+            const updatedRules = doc.collageRules.map((r) =>
+              r.id === ruleId
+                ? { ...r, imageAssignments: r.imageAssignments.map((a) => a.slotId === slotId ? { ...a, cellFeather } : a) }
+                : r
+            );
+            const updatedPages = doc.pages.map((p) => ({
+              ...p,
+              layers: p.layers.map((l) => {
+                if (l.type !== "frame") return l;
+                const cf = l.metadata["collageFrame"] as { slotId?: string; collageRuleId?: string } | undefined;
+                if (cf?.collageRuleId !== ruleId || cf?.slotId !== slotId) return l;
+                return { ...l, metadata: { ...l.metadata, collageCellFeather: cellFeather as unknown as import("@/types/primitives").JsonValue } };
+              })
+            }));
+            return { ...doc, collageRules: updatedRules, pages: updatedPages };
+          },
+          (doc) => {
+            const prev = state.document!.collageRules.find((r) => r.id === ruleId);
+            const revertedPages = doc.pages.map((p) => ({
+              ...p,
+              layers: p.layers.map((l) => {
+                if (l.type !== "frame") return l;
+                const cf = l.metadata["collageFrame"] as { slotId?: string; collageRuleId?: string } | undefined;
+                if (cf?.collageRuleId !== ruleId || cf?.slotId !== slotId) return l;
+                return { ...l, metadata: { ...l.metadata, collageCellFeather: (prevCellFeather ?? null) as unknown as import("@/types/primitives").JsonValue } };
               })
             }));
             return {

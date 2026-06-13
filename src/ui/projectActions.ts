@@ -13,6 +13,7 @@ import {
   readPortableSppPackage,
   serializeProject,
   createDefaultProjectFilename,
+  createZipStore,
   safeFilename,
   validateProjectEnvelope,
   withProjectMetadata
@@ -22,9 +23,10 @@ import type { PageSetup } from "@/types/primitives";
 import type { ProjectEnvelope, ProjectMetadataInput } from "@/types/project";
 import { measureTextLayerSize } from "@/core/text/measurement";
 import { SCREEN_HELPER_NODE_NAME } from "./editor/canvasNodeNames";
-import { downloadBytes, downloadDataUrl, downloadTextFile } from "./file";
+import { dataUrlToBlob, downloadBytes, downloadDataUrl, downloadTextFile } from "./file";
 import { markDebugEvent } from "@/debug/sppDiagnostics";
 import { getExportPixelRatio, getJpegQuality, type ExportRenderOptions } from "@/settings";
+import { uploadCloudProjectFile, type CloudProject } from "@/services/cloud/cloudProjects";
 
 export interface ProjectSaveOptions {
   filename?: string;
@@ -222,6 +224,74 @@ export function saveProjectAs(document: Document, options: ProjectSaveOptions = 
   return saved;
 }
 
+export interface DiskSaveOutcome {
+  saved: ProjectEnvelope;
+  /** Resolved on-disk path, or null when it fell back to a browser download / was canceled. */
+  filePath: string | null;
+  canceled: boolean;
+}
+
+export interface CloudSaveOutcome {
+  saved: ProjectEnvelope;
+  project: CloudProject;
+}
+
+/**
+ * Save a project to disk.
+ *
+ * - If `filePath` is known and Electron is available → overwrite that file in place
+ *   (this is the "Save" / Ctrl+S behaviour, no dialog).
+ * - Otherwise, if Electron is available → open a native "Save As" dialog and write
+ *   to the chosen path.
+ * - Otherwise (web build) → fall back to a browser download.
+ */
+export async function saveProjectToDisk(
+  document: Document,
+  options: ProjectSaveOptions & { forceDialog?: boolean } = {}
+): Promise<DiskSaveOutcome> {
+  const spp = typeof window !== "undefined" ? window.spp : undefined;
+  const envelope = createProjectEnvelope({ document, linkedGroups: [], batchJobs: [] });
+
+  // ── In-place overwrite (Save / Ctrl+S) ──────────────────────────────────────
+  if (!options.forceDialog && options.filePath !== undefined && spp?.writeProjectFile !== undefined) {
+    const saved = recordProjectSaved(envelope, options.filePath, options.thumbnailPath);
+    const res = await spp.writeProjectFile(options.filePath, serializeProject(saved));
+    if (!res.success) throw new Error(res.error ?? "כתיבת הקובץ נכשלה");
+    return { saved, filePath: options.filePath, canceled: false };
+  }
+
+  // ── Save As via native dialog ───────────────────────────────────────────────
+  if (spp?.saveProjectDialog !== undefined && spp.writeProjectFile !== undefined) {
+    const suggested = options.filename ?? createDefaultProjectFilename(envelope.metadata, { extension: ".spp2" });
+    const picked = await spp.saveProjectDialog(suggested);
+    if (!picked.success || picked.filePath === undefined) {
+      return { saved: envelope, filePath: null, canceled: picked.canceled ?? true };
+    }
+    const saved = recordProjectSaved(envelope, picked.filePath, options.thumbnailPath);
+    const res = await spp.writeProjectFile(picked.filePath, serializeProject(saved));
+    if (!res.success) throw new Error(res.error ?? "כתיבת הקובץ נכשלה");
+    return { saved, filePath: picked.filePath, canceled: false };
+  }
+
+  // ── Web fallback: browser download ──────────────────────────────────────────
+  const saved = recordProjectSaved(envelope, options.filePath ?? options.filename, options.thumbnailPath);
+  downloadTextFile(
+    options.filename ?? createDefaultProjectFilename(saved.metadata, { extension: ".spp2" }),
+    serializeProject(saved),
+    "application/json"
+  );
+  return { saved, filePath: options.filePath ?? null, canceled: false };
+}
+
+export async function saveProjectToCloud(document: Document, options: ProjectSaveOptions = {}): Promise<CloudSaveOutcome> {
+  const envelope = createProjectEnvelope({ document, linkedGroups: [], batchJobs: [] });
+  const saved = recordProjectSaved(envelope, options.filePath ?? envelope.metadata.currentFilePath, options.thumbnailPath);
+  const filename = options.filename ?? createDefaultProjectFilename(saved.metadata, { extension: ".spp2" });
+  const file = new File([serializeProject(saved)], filename, { type: "application/json" });
+  const project = await uploadCloudProjectFile(file, { projectUuid: saved.metadata.projectUuid });
+  return { saved, project };
+}
+
 export async function savePortableProject(document: Document, options: ProjectSaveOptions = {}): Promise<ProjectEnvelope> {
   const envelope = createProjectEnvelope({
     document,
@@ -344,17 +414,64 @@ export async function buildMultiPagePdf(pages: PrintableStageImage[]): Promise<U
   return pdf.save();
 }
 
+function pageImageFileNames(pages: PrintableStageImage[], documentName: string): string[] {
+  const base = safeFilename(documentName);
+  const pad = String(pages.length).length;
+  return pages.map((page, index) => {
+    const ext = page.mimeType === "image/jpeg" ? "jpg" : "png";
+    const num = String(index + 1).padStart(pad, "0");
+    return `${base}-page-${num}.${ext}`;
+  });
+}
+
 export function downloadRenderedPagesAsImages(
   pages: PrintableStageImage[],
   documentName: string
 ): void {
-  const base = safeFilename(documentName);
-  const pad = String(pages.length).length;
+  const names = pageImageFileNames(pages, documentName);
   pages.forEach((page, index) => {
-    const ext = page.mimeType === "image/jpeg" ? "jpg" : "png";
-    const num = String(index + 1).padStart(pad, "0");
-    downloadDataUrl(`${base}-page-${num}.${ext}`, page.dataUrl);
+    downloadDataUrl(names[index], page.dataUrl);
   });
+}
+
+export interface FolderExportResult {
+  ok: boolean;
+  method: "folder" | "zip";
+  folderPath?: string;
+  count?: number;
+  canceled?: boolean;
+  error?: string;
+}
+
+/**
+ * Export all rendered pages at once, avoiding the old per-page save-popup storm.
+ * In Electron: one folder picker, all pages written to the chosen folder.
+ * In the browser: a single ZIP download (stored/no-compression, since PNG/JPEG
+ * are already compressed) built with the existing createZipStore.
+ */
+export async function exportRenderedPagesToFolder(
+  pages: PrintableStageImage[],
+  documentName: string
+): Promise<FolderExportResult> {
+  const names = pageImageFileNames(pages, documentName);
+
+  const bridge = typeof window !== "undefined" ? window.spp?.exportPagesToFolder : undefined;
+  if (bridge !== undefined) {
+    const items = pages.map((page, index) => ({ dataUrl: page.dataUrl, fileName: names[index] }));
+    const result = await bridge({ documentName: safeFilename(documentName), items });
+    if (result.canceled === true) return { ok: false, method: "folder", canceled: true };
+    if (result.success !== true) return { ok: false, method: "folder", error: result.error };
+    return { ok: true, method: "folder", folderPath: result.folderPath, count: result.count ?? pages.length };
+  }
+
+  // Browser fallback: bundle into a single ZIP and download once.
+  const files = new Map<string, Uint8Array>();
+  for (let index = 0; index < pages.length; index += 1) {
+    const buffer = await dataUrlToBlob(pages[index].dataUrl).arrayBuffer();
+    files.set(names[index], new Uint8Array(buffer));
+  }
+  downloadBytes(`${safeFilename(documentName)}.zip`, createZipStore(files), "application/zip");
+  return { ok: true, method: "zip", count: pages.length };
 }
 
 export async function exportRenderedPagesAsPdf(
@@ -365,12 +482,18 @@ export async function exportRenderedPagesAsPdf(
   downloadBytes(`${safeFilename(documentName)}.pdf`, bytes, "application/pdf");
 }
 
-export async function exportStagePdf(stage: Konva.Stage, documentName: string, sourcePage: Page, options?: ExportRenderOptions): Promise<void> {
+export async function exportStagePdf(
+  stage: Konva.Stage,
+  documentName: string,
+  sourcePage: Page,
+  options?: ExportRenderOptions,
+  mimeType: "image/png" | "image/jpeg" = "image/jpeg"
+): Promise<void> {
   const { PDFDocument } = await import("pdf-lib");
-  const dataUrl = renderPrintableStage(stage, "image/png", sourcePage, options);
+  const dataUrl = renderPrintableStage(stage, mimeType, sourcePage, options);
   const imageBytes = await fetch(dataUrl).then((response) => response.arrayBuffer());
   const pdf = await PDFDocument.create();
-  const image = await pdf.embedPng(imageBytes);
+  const image = mimeType === "image/jpeg" ? await pdf.embedJpg(imageBytes) : await pdf.embedPng(imageBytes);
   const widthPoints = (sourcePage.width / sourcePage.setup.dpi) * 72;
   const heightPoints = (sourcePage.height / sourcePage.setup.dpi) * 72;
   const pdfPage = pdf.addPage([widthPoints, heightPoints]);
@@ -420,11 +543,13 @@ function renderPrintableStage(stage: Konva.Stage, mimeType: "image/png" | "image
           undoHistoryLimit: 100,
           warnLargeFileMb: 50,
           performanceMode: false,
-          lowResWhileDragging: false
+          lowResWhileDragging: false,
+          aiPerformanceMode: "balanced" as const,
+          aiShowLoadingVideo: true
         };
     return stage.toDataURL({
       mimeType,
-      pixelRatio: performanceSettings === undefined ? 1 : getExportPixelRatio(page, performanceSettings),
+      pixelRatio: performanceSettings === undefined ? 1 : getExportPixelRatio(page, performanceSettings, options?.maxLongSidePx),
       quality: mimeType === "image/jpeg" ? getJpegQuality(options?.jpgQuality === undefined ? undefined : options.jpgQuality * 100) : undefined
     });
   } finally {

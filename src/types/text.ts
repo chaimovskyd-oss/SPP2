@@ -157,6 +157,21 @@ export interface TextStylePatch {
   effects?: TextEffect[];
 }
 
+export type RichTextInlineStyle = Pick<
+  TextStylePatch,
+  "fontFamily" | "fontWeight" | "fontStyle" | "fontSize" | "letterSpacing" | "color" | "fillOpacity"
+>;
+
+export interface RichTextRange extends VersionedEntity {
+  start: number;
+  end: number;
+  style: RichTextInlineStyle;
+}
+
+export interface RichTextSettings extends VersionedEntity {
+  ranges: RichTextRange[];
+}
+
 export type TextPresetCategory =
   | "favourites"
   | "3d"

@@ -1,5 +1,3 @@
-mediapipe==0.10.14
-onnxruntime>=1.23
-torch>=2.7
-simple-lama-inpainting>=0.1.2
-gdown>=5.0
+# Deprecated: AI dependencies are split per component.
+# See requirements-smart-selection.txt, requirements-content-aware.txt,
+# requirements-face.txt, and requirements-editor-ai.txt.

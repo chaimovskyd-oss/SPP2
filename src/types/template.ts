@@ -11,7 +11,8 @@ export type ModeType =
   | "collage"
   | "pdf_tools"
   | "batch_production"
-  | "blessing";
+  | "blessing"
+  | "smart_photo_pack";
 
 export interface TextStyle extends VersionedEntity {
   fontFamily: string;

@@ -11,6 +11,9 @@ import type {
   ExportPrintSettings,
   PassportSettings,
   AdvancedSettings,
+  PrintHubSettings,
+  AdvancedPrintSettings,
+  ComponentsSettings,
   SettingsCategory,
   ShortcutModifiers
 } from "./types";
@@ -30,6 +33,9 @@ export interface AppSettingsState {
   updateExportPrint: (patch: Partial<ExportPrintSettings>) => void;
   updatePassport: (patch: Partial<PassportSettings>) => void;
   updateAdvanced: (patch: Partial<AdvancedSettings>) => void;
+  updatePrintHub: (patch: Partial<PrintHubSettings>) => void;
+  updateAdvancedPrint: (patch: Partial<AdvancedPrintSettings>) => void;
+  updateComponents: (patch: Partial<ComponentsSettings>) => void;
   /** Reset a single settings category to its defaults */
   resetCategory: (category: SettingsCategory) => void;
   /** Reset all settings to defaults */
@@ -75,6 +81,15 @@ export const useAppSettings = create<AppSettingsState>()(
 
       updateAdvanced: (patch) =>
         set((s) => ({ settings: { ...s.settings, advanced: { ...s.settings.advanced, ...patch } } })),
+
+      updatePrintHub: (patch) =>
+        set((s) => ({ settings: { ...s.settings, printHub: { ...s.settings.printHub, ...patch } } })),
+
+      updateAdvancedPrint: (patch) =>
+        set((s) => ({ settings: { ...s.settings, advancedPrint: { ...s.settings.advancedPrint, ...patch } } })),
+
+      updateComponents: (patch) =>
+        set((s) => ({ settings: { ...s.settings, components: { ...s.settings.components, ...patch } } })),
 
       resetCategory: (category) =>
         set((s) => ({

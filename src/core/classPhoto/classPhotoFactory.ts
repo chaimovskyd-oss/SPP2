@@ -145,6 +145,8 @@ export function defaultLayoutSettings(
     staffRowEnabled: true,
     staffLargerThanChildren: true,
     staffScale: 1.3,
+    childGroupScale: 1,
+    staffGroupScale: 1,
     childFrameSize: { width: childFrameSize, height: childFrameSize },
     staffFrameSize: { width: staffFrameSize, height: staffFrameSize },
     horizontalSpacing: hSpacing,

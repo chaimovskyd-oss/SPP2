@@ -3,6 +3,7 @@ import type { ProjectEnvelope, ProjectMetadata } from "@/types/project";
 import { parseProject, serializeProject } from "./projectFormat";
 import { recordProjectAutosaved, type ProjectLifecycleStorage } from "./projectLifecycle";
 import { createAutosaveSafeProject } from "./autosaveSerialize";
+import { ensureAssetsCachedToDisk } from "@/core/assets/assetManager";
 
 export interface AutosaveRecord {
   id: string;
@@ -209,10 +210,16 @@ export async function saveRecoveryRecord(project: ProjectEnvelope, kind: Autosav
     };
   }
 
+  // Mirror inline (data-URL) images to the on-disk cache first, so that the
+  // skeleton we are about to strip still carries a recoverable path for every
+  // asset — including derived ones (masks, merges, rasterized output) that never
+  // came from a File import. No-op outside Electron.
+  const cachedProject = await ensureAssetsCachedToDisk(project);
+
   // Build a lightweight project envelope: strip embedded data URLs so payloads
   // stay well under the localStorage quota. Manual Save / Export are unaffected;
   // they use serializeProject directly on the live document.
-  const { safe, strippedAssetIds } = createAutosaveSafeProject(project);
+  const { safe, strippedAssetIds } = createAutosaveSafeProject(cachedProject);
   const payload = serializeProject(safe);
   const estimatedSizeBytes = estimateStringBytes(payload);
 

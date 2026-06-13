@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SPP2 – Smart Print Prepare אפיון מלא</title>
+  <style>
+    :root{
+      --bg:#0f172a;--card:#111c34;--card2:#16223d;--text:#eaf0ff;--muted:#aab6d3;
+      --blue:#27a7ff;--gold:#ffd166;--red:#ef476f;--green:#06d6a0;--orange:#ff9f1c;
+      --border:rgba(255,255,255,.12);--code:#08111f;
+    }
+    *{box-sizing:border-box} body{margin:0;font-family:Arial,"Segoe UI",sans-serif;background:linear-gradient(145deg,#08111f,#17213a 55%,#0f172a);color:var(--text);line-height:1.75}
+    header{padding:48px 6vw 30px;border-bottom:1px solid var(--border);background:radial-gradient(circle at 20% 20%,rgba(39,167,255,.22),transparent 35%),radial-gradient(circle at 85% 15%,rgba(255,209,102,.18),transparent 28%)}
+    h1{font-size:42px;margin:0 0 12px;color:white} h2{font-size:28px;margin:46px 0 16px;color:var(--gold)} h3{font-size:21px;margin:28px 0 10px;color:#8bd3ff}
+    .subtitle{font-size:20px;color:var(--muted);max-width:980px}.wrap{padding:34px 6vw 80px;max-width:1380px;margin:auto}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}.card{background:rgba(17,28,52,.82);border:1px solid var(--border);border-radius:18px;padding:20px;box-shadow:0 18px 42px rgba(0,0,0,.22)}
+    .card strong{color:white}.pill{display:inline-block;padding:4px 10px;border-radius:999px;background:rgba(39,167,255,.16);border:1px solid rgba(39,167,255,.35);color:#bfe8ff;font-size:13px;margin:3px}
+    pre{direction:ltr;text-align:left;background:var(--code);border:1px solid var(--border);padding:18px;border-radius:14px;overflow:auto;color:#d9e7ff;line-height:1.55}
+    code{background:rgba(0,0,0,.25);padding:2px 6px;border-radius:6px;color:#d6f3ff}.flow{counter-reset:step}.step{position:relative;margin:14px 0;padding:16px 20px;background:var(--card);border:1px solid var(--border);border-radius:16px}.step:before{counter-increment:step;content:counter(step);display:inline-grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--blue);color:#001528;font-weight:bold;margin-left:10px}.warn{border-right:5px solid var(--orange)}.ok{border-right:5px solid var(--green)}.danger{border-right:5px solid var(--red)}.table{width:100%;border-collapse:collapse;margin:14px 0;background:rgba(17,28,52,.7);border-radius:14px;overflow:hidden}.table th,.table td{border:1px solid var(--border);padding:12px;text-align:right;vertical-align:top}.table th{background:rgba(39,167,255,.16);color:white}.small{color:var(--muted);font-size:14px}.mock{background:#eef3ff;color:#132033;border-radius:18px;padding:20px;margin:16px 0;box-shadow:inset 0 0 0 1px rgba(0,0,0,.08)}.mock h4{margin:0 0 10px;color:#0f3970}.check{font-family:monospace;white-space:pre-wrap;background:white;border:1px solid #d9e2f2;color:#10213d;border-radius:12px;padding:14px;direction:rtl;text-align:right}.tagline{font-size:24px;color:white;margin-top:20px}.toc a{color:#d6f3ff;text-decoration:none}.toc li{margin:6px 0}.highlight{color:var(--gold);font-weight:bold}.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:800px){.two{grid-template-columns:1fr}h1{font-size:32px}}
+  </style>
+</head>
+<body>
+<header>
+  <h1>SPP2 – Smart Print Prepare</h1>
+  <div class="subtitle">אפיון מקיף לפיצ'ר הכנה חכמה לתמונות לפני דפוס: ניקוי צילומי מסך, תיקון צבע בסיסי, התאמה למידה, קרופ חכם לפי פנים, פריסטים עיצוביים, בדיקה ידנית, דוח סופי ושילוב מלא בכלי SPP.</div>
+  <div class="tagline">המטרה: “קיבלתי 150 תמונות מהלקוח — תכין אותן לעבודה.”</div>
+</header>
+<div class="wrap">
+
+<section class="card toc">
+  <h2>תוכן עניינים</h2>
+  <ol>
+    <li><a href="#vision">חזון הפיצ'ר</a></li>
+    <li><a href="#modes">שני מצבי שימוש: כלי עזר + חלק מהייבוא</a></li>
+    <li><a href="#ux">Flow משתמש מלא</a></li>
+    <li><a href="#options">אפשרויות במסך הראשי</a></li>
+    <li><a href="#engine">ImagePrepareEngine – מנוע פנימי</a></li>
+    <li><a href="#screenshots">ניקוי צילומי מסך</a></li>
+    <li><a href="#color">תיקוני צבע בסיסיים</a></li>
+    <li><a href="#crop">התאמה למידה וקרופ חכם</a></li>
+    <li><a href="#presets">פריסטים עיצוביים ומניעת התנגשויות</a></li>
+    <li><a href="#manual">מסך בדיקה ידנית לפני/אחרי</a></li>
+    <li><a href="#output">פלט, שמירה ודוחות</a></li>
+    <li><a href="#implementation">תוכנית יישום בשלבים</a></li>
+    <li><a href="#prompts">פרומפטים מוכנים לקלוד/AI פיתוח</a></li>
+  </ol>
+</section>
+
+<section id="vision">
+  <h2>1. חזון הפיצ'ר</h2>
+  <div class="grid">
+    <div class="card"><strong>לא עוד כלי תיקון קטן</strong><br>זה מנוע הכנה מרכזי שמטפל בתמונות לפני שהן נכנסות לקנבס, לפיתוח תמונות, לקולאז', לגריד, לתמונות מחזור או לכל כלי Batch אחר.</div>
+    <div class="card"><strong>שימוש יומיומי אמיתי</strong><br>לקוחות שולחים צילומי מסך, תמונות חשוכות, תמונות עם צבע מוזר, תמונות שלא מתאימות ליחס ההדפסה, ותמונות באיכות לא אחידה.</div>
+    <div class="card"><strong>שתי רמות שליטה</strong><br>מצב אוטומטי מלא לעבודה מהירה, ומצב בדיקה ידנית למקרים שבהם רוצים לשלוט בקרופ, צבע, פריסטים ואישור לכל תמונה.</div>
+  </div>
+  <h3>שם מוצע</h3>
+  <p><span class="pill">הכנה חכמה לדפוס</span> <span class="pill">Smart Print Prepare</span> <span class="pill">הכן תמונות לעבודה</span></p>
+</section>
+
+<section id="modes">
+  <h2>2. שני מצבי שימוש</h2>
+  <div class="two">
+    <div class="card ok">
+      <h3>א. כלי עזר עצמאי</h3>
+      <p>נמצא באזור כלי עזר. המשתמש גורר תיקייה או הרבה תמונות, בוחר פעולות, מפעיל, מקבל קבצים מתוקנים ודוח.</p>
+      <p>מתאים למצב שבו רוצים להכין תיקייה שלמה לפני עבודה, או להעביר ללקוח תיקייה מתוקנת.</p>
+    </div>
+    <div class="card ok">
+      <h3>ב. חלק מהייבוא לכלים רגילים</h3>
+      <p>בכל כלי שכולל גרירת תמונות לפני פתיחת הקנבס מופיעה אפשרות: <strong>בצע הכנה חכמה לפני פתיחה</strong>.</p>
+      <p>מתאים לפיתוח תמונות, קולאז', גריד, תמונות מחזור, Batch Products, כרטיסי ברכה ועוד.</p>
+    </div>
+  </div>
+</section>
+
+<section id="ux">
+  <h2>3. Flow משתמש מלא – כלי עזר עצמאי</h2>
+  <div class="flow">
+    <div class="step"><strong>בחירת תמונות</strong> – גרירת קבצים/תיקייה או כפתור בחירה.</div>
+    <div class="step"><strong>בחירת פעולות</strong> – צ'קבוקסים קצרים: צילומי מסך, תיקון צבע, התאמה למידה, פריסט.</div>
+    <div class="step"><strong>בחירת מצב עבודה</strong> – אוטומטי מלא או בדיקה ידנית לפני שמירה.</div>
+    <div class="step"><strong>סריקה מקדימה</strong> – התוכנה מזהה בעיות אך לא משנה עדיין כלום.</div>
+    <div class="step"><strong>תצוגת תוצאות צפויות</strong> – כמה צילומי מסך נמצאו, כמה תמונות דורשות צבע, כמה לא מתאימות למידה.</div>
+    <div class="step"><strong>ביצוע</strong> – עיבוד כל התמונות לפי ההגדרות.</div>
+    <div class="step"><strong>פלט ודוח</strong> – שמירה לתיקייה חדשה/בחירת תיקייה/יצירת פרויקט SPP/המשך לכלי אחר.</div>
+  </div>
+
+  <h2>Flow מקוצר – כחלק מכלים רגילים</h2>
+  <div class="flow">
+    <div class="step">המשתמש בוחר כלי, למשל פיתוח תמונות.</div>
+    <div class="step">המשתמש גורר 100 תמונות.</div>
+    <div class="step">מופיע מסך קטן: “נבחרו 100 תמונות. לבצע הכנה חכמה?”</div>
+    <div class="step">אם סומן — נפתח מסך אפשרויות מקוצר.</div>
+    <div class="step">אוטומטי: הכלי נפתח עם תמונות מוכנות. ידני: קודם מסך אישור ואז המשך לכלי.</div>
+  </div>
+</section>
+
+<section id="options">
+  <h2>4. מסך אפשרויות ראשי</h2>
+  <div class="mock">
+    <h4>הכנה חכמה לדפוס</h4>
+    <div class="check">נבחרו 126 תמונות
+
+☑ חתוך צילומי מסך ושאריות ממשק
+☑ בצע תיקוני צבע בסיסיים רק כשצריך
+☑ חדד תמונות רכות בעדינות
+☑ בדוק רזולוציה ואיכות
+
+☑ התאם למידה:
+[10x15 ▼]
+[ ] מידה מותאמת אישית: רוחב ___ גובה ___ יחידות [ס״מ ▼]
+
+☐ החל פריסט עיצובי על כל התמונות:
+[HDR Pop ▼]   עוצמה: 70%
+☑ הגן מפני תיקון מוגזם
+
+מצב פעולה:
+(●) בצע אוטומטית ושמור
+( ) בדיקה ידנית לפני שמירה
+
+פלט:
+(●) תיקייה חדשה ליד המקור
+( ) תיקייה לבחירה
+( ) צור פרויקט SPP חדש
+( ) המשך לכלי הנוכחי</div>
+  </div>
+
+  <h3>ברירות מחדל מומלצות</h3>
+  <table class="table">
+    <tr><th>אפשרות</th><th>ברירת מחדל</th><th>הסבר</th></tr>
+    <tr><td>חתוך צילומי מסך</td><td>פעיל</td><td>תהליך בטוח יחסית, חוסך המון זמן.</td></tr>
+    <tr><td>תיקון צבע בסיסי</td><td>פעיל, רק כשצריך</td><td>לא לשנות תמונות שכבר נראות טוב.</td></tr>
+    <tr><td>התאם למידה</td><td>כבוי בכלי עזר, פעיל בכלי עם מידה ברורה</td><td>בפיתוח 10x15 למשל אפשר להפעיל אוטומטית.</td></tr>
+    <tr><td>פריסט עיצובי</td><td>כבוי</td><td>זו החלטה עיצובית, לא תיקון טכני.</td></tr>
+    <tr><td>מצב פעולה</td><td>בדיקה ידנית מהירה</td><td>בתחילת הדרך עדיף לתת ביטחון. אחר כך אפשר לשמור Preset אוטומטי.</td></tr>
+  </table>
+</section>
+
+<section id="engine">
+  <h2>5. ImagePrepareEngine – מנוע פנימי מרכזי</h2>
+  <p>חשוב לא לבנות את הפיצ'ר כקומפוננטה חד-פעמית. צריך לבנות מנוע פנימי אחד שכל הכלים משתמשים בו.</p>
+  <pre><code>ImagePrepareEngine
+├─ analyzeBatch(files, options)
+├─ analyzeSingleImage(image)
+├─ detectScreenshotArtifacts(image)
+├─ detectColorProblems(image)
+├─ detectFaces(image)
+├─ computeSmartCrop(image, targetRatio, faces)
+├─ applyTechnicalFixes(image, analysis, options)
+├─ applyDesignPreset(image, preset, strength, guardrails)
+├─ exportPreparedImages(results, outputOptions)
+└─ generateReport(results)</code></pre>
+
+  <h3>מבנה נתונים מוצע</h3>
+  <pre><code>type PrepareOptions = {
+  removeScreenshotArtifacts: boolean;
+  autoColorFix: boolean;
+  sharpenSoftImages: boolean;
+  qualityCheck: boolean;
+  targetSize?: {
+    enabled: boolean;
+    width: number;
+    height: number;
+    unit: 'cm' | 'mm' | 'inch' | 'px';
+    dpi?: number;
+  };
+  designPreset?: {
+    enabled: boolean;
+    presetId: string;
+    strength: number; // 0-100
+    protectFromOverProcessing: boolean;
+  };
+  mode: 'auto' | 'manual-review';
+  output: 'new-folder-next-to-source' | 'choose-folder' | 'new-spp-project' | 'continue-to-current-tool';
+  neverOverwriteOriginals: true;
+};</code></pre>
+
+  <pre><code>type ImageAnalysis = {
+  filePath: string;
+  width: number;
+  height: number;
+  aspectRatio: number;
+  isLikelyScreenshot: boolean;
+  screenshotCrop?: CropRect;
+  colorIssues: Array<'too_dark'|'too_bright'|'too_yellow'|'too_blue'|'too_red'|'low_contrast'>;
+  faces: FaceBox[];
+  recommendedCrop?: CropRect;
+  qualityWarnings: Array<'low_resolution'|'soft'|'heavy_compression'|'faces_near_edge'>;
+  confidence: number;
+};</code></pre>
+</section>
+
+<section id="screenshots">
+  <h2>6. ניקוי צילומי מסך</h2>
+  <p>בשלב ראשון אפשר לבצע מקומית בלי AI כבד, בעזרת OpenCV וחוקים גיאומטריים.</p>
+  <div class="grid">
+    <div class="card"><strong>זיהוי פס עליון/תחתון</strong><br>חיפוש אזורים בגובה אופייני עם צבע אחיד, ניגודיות נמוכה, או אייקונים קטנים.</div>
+    <div class="card"><strong>יחסים נפוצים</strong><br>זיהוי מידות אופייניות של מסכי טלפון: 9:16, 19.5:9, 20:9, צילומי מסך ארוכים.</div>
+    <div class="card"><strong>חיתוך בטוח</strong><br>במצב בטוח חותכים רק אזורים ברורים מאוד. אם הביטחון נמוך — מסמנים לבדיקה ידנית.</div>
+  </div>
+
+  <h3>שני מצבי ניקוי</h3>
+  <table class="table">
+    <tr><th>מצב</th><th>מה עושה</th><th>סיכון</th></tr>
+    <tr><td>בטוח</td><td>מסיר רק פסי מערכת ברורים: שעה, סוללה, ניווט תחתון.</td><td>נמוך מאוד</td></tr>
+    <tr><td>אגרסיבי</td><td>מנסה להסיר גם Header/Footer של וואטסאפ, אינסטגרם, פייסבוק וכדומה.</td><td>בינוני, עדיף עם בדיקה ידנית</td></tr>
+  </table>
+
+  <div class="card warn"><strong>כלל חשוב:</strong> אם הזיהוי לא בטוח, לא חותכים אוטומטית. מסמנים “דורש בדיקה”. עדיף לא לתקן מאשר להרוס תמונה.</div>
+</section>
+
+<section id="color">
+  <h2>7. תיקוני צבע בסיסיים</h2>
+  <p>זה צריך להיות תיקון טכני עדין, לא פילטר עיצובי. המטרה: להביא תמונה למצב הדפסה סביר.</p>
+  <div class="grid">
+    <div class="card"><strong>Auto Levels</strong><br>מתיחה מתונה של היסטוגרמה, עם הגנה מפני שריפה.</div>
+    <div class="card"><strong>White Balance</strong><br>Gray World / Simple WB / תיקון טמפרטורה לפי גוון כללי.</div>
+    <div class="card"><strong>CLAHE עדין</strong><br>שיפור קונטרסט מקומי בלי להרוס פנים.</div>
+    <div class="card"><strong>Vibrance</strong><br>חיזוק צבעים מתונים בלי להקפיץ עור יותר מדי.</div>
+    <div class="card"><strong>Sharpen עדין</strong><br>Unsharp Mask חלש רק בתמונות רכות.</div>
+    <div class="card"><strong>Skin Guard</strong><br>הגנה בסיסית על גווני עור כדי לא להפוך אנשים לאדומים/כתומים מדי.</div>
+  </div>
+
+  <h3>כלל פעולה</h3>
+  <pre><code>if imageLooksGood:
+  do not auto-fix color
+else:
+  apply minimal technical correction
+  compare before/after metrics
+  if correction is too strong or suspicious:
+    mark for manual review</code></pre>
+</section>
+
+<section id="crop">
+  <h2>8. התאמה למידה וקרופ חכם</h2>
+  <p>כאשר המשתמש בוחר מידה, המערכת מייצרת Crop ביחס הנכון תוך שמירה על פנים וקבוצות אנשים.</p>
+  <div class="mock">
+    <h4>התאמה למידה</h4>
+    <div class="check">☑ התאם למידה
+[10x15 ▼]
+
+אפשרויות מתקדמות:
+☑ שמור פנים בתוך אזור בטוח
+☑ אל תחתוך ראש אם אפשר
+☑ מרכז קבוצת אנשים
+☑ השאר שוליים בטוחים להדפסה
+☐ אפשר חיתוך אגרסיבי אם אין ברירה</div>
+  </div>
+
+  <h3>מידות ברירת מחדל</h3>
+  <p><span class="pill">10x15</span><span class="pill">13x18</span><span class="pill">15x20</span><span class="pill">20x30</span><span class="pill">A4</span><span class="pill">ריבוע</span><span class="pill">סטורי</span><span class="pill">30x40 קנבס</span><span class="pill">40x60 קנבס</span><span class="pill">מותאם אישית</span></p>
+
+  <h3>חוקים לקרופ</h3>
+  <table class="table">
+    <tr><th>מצב</th><th>התנהגות</th></tr>
+    <tr><td>פנים בודדות</td><td>למקם את הפנים באזור בטוח, לא בהכרח במרכז מתמטי אם הקומפוזיציה טובה יותר אחרת.</td></tr>
+    <tr><td>כמה פנים</td><td>לחשב bounding box קבוצתי ולהשאיר שוליים סביב כולם.</td></tr>
+    <tr><td>אין פנים</td><td>קרופ מרכזי לפי נושא/קונטרסט, או מרכז התמונה כברירת מחדל.</td></tr>
+    <tr><td>פנים קרובות לקצה</td><td>אזהרה, לא לבצע קרופ אגרסיבי בלי אישור.</td></tr>
+    <tr><td>יחס לא מתאים</td><td>להציע Fit עם שוליים / Fill Crop / Mirror Edge / Generative Expand עתידי.</td></tr>
+  </table>
+</section>
+
+<section id="presets">
+  <h2>9. פריסטים עיצוביים</h2>
+  <p>אפשר להוסיף כבר בשלב ראשון חיבור לספריית הפריסטים הקיימת, אבל חייבים להפריד בין תיקון טכני לבין לוק עיצובי.</p>
+  <div class="two">
+    <div class="card ok"><h3>תיקון טכני</h3><p>איזון לבן, חשיפה, קונטרסט בסיסי, ניקוי צילום מסך, קרופ חכם. מטרתו לתקן בעיות.</p></div>
+    <div class="card warn"><h3>פריסט עיצובי</h3><p>HDR, שחור לבן, Product Punch, Vintage, Duotone, Warm Look. מטרתו לתת סגנון.</p></div>
+  </div>
+
+  <h3>סדר פעולות מומלץ</h3>
+  <pre><code>1. Decode image
+2. Detect and crop screenshot artifacts
+3. Compute target-size crop
+4. Apply technical color correction only if needed
+5. Apply optional design preset
+6. Apply guardrails against over-processing
+7. Export / continue to tool</code></pre>
+
+  <h3>UI מוצע לפריסטים</h3>
+  <div class="mock"><div class="check">☐ החל פריסט עיצובי על כל התמונות
+[HDR Pop ▼]
+
+עוצמת פריסט: 70%
+☑ הגן מפני תיקון מוגזם
+
+סדר פעולה:
+(●) תיקון טכני קודם, פריסט אחרי
+( ) פריסט בלבד, ללא תיקון אוטומטי
+( ) תיקון בלבד, ללא פריסט</div></div>
+
+  <h3>Guardrails למניעת הגזמה</h3>
+  <ul>
+    <li>להגביל Saturation אם התמונה כבר קיבלה Vibrance.</li>
+    <li>להגביל Sharpen אם כבר הופעל חידוד טכני.</li>
+    <li>למנוע Contrast מוגזם אחרי Auto Levels.</li>
+    <li>לשמור גווני עור בטווח טבעי ככל האפשר.</li>
+    <li>אם המדדים קיצוניים אחרי פריסט — לסמן לבדיקה ידנית.</li>
+  </ul>
+</section>
+
+<section id="manual">
+  <h2>10. מסך בדיקה ידנית</h2>
+  <p>המצב הידני צריך להיות מהיר, לא אשף מסובך. המטרה: לעבור על התמונות החשודות או על דוגמאות, לא לעבוד אחת-אחת על 150 תמונות אם אין צורך.</p>
+  <div class="mock">
+    <h4>בדיקה ידנית מהירה</h4>
+    <div class="check">[רשימת תמונות בצד]
+
+IMG_1234.jpg       ציון: 72/100
+בעיות: צילום מסך, כהה, נדרש קרופ 10x15
+
+לפני | אחרי
+
+פעולות:
+☑ הסר צילום מסך
+☑ תיקון צבע
+☑ קרופ למידה
+☐ פריסט HDR
+
+קרופ:
+[הזז תמונה] [זום +] [זום -] [איפוס]
+
+צבע:
+חשיפה ___  קונטרסט ___  טמפרטורה ___  סטורציה ___
+
+[אשר תמונה] [השאר מקור] [החל אותו שינוי על דומות] [אשר הכל]</div>
+  </div>
+
+  <h3>פילטרים במסך הבדיקה</h3>
+  <p><span class="pill">הצג רק בעייתיות</span><span class="pill">צילומי מסך</span><span class="pill">צבע דורש תיקון</span><span class="pill">קרופ בעייתי</span><span class="pill">רזולוציה נמוכה</span><span class="pill">נראה תקין</span></p>
+
+  <div class="card ok"><strong>רעיון חשוב:</strong> במצב ידני, ברירת המחדל היא להציג קודם רק תמונות שיש בהן סיכון או שינוי משמעותי. תמונות רגילות יכולות לקבל אישור אוטומטי.</div>
+</section>
+
+<section id="output">
+  <h2>11. פלט, שמירה ודוחות</h2>
+  <h3>כללי שמירה</h3>
+  <ul>
+    <li><span class="highlight">לא לדרוס מקור לעולם.</span></li>
+    <li>בכלי עזר: לשמור קבצים חדשים בתיקייה נפרדת.</li>
+    <li>בתוך SPP: לשמור גם נתוני קרופ/תיקון כפעולות לא הרסניות כשאפשר.</li>
+    <li>לאפשר יצוא JPG/PNG לפי הצורך, עם שמירת איכות גבוהה.</li>
+  </ul>
+
+  <h3>אפשרויות פלט</h3>
+  <table class="table">
+    <tr><th>אפשרות</th><th>שימוש</th></tr>
+    <tr><td>תיקייה חדשה ליד המקור</td><td>ברירת מחדל בכלי עזר.</td></tr>
+    <tr><td>תיקייה לבחירה</td><td>כאשר רוצים לשלוט לאן התוצאה יוצאת.</td></tr>
+    <tr><td>צור פרויקט SPP חדש</td><td>למשל גריד או פיתוח תמונות עם התמונות המוכנות.</td></tr>
+    <tr><td>המשך לכלי הנוכחי</td><td>כאשר הפיצ'ר הופעל מתוך קולאז'/פיתוח/גריד.</td></tr>
+  </table>
+
+  <h3>דוח סופי לדוגמה</h3>
+  <div class="mock"><div class="check">הכנה חכמה הסתיימה
+
+126 תמונות נסרקו
+14 צילומי מסך נוקו
+31 תמונות קיבלו תיקון צבע בסיסי
+126 תמונות הותאמו ל-10x15
+8 תמונות סומנו כרזולוציה נמוכה
+5 תמונות דורשות בדיקה ידנית
+
+פלט נשמר אל:
+Prepared_10x15_2026-06-02</div></div>
+
+  <h3>קבצי דוח</h3>
+  <pre><code>Prepared_10x15_2026-06-02/
+├─ images/
+│  ├─ IMG_001_prepared.jpg
+│  ├─ IMG_002_prepared.jpg
+├─ report.html
+├─ report.json
+└─ originals_map.json</code></pre>
+</section>
+
+<section id="implementation">
+  <h2>12. תוכנית יישום בשלבים</h2>
+  <div class="card ok">
+    <h3>Phase 1 – גרסה שימושית ומהירה</h3>
+    <ul>
+      <li>UI כלי עזר עצמאי.</li>
+      <li>בחירת תמונות/תיקייה.</li>
+      <li>ניקוי צילום מסך במצב בטוח.</li>
+      <li>תיקון צבע טכני בסיסי רק כשצריך.</li>
+      <li>התאמה למידה עם קרופ מרכזי + זיהוי פנים אם כבר קיים/זמין.</li>
+      <li>חיבור לפריסטים קיימים עם עוצמה ו-Guardrails בסיסיים.</li>
+      <li>שמירה לתיקייה חדשה + דוח HTML/JSON.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>Phase 2 – בדיקה ידנית ושילוב בכלים</h3>
+    <ul>
+      <li>מסך לפני/אחרי.</li>
+      <li>שליטה בקרופ ידני.</li>
+      <li>סליידרים בסיסיים לצבע.</li>
+      <li>פילטר “הצג רק בעייתיות”.</li>
+      <li>שילוב כ-checkbox בפיתוח תמונות, קולאז', גריד ותמונות מחזור.</li>
+      <li>המשך לכלי עם התמונות המתוקנות.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>Phase 3 – חוכמה מתקדמת</h3>
+    <ul>
+      <li>זיהוי צילומי מסך לפי אפליקציות: WhatsApp, Instagram, Facebook.</li>
+      <li>Face grouping / Best photo selector בעתיד.</li>
+      <li>Mirror Edge / Generative Expand כשיחס התמונה לא מתאים.</li>
+      <li>Presets חכמים לפי סוג תמונה: אנשים, מוצר, נוף, מסמך.</li>
+      <li>שמירת פרופילים: “מצב חנות חדיש”, “מצב עדין”, “מצב אגרסיבי”.</li>
+    </ul>
+  </div>
+
+  <h3>Acceptance Criteria</h3>
+  <table class="table">
+    <tr><th>בדיקה</th><th>תוצאה נדרשת</th></tr>
+    <tr><td>100 תמונות רגילות</td><td>המערכת לא משנה תמונות ללא צורך.</td></tr>
+    <tr><td>20 צילומי מסך עם פסי מערכת</td><td>לפחות רובם מזוהים ונחתכים במצב בטוח.</td></tr>
+    <tr><td>תמונות כהות/צהובות</td><td>תיקון נראה טבעי ולא מוגזם.</td></tr>
+    <tr><td>התאמה ל-10x15 עם פנים</td><td>פנים לא נחתכות, קרופ סביר.</td></tr>
+    <tr><td>פריסט HDR + תיקון צבע</td><td>אין Saturation/Sharpen מוגזם בזכות Guardrails.</td></tr>
+    <tr><td>שמירה</td><td>מקור לא נדרס לעולם.</td></tr>
+  </table>
+</section>
+
+<section id="prompts">
+  <h2>13. פרומפטים מוכנים ליישום</h2>
+
+  <h3>פרומפט 1 – בניית מנוע ImagePrepareEngine</h3>
+  <pre><code>Implement a central ImagePrepareEngine for SPP2.
+The engine must be reusable by the standalone helper tool and by all image-import workflows such as Photo Prints, Collage, Grid, Class Photos, and Batch Products.
+
+Core requirements:
+1. Never overwrite original files.
+2. Analyze a batch before applying changes.
+3. Detect likely screenshots and compute safe crop rectangles for top/bottom UI artifacts.
+4. Detect basic color issues: too dark, too bright, too yellow, too blue, too red, low contrast.
+5. Apply minimal technical corrections only when needed.
+6. Support optional target size crop with face-aware smart crop.
+7. Support optional design preset after technical correction.
+8. Include guardrails to prevent over-processing when technical correction and presets are both active.
+9. Return detailed per-image result objects and a batch summary report.
+10. Keep the API clean and independent from the UI.
+
+Create TypeScript types for PrepareOptions, ImageAnalysis, PrepareResult, BatchPrepareReport.
+If Python/OpenCV is already available in the project, expose the heavy image operations through the existing Python sidecar. Otherwise create clean placeholders and fallback implementations.</code></pre>
+
+  <h3>פרומפט 2 – UI כלי עזר עצמאי</h3>
+  <pre><code>Create a new standalone helper tool screen in SPP2 called “הכנה חכמה לדפוס / Smart Print Prepare”.
+
+UX requirements:
+1. User can drag many images or a folder.
+2. Show selected image count.
+3. Show compact options:
+   - remove screenshot artifacts
+   - basic color correction only when needed
+   - gentle sharpen for soft images
+   - quality check
+   - target size dropdown with custom size option
+   - optional design preset dropdown from the existing preset library
+   - preset strength slider
+   - protect from over-processing checkbox
+4. Mode selection:
+   - automatic process and save
+   - manual review before saving
+5. Output selection:
+   - new folder next to source
+   - choose folder
+   - create new SPP project
+   - continue to another tool if launched from a workflow
+6. After processing show report with counts and warnings.
+7. Do not overwrite originals.
+8. Use RTL Hebrew UI consistent with the existing SPP2 design.</code></pre>
+
+  <h3>פרומפט 3 – שילוב בכלי פיתוח/קולאז'/גריד</h3>
+  <pre><code>Integrate Smart Print Prepare into image import workflows.
+
+When a user drags images before opening a canvas/tool, show an optional checkbox:
+“בצע הכנה חכמה לתמונות לפני פתיחה”.
+
+If checked, show a compact Smart Prepare panel with the same core options but adapted to the current tool.
+Examples:
+- Photo Prints 10x15 should auto-select target size 10x15.
+- Collage should default to no destructive export and should pass prepared image data into the collage workflow.
+- Grid/Class Photos should allow target size and face-aware crop.
+
+Automatic mode should open the target tool immediately after processing.
+Manual mode should open the review screen first, then continue to the target tool.
+Ensure the original selected files remain unchanged.</code></pre>
+
+  <h3>פרומפט 4 – מסך בדיקה ידנית</h3>
+  <pre><code>Build a manual review screen for Smart Print Prepare.
+
+The screen should show:
+1. Thumbnail list of images with warning badges.
+2. Filters: all, changed, screenshots, color issues, crop warnings, low resolution, manual review required.
+3. Before/after preview for the selected image.
+4. Per-image toggles:
+   - remove screenshot crop
+   - color correction
+   - target crop
+   - design preset
+5. Crop editor with pan, zoom, reset, and face-safe overlay.
+6. Basic color sliders: exposure, contrast, temperature, saturation, sharpen.
+7. Buttons:
+   - approve image
+   - keep original
+   - apply same settings to similar images
+   - approve all safe changes
+8. Keep the screen fast with thumbnail caching and low-res previews. Final export must use full quality.</code></pre>
+
+  <h3>פרומפט 5 – דוח HTML/JSON</h3>
+  <pre><code>Add report generation for Smart Print Prepare.
+
+After processing, generate:
+1. A user-friendly HTML report in Hebrew.
+2. A machine-readable JSON report.
+
+The report should include:
+- total images scanned
+- number of screenshots cleaned
+- number of images color-corrected
+- number of images cropped to target size
+- number of images with design preset applied
+- low-resolution warnings
+- manual review warnings
+- output folder path
+- per-image original filename, output filename, actions applied, warnings, and confidence score
+
+The report must be saved next to the exported images when using standalone helper mode.</code></pre>
+</section>
+
+<section>
+  <h2>14. החלטות שצריך לסגור לפני כתיבה בפועל</h2>
+  <div class="card danger">
+    <ol>
+      <li>האם Phase 1 כולל בדיקה ידנית מלאה, או רק דוח + שמירה אוטומטית? המלצה: להתחיל אוטומטי + דוח, ואז ידני ב-Phase 2.</li>
+      <li>איזה מנוע פנים זמין כרגע בפרויקט? אם אין, להתחיל מקרופ מרכזי ולחבר פנים בהמשך.</li>
+      <li>האם פריסטים קיימים מיושמים כשכבות/פילטרים/מתכונים? צריך Wrapper אחד שמפעיל אותם על Bitmap Batch.</li>
+      <li>איפה בדיוק יושב כלי העזר בתפריט SPP?</li>
+      <li>באילו כלים משלבים קודם את checkbox ההכנה החכמה? המלצה: פיתוח תמונות וקולאז' ראשונים.</li>
+    </ol>
+  </div>
+</section>
+
+<section class="card ok">
+  <h2>סיכום קצר</h2>
+  <p>Smart Print Prepare צריך להיות מנוע מרכזי, לא כלי צדדי בלבד. הוא מקבל כמות גדולה של תמונות, מזהה בעיות נפוצות של לקוחות, מנקה צילומי מסך, מתקן צבע בעדינות, מתאים למידה, מאפשר פריסט עיצובי אחיד, נותן בדיקה ידנית כשצריך, ושומר פלט מסודר בלי לגעת במקור.</p>
+  <p><strong>זה פיצ'ר דגל מעשי:</strong> פחות התעסקות, פחות טעויות, יותר מהירות, וממש מתאים לעולם של פיתוח תמונות, קולאז'ים ומתנות מודפסות.</p>
+</section>
+
+</div>
+</body>
+</html>

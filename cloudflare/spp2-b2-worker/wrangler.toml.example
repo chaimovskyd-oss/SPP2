@@ -1,0 +1,16 @@
+name = "spp2-b2-cloud-staging"
+main = "src/index.js"
+compatibility_date = "2026-06-05"
+
+[vars]
+SUPABASE_URL = "https://YOUR_PROJECT_REF.supabase.co"
+SUPABASE_PUBLISHABLE_KEY = "sb_publishable_..."
+ALLOWED_ORIGIN = "http://localhost:5173"
+MAX_PROJECT_BYTES = "2147483648"
+B2_BUCKET_NAME = "spp2-projects-staging"
+B2_ENDPOINT = "https://s3.eu-central-003.backblazeb2.com"
+B2_REGION = "eu-central-003"
+
+# Add as secrets in production:
+# B2_KEY_ID
+# B2_APPLICATION_KEY

@@ -23,6 +23,16 @@ export const ENABLE_IMAGE_LEVEL_ADJUSTMENTS = true;
 export const ENABLE_PAGE_LOOK_LAYERS = true;
 
 /**
+ * Smart Shadow/Highlights V2: scene-aware modulation (faces / skin / sky / noise)
+ * layered on the V1 local Shadow/Highlights engine. Gates whether the Shadow/
+ * Highlights modal shows the "Smart Options" section and runs scene analysis.
+ * The render pipeline keys off each adjustment's own `smart` flag, so turning
+ * this off simply stops new adjustments from enabling V2 — existing pure-V1
+ * results are unaffected.
+ */
+export const ENABLE_SMART_SHADOW_HIGHLIGHTS_V2 = true;
+
+/**
  * Allow creating legacy AdjustmentLayers from the Layers-panel "+" menu. These
  * don't render live (ENABLE_CLASSIC_ADJUSTMENT_LAYER_RENDERING is off), so they
  * appear "disconnected". Disabled in favor of the Tool Library / Image

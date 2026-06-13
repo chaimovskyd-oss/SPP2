@@ -1,0 +1,3 @@
+mediapipe==0.10.14
+onnxruntime-directml>=1.17,<1.24; platform_system == "Windows"
+onnxruntime>=1.17,<1.24; platform_system != "Windows"

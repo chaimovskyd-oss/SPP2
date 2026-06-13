@@ -1,4 +1,4 @@
-import { getTransformedBounds, unionRects } from "@/core/bounds/bounds";
+import { getTransformedBounds, unionRects, visualCenterToOrigin } from "@/core/bounds/bounds";
 import type { Page } from "@/types/document";
 import type { VisualLayer } from "@/types/layers";
 import type { Rect } from "@/types/primitives";
@@ -30,6 +30,39 @@ export function alignLayers(input: {
       patches.set(layer.id, deltaForAlignment(layer, bounds, targetBounds, input.command));
     });
   }
+
+  return input.layers.map((layer) => {
+    const patch = patches.get(layer.id);
+    return patch === undefined ? layer : ({ ...layer, ...patch } as VisualLayer);
+  });
+}
+
+/**
+ * Center the selected layers on the page/canvas, regardless of selection count.
+ * `axis` controls which axes are centered: both, horizontal only, or vertical only.
+ */
+export function centerToCanvas(input: {
+  page: Page;
+  layers: VisualLayer[];
+  selectedLayerIds: string[];
+  axis: "both" | "x" | "y";
+}): VisualLayer[] {
+  const selected = input.layers.filter((layer) => input.selectedLayerIds.includes(layer.id) && layer.visible && !layer.locked);
+  if (selected.length === 0) return input.layers;
+
+  const cx = input.page.width / 2;
+  const cy = input.page.height / 2;
+  const patches = new Map<string, Partial<VisualLayer>>();
+  selected.forEach((layer) => {
+    // Rotation-aware: place the layer's true visual center at the page center
+    // (Konva rotates most layers around their top-left origin, so a naive x = (pageW - w)/2
+    // would push a rotated layer off-canvas).
+    const origin = visualCenterToOrigin(layer, cx, cy);
+    const patch: Partial<VisualLayer> = {};
+    if (input.axis === "both" || input.axis === "x") patch.x = origin.x;
+    if (input.axis === "both" || input.axis === "y") patch.y = origin.y;
+    patches.set(layer.id, patch);
+  });
 
   return input.layers.map((layer) => {
     const patch = patches.get(layer.id);

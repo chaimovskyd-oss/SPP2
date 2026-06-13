@@ -16,7 +16,9 @@ const baseSettings: PerformanceSettings = {
   undoHistoryLimit: 100,
   warnLargeFileMb: 50,
   performanceMode: false,
-  lowResWhileDragging: false
+  lowResWhileDragging: false,
+  aiPerformanceMode: "full",
+  aiShowLoadingVideo: true
 };
 
 const page = {

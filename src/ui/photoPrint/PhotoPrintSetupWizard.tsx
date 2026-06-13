@@ -21,7 +21,7 @@ interface PhotoPrintSetupWizardProps {
 }
 
 const LOW_RES_DPI_THRESHOLD = 150;
-const SPLIT_OPTIONS = [1, 2, 4, 6, 8, 9] as const;
+const SPLIT_OPTIONS = [1, 2, 4, 6, 8, 9, 12, 15, 18, 20, 24, 30, 35, 40, 45, 50, 60] as const;
 
 export function PhotoPrintSetupWizard({ onComplete, onCancel }: PhotoPrintSetupWizardProps): ReactElement {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
@@ -131,11 +131,19 @@ export function PhotoPrintSetupWizard({ onComplete, onCancel }: PhotoPrintSetupW
   }
 
   function getPrintDimsMm(): { widthMm: number; heightMm: number } {
+    const orient = (widthMm: number, heightMm: number): { widthMm: number; heightMm: number } => {
+      if (orientationPolicy === "auto") return { widthMm, heightMm };
+      const min = Math.min(widthMm, heightMm);
+      const max = Math.max(widthMm, heightMm);
+      return orientationPolicy === "portrait"
+        ? { widthMm: min, heightMm: max }
+        : { widthMm: max, heightMm: min };
+    };
     if (printPresetId === "custom") {
-      return { widthMm: parseFloat(customPrintW) || 100, heightMm: parseFloat(customPrintH) || 150 };
+      return orient(parseFloat(customPrintW) || 100, parseFloat(customPrintH) || 150);
     }
     const preset = PRINT_SIZE_PRESETS.find((p) => p.id === printPresetId) ?? PRINT_SIZE_PRESETS[0];
-    return { widthMm: preset.widthMm, heightMm: preset.heightMm };
+    return orient(preset.widthMm, preset.heightMm);
   }
 
   function getPrintPreset(): PrintSizePreset {
@@ -149,7 +157,7 @@ export function PhotoPrintSetupWizard({ onComplete, onCancel }: PhotoPrintSetupW
     const pageWpx = mmToPx(pageW, dpi);
     const pageHpx = mmToPx(pageH, dpi);
     const count = forCount ?? (layoutMode === "split" ? targetsPerPage : 0);
-    return computePhotoPrintLayout(pageWpx, pageHpx, printW, printH, dpi, sheetMarginsMm, gapMm, autoRotateOnSheet, globalCopies, Math.max(1, images.length), count);
+    return computePhotoPrintLayout(pageWpx, pageHpx, printW, printH, dpi, sheetMarginsMm, gapMm, autoRotateOnSheet, globalCopies, Math.max(1, images.length), count, orientationPolicy);
   }
 
   function getSplitSlotSizeMm(count: number): { widthMm: number; heightMm: number } {
@@ -161,7 +169,7 @@ export function PhotoPrintSetupWizard({ onComplete, onCancel }: PhotoPrintSetupW
     const gapPx = mmToPx(gapMm, dpi);
     const usableW = pageWpx - 2 * marginPx;
     const usableH = pageHpx - 2 * marginPx;
-    const { rows, cols } = computeBestGridForCount(usableW, usableH, gapPx, count);
+    const { rows, cols } = computeBestGridForCount(usableW, usableH, gapPx, count, orientationPolicy);
     const slotW = (usableW - (cols - 1) * gapPx) / cols;
     const slotH = (usableH - (rows - 1) * gapPx) / rows;
     const mmPerPx = 25.4 / dpi;
@@ -175,7 +183,7 @@ export function PhotoPrintSetupWizard({ onComplete, onCancel }: PhotoPrintSetupW
     const pageHpx = mmToPx(pageH, dpi);
     const marginPx = mmToPx(sheetMarginsMm, dpi);
     const gapPx = mmToPx(gapMm, dpi);
-    return computeBestGridForCount(pageWpx - 2 * marginPx, pageHpx - 2 * marginPx, gapPx, count);
+    return computeBestGridForCount(pageWpx - 2 * marginPx, pageHpx - 2 * marginPx, gapPx, count, orientationPolicy);
   }
 
   function isPrintSizeTooLarge(): boolean {

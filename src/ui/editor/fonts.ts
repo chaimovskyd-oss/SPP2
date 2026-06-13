@@ -153,6 +153,9 @@ export interface GroupedFonts {
   favorites: FontEntry[];
   hebrew: FontEntry[];
   latin: FontEntry[];
+  /** Extra fonts installed on the machine. Kept separate so the curated
+   *  dropdown stays short; the selector only surfaces these while searching. */
+  system: FontEntry[];
 }
 
 export function getGroupedFonts(favorites: Set<string>, query = ""): GroupedFonts {
@@ -162,11 +165,23 @@ export function getGroupedFonts(favorites: Set<string>, query = ""): GroupedFont
     f.family.toLowerCase().includes(q) ||
     f.label.toLowerCase().includes(q);
 
-  const all = getAllFonts().filter(matches);
+  // Curated, hand-picked fonts only — these define the default dropdown.
+  const curated = FONT_LIST
+    .map((font) => ({ ...font, source: font.source ?? ("bundled" as const) }))
+    .filter(matches);
+  const curatedKeys = new Set(FONT_LIST.map((f) => normalizeFontFamily(f.family).toLowerCase()));
+
+  // Installed system fonts that are not already curated.
+  const system = systemFontsCache
+    .filter((f) => !curatedKeys.has(normalizeFontFamily(f.family).toLowerCase()))
+    .filter(matches)
+    .sort(byFontName);
+
   return {
-    favorites: all.filter((f) => favorites.has(f.family)),
-    hebrew: all.filter((f) => f.lang !== "la" && !favorites.has(f.family)),
-    latin: all.filter((f) => f.lang !== "he" && !favorites.has(f.family))
+    favorites: [...curated, ...system].filter((f) => favorites.has(f.family)),
+    hebrew: curated.filter((f) => f.lang !== "la" && !favorites.has(f.family)),
+    latin: curated.filter((f) => f.lang !== "he" && !favorites.has(f.family)),
+    system: system.filter((f) => !favorites.has(f.family))
   };
 }
 

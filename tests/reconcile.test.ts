@@ -77,6 +77,35 @@ describe("adaptContentTransform", () => {
     expect(result.hasManual).toBe(false);
     expect(result.transform).toEqual(T());
   });
+
+  it("preserves rotation across a large aspect change (rotation is image-intrinsic)", () => {
+    const prev = T({ offsetX: 30, offsetY: 30, scale: 1.5, rotation: 90 });
+    // Large aspect change resets pan/zoom, but the 90° correction must survive.
+    const result = adaptContentTransform(
+      prev,
+      { w: 100, h: 100 },
+      { w: 200, h: 50 },
+      { hasManual: true },
+    );
+    expect(result.transform.rotation).toBe(90);
+    expect(result.transform.offsetX).toBe(0);
+    expect(result.transform.offsetY).toBe(0);
+    expect(result.transform.scale).toBe(1);
+    // Stays "manual" so the rotation keeps surviving subsequent reflows.
+    expect(result.hasManual).toBe(true);
+  });
+
+  it("preserves rotation even with no manual pan/zoom", () => {
+    const prev = T({ rotation: 270 });
+    const result = adaptContentTransform(
+      prev,
+      { w: 100, h: 100 },
+      { w: 50, h: 50 },
+      { hasManual: false },
+    );
+    expect(result.transform.rotation).toBe(270);
+    expect(result.hasManual).toBe(true);
+  });
 });
 
 describe("aspectChangedSignificantly", () => {

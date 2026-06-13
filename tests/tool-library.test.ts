@@ -19,7 +19,9 @@ describe("toolLibrary model", () => {
       expect(kinds.has("imagePreset")).toBe(true);
       expect(kinds.has("pageLookPreset")).toBe(true);
       expect(kinds.has("effect")).toBe(false);
-      // AI smart tools lead, then the 10 raw tools in display order.
+      // AI smart tools lead, then the 10 raw tools in display order. (The local
+      // Shadow/Highlights tool is opened from the inspector/right-click modal, not
+      // the library, so it is intentionally excluded from TOOL_ORDER.)
       expect(items[0]?.key).toBe("ai:autoEnhance");
       expect(items.filter((i) => i.kind === "aiTool")).toHaveLength(3);
       expect(items.filter((i) => i.kind === "tool")).toHaveLength(10);

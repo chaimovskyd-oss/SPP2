@@ -1,12 +1,13 @@
 import { Fragment, type ReactElement, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Circle, Group, Image as KonvaImage, Layer, Line, Path, Rect, Stage, Transformer } from "react-konva";
+import { Circle, Group, Image as KonvaImage, Layer, Line, Path, Rect, Stage, Text as KonvaText, Transformer } from "react-konva";
 import { useProductStore } from "@/state/productStore";
 import { ProductGuidesOverlay } from "./ProductGuidesOverlay";
 import { CollageGridOverlay } from "./CollageGridOverlay";
 import type { ProductPageContext } from "@/types/product";
 import { calculateRotateHandlePosition, nodeAABBInCanvasUnits, type RotateHandlePosition } from "./rotateHandleUtils";
 import { useKonvaImage } from "./useKonvaImage";
-import { createMaskAsset, resolveCanvasAssetPath } from "@/core/assets/assetManager";
+import { SmartExpandHighlight } from "./SmartExpandHighlight";
+import { createImageAssetFromDataUrl, createMaskAsset, resolveCanvasAssetPath } from "@/core/assets/assetManager";
 import { runMagicWand } from "@/core/imageEdit/magicWandWorker";
 import {
   makeSmartSelectionInput,
@@ -23,7 +24,9 @@ import { getEffectiveSourceSize } from "@/core/image/screenshotCropMetadata";
 import { clampContentTransformToFillBounds } from "@/core/rendering/frameFitEngine";
 import { marqueeSelect } from "@/core/selection/selectionEngine";
 import { snapLayerBounds, snapLayerPosition, type SnapLine, type SnapLineKind, type SnapSourceRole } from "@/core/snap/snapEngine";
+import { SOFT_ROTATION_SNAPS, buildRotationSnaps, normalizeAngle } from "@/core/transform/rotationSnap";
 import { measureTextLayerSize } from "@/core/text/measurement";
+import { pruneRichTextForText, type TextSelectionRange } from "@/core/text/richText";
 import { useViewportStore } from "@/state/viewportStore";
 import { useImageEditStore, type SmartSelectionPrompt } from "@/state/imageEditStore";
 import { useDrawingToolsStore } from "@/state/drawingToolsStore";
@@ -50,6 +53,19 @@ import { markDebugEvent, registerKonvaStage, trackDebugMount } from "@/debug/spp
 const OVERFLOW_PAD = 200; // px
 
 const VISUAL_LAYER_TYPES = new Set<VisualLayer["type"]>(["image", "text", "shape", "frame", "mask", "background", "guide"]);
+const VIEWPORT_SELECTION_TOLERANCE = 0.001;
+
+interface ViewportSnapshot {
+  stageX: number;
+  stageY: number;
+  stageScaleX: number;
+  stageScaleY: number;
+  zoom: number;
+  panX: number;
+  panY: number;
+  scrollLeft: number;
+  scrollTop: number;
+}
 
 // AABB hit-test in canvas units, taking rotation into account.
 // Used for Alt+Click to bypass listening={false} on locked layers.
@@ -121,6 +137,7 @@ interface CanvasStageProps {
   editingLayerId: string | null;
   onBeginTextEdit: (layerId: string) => void;
   onEndTextEdit: () => void;
+  onTextSelectionChange?: (layerId: string, selection: TextSelectionRange | null) => void;
   onImageDoubleClick?: (layerId: string) => void;
   onLayerContextMenu?: (target: CanvasContextMenuTarget) => void;
   stageRef: React.RefObject<Konva.Stage | null>;
@@ -143,6 +160,7 @@ export function CanvasStage({
   editingLayerId,
   onBeginTextEdit,
   onEndTextEdit,
+  onTextSelectionChange,
   onImageDoubleClick,
   onLayerContextMenu,
   stageRef,
@@ -159,20 +177,69 @@ export function CanvasStage({
     startAngle: number;
     initialNodes: Array<{ node: Konva.Node; x: number; y: number; rotation: number }>;
   } | null>(null);
+  const viewport = useViewportStore();
   const [rotateHandlePos, setRotateHandlePos] = useState<RotateHandlePosition | null>(null);
   const inputStateRef = useRef(createInputState("move"));
   const [marqueeRect, setMarqueeRect] = useState<RectType | null>(null);
   const [smartLines, setSmartLines] = useState<SnapLine[]>([]);
+  const viewportRef = useRef(viewport);
+
+  function captureViewportSnapshot(): ViewportSnapshot | null {
+    const stage = stageRef.current;
+    if (stage === null) return null;
+    const canvasScroller = stage.container().closest(".canvas-area");
+    return {
+      stageX: stage.x(),
+      stageY: stage.y(),
+      stageScaleX: stage.scaleX(),
+      stageScaleY: stage.scaleY(),
+      zoom: viewportRef.current.zoom,
+      panX: viewportRef.current.panX,
+      panY: viewportRef.current.panY,
+      scrollLeft: canvasScroller instanceof HTMLElement ? canvasScroller.scrollLeft : 0,
+      scrollTop: canvasScroller instanceof HTMLElement ? canvasScroller.scrollTop : 0
+    };
+  }
+
+  function warnIfViewportChangedDuringSelection(before: ViewportSnapshot | null): void {
+    if (before === null || !import.meta.env.DEV) return;
+    const after = captureViewportSnapshot();
+    if (after === null) return;
+    const changed =
+      Math.abs(after.stageX - before.stageX) > VIEWPORT_SELECTION_TOLERANCE ||
+      Math.abs(after.stageY - before.stageY) > VIEWPORT_SELECTION_TOLERANCE ||
+      Math.abs(after.stageScaleX - before.stageScaleX) > VIEWPORT_SELECTION_TOLERANCE ||
+      Math.abs(after.stageScaleY - before.stageScaleY) > VIEWPORT_SELECTION_TOLERANCE ||
+      Math.abs(after.zoom - before.zoom) > VIEWPORT_SELECTION_TOLERANCE ||
+      Math.abs(after.panX - before.panX) > VIEWPORT_SELECTION_TOLERANCE ||
+      Math.abs(after.panY - before.panY) > VIEWPORT_SELECTION_TOLERANCE ||
+      after.scrollLeft !== before.scrollLeft ||
+      after.scrollTop !== before.scrollTop;
+    if (!changed) return;
+    console.warn("Viewport changed during selection", {
+      before: { x: before.stageX, y: before.stageY, scale: before.stageScaleX, zoom: before.zoom, panX: before.panX, panY: before.panY, scrollLeft: before.scrollLeft, scrollTop: before.scrollTop },
+      after: { x: after.stageX, y: after.stageY, scale: after.stageScaleX, zoom: after.zoom, panX: after.panX, panY: after.panY, scrollLeft: after.scrollLeft, scrollTop: after.scrollTop }
+    });
+  }
+
+  function runViewportStableSelection(action: () => void): void {
+    const before = captureViewportSnapshot();
+    action();
+    warnIfViewportChangedDuringSelection(before);
+    requestAnimationFrame(() => warnIfViewportChangedDuringSelection(before));
+  }
 
   function selectLayerFromCanvas(layerId: string, additive = false): void {
-    if (!additive) {
-      onSelectLayer(layerId);
-      return;
-    }
-    const next = selectedLayerIds.includes(layerId)
-      ? selectedLayerIds.filter((id) => id !== layerId)
-      : [...selectedLayerIds, layerId];
-    onSelectLayers(next);
+    runViewportStableSelection(() => {
+      if (!additive) {
+        onSelectLayer(layerId);
+        return;
+      }
+      const next = selectedLayerIds.includes(layerId)
+        ? selectedLayerIds.filter((id) => id !== layerId)
+        : [...selectedLayerIds, layerId];
+      onSelectLayers(next);
+    });
   }
 
   useEffect(() => {
@@ -234,6 +301,8 @@ export function CanvasStage({
 
   // ── Paint Bucket ──────────────────────────────────────────────────────────
   const updatePage = useDocumentStore((s) => s.updatePage);
+  const applyDocumentChange = useDocumentStore((s) => s.applyDocumentChange);
+  const applySmartArrange = useDocumentStore((s) => s.applySmartArrange);
   const addLayerToDoc = useDocumentStore((s) => s.addLayer);
   const attachTextToFrame = useDocumentStore((s) => s.attachTextToFrame);
   const detachTextFromFrame = useDocumentStore((s) => s.detachTextFromFrame);
@@ -372,7 +441,7 @@ export function CanvasStage({
     addLayerToDoc(page.id, layer);
     onSelectLayer(layer.id);
   }
-  function applyBucketFill(canvasPoint: { x: number; y: number }): "ok" | "image-unsupported" | "noop" {
+  async function applyBucketFill(canvasPoint: { x: number; y: number }): Promise<"ok" | "image-unsupported" | "noop"> {
     const color = useColorStore.getState().currentColor;
     const hitId = findTopmostLayerAtPoint(page.layers, canvasPoint);
     if (hitId === null) {
@@ -394,8 +463,34 @@ export function CanvasStage({
       onLayerChange({ ...layer, color });
       return "ok";
     }
-    if (layer.type === "image" || layer.type === "frame") {
-      // Destructive image painting deferred — see plans/serialized-herding-petal.md
+    if (layer.type === "image") {
+      const asset = assets.find((item) => item.id === layer.assetId);
+      const recolored = await recolorTransparentImageAsset(asset, color, layer.name);
+      if (recolored === null) return "image-unsupported";
+      applyDocumentChange("BucketFillImageLayerAction", (document) => ({
+        ...document,
+        assets: [...document.assets, recolored],
+        pages: document.pages.map((docPage) => docPage.id === page.id
+          ? {
+              ...docPage,
+              layers: docPage.layers.map((item) => item.id === layer.id
+                ? {
+                    ...item,
+                    assetId: recolored.id,
+                    metadata: {
+                      ...item.metadata,
+                      bucketFillSourceAssetId: layer.assetId,
+                      bucketFillColor: color
+                    }
+                  }
+                : item)
+            }
+          : docPage)
+      }), page.id);
+      return "ok";
+    }
+    if (layer.type === "frame") {
+      // Destructive image painting for framed photos is still deferred.
       return "image-unsupported";
     }
     return "noop";
@@ -424,7 +519,7 @@ export function CanvasStage({
   }, [imageEditLayerId, imageEditMode, page.id, page.layers.length, selectedLayerIds]);
 
   useEffect(() => {
-    if (imageEditStore.selectionMask === null || (imageActiveTool !== "wand" && imageActiveTool !== "rect-select" && imageActiveTool !== "smart-select" && imageActiveTool !== "brush-select")) {
+    if (imageEditStore.selectionMask === null || (imageActiveTool !== "wand" && imageActiveTool !== "rect-select" && imageActiveTool !== "smart-select" && imageActiveTool !== "brush-select" && imageActiveTool !== "lasso")) {
       setSelectionCanvas(null);
       return;
     }
@@ -435,7 +530,9 @@ export function CanvasStage({
   const pendingLinesRef = useRef<SnapLine[]>([]);
   const rafRef = useRef<number | null>(null);
 
-  const viewport = useViewportStore();
+  useEffect(() => {
+    viewportRef.current = viewport;
+  }, [viewport]);
   const activeProduct = useProductStore((s) => s.activeProduct);
   const productContext = useMemo<ProductPageContext | null>(() => {
     if (!activeProduct) return null;
@@ -471,10 +568,83 @@ export function CanvasStage({
     [page.layers, passportGuidelinesEnabled]
   );
   const performanceSettings = useAppSettings((state) => state.settings.performance);
+  const workspaceSettings = useAppSettings((state) => state.settings.workspace);
   const effectivePerformance = useMemo(
     () => resolveEffectivePerformanceSettings(performanceSettings),
     [performanceSettings]
   );
+  // Shift-held drives stronger snap tolerance (drag) and forced rotation steps.
+  // Tracked at the window level so it stays correct even when focus is on the canvas.
+  const [shiftHeld, setShiftHeld] = useState(false);
+  const shiftHeldRef = useRef(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Shift" && shiftHeldRef.current !== e.shiftKey) {
+        shiftHeldRef.current = e.shiftKey;
+        setShiftHeld(e.shiftKey);
+      } else if (e.shiftKey !== shiftHeldRef.current) {
+        shiftHeldRef.current = e.shiftKey;
+        setShiftHeld(e.shiftKey);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKey);
+    };
+  }, []);
+
+  // Konva Transformer rotation snapping: soft snap to 0/45/90/… normally,
+  // forced fixed-step snap (e.g. every 15°) while Shift is held.
+  const rotationSnaps = useMemo(() => {
+    if (!workspaceSettings.rotationSnapEnabled) return [];
+    return shiftHeld ? buildRotationSnaps(workspaceSettings.shiftRotationStepDeg) : SOFT_ROTATION_SNAPS;
+  }, [workspaceSettings.rotationSnapEnabled, workspaceSettings.shiftRotationStepDeg, shiftHeld]);
+  const rotationSnapTolerance = shiftHeld
+    ? Math.max(1, workspaceSettings.shiftRotationStepDeg / 2)
+    : workspaceSettings.rotationSnapToleranceDeg;
+  // Live angle readout shown next to the transformer while rotating.
+  const [rotationReadout, setRotationReadout] = useState<{ x: number; y: number; angle: number } | null>(null);
+
+  // Center-preserving rotation from the toolbar's rotate buttons.
+  // Operates on the live Konva node (ground truth = exactly what the user sees):
+  // rotate around the node origin, then compensate x/y so the visual center is fixed.
+  // All selected layers are committed in a single undo step.
+  useEffect(() => {
+    const onRotate = (event: Event): void => {
+      const detail = (event as CustomEvent<{ delta?: number; layerIds?: string[] }>).detail;
+      const delta = detail?.delta ?? 0;
+      if (delta === 0) return;
+      const stage = stageRef.current;
+      if (stage === null || scale === 0) return;
+
+      // Rotate the explicitly-targeted layers (e.g. right-click menu) or the current selection.
+      const targetIds = detail?.layerIds !== undefined && detail.layerIds.length > 0 ? detail.layerIds : selectedLayerIds;
+      const updates: Array<{ layerId: string; x: number; y: number; rotation: number }> = [];
+      for (const id of targetIds) {
+        const layer = page.layers.find((l) => l.id === id);
+        if (layer === undefined || layer.locked) continue;
+        if (isGridCellLayer(layer) || isPhotoPrintSlotLayer(layer)) continue;
+        const node = stage.findOne(`#${id}`);
+        if (!(node instanceof Konva.Node)) continue;
+
+        const before = nodeAABBInCanvasUnits(node, scale);
+        const cx = (before.minX + before.maxX) / 2;
+        const cy = (before.minY + before.maxY) / 2;
+        node.rotation(normalizeAngle(node.rotation() + delta));
+        const after = nodeAABBInCanvasUnits(node, scale);
+        const ncx = (after.minX + after.maxX) / 2;
+        const ncy = (after.minY + after.maxY) / 2;
+        node.x(node.x() + (cx - ncx));
+        node.y(node.y() + (cy - ncy));
+        updates.push({ layerId: id, x: node.x(), y: node.y(), rotation: node.rotation() });
+      }
+      if (updates.length > 0) applySmartArrange(page.id, updates, "RotateLayersAction");
+    };
+    window.addEventListener("spp2:rotate-selection", onRotate);
+    return () => window.removeEventListener("spp2:rotate-selection", onRotate);
+  }, [page, scale, selectedLayerIds, stageRef, applySmartArrange]);
   // `reduceEffectsDuringInteraction` is a policy/setting — it only applies during
   // an actual drag or transform. Without gating on transient interaction state,
   // having the setting enabled would keep image filters off forever, so sliders
@@ -494,11 +664,14 @@ export function CanvasStage({
     }
     // Hide transformer completely while in image-edit mode (crop handles take over)
     if (imageEditMode) {
+      const before = captureViewportSnapshot();
       transformer.nodes([]);
       transformer.getLayer()?.batchDraw();
       setRotateHandlePos(null);
+      warnIfViewportChangedDuringSelection(before);
       return;
     }
+    const before = captureViewportSnapshot();
     try {
       const nonTransformableIds = new Set(
         page.layers
@@ -524,6 +697,7 @@ export function CanvasStage({
       } else {
         setRotateHandlePos(null);
       }
+      warnIfViewportChangedDuringSelection(before);
     } catch (error) {
       markDebugEvent("konva-transformer:error", {
         pageId: page.id,
@@ -532,6 +706,7 @@ export function CanvasStage({
       });
       transformer.nodes([]);
       setRotateHandlePos(null);
+      warnIfViewportChangedDuringSelection(before);
     }
   }, [selectedLayerIds, layoutEditMode, imageEditMode, stageRef, page.layers, page.height]);
 
@@ -616,6 +791,21 @@ export function CanvasStage({
     };
   }
 
+  // Build effective snap settings: zoom-aware screen tolerance + Shift strengthening,
+  // AND-combined with the per-page snap toggles and the app-level workspace prefs.
+  function buildEffectiveSnapSettings(shift: boolean): typeof page.setup.snapSettings {
+    const screenTol = shift ? workspaceSettings.shiftSnapTolerancePx : workspaceSettings.snapTolerancePx;
+    const canvasTol = scale > 0 ? screenTol / scale : screenTol;
+    return {
+      ...page.setup.snapSettings,
+      enabled: viewport.snapEnabled,
+      snapTolerance: canvasTol,
+      snapToPage: page.setup.snapSettings.snapToPage && workspaceSettings.snapToCanvasEnabled,
+      snapToLayers: page.setup.snapSettings.snapToLayers && workspaceSettings.snapToLayersEnabled,
+      showSmartGuides: page.setup.snapSettings.showSmartGuides && workspaceSettings.smartGuidesEnabled
+    };
+  }
+
   // Called by Stage onDragMove — applies magnetic snap imperatively then updates guides
   function handleStageDragMove(event: Konva.KonvaEventObject<DragEvent>): void {
     if (!viewport.snapEnabled) return;
@@ -634,7 +824,8 @@ export function CanvasStage({
 
       const x = node.x();
       const y = node.y();
-      const settings = { ...page.setup.snapSettings, enabled: viewport.snapEnabled };
+      const shift = (event.evt as MouseEvent | undefined)?.shiftKey ?? shiftHeldRef.current;
+      const settings = buildEffectiveSnapSettings(shift);
 
       const result = snapLayerPosition({ layer, page, layers: page.layers, x, y, settings });
 
@@ -642,7 +833,7 @@ export function CanvasStage({
       if (result.dx !== 0) node.x(result.x);
       if (result.dy !== 0) node.y(result.y);
 
-      if (page.setup.snapSettings.showSmartGuides && result.lines.length > 0) {
+      if (settings.showSmartGuides && result.lines.length > 0) {
         scheduleGuideUpdate(result.lines);
       } else {
         scheduleGuideUpdate([]);
@@ -673,17 +864,30 @@ export function CanvasStage({
       if (isPhotoPrintSlotLayer(layer)) return;
 
       const anchor = transformer.getActiveAnchor();
+
+      // While rotating, show a live angle readout above the node and skip position snapping.
+      if (anchor === "rotater") {
+        const bb = nodeAABBInCanvasUnits(node, scale);
+        setRotationReadout({
+          x: (bb.minX + bb.maxX) / 2,
+          y: bb.minY - 26 / scale,
+          angle: normalizeAngle(node.rotation())
+        });
+        return;
+      }
+
+      const settings = buildEffectiveSnapSettings(shiftHeldRef.current);
       const result = snapLayerBounds({
         movingLayerId: layer.id,
         page,
         layers: page.layers,
         bounds: transformedNodeRect(node),
-        settings: { ...page.setup.snapSettings, enabled: viewport.snapEnabled },
+        settings,
         allowedSourceRoles: sourceRolesForAnchor(anchor)
       });
 
       applyTransformSnap(node, result.dx, result.dy, result.sourceRoles, anchor);
-      scheduleGuideUpdate(page.setup.snapSettings.showSmartGuides ? result.lines : []);
+      scheduleGuideUpdate(settings.showSmartGuides ? result.lines : []);
     } catch (error) {
       console.error("[CanvasStage] handleTransformerTransform failed:", error);
       scheduleGuideUpdate([]);
@@ -1193,6 +1397,9 @@ export function CanvasStage({
           : drawingTool === "shape" ? "crosshair"
           : drawingTool === "marquee" ? "crosshair"
           : drawingTool === "lasso" ? "crosshair"
+          : drawingTool === "regionRect" ? "crosshair"
+          : drawingTool === "regionLasso" ? "crosshair"
+          : drawingTool === "regionWand" ? "crosshair"
           : undefined
       }}
       onWheel={handleCanvasWheel}
@@ -1222,6 +1429,33 @@ export function CanvasStage({
             inputStateRef.current = beginPointer(inputStateRef.current, panStartRef.current, event.evt.button);
             return;
           }
+          // Region selection tools (rect/lasso/wand): enter image-edit on the image under the
+          // cursor and begin the matching selection. Works on any image without pre-selecting.
+          if (drawingTool === "regionRect" || drawingTool === "regionLasso" || drawingTool === "regionWand") {
+            event.evt.preventDefault();
+            const pointer = getPointerPosition();
+            if (pointer === null) return;
+            const hitId = findTopmostLayerAtPoint(page.layers, pointer);
+            if (hitId === null) return;
+            const hit = page.layers.find((l) => l.id === hitId) ?? null;
+            if (hit === null || hit.type !== "image") return; // empty / non-image: keep tool armed
+            const imageTool = drawingTool === "regionWand" ? "wand" : drawingTool === "regionLasso" ? "lasso" : "rect-select";
+            onSelectLayer(hitId);
+            if (!imageEditStore.imageEditMode || imageEditStore.editingLayerId !== hitId) {
+              imageEditStore.enterImageEditMode(hitId, { x: 0, y: 0, width: 1, height: 1 });
+            }
+            imageEditStore.setActiveTool(imageTool);
+            setDrawingTool(null);
+            if (imageTool === "rect-select") {
+              rectStartRef.current = pointer;
+            } else if (imageTool === "lasso") {
+              lassoPointsRef.current = [pointer];
+              isPaintingRef.current = true;
+              setLassoPreviewPoints([pointer.x, pointer.y]);
+            }
+            // wand: handled on mouse-up by the existing imageEditMode/wand branch
+            return;
+          }
           // Eyedropper: sample pixel at pointer (highest priority, works regardless of selection)
           if (drawingTool === "eyedropper") {
             event.evt.preventDefault();
@@ -1239,7 +1473,7 @@ export function CanvasStage({
             event.evt.preventDefault();
             const pointer = getPointerPosition();
             if (pointer !== null) {
-              applyBucketFill(pointer);
+              void applyBucketFill(pointer);
             }
             return;
           }
@@ -1314,6 +1548,17 @@ export function CanvasStage({
             if (pointer !== null) rectStartRef.current = pointer;
             return;
           }
+          // Image-edit lasso: start free-hand polygon over the edited image
+          if (imageEditMode && imageActiveTool === "lasso") {
+            event.evt.preventDefault();
+            const pointer = getPointerPosition();
+            if (pointer !== null) {
+              lassoPointsRef.current = [pointer];
+              isPaintingRef.current = true;
+              setLassoPreviewPoints([pointer.x, pointer.y]);
+            }
+            return;
+          }
           if (event.target === event.target.getStage()) {
             const pointer = getPointerPosition();
             // Alt+Click bypass: select topmost layer at point, including locked ones
@@ -1350,8 +1595,8 @@ export function CanvasStage({
             }
             return;
           }
-          // Lasso tool: append points
-          if (drawingTool === "lasso" && isPaintingRef.current) {
+          // Lasso tool (general or image-edit): append points
+          if ((drawingTool === "lasso" || (imageEditMode && imageActiveTool === "lasso")) && isPaintingRef.current) {
             const pointer = getPointerPosition();
             if (pointer !== null) {
               const points = lassoPointsRef.current;
@@ -1464,6 +1709,39 @@ export function CanvasStage({
           // Marquee tool: commit marquee selection
           if (drawingTool === "marquee" && marqueeStartRef.current !== null) {
             finishMarqueeSelection();
+            return;
+          }
+          // Image-edit lasso: rasterize polygon → selection mask in layer-local pixels
+          if (imageEditMode && imageActiveTool === "lasso" && isPaintingRef.current) {
+            isPaintingRef.current = false;
+            const points = lassoPointsRef.current;
+            lassoPointsRef.current = [];
+            setLassoPreviewPoints(null);
+            const editLayer = getEditingImageLayer();
+            if (points.length >= 3 && editLayer !== null) {
+              const { x: lx, y: ly, width: lw, height: lh } = editLayer;
+              const w = Math.max(1, Math.round(lw));
+              const h = Math.max(1, Math.round(lh));
+              const localPoly = points.map((p) => ({ x: ((p.x - lx) / lw) * w, y: ((p.y - ly) / lh) * h }));
+              let minX = w, minY = h, maxX = 0, maxY = 0;
+              for (const p of localPoly) {
+                if (p.x < minX) minX = p.x;
+                if (p.y < minY) minY = p.y;
+                if (p.x > maxX) maxX = p.x;
+                if (p.y > maxY) maxY = p.y;
+              }
+              const x0 = Math.max(0, Math.floor(minX));
+              const y0 = Math.max(0, Math.floor(minY));
+              const x1 = Math.min(w, Math.ceil(maxX));
+              const y1 = Math.min(h, Math.ceil(maxY));
+              const mask = new Uint8Array(w * h);
+              for (let py = y0; py < y1; py++) {
+                for (let px = x0; px < x1; px++) {
+                  if (pointInPolygon(px + 0.5, py + 0.5, localPoly)) mask[py * w + px] = 255;
+                }
+              }
+              imageEditStore.setSelectionMask({ data: mask, width: w, height: h });
+            }
             return;
           }
           // Lasso tool: commit polygon selection
@@ -1696,6 +1974,7 @@ export function CanvasStage({
             );
           })()}
           <PageLookOverlay pageLooks={page.pageLooks} width={page.width} height={page.height} />
+          <SmartExpandHighlight width={page.width} height={page.height} />
           {marqueeRect !== null ? (
             <Rect
               name={SCREEN_HELPER_NODE_NAME}
@@ -1778,16 +2057,20 @@ export function CanvasStage({
             const color = GUIDE_COLORS[line.kind] ?? "#F7C948";
             const sw = 1.5 / scale;
 
-            // Spacing indicators: render gap brackets instead of a full-canvas line
+            // Spacing indicators: render gap brackets + an equal-gap distance label
             if (line.kind === "spacing" && line.spacingGaps !== undefined) {
               const gaps = line.spacingGaps;
+              const lw = 26 / scale;
+              const lh = 15 / scale;
               if (line.axis === "x") {
                 // Horizontal spacing — draw two vertical gap segments at the Y midpoint
                 const yMid = line.position;
                 const tickH = 12 / scale;
                 return (
                   <Fragment key={`spacing-x-${line.label}`}>
-                    {gaps.map((gap, i) => (
+                    {gaps.map((gap, i) => {
+                      const mid = (gap.from + gap.to) / 2;
+                      return (
                       <Fragment key={i}>
                         {/* horizontal connector across the gap */}
                         <Line name={SCREEN_HELPER_NODE_NAME} points={[gap.from, yMid, gap.to, yMid]} stroke={color} strokeWidth={sw * 1.5} listening={false} />
@@ -1795,8 +2078,12 @@ export function CanvasStage({
                         <Line name={SCREEN_HELPER_NODE_NAME} points={[gap.from, yMid - tickH, gap.from, yMid + tickH]} stroke={color} strokeWidth={sw * 1.5} listening={false} />
                         {/* right tick */}
                         <Line name={SCREEN_HELPER_NODE_NAME} points={[gap.to, yMid - tickH, gap.to, yMid + tickH]} stroke={color} strokeWidth={sw * 1.5} listening={false} />
+                        {/* equal-gap distance label */}
+                        <Rect name={SCREEN_HELPER_NODE_NAME} x={mid - lw / 2} y={yMid - tickH - lh - 2 / scale} width={lw} height={lh} cornerRadius={3 / scale} fill="#17161C" stroke={color} strokeWidth={1 / scale} listening={false} />
+                        <KonvaText name={SCREEN_HELPER_NODE_NAME} x={mid - lw / 2} y={yMid - tickH - lh + 1 / scale} width={lw} align="center" text={`${Math.round(gap.to - gap.from)}`} fontSize={11 / scale} fill="#FFFFFF" listening={false} />
                       </Fragment>
-                    ))}
+                      );
+                    })}
                   </Fragment>
                 );
               }
@@ -1805,13 +2092,19 @@ export function CanvasStage({
               const tickW = 12 / scale;
               return (
                 <Fragment key={`spacing-y-${line.label}`}>
-                  {gaps.map((gap, i) => (
+                  {gaps.map((gap, i) => {
+                    const mid = (gap.from + gap.to) / 2;
+                    return (
                     <Fragment key={i}>
                       <Line name={SCREEN_HELPER_NODE_NAME} points={[xMid, gap.from, xMid, gap.to]} stroke={color} strokeWidth={sw * 1.5} listening={false} />
                       <Line name={SCREEN_HELPER_NODE_NAME} points={[xMid - tickW, gap.from, xMid + tickW, gap.from]} stroke={color} strokeWidth={sw * 1.5} listening={false} />
                       <Line name={SCREEN_HELPER_NODE_NAME} points={[xMid - tickW, gap.to,   xMid + tickW, gap.to]}   stroke={color} strokeWidth={sw * 1.5} listening={false} />
+                      {/* equal-gap distance label */}
+                      <Rect name={SCREEN_HELPER_NODE_NAME} x={xMid + tickW + 2 / scale} y={mid - lh / 2} width={lw} height={lh} cornerRadius={3 / scale} fill="#17161C" stroke={color} strokeWidth={1 / scale} listening={false} />
+                      <KonvaText name={SCREEN_HELPER_NODE_NAME} x={xMid + tickW + 2 / scale} y={mid - lh / 2 + 3 / scale} width={lw} align="center" text={`${Math.round(gap.to - gap.from)}`} fontSize={11 / scale} fill="#FFFFFF" listening={false} />
                     </Fragment>
-                  ))}
+                    );
+                  })}
                 </Fragment>
               );
             }
@@ -1892,6 +2185,8 @@ export function CanvasStage({
             ref={transformerRef}
             name={SCREEN_HELPER_NODE_NAME}
             rotateEnabled
+            rotationSnaps={rotationSnaps}
+            rotationSnapTolerance={rotationSnapTolerance}
             anchorSize={10}
             borderStroke="#7C6FE0"
             anchorStroke="#9B8FF0"
@@ -1900,9 +2195,33 @@ export function CanvasStage({
             onTransform={handleTransformerTransform}
             onTransformEnd={() => {
               setIsInteracting(false);
+              setRotationReadout(null);
               clearGuides();
             }}
           />
+          {rotationReadout !== null && (
+            <Group x={rotationReadout.x} y={rotationReadout.y} listening={false}>
+              <Rect
+                x={-22 / scale}
+                y={-11 / scale}
+                width={44 / scale}
+                height={22 / scale}
+                cornerRadius={4 / scale}
+                fill="#17161C"
+                stroke="#7C6FE0"
+                strokeWidth={1 / scale}
+              />
+              <KonvaText
+                x={-22 / scale}
+                y={-7 / scale}
+                width={44 / scale}
+                align="center"
+                text={`${Math.round(rotationReadout.angle)}°`}
+                fontSize={13 / scale}
+                fill="#FFFFFF"
+              />
+            </Group>
+          )}
         </Layer>
         {/* ── Image edit overlay layer (crop handles, selection) ── */}
         {imageEditMode && imageEditLayerId !== null && (() => {
@@ -1990,8 +2309,8 @@ export function CanvasStage({
                     listening={false}
                   />
                 )}
-                {/* Selection overlay (wand / rect-select / smart-select / brush-select) */}
-                {(imageActiveTool === "wand" || imageActiveTool === "rect-select" || imageActiveTool === "smart-select" || imageActiveTool === "brush-select") && selectionCanvas !== null && (
+                {/* Selection overlay (wand / rect-select / smart-select / brush-select / lasso) */}
+                {(imageActiveTool === "wand" || imageActiveTool === "rect-select" || imageActiveTool === "smart-select" || imageActiveTool === "brush-select" || imageActiveTool === "lasso") && selectionCanvas !== null && (
                   <KonvaImage
                     x={0} y={0}
                     width={lw}
@@ -2135,7 +2454,13 @@ export function CanvasStage({
         );
       })()}
       {editingLayer !== null ? (
-        <InlineTextEditor layer={editingLayer} scale={scale} onChange={handleLayerChange} onClose={onEndTextEdit} />
+        <InlineTextEditor
+          layer={editingLayer}
+          scale={scale}
+          onChange={handleLayerChange}
+          onClose={onEndTextEdit}
+          onTextSelectionChange={onTextSelectionChange}
+        />
       ) : null}
     </div>
   );
@@ -2145,12 +2470,14 @@ function InlineTextEditor({
   layer,
   scale,
   onChange,
-  onClose
+  onClose,
+  onTextSelectionChange
 }: {
   layer: TextLayer;
   scale: number;
   onChange: (layer: VisualLayer) => void;
   onClose: () => void;
+  onTextSelectionChange?: (layerId: string, selection: TextSelectionRange | null) => void;
 }): React.ReactElement {
   const [value, setValue] = useState(layer.text);
 
@@ -2160,10 +2487,14 @@ function InlineTextEditor({
 
   function commit(): void {
     onChange(withMeasuredTextSize({
-      ...layer,
+      ...pruneRichTextForText({ ...layer, text: value }),
       text: value
     }));
     onClose();
+  }
+
+  function captureSelection(target: HTMLTextAreaElement): void {
+    onTextSelectionChange?.(layer.id, { start: target.selectionStart, end: target.selectionEnd });
   }
 
   return (
@@ -2173,13 +2504,20 @@ function InlineTextEditor({
       data-testid="inline-text-editor"
       dir={layer.direction === "auto" ? "auto" : layer.direction}
       onBlur={commit}
-      onChange={(event) => setValue(event.target.value)}
+      onChange={(event) => {
+        setValue(event.target.value);
+        captureSelection(event.currentTarget);
+      }}
+      onFocus={(event) => captureSelection(event.currentTarget)}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
           commit();
         }
       }}
+      onKeyUp={(event) => captureSelection(event.currentTarget)}
+      onMouseUp={(event) => captureSelection(event.currentTarget)}
+      onSelect={(event) => captureSelection(event.currentTarget)}
       style={{
         left: layer.x * scale,
         top: layer.y * scale,
@@ -2509,6 +2847,58 @@ function RulerOverlay({ page, scale }: { page: Page; scale: number }): React.Rea
 }
 
 // ─── Background image node ────────────────────────────────────────────────────
+
+function loadHtmlImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not load image for bucket fill."));
+    image.src = src;
+  });
+}
+
+async function recolorTransparentImageAsset(asset: Asset | undefined, color: string, layerName: string): Promise<Asset | null> {
+  const src = resolveCanvasAssetPath(asset);
+  if (asset === undefined || src === undefined) return null;
+  const isSvg = asset.mimeType === "image/svg+xml" || src.startsWith("data:image/svg");
+  if (!isSvg && asset.mimeType === "image/jpeg") return null;
+  try {
+    const image = await loadHtmlImage(src);
+    const width = Math.max(1, asset.width ?? image.naturalWidth ?? image.width);
+    const height = Math.max(1, asset.height ?? image.naturalHeight ?? image.height);
+    const canvas = window.document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (context === null) return null;
+    context.drawImage(image, 0, 0, width, height);
+    const imageData = context.getImageData(0, 0, width, height);
+    let hasTransparency = isSvg;
+    for (let index = 3; index < imageData.data.length; index += 4) {
+      if ((imageData.data[index] ?? 255) < 250) {
+        hasTransparency = true;
+        break;
+      }
+    }
+    if (!hasTransparency) return null;
+    context.globalCompositeOperation = "source-in";
+    context.fillStyle = color;
+    context.fillRect(0, 0, width, height);
+    context.globalCompositeOperation = "source-over";
+    const dataUrl = canvas.toDataURL("image/png");
+    return {
+      ...createImageAssetFromDataUrl(dataUrl, width, height, `${layerName || asset.name} bucket fill`),
+      metadata: {
+        source: "bucket-fill",
+        sourceAssetId: asset.id,
+        fillColor: color
+      }
+    };
+  } catch {
+    return null;
+  }
+}
 
 function alphaFromCanvas(canvas: HTMLCanvasElement): Uint8Array {
   const context = canvas.getContext("2d");

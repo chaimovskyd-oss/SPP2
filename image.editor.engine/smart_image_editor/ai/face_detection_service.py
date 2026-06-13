@@ -43,7 +43,36 @@ def _haar_detector():
     return None if detector.empty() else detector
 
 
+@lru_cache(maxsize=1)
+def _scrfd_detector():
+    try:
+        import onnxruntime as ort  # type: ignore
+        from smart_selection.model_manager import ModelManager
+        from smart_selection.providers import preferred_onnx_providers
+        from smart_selection.scrfd_face_detector import ScrfdFaceDetector
+
+        status = ModelManager().ensure("scrfd_2.5g_kps", auto_download=True)
+        if not status.available or not status.path:
+            return None
+        so = ort.SessionOptions()
+        so.log_severity_level = 3
+        providers = preferred_onnx_providers(list(ort.get_available_providers()))
+        session = ort.InferenceSession(status.path, sess_options=so, providers=providers)
+        return ScrfdFaceDetector(session)
+    except Exception:
+        return None
+
+
 def detect_faces(image: Image.Image) -> list[FaceBox]:
+    scrfd = _scrfd_detector()
+    if scrfd is not None:
+        faces = [
+            FaceBox(face.x, face.y, face.width, face.height, face.score)
+            for face in scrfd.detect(image)
+        ]
+        if faces:
+            return faces
+
     rgb = np.asarray(image.convert("RGB"))
     height, width = rgb.shape[:2]
     detector = _face_detector()
@@ -88,3 +117,7 @@ def face_mask(image: Image.Image, padding: float = 0.35) -> np.ndarray:
 
 def has_mediapipe_face_detection() -> bool:
     return _face_detector() is not None
+
+
+def has_scrfd_face_detection() -> bool:
+    return _scrfd_detector() is not None

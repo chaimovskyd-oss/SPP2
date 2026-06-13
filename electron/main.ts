@@ -247,6 +247,56 @@ ipcMain.handle("spp:save-pdf-dialog", async (_event, pdfBase64: string, suggeste
   }
 });
 
+// Pick a destination for a project file (Save As). Returns the chosen path only;
+// the renderer writes via spp:write-project-file so metadata stays consistent.
+ipcMain.handle("spp:save-project-dialog", async (_event, suggestedName = "project.spp2"): Promise<{ success: boolean; filePath?: string; canceled?: boolean; error?: string }> => {
+  try {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    const result = await dialog.showSaveDialog(win, {
+      title: "שמירת פרויקט",
+      defaultPath: suggestedName,
+      filters: [
+        { name: "SPP2 Project", extensions: ["spp2"] },
+        { name: "JSON", extensions: ["json"] }
+      ]
+    });
+    if (result.canceled || !result.filePath) {
+      return { success: false, canceled: true };
+    }
+    return { success: true, filePath: result.filePath };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+// Overwrite an existing project file in place (Ctrl+S when a path is known).
+ipcMain.handle("spp:write-project-file", async (_event, filePath: string, content: string): Promise<{ success: boolean; error?: string }> => {
+  try {
+    fs.writeFileSync(filePath, content, "utf8");
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+// Persist an imported asset's original bytes to an on-disk cache. Autosave strips
+// inline data URLs to stay under the localStorage quota; keeping a stable cache
+// path lets recovery re-load the full image later. Content-addressed by filename
+// (hash.ext) so re-importing the same image is deduplicated.
+ipcMain.handle("spp:cache-asset-file", async (_event, base64: string, fileName: string): Promise<{ success: boolean; filePath?: string; error?: string }> => {
+  try {
+    const dir = path.join(app.getPath("userData"), "asset-cache");
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, path.basename(fileName));
+    if (!fs.existsSync(filePath)) {
+      fs.writeFileSync(filePath, Buffer.from(base64, "base64"));
+    }
+    return { success: true, filePath };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
 function getLibreOfficeCandidates(): string[] {
   const configured = getConfiguredLibreOfficePath();
   if (process.platform === "win32") {
@@ -605,6 +655,22 @@ ipcMain.handle("spp:open-path", async (_event, filePath: string): Promise<{ erro
   }
 });
 
+// Opens the bundled HTML user guide in the OS default browser. window.open(file://) in the
+// renderer is denied by setWindowOpenHandler, so route through shell.openPath instead.
+ipcMain.handle("spp:open-user-guide", async (): Promise<{ error?: string }> => {
+  try {
+    const base = app.isPackaged ? process.resourcesPath : path.join(__dirname, "..");
+    const guidePath = path.join(base, "docs", "guide-mapping", "spp2-user-guide-he.html");
+    if (!fs.existsSync(guidePath)) {
+      return { error: `Guide not found at ${guidePath}` };
+    }
+    const error = await shell.openPath(guidePath);
+    return error ? { error } : {};
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
 /** Launch an external application with an optional file argument. */
 ipcMain.handle(
   "spp:open-external-app",
@@ -859,12 +925,35 @@ async function createWindow(): Promise<void> {
   });
 
   installFileDropNavigationGuard(win);
+
+  // Don't let the window close out from under unsaved work. Ask the renderer
+  // first; it shows the "unsaved changes" prompt and calls confirmClose() when
+  // the user decides. confirmClose() destroys the window, bypassing this guard
+  // and the beforeunload handler. Only guard once the renderer is loaded and
+  // listening; before that, allow a normal close so the X never appears stuck.
+  let closeGuardActive = false;
+  win.webContents.once("did-finish-load", () => { closeGuardActive = true; });
+  win.on("close", (event) => {
+    if (!closeGuardActive || win.webContents.isDestroyed()) return;
+    event.preventDefault();
+    win.webContents.send("spp:close-requested");
+  });
+
   if (isDev) {
     await win.loadURL(process.env.VITE_DEV_SERVER_URL as string);
   } else {
     await win.loadFile(path.join(__dirname, "../dist/index.html"));
   }
 }
+
+// The renderer calls this once the user has resolved any unsaved-changes prompt.
+// destroy() force-closes without re-triggering the close guard or beforeunload.
+ipcMain.on("spp:confirm-close", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win !== null) {
+    win.destroy();
+  }
+});
 
 async function createModeWindow(payload: ModeWindowPayload = {}): Promise<void> {
   const mode = sanitizeModeWindowMode(payload.mode);
@@ -927,6 +1016,154 @@ ipcMain.handle("spp:open-pdf-studio-window", async (): Promise<{ success: boolea
   try {
     await createModeWindow({ mode: "pdf-studio", title: MODE_WINDOW_TITLES["pdf-studio"] });
     return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+interface SmartPrepareSaveItem {
+  fileName?: unknown;
+  sourcePath?: unknown;
+  dataUrl?: unknown;
+}
+
+interface SmartPrepareSavePayload {
+  outputDir?: unknown;
+  items?: unknown;
+  report?: unknown;
+}
+
+function smartPrepareDefaultOutputDir(items: SmartPrepareSaveItem[]): string {
+  const firstSource = items.map((item) => String(item.sourcePath || "")).find((value) => value.length > 0 && fs.existsSync(value));
+  const baseDir = firstSource ? path.dirname(firstSource) : app.getPath("pictures");
+  const stamp = new Date().toISOString().slice(0, 10);
+  return path.join(baseDir, `SPP2_Smart_Print_Prepare_${stamp}`);
+}
+
+function safePreparedBaseName(fileName: unknown): string {
+  const raw = path.basename(String(fileName || "image"), path.extname(String(fileName || "")));
+  return (raw || "image").replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").slice(0, 120);
+}
+
+function uniquePreparedOutputPath(outputDir: string, fileName: unknown): string {
+  const base = safePreparedBaseName(fileName);
+  let candidate = path.join(outputDir, `${base}_prepared.jpg`);
+  let index = 2;
+  while (fs.existsSync(candidate)) {
+    candidate = path.join(outputDir, `${base}_prepared_${index}.jpg`);
+    index += 1;
+  }
+  return candidate;
+}
+
+function dataUrlToBuffer(dataUrl: unknown): Buffer {
+  const value = String(dataUrl || "");
+  const match = /^data:[^;]+;base64,(.+)$/i.exec(value);
+  if (!match) throw new Error("Invalid image data URL.");
+  return Buffer.from(match[1], "base64");
+}
+
+function smartPrepareReportHtml(report: any, outputDir: string): string {
+  const summary = report?.summary || {};
+  const rows = Array.isArray(report?.results) ? report.results : [];
+  const tr = rows.map((item: any) => `
+    <tr>
+      <td>${escapeHtml(item.fileName || "")}</td>
+      <td>${Math.round(Number(item.confidence || 0) * 100)}%</td>
+      <td>${escapeHtml((item.warnings || []).map((warning: any) => warning.message || warning.type).join(", "))}</td>
+    </tr>
+  `).join("");
+  return `<!doctype html>
+<html lang="he" dir="rtl">
+<head><meta charset="utf-8"><title>SPP2 Smart Print Prepare Report</title>
+<style>body{font-family:Arial,sans-serif;margin:32px;line-height:1.6;color:#111827}table{width:100%;border-collapse:collapse}td,th{border:1px solid #d1d5db;padding:8px;text-align:right}th{background:#eef2ff}.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:18px 0}.card{border:1px solid #d1d5db;border-radius:8px;padding:12px;background:#f9fafb}</style></head>
+<body><h1>הכנה חכמה לדפוס - דוח</h1><p>פלט נשמר אל: ${escapeHtml(outputDir)}</p>
+<div class="summary">
+<div class="card"><strong>${Number(report?.total || rows.length)}</strong><br>תמונות</div>
+<div class="card"><strong>${Number(summary.screenshotsCleaned || 0)}</strong><br>צילומי מסך נוקו</div>
+<div class="card"><strong>${Number(summary.colorCorrected || 0)}</strong><br>תיקוני צבע</div>
+<div class="card"><strong>${Number(summary.croppedToTarget || 0)}</strong><br>התאמות למידה</div>
+<div class="card"><strong>${Number(summary.manualReviewRequired || 0)}</strong><br>דורשות בדיקה</div>
+</div>
+<table><thead><tr><th>קובץ</th><th>Confidence</th><th>אזהרות</th></tr></thead><tbody>${tr}</tbody></table>
+</body></html>`;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;" }[char] || char));
+}
+
+ipcMain.handle("spp:smart-print-prepare:choose-output-dir", async (_event, defaultPath?: string): Promise<{ success: boolean; folderPath?: string; canceled?: boolean; error?: string }> => {
+  try {
+    const fallbackDir = typeof defaultPath === "string" && defaultPath.length > 0 ? defaultPath : path.join(app.getPath("pictures"), "SPP2_Smart_Print_Prepare");
+    fs.mkdirSync(fallbackDir, { recursive: true });
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    const result = await dialog.showOpenDialog(win, {
+      title: "בחירת תיקיית פלט",
+      defaultPath: fallbackDir,
+      properties: ["openDirectory", "createDirectory"]
+    });
+    if (result.canceled || !result.filePaths[0]) return { success: false, canceled: true };
+    return { success: true, folderPath: result.filePaths[0] };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle("spp:smart-print-prepare:save-batch", async (_event, payload: SmartPrepareSavePayload): Promise<{ success: boolean; outputDir?: string; saved?: string[]; error?: string }> => {
+  try {
+    const items = Array.isArray(payload?.items) ? payload.items as SmartPrepareSaveItem[] : [];
+    if (items.length === 0) return { success: false, error: "No prepared images to save." };
+    const outputDir = String(payload?.outputDir || smartPrepareDefaultOutputDir(items));
+    const imagesDir = path.join(outputDir, "images");
+    fs.mkdirSync(imagesDir, { recursive: true });
+    const saved: string[] = [];
+    for (const item of items) {
+      const outputPath = uniquePreparedOutputPath(imagesDir, item.fileName);
+      fs.writeFileSync(outputPath, dataUrlToBuffer(item.dataUrl));
+      saved.push(outputPath);
+    }
+    const report = payload?.report || {};
+    fs.writeFileSync(path.join(outputDir, "report.json"), JSON.stringify(report, null, 2), "utf-8");
+    fs.writeFileSync(path.join(outputDir, "report.html"), smartPrepareReportHtml(report, outputDir), "utf-8");
+    return { success: true, outputDir, saved };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+// Export every page of a multi-page document to ONE chosen folder in a single
+// dialog (replaces the old per-page browser download which opened N save popups).
+// The renderer supplies fully-formed, numbered file names (e.g. "doc-page-01.png").
+ipcMain.handle("spp:export-pages-to-folder", async (_event, payload: { documentName?: string; items?: Array<{ dataUrl: string; fileName: string }> }): Promise<{ success: boolean; folderPath?: string; count?: number; canceled?: boolean; error?: string }> => {
+  try {
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    if (items.length === 0) return { success: false, error: "אין עמודים לייצוא." };
+    const safeDocName = (String(payload?.documentName || "SPP2_Export").replace(/[<>:"/\\|?* -]/g, "_").slice(0, 120)) || "SPP2_Export";
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    const result = await dialog.showOpenDialog(win, {
+      title: "בחירת תיקיית ייצוא",
+      defaultPath: path.join(app.getPath("pictures"), safeDocName),
+      properties: ["openDirectory", "createDirectory"]
+    });
+    if (result.canceled || !result.filePaths[0]) return { success: false, canceled: true };
+    const outputDir = path.join(result.filePaths[0], safeDocName);
+    fs.mkdirSync(outputDir, { recursive: true });
+    let count = 0;
+    for (const item of items) {
+      const base = safePreparedBaseName(item.fileName || "page");
+      const ext = (path.extname(String(item.fileName || "")) || ".png").toLowerCase();
+      let candidate = path.join(outputDir, `${base}${ext}`);
+      let index = 2;
+      while (fs.existsSync(candidate)) {
+        candidate = path.join(outputDir, `${base}_${index}${ext}`);
+        index += 1;
+      }
+      fs.writeFileSync(candidate, dataUrlToBuffer(item.dataUrl));
+      count += 1;
+    }
+    void shell.openPath(outputDir);
+    return { success: true, folderPath: outputDir, count };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : String(err) };
   }

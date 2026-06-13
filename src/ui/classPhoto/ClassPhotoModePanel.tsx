@@ -7,6 +7,7 @@ import {
   RotateCcw,
   Settings,
   Sparkles,
+  Maximize2,
   Trash2,
   Type,
   UserRound,
@@ -22,8 +23,10 @@ import {
   type ReactElement
 } from "react";
 import { importImageAsset } from "@/core/assets/assetManager";
+import { canApplyClassPhotoGroupScale } from "@/core/classPhoto/classPhotoLayoutEngine";
 import { createClassPhotoPersonRecord } from "@/core/classPhoto/classPhotoFactory";
 import { useDocumentStore } from "@/state/documentStore";
+import { useUiBusyStore } from "@/state/uiBusyStore";
 import type { ClassPhotoLayoutRule, ClassPhotoPersonRecord } from "@/types/classPhoto";
 import type { VisualLayer, TextLayer } from "@/types/layers";
 
@@ -57,13 +60,16 @@ export function ClassPhotoModePanel({ rule, selectedLayer, smartCropProgress = n
   const addFileInputRef = useRef<HTMLInputElement>(null);
 
   const activePageId = useDocumentStore((s) => s.activePageId);
+  const document = useDocumentStore((s) => s.document);
   const regenerateClassPhoto = useDocumentStore((s) => s.regenerateClassPhoto);
   const addPeopleToClassPhoto = useDocumentStore((s) => s.addPeopleToClassPhoto);
   const removePersonFromClassPhoto = useDocumentStore((s) => s.removePersonFromClassPhoto);
   const updateClassPhotoPerson = useDocumentStore((s) => s.updateClassPhotoPerson);
   const updateClassPhotoFrameStyle = useDocumentStore((s) => s.updateClassPhotoFrameStyle);
+  const updateClassPhotoLayoutSettings = useDocumentStore((s) => s.updateClassPhotoLayoutSettings);
   const updateClassPhotoNameTextStyle = useDocumentStore((s) => s.updateClassPhotoNameTextStyle);
   const applyClassPhotoTextStyleToGroup = useDocumentStore((s) => s.applyClassPhotoTextStyleToGroup);
+  const flashToast = useUiBusyStore((s) => s.flashToast);
 
   // Detect if selected layer is a managed class photo item
   const selectedPersonId =
@@ -106,6 +112,25 @@ export function ClassPhotoModePanel({ rule, selectedLayer, smartCropProgress = n
 
   function toggleSection(key: string): void {
     setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  function handleGroupScaleChange(target: "child" | "staff", value: number): void {
+    const nextChildScale = target === "child" ? value : rule.layoutSettings.childGroupScale ?? 1;
+    const nextStaffScale = target === "staff" ? value : rule.layoutSettings.staffGroupScale ?? 1;
+    const page = document?.pages.find((p) => p.id === rule.pageId);
+    if (!page) return;
+    const canApply = canApplyClassPhotoGroupScale(page.width, page.height, rule, {
+      childGroupScale: nextChildScale,
+      staffGroupScale: nextStaffScale
+    });
+    if (!canApply) {
+      flashToast("הגודל הזה לא נכנס בבטחה בדף. נסה ערך קטן יותר או פנה מקום.", 2600);
+      return;
+    }
+    updateClassPhotoLayoutSettings(rule.id, {
+      childGroupScale: nextChildScale,
+      staffGroupScale: nextStaffScale
+    });
   }
 
   const staffRecords = rule.personRecords.filter((r) => r.role === "staff");
@@ -303,6 +328,34 @@ export function ClassPhotoModePanel({ rule, selectedLayer, smartCropProgress = n
           </div>
         </div>
       )}
+
+      <div className="cp-panel-section">
+        <div className="cp-section-header" onClick={() => toggleSection("groupScale")}>
+          <span><Maximize2 size={13} /> גודל קבוצות</span>
+          {collapsed["groupScale"] ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+        </div>
+        {!collapsed["groupScale"] && (
+          <div className="cp-section-body">
+            <GroupScaleSlider
+              label="תלמידים"
+              value={rule.layoutSettings.childGroupScale ?? 1}
+              onChange={(childGroupScale) => handleGroupScaleChange("child", childGroupScale)}
+            />
+            <GroupScaleSlider
+              label="צוות"
+              value={rule.layoutSettings.staffGroupScale ?? 1}
+              onChange={(staffGroupScale) => handleGroupScaleChange("staff", staffGroupScale)}
+            />
+            <button
+              className="cp-apply-btn"
+              onClick={() => updateClassPhotoLayoutSettings(rule.id, { childGroupScale: 1, staffGroupScale: 1 })}
+              type="button"
+            >
+              איפוס ל-100%
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* ── Frame style ── */}
       <div className="cp-panel-section">
@@ -506,6 +559,31 @@ function MiniTextStylePicker({ fontSize, fontWeight, color, onFontSizeChange, on
           value={color}
         />
       </label>
+    </div>
+  );
+}
+
+function GroupScaleSlider({ label, value, onChange }: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}): ReactElement {
+  const pct = Math.round(value * 100);
+  return (
+    <div className="cp-slider-row">
+      <div className="cp-slider-header">
+        <span className="cp-slider-label">{label}</span>
+        <span className="cp-slider-value">{pct}%</span>
+      </div>
+      <input
+        dir="ltr"
+        max={160}
+        min={50}
+        onChange={(e) => onChange(Number(e.target.value) / 100)}
+        step={1}
+        type="range"
+        value={pct}
+      />
     </div>
   );
 }

@@ -23,6 +23,8 @@ export interface ClassPhotoLayoutSettings extends VersionedEntity {
   staffRowEnabled: boolean;
   staffLargerThanChildren: boolean;
   staffScale: number;
+  childGroupScale?: number;
+  staffGroupScale?: number;
 
   childFrameSize: Size;
   staffFrameSize: Size;

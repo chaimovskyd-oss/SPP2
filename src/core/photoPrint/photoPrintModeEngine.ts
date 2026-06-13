@@ -97,6 +97,7 @@ export function computePhotoPrintLayout(
   const usableW = Math.max(1, pageWidthPx - 2 * marginPx);
   const usableH = Math.max(1, pageHeightPx - 2 * marginPx);
   const totalPrintItems = Math.max(1, totalSourceImages) * Math.max(1, globalCopies);
+  const printDims = orientPrintDimensions(printWidthMm, printHeightMm, orientationPolicy);
 
   // Smart grid: fixed count per page
   if (targetsPerPage > 0) {
@@ -116,14 +117,14 @@ export function computePhotoPrintLayout(
     };
   }
 
-  const printWPx = mmToPx(printWidthMm, dpi);
-  const printHPx = mmToPx(printHeightMm, dpi);
+  const printWPx = mmToPx(printDims.widthMm, dpi);
+  const printHPx = mmToPx(printDims.heightMm, dpi);
 
   const colsNormal = Math.max(0, Math.floor((usableW + gapPx) / (printWPx + gapPx)));
   const rowsNormal = Math.max(0, Math.floor((usableH + gapPx) / (printHPx + gapPx)));
   const totalNormal = colsNormal * rowsNormal;
 
-  if (autoRotateOnSheet) {
+  if (autoRotateOnSheet && orientationPolicy === "auto") {
     const colsRotated = Math.max(0, Math.floor((usableW + gapPx) / (printHPx + gapPx)));
     const rowsRotated = Math.max(0, Math.floor((usableH + gapPx) / (printWPx + gapPx)));
     const totalRotated = colsRotated * rowsRotated;
@@ -211,8 +212,9 @@ export function createPhotoPrintModeDocument(
 }
 
 export function fillPhotoPrintWithImages(document: Document, ruleId: string, inputs: PhotoPrintImageInput[]): Document {
-  const rule = getRule(document, ruleId);
-  if (rule === undefined) return document;
+  const rawRule = getRule(document, ruleId);
+  if (rawRule === undefined) return document;
+  const rule = normalizePhotoPrintRule(rawRule);
   const firstPage = document.pages.find((page) => page.id === rule.pageIds[0]) ?? document.pages[0];
   if (firstPage === undefined) return document;
 
@@ -257,7 +259,7 @@ export function fillPhotoPrintWithImages(document: Document, ruleId: string, inp
 export function regeneratePhotoPrint(document: Document, ruleId: string, patch: Partial<PhotoPrintRule>): Document {
   const rule = getRule(document, ruleId);
   if (rule === undefined) return document;
-  const nextRule: PhotoPrintRule = { ...rule, ...patch };
+  const nextRule = normalizePhotoPrintRule({ ...rule, ...patch });
   const existing = document.photoPrintImageAssignments
     .filter((a) => a.photoPrintId === ruleId)
     .sort((a, b) => a.globalIndex - b.globalIndex);
@@ -288,14 +290,16 @@ export function getActivePhotoPrintRule(document: Document): PhotoPrintRule | un
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 function createPhotoPrintRule(ruleId: string, setup: PageSetup, options: PhotoPrintCreateOptions): PhotoPrintRule {
-  return {
+  const orientationPolicy = options.orientationPolicy ?? "auto";
+  const printDims = orientPrintDimensions(options.printWidthMm, options.printHeightMm, orientationPolicy);
+  return normalizePhotoPrintRule({
     version: 1,
     id: ruleId,
     name: options.name ?? "פיתוח תמונות",
     pageIds: [],
     frameIds: [],
-    printWidthMm: options.printWidthMm,
-    printHeightMm: options.printHeightMm,
+    printWidthMm: printDims.widthMm,
+    printHeightMm: printDims.heightMm,
     frameBorderEnabled: options.frameBorderEnabled ?? true,
     frameBorderMm: options.frameBorderMm ?? DEFAULT_BORDER_MM,
     frameBorderColor: options.frameBorderColor ?? "#ffffff",
@@ -311,7 +315,7 @@ function createPhotoPrintRule(ruleId: string, setup: PageSetup, options: PhotoPr
     slotsPerColumn: 1,
     slotsRotatedOnSheet: false,
     targetsPerPage: options.targetsPerPage ?? 0,
-    orientationPolicy: options.orientationPolicy ?? "auto",
+    orientationPolicy,
     faceDetectionEnabled: options.faceDetectionEnabled ?? false,
     globalCopies: options.globalCopies ?? DEFAULT_COPIES,
     perImageCopies: {},
@@ -321,7 +325,29 @@ function createPhotoPrintRule(ruleId: string, setup: PageSetup, options: PhotoPr
     passportSizeMm: options.passportSizeMm,
     showPassportGuidelines: options.showPassportGuidelines,
     metadata: { dpi: setup.dpi, printPresetId: options.printPresetId ?? "" }
+  });
+}
+
+function normalizePhotoPrintRule(rule: PhotoPrintRule): PhotoPrintRule {
+  const printDims = orientPrintDimensions(rule.printWidthMm, rule.printHeightMm, rule.orientationPolicy);
+  return {
+    ...rule,
+    printWidthMm: printDims.widthMm,
+    printHeightMm: printDims.heightMm
   };
+}
+
+function orientPrintDimensions(
+  widthMm: number,
+  heightMm: number,
+  orientationPolicy: "auto" | "portrait" | "landscape"
+): { widthMm: number; heightMm: number } {
+  if (orientationPolicy === "auto") return { widthMm, heightMm };
+  const min = Math.min(widthMm, heightMm);
+  const max = Math.max(widthMm, heightMm);
+  return orientationPolicy === "portrait"
+    ? { widthMm: min, heightMm: max }
+    : { widthMm: max, heightMm: min };
 }
 
 interface ExpandedInput {

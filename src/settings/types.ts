@@ -1,7 +1,9 @@
 import type { Unit } from "@/types/primitives";
 import type { AppShortcutDef } from "@/core/input/inputSystem";
+import type { AdvancedPrintSettings } from "@/types/advancedPrint";
 
 export type { AppShortcutDef };
+export type { AdvancedPrintSettings };
 
 // ─── Shortcut types ────────────────────────────────────────────────────────────
 
@@ -84,6 +86,16 @@ export interface WorkspaceSettings {
   defaultObjectSpacingMm: number;
   defaultImageFillMode: "cover" | "contain" | "fit" | "stretch";
   autoRotateImagesInFrames: boolean;
+  // Snapping / smart-guide / rotation behavior (app-level prefs).
+  // Tolerances are in SCREEN pixels and converted to canvas units per zoom at use-site.
+  smartGuidesEnabled: boolean;
+  snapToCanvasEnabled: boolean;
+  snapToLayersEnabled: boolean;
+  rotationSnapEnabled: boolean;
+  snapTolerancePx: number;
+  shiftSnapTolerancePx: number;
+  rotationSnapToleranceDeg: number;
+  shiftRotationStepDeg: number;
   freeModeDefaults: FreeModeDefaults;
   gridModeDefaults: GridModeDefaults;
   sizeModeDefaults: SizeModeDefaults;
@@ -117,6 +129,15 @@ export interface PerformanceSettings {
   warnLargeFileMb: number;
   performanceMode: boolean;
   lowResWhileDragging: boolean;
+  /**
+   * How aggressively local AI models are preloaded/warmed at startup.
+   * "balanced" keeps Object Select hot; heavier content-aware models load only
+   * in advanced/full or on demand.
+   * See plan add-an-ai-model-jiggly-locket.
+   */
+  aiPerformanceMode: "lazy" | "balanced" | "advanced" | "full";
+  /** Show the loading video while AI models preload on startup. */
+  aiShowLoadingVideo: boolean;
 }
 
 export interface FilesAutosaveSettings {
@@ -166,6 +187,33 @@ export interface AdvancedSettings {
   enableDiagnostics: boolean;
 }
 
+export interface PrintHubSettings {
+  /** Shared queue folder this station sends jobs to (e.g. \\PRINT-PC\SPP_PrintQueue). */
+  networkFolderPath: string;
+  /** Role of this station in the hub. */
+  stationRole: "designer" | "operator" | "admin";
+  /** Default approval mode applied to jobs sent from this station. */
+  defaultApprovalMode: "auto" | "require_approval";
+  /** Local hub root used when this machine acts as the print server (e.g. C:\SPP_PrintHub). */
+  serverHubRoot: string;
+  /** Days to keep jobs in Done/Archive before auto-purge (Phase 10). 0 = keep forever. */
+  retentionDays: number;
+  /** How this station sends jobs: shared folder (default) or directly to a Hub over the LAN. */
+  transportMode: "folder" | "lan";
+  /** LAN transport target — the Print Hub machine's hostname/IP. */
+  lanHost: string;
+  /** LAN transport target port (the Hub's ingest server). */
+  lanPort: number;
+  /** Pairing token shown by the Hub, required to submit jobs over LAN. */
+  lanToken: string;
+  /** Mirror job status to Supabase for a live cross-machine queue (metadata only, no images). */
+  cloudStatusEnabled: boolean;
+}
+
+export interface ComponentsSettings {
+  lastCheckedAt: string;
+}
+
 // ─── Root settings shape ───────────────────────────────────────────────────────
 
 export interface AppSettings {
@@ -179,6 +227,9 @@ export interface AppSettings {
   exportPrint: ExportPrintSettings;
   passport: PassportSettings;
   advanced: AdvancedSettings;
+  printHub: PrintHubSettings;
+  advancedPrint: AdvancedPrintSettings;
+  components: ComponentsSettings;
 }
 
 export type SettingsCategory = keyof Omit<AppSettings, "schemaVersion">;

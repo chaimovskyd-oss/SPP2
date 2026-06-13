@@ -55,6 +55,7 @@ export interface ToolLibraryProps {
   /**
    * Called when the user applies an item. strength is 0..1 (presets only; tools/effects get 1).
    * applyToAll is true when the user chose "apply to all images on the page" (image presets only).
+   * applyToAllPages is true when the user chose "apply to all pages" in a multi-page document.
    * duplicate is true when the user chose "duplicate layer & apply" (single image preset only).
    */
   onApply: (
@@ -62,7 +63,8 @@ export interface ToolLibraryProps {
     strength: number,
     applyToAll: boolean,
     duplicate: boolean,
-    extra: ImageAdjustmentTemplate[]
+    extra: ImageAdjustmentTemplate[],
+    applyToAllPages: boolean
   ) => void;
   onClose: () => void;
   /** src/data-URL of the image to preview against (the selected image). */
@@ -71,13 +73,15 @@ export interface ToolLibraryProps {
   previewLabel?: string;
   /** how many images the preset would apply to (for the multi-select note). */
   selectedCount?: number;
+  /** document page count; when >1 the library offers all-pages apply modes. */
+  pageCount?: number;
 }
 
 const ALL_CATEGORIES = "__all__";
 /** side = original next to edited (default), split = wipe divider, before/after = single. */
 type PreviewMode = "side" | "split" | "before" | "after";
 /** How an image preset is committed: in place, on a duplicate, or to all images. */
-type ApplyMode = "layer" | "duplicate" | "all";
+type ApplyMode = "layer" | "duplicate" | "all" | "allPages";
 
 type AiState = "idle" | "running" | "done";
 
@@ -120,7 +124,8 @@ export function ToolLibrary({
   onClose,
   previewSrc,
   previewLabel,
-  selectedCount = 0
+  selectedCount = 0,
+  pageCount = 1
 }: ToolLibraryProps): ReactElement {
   const recentKeys = useToolLibraryStore((s) => s.recentKeys);
   const markUsed = useToolLibraryStore((s) => s.markUsed);
@@ -164,10 +169,12 @@ export function ToolLibrary({
   const [aiState, setAiState] = useState<AiState>("idle");
   const [aiTemplates, setAiTemplates] = useState<ImageAdjustmentTemplate[]>([]);
   const [aiHasFace, setAiHasFace] = useState(false);
+  const [toolAdvancedOpen, setToolAdvancedOpen] = useState(false);
 
   const effectivePct = strengthPct ?? defaultPct;
   const isImagePreset = selected !== null && selected.kind === "imagePreset";
   const canApplyToAll = isImagePreset;
+  const canApplyToAllPages = pageCount > 1 && (isImagePreset || isTool || isAiTool || selected?.kind === "pageLookPreset" || selected?.kind === "effect");
   const canDuplicate = context === "image" && isImagePreset && previewSrc !== undefined;
   // Tools and AI tools can also be applied to every image on the page.
   const toolCanApplyToAll = isTool || (isAiTool && previewSrc !== undefined);
@@ -246,16 +253,17 @@ export function ToolLibrary({
 
   const handleApply = (item: LibraryItem): void => {
     markUsed(item.key);
-    const shouldApplyToAll = context === "page" || applyMode === "all";
+    const shouldApplyToAllPages = applyMode === "allPages";
+    const shouldApplyToAll = context === "page" || applyMode === "all" || shouldApplyToAllPages;
     if (item.kind === "tool" && item.toolType !== undefined) {
       onApply(item, 1, toolCanApplyToAll && shouldApplyToAll, false, [
         buildToolTemplate(item.toolType, toolDraft, curvePreset)
-      ]);
+      ], shouldApplyToAllPages);
     } else if (item.kind === "aiTool") {
       if (aiTemplates.length === 0) return;
-      onApply(item, 1, toolCanApplyToAll && shouldApplyToAll, false, aiTemplates);
+      onApply(item, 1, toolCanApplyToAll && shouldApplyToAll, false, aiTemplates, shouldApplyToAllPages);
     } else {
-      onApply(item, effectivePct / 100, canApplyToAll && shouldApplyToAll, canDuplicate && duplicate, extraTemplates);
+      onApply(item, effectivePct / 100, canApplyToAll && shouldApplyToAll, canDuplicate && duplicate, extraTemplates, shouldApplyToAllPages);
     }
   };
 
@@ -457,17 +465,57 @@ export function ToolLibrary({
                 {isTool && selected.toolType !== undefined && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {PARAM_CONFIG[selected.toolType].length > 0 ? (
-                      PARAM_CONFIG[selected.toolType].map((slider) => (
-                        <ThrottledSlider
-                          key={slider.key}
-                          label={slider.label}
-                          value={toolDraft[slider.key] ?? 0}
-                          min={slider.min}
-                          max={slider.max}
-                          step={slider.step ?? 1}
-                          onCommit={(v) => setToolDraft((d) => ({ ...d, [slider.key]: v }))}
-                        />
-                      ))
+                      <>
+                        {PARAM_CONFIG[selected.toolType]
+                          .filter((slider) => slider.advanced !== true)
+                          .map((slider) => (
+                            <ThrottledSlider
+                              key={slider.key}
+                              label={slider.label}
+                              value={toolDraft[slider.key] ?? 0}
+                              min={slider.min}
+                              max={slider.max}
+                              step={slider.step ?? 1}
+                              onCommit={(v) => setToolDraft((d) => ({ ...d, [slider.key]: v }))}
+                            />
+                          ))}
+                        {PARAM_CONFIG[selected.toolType].some((slider) => slider.advanced === true) && (
+                          <div>
+                            <button
+                              type="button"
+                              onClick={() => setToolAdvancedOpen((v) => !v)}
+                              style={{
+                                background: "none",
+                                border: "none",
+                                padding: 0,
+                                cursor: "pointer",
+                                fontSize: 12,
+                                fontWeight: 600,
+                                color: "var(--color-text-secondary,#aaa)"
+                              }}
+                            >
+                              {toolAdvancedOpen ? "▾" : "▸"} מתקדם
+                            </button>
+                            {toolAdvancedOpen && (
+                              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+                                {PARAM_CONFIG[selected.toolType]
+                                  .filter((slider) => slider.advanced === true)
+                                  .map((slider) => (
+                                    <ThrottledSlider
+                                      key={slider.key}
+                                      label={slider.label}
+                                      value={toolDraft[slider.key] ?? 0}
+                                      min={slider.min}
+                                      max={slider.max}
+                                      step={slider.step ?? 1}
+                                      onCommit={(v) => setToolDraft((d) => ({ ...d, [slider.key]: v }))}
+                                    />
+                                  ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
                     ) : selected.toolType === "curves" ? (
                       <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--color-text-secondary,#888)" }}>
                         <span>סוג עקומה</span>
@@ -534,7 +582,7 @@ export function ToolLibrary({
                     <ApplyModeButton
                       label="החל על התמונה"
                       hint="מוסיף את ההתאמה לתמונה הנבחרת בלבד"
-                      active={applyMode !== "all"}
+                      active={applyMode === "layer"}
                       onClick={() => setApplyMode("layer")}
                     />
                     {toolCanApplyToAll && (
@@ -543,6 +591,14 @@ export function ToolLibrary({
                         hint="מוסיף את אותה התאמה לכל התמונות בעמוד"
                         active={applyMode === "all"}
                         onClick={() => setApplyMode("all")}
+                      />
+                    )}
+                    {canApplyToAllPages && (
+                      <ApplyModeButton
+                        label="החל על כל העמודים"
+                        hint={`מחיל את אותה התאמה על כל התמונות בכל ${pageCount} העמודים`}
+                        active={applyMode === "allPages"}
+                        onClick={() => setApplyMode("allPages")}
                       />
                     )}
                   </div>
@@ -573,6 +629,32 @@ export function ToolLibrary({
                         onClick={() => setApplyMode("all")}
                       />
                     )}
+                    {canApplyToAllPages && (
+                      <ApplyModeButton
+                        label="החל על כל העמודים"
+                        hint={`מחיל את הפריסט על כל התמונות בכל ${pageCount} העמודים`}
+                        active={applyMode === "allPages"}
+                        onClick={() => setApplyMode("allPages")}
+                      />
+                    )}
+                  </div>
+                )}
+
+                {(selected?.kind === "pageLookPreset" || selected?.kind === "effect") && canApplyToAllPages && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontSize: 11, color: "var(--color-text-tertiary,#666)" }}>יעד החלה</span>
+                    <ApplyModeButton
+                      label="החל על העמוד הנוכחי"
+                      hint="מוסיף את שכבת האווירה לעמוד הנוכחי בלבד"
+                      active={applyMode !== "allPages"}
+                      onClick={() => setApplyMode("layer")}
+                    />
+                    <ApplyModeButton
+                      label="החל על כל העמודים"
+                      hint={`מוסיף את שכבת האווירה לכל ${pageCount} העמודים`}
+                      active={applyMode === "allPages"}
+                      onClick={() => setApplyMode("allPages")}
+                    />
                   </div>
                 )}
 

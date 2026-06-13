@@ -106,6 +106,15 @@ export function AdvancedPanel(): ReactElement {
         </div>
       </SettingsSection>
 
+      <SettingsSection title="הדפסה מתקדמת" description="מנוע ההדפסה המרכזי: פרופילי מדפסת, Preflight, ניהול צבע ICC, דף בדיקה ועוזר Windows מקורי מבוסס C#." >
+        <div className="settings-row">
+          <div className="settings-row-label">
+            <span className="settings-row-name">פעיל כברירת מחדל</span>
+            <div className="settings-row-desc">כפתור ההדפסה הראשי בעורך פותח את כלי ההדפסה המתקדם.</div>
+          </div>
+        </div>
+      </SettingsSection>
+
       <SettingsSection title="אבחון ופיתוח">
         <SettingsRow label="מצב Debug" description="הצג לוגים מורחבים ואפשרויות פיתוח.">
           <SettingsToggle value={advanced.debugMode} onChange={(v) => updateAdvanced({ debugMode: v })} />

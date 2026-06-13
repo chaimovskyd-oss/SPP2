@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#ffe08a"/>
+      <stop offset="0.5" stop-color="#74c0fc"/>
+      <stop offset="1" stop-color="#8ce99a"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="800" fill="url(#bg)"/>
+  <circle cx="320" cy="300" r="150" fill="#ffffff" opacity="0.82"/>
+  <rect x="620" y="180" width="340" height="260" rx="36" fill="#1c1b29" opacity="0.78"/>
+  <text x="790" y="325" text-anchor="middle" font-family="Arial, sans-serif" font-size="56" fill="#ffffff" font-weight="700">SPP2</text>
+  <text x="790" y="382" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" fill="#dbe4ff">Guide sample image</text>
+  <path d="M160 640 C320 520 430 720 610 590 S930 550 1060 680" fill="none" stroke="#ffffff" stroke-width="28" opacity="0.72" stroke-linecap="round"/>
+</svg>

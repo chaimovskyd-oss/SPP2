@@ -213,9 +213,19 @@ export function reorderLayersAction(pageId: string, before: VisualLayer[], after
 }
 
 /** Full before/after page-layer swap with a caller-supplied action type. One undo record. */
-export function changeLayersAction(pageId: string, before: VisualLayer[], after: VisualLayer[], type = "ChangeLayersAction"): DocumentAction {
-  return createAction(type, (document) => updatePageById(document, pageId, (page) => ({ ...page, layers: after })), (document) =>
-    updatePageById(document, pageId, (page) => ({ ...page, layers: before }))
+export function changeLayersAction(
+  pageId: string,
+  before: VisualLayer[],
+  after: VisualLayer[],
+  type = "ChangeLayersAction",
+  coalesceKey?: string
+): DocumentAction {
+  return createAction(
+    type,
+    (document) => updatePageById(document, pageId, (page) => ({ ...page, layers: after })),
+    (document) => updatePageById(document, pageId, (page) => ({ ...page, layers: before })),
+    coalesceKey,
+    coalesceKey !== undefined
   );
 }
 

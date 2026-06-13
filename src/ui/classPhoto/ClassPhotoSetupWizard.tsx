@@ -65,6 +65,34 @@ const SHAPE_OPTIONS: Array<{ value: ClassPhotoFrameStyle["shape"]; label: string
   { value: "cloud", label: "ענן" }
 ];
 
+type SpacingDensity = "compact" | "standard" | "relaxed";
+
+const SPACING_DENSITY_OPTIONS: Array<{ value: SpacingDensity; label: string; hint: string; factor: number }> = [
+  { value: "standard", label: "סטנדרטי", hint: "איזון בטוח לרוב הכיתות", factor: 1 },
+  { value: "compact", label: "צפוף", hint: "יותר מקום לתמונות", factor: 0.62 },
+  { value: "relaxed", label: "מרווח", hint: "אוויר בין השורות כשיש מספיק מקום", factor: 1.28 }
+];
+
+function spacingDensityFromLayout(base: ClassPhotoLayoutSettings, current?: ClassPhotoLayoutSettings): SpacingDensity {
+  if (!current || base.horizontalSpacing <= 0) return "standard";
+  const ratio = current.horizontalSpacing / base.horizontalSpacing;
+  if (ratio < 0.82) return "compact";
+  if (ratio > 1.14) return "relaxed";
+  return "standard";
+}
+
+function applySpacingDensity(settings: ClassPhotoLayoutSettings, density: SpacingDensity): ClassPhotoLayoutSettings {
+  const option = SPACING_DENSITY_OPTIONS.find((item) => item.value === density) ?? SPACING_DENSITY_OPTIONS[0];
+  const factor = option.factor;
+  return {
+    ...settings,
+    horizontalSpacing: Math.max(0, Math.round(settings.horizontalSpacing * factor)),
+    verticalSpacing: Math.max(0, Math.round(settings.verticalSpacing * factor)),
+    frameToNameSpacing: Math.max(0, Math.round(settings.frameToNameSpacing * Math.min(factor, 1))),
+    staffToChildrenSpacing: Math.max(0, Math.round(settings.staffToChildrenSpacing * factor))
+  };
+}
+
 type WizardStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 const STEP_LABELS: Record<WizardStep, string> = {
@@ -100,6 +128,18 @@ export interface ClassPhotoWizardInitialState {
   layoutSettings?: ClassPhotoLayoutSettings;
   /** Back-to-wizard: skip image upload step since images are already imported */
   imagesAlreadyImported?: boolean;
+}
+
+function buildInitialPageSetup(
+  presetId: string,
+  orientation: "portrait" | "landscape"
+): PageSetup {
+  const preset = CLASS_PHOTO_PRESETS.find((p) => p.id === presetId && p.id !== "custom");
+  const base = pageSetupFromPreset(getPagePreset(preset?.id ?? "a4"));
+  const isPortrait = orientation === "portrait";
+  const w = isPortrait ? Math.min(base.size.width, base.size.height) : Math.max(base.size.width, base.size.height);
+  const h = isPortrait ? Math.max(base.size.width, base.size.height) : Math.min(base.size.width, base.size.height);
+  return { ...base, size: { width: w, height: h }, orientation };
 }
 
 interface ClassPhotoSetupWizardProps {
@@ -168,12 +208,20 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
   const [visualBalance, setVisualBalance] = useState<ClassPhotoVisualBalanceSettings>(
     initialState?.visualBalanceSettings ?? defaultVisualBalanceSettings()
   );
-  // Spacing overrides — pre-fill from initialState.layoutSettings if back-to-wizard
   const preLS = initialState?.layoutSettings;
-  const [hSpacingOverride, setHSpacingOverride] = useState<number | null>(preLS?.horizontalSpacing ?? null);
-  const [vSpacingOverride, setVSpacingOverride] = useState<number | null>(preLS?.verticalSpacing ?? null);
-  const [frameToNameOverride, setFrameToNameOverride] = useState<number | null>(preLS?.frameToNameSpacing ?? null);
-  const [staffSpacingOverride, setStaffSpacingOverride] = useState<number | null>(preLS?.staffToChildrenSpacing ?? null);
+  const initialPageSetupForDensity = buildInitialPageSetup(
+    initialState?.presetId ?? "a4",
+    initialState?.orientation ?? "portrait"
+  );
+  const initialDensityBase = defaultLayoutSettings(
+    initialPageSetupForDensity.size.width,
+    initialPageSetupForDensity.size.height,
+    Math.max(1, (initialState?.personRecords ?? []).filter((r) => r.role === "child").length),
+    Math.max(0, (initialState?.personRecords ?? []).filter((r) => r.role === "staff").length)
+  );
+  const [spacingDensity, setSpacingDensity] = useState<SpacingDensity>(
+    spacingDensityFromLayout(initialDensityBase, preLS)
+  );
 
   // ─── Step 9 — background ────────────────────────────────────────────────
   const [backgroundFile, setBackgroundFile] = useState<File | undefined>();
@@ -237,13 +285,7 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
     const childCount = personRecords.filter((r) => r.role === "child").length;
     const staffCount = personRecords.filter((r) => r.role === "staff").length;
     const ls = defaultLayoutSettings(pageSetup.size.width, pageSetup.size.height, childCount, staffCount);
-    return optimizeLayoutSettings(pageSetup, {
-      ...ls,
-      horizontalSpacing: hSpacingOverride ?? ls.horizontalSpacing,
-      verticalSpacing: vSpacingOverride ?? ls.verticalSpacing,
-      frameToNameSpacing: frameToNameOverride ?? ls.frameToNameSpacing,
-      staffToChildrenSpacing: staffSpacingOverride ?? ls.staffToChildrenSpacing
-    });
+    return optimizeLayoutSettings(pageSetup, applySpacingDensity(ls, spacingDensity));
   }
 
   function optimizeLayoutSettings(pageSetup: PageSetup, settings: ClassPhotoLayoutSettings): ClassPhotoLayoutSettings {
@@ -391,7 +433,7 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
       personRecords,
       backgroundFile,
       pageSetup,
-      titleText: titleText || `תמונת כיתה${customerName ? ` — ${customerName}` : ""}`,
+      titleText,
       footerText,
       titleFontFamily,
       footerFontFamily,
@@ -421,23 +463,7 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
     Math.max(1, personRecords.filter((r) => r.role === "child").length),
     Math.max(0, personRecords.filter((r) => r.role === "staff").length)
   );
-  const autoLS = optimizeLayoutSettings(previewPageSetup, {
-    ...autoLSBase,
-    horizontalSpacing: hSpacingOverride ?? autoLSBase.horizontalSpacing,
-    verticalSpacing: vSpacingOverride ?? autoLSBase.verticalSpacing,
-    frameToNameSpacing: frameToNameOverride ?? autoLSBase.frameToNameSpacing,
-    staffToChildrenSpacing: staffSpacingOverride ?? autoLSBase.staffToChildrenSpacing
-  });
-  const effectiveH = hSpacingOverride ?? autoLS.horizontalSpacing;
-  const effectiveV = vSpacingOverride ?? autoLS.verticalSpacing;
-  const effectiveFN = frameToNameOverride ?? autoLS.frameToNameSpacing;
-  const effectiveST = staffSpacingOverride ?? autoLS.staffToChildrenSpacing;
-
-  // Slider max = 3x auto value, min = 0
-  const hMax = Math.round(autoLS.horizontalSpacing * 3);
-  const vMax = Math.round(autoLS.verticalSpacing * 3);
-  const fnMax = Math.round(autoLS.frameToNameSpacing * 3);
-  const stMax = Math.round(autoLS.staffToChildrenSpacing * 3);
+  const autoLS = optimizeLayoutSettings(previewPageSetup, applySpacingDensity(autoLSBase, spacingDensity));
 
   return (
     <div className="cp-wizard-overlay">
@@ -727,53 +753,22 @@ export function ClassPhotoSetupWizard({ onComplete, onCancel, initialState }: Cl
               <h3>ריווח ופריסה</h3>
               <p className="cp-step-desc">
                 גודל מסגרת אוטומטי: <strong>{autoLS.childFrameSize.width}px</strong> ({personRecords.filter(r=>r.role==="child").length} ילדים).
-                הגדרות ריווח מסומנות <em>אוטו</em> מחושבות אוטומטית לפי מספר הילדים.
+                הריווח מחושב אוטומטית לפי מספר הילדים וגודל הדף.
               </p>
 
-              <SliderWithReset
-                label="רווח אופקי בין תמונות"
-                value={effectiveH}
-                min={0}
-                max={Math.max(hMax, effectiveH)}
-                autoValue={autoLS.horizontalSpacing}
-                isOverridden={hSpacingOverride !== null}
-                onChange={(v) => setHSpacingOverride(v)}
-                onReset={() => setHSpacingOverride(null)}
-                unit="px"
-              />
-              <SliderWithReset
-                label="רווח אנכי בין שורות"
-                value={effectiveV}
-                min={0}
-                max={Math.max(vMax, effectiveV)}
-                autoValue={autoLS.verticalSpacing}
-                isOverridden={vSpacingOverride !== null}
-                onChange={(v) => setVSpacingOverride(v)}
-                onReset={() => setVSpacingOverride(null)}
-                unit="px"
-              />
-              <SliderWithReset
-                label="רווח מסגרת לשם"
-                value={effectiveFN}
-                min={0}
-                max={Math.max(fnMax, effectiveFN)}
-                autoValue={autoLS.frameToNameSpacing}
-                isOverridden={frameToNameOverride !== null}
-                onChange={(v) => setFrameToNameOverride(v)}
-                onReset={() => setFrameToNameOverride(null)}
-                unit="px"
-              />
-              <SliderWithReset
-                label="רווח צוות-ילדים"
-                value={effectiveST}
-                min={0}
-                max={Math.max(stMax, effectiveST)}
-                autoValue={autoLS.staffToChildrenSpacing}
-                isOverridden={staffSpacingOverride !== null}
-                onChange={(v) => setStaffSpacingOverride(v)}
-                onReset={() => setStaffSpacingOverride(null)}
-                unit="px"
-              />
+              <div className="cp-shape-grid" role="radiogroup" aria-label="צפיפות פריסה">
+                {SPACING_DENSITY_OPTIONS.map((option) => (
+                  <button
+                    className={`cp-shape-btn${spacingDensity === option.value ? " active" : ""}`}
+                    key={option.value}
+                    onClick={() => setSpacingDensity(option.value)}
+                    title={option.hint}
+                    type="button"
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
 
               <div style={{ marginTop: 8, borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
                 <label className="cp-toggle-row">

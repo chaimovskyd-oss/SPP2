@@ -1,0 +1,9 @@
+# NVIDIA CUDA acceleration for Stable Diffusion content-aware fill.
+# Installs the CUDA build of torch, REPLACING the CPU build pulled in by
+# requirements-content-aware.txt. Optional component — only installed on
+# machines with an NVIDIA GPU (heavy ~2.5 GB download). The `+cu121` local
+# version tag forces the CUDA wheels from the PyTorch index. Same torch
+# version as the CPU base, so diffusers/transformers stay compatible.
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.2.2+cu121
+torchvision==0.17.2+cu121

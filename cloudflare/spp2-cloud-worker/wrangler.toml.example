@@ -1,0 +1,17 @@
+name = "spp2-cloud-staging"
+main = "src/index.ts"
+compatibility_date = "2026-06-05"
+
+[[r2_buckets]]
+binding = "SPP2_PROJECTS"
+bucket_name = "spp2-projects-staging"
+
+[vars]
+SUPABASE_URL = "https://YOUR_PROJECT_REF.supabase.co"
+SUPABASE_PUBLISHABLE_KEY = "sb_publishable_..."
+MAX_PROJECT_BYTES = "524288000"
+ALLOWED_ORIGIN = "http://127.0.0.1:5173"
+
+# Add as secrets:
+# wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+

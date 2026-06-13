@@ -235,6 +235,15 @@ export const DEFAULT_SHORTCUT_DEFINITIONS: AppShortcutDef[] = [
   { action: "toggleGrid",   label: "הצג/הסתר גריד",     defaultKey: "g" },
   { action: "toggleRulers", label: "הצג/הסתר סרגלים",   defaultKey: "r" },
   { action: "settings",     label: "הגדרות",            defaultKey: ",", ctrl: true },
+  { action: "quickContentFill", label: "מילוי חכם מהיר",  defaultKey: "F5", shift: true },
+  { action: "contentFill",      label: "מילוי חכם / מחיקה חכמה", defaultKey: "e", shift: true },
+  { action: "smartExpand",      label: "הרחבה חכמה",        defaultKey: "F6", shift: true },
+  { action: "rotate90Right",    label: "סובב 90° עם כיוון השעון", defaultKey: "9", ctrl: true },
+  { action: "rotate90Left",     label: "סובב 90° נגד כיוון השעון", defaultKey: "7", ctrl: true },
+  { action: "centerToCanvas",   label: "מרכז בקנבס",        defaultKey: "5", ctrl: true },
+  { action: "centerToTop",      label: "מרכז למעלה",        defaultKey: "8", ctrl: true },
+  { action: "centerToBottom",   label: "מרכז למטה",         defaultKey: "2", ctrl: true },
+  { action: "exactSize",        label: "גודל מדויק...",     defaultKey: "t", ctrl: true },
 ];
 
 // ─── Collage Mode shortcuts ───────────────────────────────────────────────────

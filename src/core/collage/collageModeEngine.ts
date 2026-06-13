@@ -19,7 +19,7 @@ import type {
   ScoredLayoutSuggestion,
   CollageSplitNode,
 } from "@/types/collage";
-import type { Page } from "@/types/document";
+import type { Asset, Page } from "@/types/document";
 import type { FrameLayer, ShapeLayer } from "@/types/layers";
 import type { ID } from "@/types/primitives";
 
@@ -37,6 +37,49 @@ export function normalizeCollageColorAdjustments(
   adjustments: Partial<CollageImageAssignment["colorAdjustments"]> | null | undefined
 ): CollageImageAssignment["colorAdjustments"] {
   return { ...DEFAULT_COLLAGE_COLOR_ADJUSTMENTS, ...(adjustments ?? {}) };
+}
+
+/**
+ * Build the effective `CollageImageInput[]` used for layout scoring, slot
+ * pairing and recommendations.
+ *
+ * When a cell image is rotated a quarter turn (90°/270°) its *displayed* aspect
+ * is swapped (a portrait becomes landscape and vice-versa). That changes which
+ * slot it best fits and which layout families score well, so we swap W/H here.
+ * Rotation is read from the rule's assignments (falls back to 0 for pool images
+ * that have no assignment yet, e.g. freshly added images).
+ *
+ * faceRegions are passed through unrotated — face-safety scoring is a secondary
+ * signal and rotating the regions is deferred.
+ */
+export function buildCollageImageInputs(
+  assets: Asset[],
+  assetIds: ID[],
+  rule?: Pick<CollageRule, "imageAssignments">,
+): CollageImageInput[] {
+  const byId = new Map(assets.map((a) => [a.id, a]));
+  const rotationByAsset = new Map<ID, number>();
+  if (rule) {
+    for (const a of rule.imageAssignments) {
+      rotationByAsset.set(a.assetId, a.contentTransform?.rotation ?? 0);
+    }
+  }
+  return assetIds.flatMap((assetId) => {
+    const asset = byId.get(assetId);
+    if (!asset) return [];
+    let width = asset.width ?? 800;
+    let height = asset.height ?? 600;
+    const rotation = ((rotationByAsset.get(assetId) ?? 0) % 360 + 360) % 360;
+    const quarter = Math.round(rotation / 90) % 4;
+    if (quarter === 1 || quarter === 3) {
+      [width, height] = [height, width];
+    }
+    const faceRegions = Array.isArray(asset.metadata.faceRegions)
+      ? (asset.metadata.faceRegions as CollageImageInput["faceRegions"])
+      : undefined;
+    const analysisScore = typeof asset.metadata.analysisScore === "number" ? asset.metadata.analysisScore : undefined;
+    return [{ assetId, width, height, faceRegions, analysisScore }];
+  });
 }
 
 // ─── 1. Generate scored suggestions (in-memory only, never stored) ────────────
@@ -249,6 +292,7 @@ export function assignByPoolOrder(
     if (prev) {
       const oldSlot = oldSlotById.get(prev.slotId);
       // Normalized slot dims (0..1) — adapter only cares about ratio + scale.
+      const prevRotation = prev.contentTransform?.rotation ?? 0;
       const adapted = oldSlot
         ? adaptContentTransform(
             prev.contentTransform,
@@ -256,7 +300,8 @@ export function assignByPoolOrder(
             { w: slot.w, h: slot.h },
             { hasManual: prev.hasManualTransform ?? false, faceAnchor: undefined },
           )
-        : { transform: { ...RESET_TRANSFORM }, hasManual: false };
+        // No matching old slot — reset pan/zoom but keep the rotation correction.
+        : { transform: { ...RESET_TRANSFORM, rotation: prevRotation }, hasManual: prevRotation !== 0 };
 
       return {
         ...prev,
@@ -268,6 +313,7 @@ export function assignByPoolOrder(
         colorAdjustments: normalizeCollageColorAdjustments(prev.colorAdjustments),
         imageEditParams: prev.imageEditParams,
         edgeConfig: prev.edgeConfig,
+        cellFeather: prev.cellFeather,
       };
     }
 
@@ -287,11 +333,21 @@ function pairImagesToSlots(
 
   const inputById = new Map(imageInputs.map((input) => [input.assetId, input]));
   const maxArea = Math.max(0.0001, ...imageSlots.map((slot) => slot.w * slot.h));
+  // Centrality: 1 at the page centre, → 0 at the corners. Lets the most central
+  // cell (and hero cells) claim the most important image first.
+  const centralityOf = (slot: CollageSlot): number => {
+    const cx = slot.x + slot.w / 2;
+    const cy = slot.y + slot.h / 2;
+    const dist = Math.hypot(cx - 0.5, cy - 0.5);
+    return Math.max(0, 1 - dist / Math.SQRT1_2);
+  };
   const sortedSlots = [...imageSlots].sort((a, b) => {
     const roleA = slotRoleWeight(a);
     const roleB = slotRoleWeight(b);
     if (roleA !== roleB) return roleB - roleA;
-    return b.w * b.h - a.w * a.h;
+    const areaDiff = b.w * b.h - a.w * a.h;
+    if (Math.abs(areaDiff) > 1e-4) return areaDiff;
+    return centralityOf(b) - centralityOf(a);
   });
   const unused = new Set(pool);
   const result = new Map<ID, ID>();
@@ -299,9 +355,10 @@ function pairImagesToSlots(
   for (const slot of sortedSlots) {
     let bestAsset: ID | null = null;
     let bestScore = -Infinity;
+    const centrality = centralityOf(slot);
     for (const assetId of unused) {
       const input = inputById.get(assetId);
-      const score = scoreImageSlotPair(input, slot, maxArea);
+      const score = scoreImageSlotPair(input, slot, maxArea, centrality);
       if (score > bestScore) {
         bestScore = score;
         bestAsset = assetId;
@@ -318,7 +375,12 @@ function pairImagesToSlots(
   });
 }
 
-function scoreImageSlotPair(input: CollageImageInput | undefined, slot: CollageSlot, maxSlotArea: number): number {
+function scoreImageSlotPair(
+  input: CollageImageInput | undefined,
+  slot: CollageSlot,
+  maxSlotArea: number,
+  centrality = 0,
+): number {
   if (!input || input.width <= 0 || input.height <= 0) return 0;
   const imageAspect = input.width / input.height;
   const slotAspect = slot.w / Math.max(0.0001, slot.h);
@@ -331,8 +393,10 @@ function scoreImageSlotPair(input: CollageImageInput | undefined, slot: CollageS
   const importance = Math.max(input.analysisScore ?? 0, faceImportance, resolutionImportance * 0.35);
   const roleBoost = slot.role === "hero" ? 0.12 : slot.role === "standard" ? 0.04 : 0;
   const largeSlotFit = importance * slotAreaNorm;
+  // Route important images toward central cells (in addition to large/hero ones).
+  const centralFit = importance * centrality * 0.1;
   const smallSlotPenalty = faceImportance * Math.max(0, 1 - slotAreaNorm) * 0.28;
-  return aspectScore * 0.7 + largeSlotFit * 0.22 + roleBoost - smallSlotPenalty;
+  return aspectScore * 0.7 + largeSlotFit * 0.22 + centralFit + roleBoost - smallSlotPenalty;
 }
 
 function slotRoleWeight(slot: CollageSlot): number {
@@ -530,6 +594,7 @@ export function syncFrameLayersToPage(
           vertices: slot.shapeParams.vertices,
           pathData: slot.shapeParams.pathData,
           edgeConfig: slot.edgeConfig,
+          cellFeather: rule.canvasSettings.globalCellFeather ?? assignment?.cellFeather,
           globalMask,
           globalRasterMask: rasterMask?.maskAssetId
             ? {
@@ -556,6 +621,9 @@ export function syncFrameLayersToPage(
           : null,
         collageEdgeConfig: assignment?.edgeConfig != null
           ? assignment.edgeConfig as unknown as import("@/types/primitives").JsonValue
+          : null,
+        collageCellFeather: (rule.canvasSettings.globalCellFeather ?? assignment?.cellFeather) != null
+          ? (rule.canvasSettings.globalCellFeather ?? assignment?.cellFeather) as unknown as import("@/types/primitives").JsonValue
           : null
       }
     });
@@ -575,7 +643,7 @@ export function syncFrameLayersToPage(
       for (const [k, v] of Object.entries(existing.metadata ?? {})) {
         if (preservedMeta[k] !== undefined) continue;
         if (k === "collageFrame" || k === "collageColorAdj"
-          || k === "collageImageEditParams" || k === "collageEdgeConfig") continue;
+          || k === "collageImageEditParams" || k === "collageEdgeConfig" || k === "collageCellFeather") continue;
         preservedMeta[k] = v;
       }
       withPreserved.metadata = preservedMeta as typeof withPreserved.metadata;

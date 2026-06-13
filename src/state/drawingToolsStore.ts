@@ -8,7 +8,11 @@ export type DrawingTool =
   | "marquee"
   | "lasso"
   | "line"
-  | "arrow";
+  | "arrow"
+  // Image-region selection tools: arm here, then drag on any image to mark a pixel region.
+  | "regionRect"
+  | "regionLasso"
+  | "regionWand";
 
 export type BucketMode = "fill" | "contiguous";
 export type ShapeKind = "rect" | "circle" | "ellipse" | "heart" | "line" | "arrow";

@@ -6,6 +6,8 @@ from typing import Any
 import numpy as np
 from PIL import Image, ImageFilter
 
+from smart_selection.providers import preferred_onnx_providers
+
 
 @dataclass
 class RefineResult:
@@ -56,15 +58,7 @@ class MaskRefineService:
             return
         import onnxruntime as ort  # type: ignore
 
-        available = set(ort.get_available_providers())
-        preferred = [
-            "CUDAExecutionProvider",
-            "DmlExecutionProvider",
-            "DirectMLExecutionProvider",
-            "CoreMLExecutionProvider",
-            "CPUExecutionProvider",
-        ]
-        providers = [provider for provider in preferred if provider in available] or ["CPUExecutionProvider"]
+        providers = preferred_onnx_providers(ort.get_available_providers())
         self._session = ort.InferenceSession(model_path, providers=providers)
         self._model_path = model_path
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import importlib.util
 import io
 import json
 import os
@@ -17,11 +18,21 @@ from typing import Any
 import numpy as np
 from PIL import Image, ImageFilter
 
-from smart_selection.birefnet_service import BiRefNetService
+from smart_selection.birefnet_service import BiRefNetService, infer_input_size
 from smart_selection.inpaint_service import InpaintService
 from smart_selection.mask_refine_service import MaskRefineService
 from smart_selection.model_manager import ModelManager
+from smart_selection.model_registry import ModelRegistry
+from smart_selection.providers import (
+    acceleration_status,
+    benchmark_acceleration,
+    is_accelerated,
+    preferred_onnx_providers,
+    selected_provider,
+    torch_sd_status,
+)
 from smart_selection.sam_service import SamService
+from smart_selection.scrfd_face_detector import ScrfdFaceDetector
 
 
 PROFILE = "balanced"
@@ -103,39 +114,121 @@ def log(message: str, **fields: Any) -> None:
             pass
 
 
-def probe_capabilities() -> dict[str, Any]:
-    providers: list[str] = []
-    cuda = False
-    mps = False
-    directml = False
+def dependency_available(module_name: str) -> bool:
+    return importlib.util.find_spec(module_name) is not None
+
+
+def dependency_missing_message(module_name: str) -> str:
+    return f"Python dependency missing: {module_name}"
+
+
+def probe_python_dependencies() -> dict[str, Any]:
+    diagnostics: dict[str, Any] = {
+        "pythonExecutable": sys.executable,
+        "pythonVersion": sys.version.split()[0],
+        "onnxruntime": {"available": False, "version": None, "providers": [], "selectedProvider": None},
+        "torch": {"available": False, "version": None},
+        "mediapipe": {"available": False, "version": None},
+        "warnings": [],
+    }
     try:
         import onnxruntime as ort  # type: ignore
 
         providers = list(ort.get_available_providers())
-        cuda = "CUDAExecutionProvider" in providers
-        directml = "DmlExecutionProvider" in providers or "DirectMLExecutionProvider" in providers
+        selected = preferred_onnx_providers(providers)[0] if providers else None
+        diagnostics["onnxruntime"] = {
+            "available": True,
+            "version": getattr(ort, "__version__", None),
+            "providers": providers,
+            "selectedProvider": selected,
+        }
+        if selected == "CPUExecutionProvider":
+            diagnostics["warnings"].append("AI acceleration unavailable — running on CPU.")
     except Exception as exc:
-        providers = ["CPUExecutionProvider"]
-        log("onnxruntime probe failed", error=str(exc))
+        diagnostics["onnxruntime"] = {"available": False, "version": None, "providers": [], "selectedProvider": None, "error": str(exc)}
+        diagnostics["warnings"].append(dependency_missing_message("onnxruntime"))
+
     try:
         import torch  # type: ignore
 
-        cuda = bool(cuda or torch.cuda.is_available())
-        mps = bool(getattr(torch.backends, "mps", None) and torch.backends.mps.is_available())
+        diagnostics["torch"] = {"available": True, "version": getattr(torch, "__version__", None), "cuda": bool(torch.cuda.is_available())}
     except Exception as exc:
-        log("torch probe failed", error=str(exc))
+        diagnostics["torch"] = {"available": False, "version": None, "error": str(exc)}
+
+    try:
+        import mediapipe as mp  # type: ignore
+
+        diagnostics["mediapipe"] = {"available": True, "version": getattr(mp, "__version__", None)}
+    except Exception as exc:
+        diagnostics["mediapipe"] = {"available": False, "version": None, "error": str(exc)}
+
+    try:
+        import importlib.metadata as metadata
+
+        diagnostics["onnxruntimeDirectml"] = {
+            "installed": True,
+            "version": metadata.version("onnxruntime-directml"),
+        }
+    except Exception:
+        diagnostics["onnxruntimeDirectml"] = {"installed": False, "version": None}
+    return diagnostics
+
+
+def smart_selection_model_diagnostics() -> dict[str, Any]:
+    models: dict[str, Any] = {}
+    for model_id in ("birefnet", "sam2_hiera_small", "cascadepsp", "modnet", "lama"):
+        try:
+            status = MODEL_MANAGER.status(model_id)
+            models[model_id] = {
+                "status": status.status,
+                "available": status.available,
+                "path": status.path,
+                "exists": bool(status.path and Path(status.path).exists()),
+                "message": status.message,
+                "files": status.files,
+            }
+        except Exception as exc:
+            models[model_id] = {"status": "error", "available": False, "error": str(exc)}
+    return models
+
+
+def probe_capabilities() -> dict[str, Any]:
+    diagnostics = probe_python_dependencies()
+    ort_diag = diagnostics["onnxruntime"]
+    providers = list(ort_diag.get("providers") or [])
+    selected_provider_name = ort_diag.get("selectedProvider")
+    cuda = "CUDAExecutionProvider" in providers or bool(diagnostics["torch"].get("cuda"))
+    directml = "DmlExecutionProvider" in providers
+    mps = False
+    log(
+        "smart selection health",
+        python=sys.executable,
+        onnxruntime_version=ort_diag.get("version"),
+        available_providers=providers,
+        selected_provider=selected_provider_name,
+    )
     recommended = "balanced" if cuda or mps or directml else "performance"
+    acceleration_enabled = is_accelerated(selected_provider_name)
+    message = "Smart Selection sidecar is ready. Model-backed inference will activate when models are installed."
+    if not ort_diag.get("available"):
+        message = dependency_missing_message("onnxruntime")
+    elif not acceleration_enabled:
+        message = "AI acceleration unavailable — running on CPU."
     return {
         "ok": True,
         "profile": PROFILE,
         "recommendedProfile": recommended,
         "providers": providers,
+        "selectedProvider": selected_provider_name,
+        "accelerationEnabled": acceleration_enabled,
         "gpu": {"cuda": cuda, "mps": mps, "directml": directml},
         "platform": {"system": platform.system(), "machine": platform.machine()},
+        "pythonExecutable": sys.executable,
+        "diagnostics": {**diagnostics, "models": smart_selection_model_diagnostics()},
         "modelsDir": os.environ.get("SPP2_MODELS_DIR"),
         "models": MODEL_MANAGER.list_models(),
         "fallback": True,
-        "message": "Smart Selection sidecar is ready. Model-backed inference will activate when models are installed.",
+        "message": message,
     }
 
 
@@ -159,6 +252,19 @@ def load_image(image_id: str, path: str, source_hash: str) -> dict[str, Any]:
 def encode_sam(image_id: str) -> dict[str, Any]:
     entry = require_image(image_id)
     emit_step("prepare", "Preparing smart selection model...", None, modelId="sam2_hiera_small")
+    if not dependency_available("onnxruntime"):
+        message = dependency_missing_message("onnxruntime")
+        log("encode_sam dependency missing", dependency="onnxruntime", python=sys.executable)
+        image = open_image(entry.path)
+        result = SAM_SERVICE.encode_image(
+            image_id,
+            entry.source_hash,
+            image,
+            model_files=None,
+            model_available=False,
+        )
+        result["message"] = message
+        return result
     model_status = MODEL_MANAGER.ensure("sam2_hiera_small", auto_download=True, progress=emit_progress)
     if not model_status.available:
         log("encode_sam fallback", model_status=model_status.status, status_message=model_status.message)
@@ -180,6 +286,12 @@ def encode_sam(image_id: str) -> dict[str, Any]:
 def auto_segment(image_id: str, options: dict[str, Any]) -> dict[str, Any]:
     entry = require_image(image_id)
     emit_step("prepare", "Preparing object selection...", None, modelId="birefnet")
+    if not dependency_available("onnxruntime"):
+        message = dependency_missing_message("onnxruntime")
+        log("auto_segment dependency missing", dependency="onnxruntime", python=sys.executable)
+        width, height = target_size(entry, options)
+        result = BIREFNET_SERVICE.fallback(width, height, message)
+        return mask_response(result.mask, width, height, entry, result.model_id, result.message, fallback=True, model_version=result.model_version)
     model_status = MODEL_MANAGER.ensure("birefnet", auto_download=True, progress=emit_progress)
     if not model_status.available:
         log("auto_segment fallback", model_status=model_status.status, status_message=model_status.message)
@@ -209,11 +321,73 @@ def auto_segment(image_id: str, options: dict[str, Any]) -> dict[str, Any]:
     return response
 
 
+def remove_background_to_file(image_id: str, options: dict[str, Any]) -> dict[str, Any]:
+    entry = require_image(image_id)
+    output_path = str(options.get("outputPath") or "")
+    if not output_path:
+        raise RuntimeError("output_path_required")
+
+    emit_step("prepare", "Preparing object selection...", None, modelId="birefnet")
+    if not dependency_available("onnxruntime"):
+        raise RuntimeError(dependency_missing_message("onnxruntime"))
+    model_status = MODEL_MANAGER.ensure("birefnet", auto_download=True, progress=emit_progress)
+    if not model_status.available:
+        raise RuntimeError(model_status.message or "BiRefNet model is not available.")
+
+    image = open_image(entry.path)
+    providers = options.get("providers") if isinstance(options.get("providers"), list) else None
+    emit_step("predict", "Finding the main object...", None, modelId="birefnet")
+    result = BIREFNET_SERVICE.auto_segment(
+        image,
+        model_path=model_status.path,
+        model_version=model_status.version,
+        target_width=entry.width,
+        target_height=entry.height,
+        providers=providers,
+    )
+    if result.fallback:
+        raise RuntimeError(result.message or "Object detection failed.")
+
+    rgba = image.convert("RGBA")
+    mask = Image.fromarray(result.mask, mode="L").resize(rgba.size, Image.Resampling.LANCZOS)
+    original_alpha = rgba.getchannel("A")
+    combined_alpha = Image.fromarray(
+        (np.asarray(original_alpha, dtype=np.uint16) * np.asarray(mask, dtype=np.uint16) // 255).astype(np.uint8),
+        mode="L",
+    )
+    rgba.putalpha(combined_alpha)
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    rgba.save(out, format="PNG")
+    emit_step("ready", "Transparent PNG saved.", 100, modelId=result.model_id)
+    return {
+        "ok": True,
+        "outputPath": str(out),
+        "width": entry.width,
+        "height": entry.height,
+        "modelId": result.model_id,
+        "modelVersion": result.model_version,
+        "fallback": False,
+        "message": result.message,
+    }
+
+
 def predict_mask(image_id: str, options: dict[str, Any]) -> dict[str, Any]:
     entry = require_image(image_id)
-    model_status = MODEL_MANAGER.ensure("sam2_hiera_small", auto_download=True, progress=emit_progress)
-    if not model_status.available:
-        log("predict_mask fallback", model_status=model_status.status, status_message=model_status.message)
+    dependency_missing = not dependency_available("onnxruntime")
+    if dependency_missing:
+        log("predict_mask dependency missing", dependency="onnxruntime", python=sys.executable)
+        model_status = None
+        model_available = False
+        model_message = dependency_missing_message("onnxruntime")
+        model_files = None
+    else:
+        model_status = MODEL_MANAGER.ensure("sam2_hiera_small", auto_download=True, progress=emit_progress)
+        model_available = model_status.available
+        model_message = model_status.message
+        model_files = model_status.files
+        if not model_status.available:
+            log("predict_mask fallback", model_status=model_status.status, status_message=model_status.message)
     width, height = target_size(entry, options)
     prompts = options.get("prompts") or []
     image = open_image(entry.path)
@@ -225,9 +399,9 @@ def predict_mask(image_id: str, options: dict[str, Any]) -> dict[str, Any]:
         prompts=prompts,
         target_width=width,
         target_height=height,
-        model_available=model_status.available,
-        model_message=model_status.message,
-        model_files=model_status.files,
+        model_available=model_available,
+        model_message=model_message,
+        model_files=model_files,
     )
     response = mask_response(result.mask, width, height, entry, result.model_id, result.message, fallback=result.fallback, model_version=result.model_version)
     emit_step("ready", "Smart selection ready.", 100, modelId=result.model_id)
@@ -286,6 +460,16 @@ def inpaint_remove(image_id: str, options: dict[str, Any]) -> dict[str, Any]:
     })
     mask = decode_mask(mask_b64, width, height)
     result = INPAINT_SERVICE.inpaint(image, mask, {**options, "targetWidth": width, "targetHeight": height}, progress=emit_progress)
+    log(
+        "inpaint done",
+        requested_engine=str(options.get("engine") or "auto"),
+        model_id=result.model_id,
+        fallback=result.fallback,
+        backend_attempted=result.backend_attempted,
+        backend_device=result.backend_device,
+        fallback_reason=result.fallback_reason,
+        processing_ms=result.processing_ms,
+    )
     return result.to_json()
 
 
@@ -355,7 +539,15 @@ def detect_faces(image_id: str) -> dict[str, Any]:
     faces: list[dict[str, Any]] = []
     backend = "none"
 
-    mp_detector = _mediapipe_face_detector()
+    try:
+        scrfd = REGISTRY.get("scrfd_2.5g_kps")
+        detections = scrfd.detect(image)
+        faces = [detection.to_json() for detection in detections]
+        backend = "scrfd_2.5g_kps"
+    except Exception as exc:
+        log("scrfd detect_faces unavailable", image_id=image_id, error=str(exc))
+
+    mp_detector = _mediapipe_face_detector() if not faces else None
     if mp_detector is not None:
         try:
             result = mp_detector.process(rgb)
@@ -414,6 +606,40 @@ def require_image(image_id: str) -> ImageEntry:
     return entry
 
 
+def decode_raw(options: dict[str, Any]) -> dict[str, Any]:
+    """Develop a camera RAW file (CR2/CR3, NEF, ARW, DNG, RAF, RW2, …) to a flat
+    8-bit image using LibRaw (rawpy). Uses the camera white balance + LibRaw's
+    default development; no manual exposure/colour controls are exposed at import
+    time. ``rawpy`` is a lazily-installed optional dependency, so a clear error is
+    raised when it is missing so the caller can trigger the on-demand install."""
+    input_path = str(options.get("inputPath") or "")
+    output_path = str(options.get("outputPath") or "")
+    if not input_path or not output_path:
+        raise RuntimeError("input_and_output_path_required")
+    if not dependency_available("rawpy"):
+        raise RuntimeError(dependency_missing_message("rawpy"))
+
+    import rawpy  # type: ignore
+
+    try:
+        with rawpy.imread(input_path) as raw:
+            rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=False, output_bps=8)
+    except Exception as exc:
+        raise RuntimeError(f"raw_decode_failed: {exc}") from exc
+
+    image = Image.fromarray(rgb)
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.suffix.lower() in (".jpg", ".jpeg"):
+        image.save(out, format="JPEG", quality=95)
+        fmt = "JPEG"
+    else:
+        image.save(out, format="PNG")
+        fmt = "PNG"
+    log("decode_raw", input=input_path, width=image.width, height=image.height, fmt=fmt)
+    return {"ok": True, "outputPath": str(out), "width": image.width, "height": image.height, "format": fmt}
+
+
 def open_image(path: str) -> Image.Image:
     if path.startswith("data:"):
         encoded = path.split(",", 1)[1]
@@ -466,10 +692,119 @@ def mask_response(
     }
 
 
+# --- AI model preload / warmup registry --------------------------------------
+# The registry is the single coordinator for loading + warming + reporting model
+# sessions. Loaders delegate to the existing per-service load-once caches so a
+# session is created exactly once; warmers run a tiny dummy inference to warm the
+# kernels. Loaders never raise to the registry caller-facing path on failure —
+# they return {"handle": None, "error": ...} so the model is marked unavailable.
+REGISTRY = ModelRegistry(log=log, emit=emit_progress)
+
+
+def _load_birefnet() -> dict[str, Any]:
+    status = MODEL_MANAGER.ensure("birefnet", auto_download=True, progress=emit_progress)
+    if not status.available or not status.path:
+        return {"handle": None, "error": status.message}
+    session = BIREFNET_SERVICE._get_session(Path(status.path), None)
+    provider = selected_provider(session)
+    log("onnx provider selected", model="birefnet", provider=provider, providers=session.get_providers() if hasattr(session, "get_providers") else [])
+    return {"handle": session, "provider": provider}
+
+
+def _warm_birefnet(session: Any) -> None:
+    provider = selected_provider(session)
+    log("ai model warmup skipped", model="birefnet", provider=provider, reason="startup_heavy_warmup_disabled")
+
+
+def _load_sam2() -> dict[str, Any]:
+    status = MODEL_MANAGER.ensure("sam2_hiera_small", auto_download=True, progress=emit_progress)
+    if not status.available or not status.files:
+        return {"handle": None, "error": status.message}
+    result = SAM_SERVICE.prepare_model(status.files)
+    if not result.get("ready"):
+        return {"handle": None, "error": result.get("message")}
+    provider = result.get("providers", [None])[0] if result.get("providers") else SAM_SERVICE.provider()
+    log("onnx provider selected", model="sam2_hiera_small", provider=provider, providers=result.get("providers") or [])
+    return {"handle": SAM_SERVICE, "provider": provider}
+
+
+def _warm_sam2(service: Any) -> None:
+    provider = service.provider()
+    log("ai model warmup skipped", model="sam2_hiera_small", provider=provider, reason="startup_heavy_warmup_disabled")
+
+
+def _load_lama() -> dict[str, Any]:
+    info = INPAINT_SERVICE.warm()
+    if not info.get("ready"):
+        return {"handle": None, "error": info.get("error") or "LaMa is unavailable"}
+    return {"handle": INPAINT_SERVICE, "provider": info.get("device")}
+
+
+def _warm_lama(service: Any) -> None:
+    blank = Image.new("RGB", (32, 32), (127, 127, 127))
+    mask = Image.new("L", (32, 32), 0)
+    mask.paste(255, (8, 8, 24, 24))
+    service._run_lama(blank, mask)
+
+
+def _load_sd() -> dict[str, Any]:
+    info = INPAINT_SERVICE.warm_sd()
+    if not info.get("ready"):
+        return {"handle": None, "error": info.get("error") or "Stable Diffusion inpaint is unavailable"}
+    return {"handle": INPAINT_SERVICE, "provider": info.get("device")}
+
+
+def _load_scrfd() -> dict[str, Any]:
+    status = MODEL_MANAGER.ensure("scrfd_2.5g_kps", auto_download=True, progress=emit_progress)
+    if not status.available or not status.path:
+        return {"handle": None, "error": status.message}
+    try:
+        import onnxruntime as ort  # type: ignore
+
+        so = ort.SessionOptions()
+        so.log_severity_level = 3
+        providers = preferred_onnx_providers(list(ort.get_available_providers()))
+        session = ort.InferenceSession(str(status.path), sess_options=so, providers=providers)
+        provider = selected_provider(session)
+        log("onnx provider selected", model="scrfd_2.5g_kps", provider=provider, providers=session.get_providers())
+        return {"handle": ScrfdFaceDetector(session), "provider": provider}
+    except Exception as exc:
+        return {"handle": None, "error": str(exc)}
+
+
+def _warm_scrfd(detector: Any) -> None:
+    detector.warmup()
+
+
+REGISTRY.register("birefnet", loader=_load_birefnet, warmer=_warm_birefnet, label="Automatic Object Cutout")
+REGISTRY.register("lama", loader=_load_lama, warmer=_warm_lama, label="Remove / AI Fill")
+REGISTRY.register("sam2_hiera_small", loader=_load_sam2, warmer=_warm_sam2, label="Interactive Smart Selection")
+REGISTRY.register("scrfd_2.5g_kps", loader=_load_scrfd, warmer=_warm_scrfd, label="Face Detection (SCRFD 2.5G KPS)")
+# SD pipeline load is itself the warmup; a real diffusion step is too costly to run on every launch.
+REGISTRY.register("sd_inpaint", loader=_load_sd, warmer=None, label="Stable Diffusion Inpaint")
+
+
 def dispatch(method: str, params: dict[str, Any]) -> Any:
     global PROFILE
     if method == "health":
         return probe_capabilities()
+    if method == "acceleration_status":
+        return acceleration_status(params.get("providers") if isinstance(params.get("providers"), list) else None)
+    if method == "sd_acceleration_status":
+        return torch_sd_status()
+    if method == "benchmark_acceleration":
+        iterations = params.get("iterations")
+        return benchmark_acceleration(
+            iterations=int(iterations) if isinstance(iterations, (int, float)) and iterations else 8,
+            requested=params.get("providers") if isinstance(params.get("providers"), list) else None,
+        )
+    if method == "preload_models":
+        return REGISTRY.preload(str(params.get("level") or "balanced"))
+    if method == "ai_models_status":
+        return REGISTRY.status()
+    if method == "reload_models":
+        REGISTRY.reset()
+        return REGISTRY.preload(str(params.get("level") or "balanced"))
     if method == "set_performance_profile":
         PROFILE = str(params.get("profile") or "balanced")
         return {"ok": True, "profile": PROFILE}
@@ -477,22 +812,34 @@ def dispatch(method: str, params: dict[str, Any]) -> Any:
         return ensure_model(str(params.get("model_id") or "unknown"))
     if method == "list_models":
         return MODEL_MANAGER.list_models()
+    if method == "decode_raw":
+        return decode_raw(dict(params.get("options") or {}))
     if method == "load_image":
         return load_image(str(params["image_id"]), str(params["path"]), str(params.get("source_hash") or params["image_id"]))
     if method == "encode_sam":
         return encode_sam(str(params["image_id"]))
     if method == "auto_segment":
         return auto_segment(str(params["image_id"]), dict(params.get("options") or {}))
+    if method == "remove_background_to_file":
+        return remove_background_to_file(str(params["image_id"]), dict(params.get("options") or {}))
     if method == "predict_mask":
         return predict_mask(str(params["image_id"]), dict(params.get("options") or {}))
     if method == "refine_mask":
         return refine_mask(str(params["image_id"]), dict(params.get("options") or {}))
     if method == "inpaint_remove":
         return inpaint_remove(str(params["image_id"]), dict(params.get("options") or {}))
+    if method == "warm_inpaint":
+        return INPAINT_SERVICE.warm()
+    if method == "warm_sd_inpaint":
+        return INPAINT_SERVICE.warm_sd()
     if method == "unload_image":
         return unload_image(str(params["image_id"]))
     if method == "detect_faces":
         return detect_faces(str(params["image_id"]))
+    if method == "advanced_print_color":
+        from advanced_print.color_service import advanced_print_color
+
+        return advanced_print_color(dict(params or {}))
     if method == "cancel":
         return {"ok": True}
     if method == "shutdown":

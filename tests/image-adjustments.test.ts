@@ -7,6 +7,7 @@ import { buildAdjustmentFilters, stackNeedsFilters } from "@/core/rendering/konv
 import { applyCurveLUT, buildCurveLUT } from "@/core/rendering/curveUtils";
 import {
   createImageAdjustment,
+  type CurvePoint,
   type ImageAdjustment
 } from "@/types/imageAdjustments";
 
@@ -23,6 +24,10 @@ function makeImageData(width: number, height: number, fill?: (i: number) => [num
 function px(img: ImageData, index: number): [number, number, number] {
   const i = index * 4;
   return [img.data[i]!, img.data[i + 1]!, img.data[i + 2]!];
+}
+
+function alpha(img: ImageData, index: number): number {
+  return img.data[index * 4 + 3]!;
 }
 
 describe("createImageAdjustment", () => {
@@ -86,6 +91,23 @@ describe("pixel pipeline — pointwise tools", () => {
     const [r, g, b] = px(img, 0);
     expect(r).toBe(g);
     expect(g).toBe(b);
+  });
+
+  it("adjusts visible pixels while preserving transparent holes", () => {
+    const img = makeImageData(2, 1, (p) => (p === 0 ? [200, 80, 40] : [10, 20, 30]));
+    img.data[7] = 0;
+
+    applyImageAdjustmentStack(img, [
+      createImageAdjustment({ type: "blackWhite", strength: 100 }),
+      createImageAdjustment({ type: "basicTone", brightness: 25 })
+    ]);
+
+    const [r, g, b] = px(img, 0);
+    expect(r).toBe(g);
+    expect(g).toBe(b);
+    expect(r).toBeGreaterThan(80);
+    expect(alpha(img, 0)).toBe(255);
+    expect(alpha(img, 1)).toBe(0);
   });
 
   it("threshold with no smoothing produces pure black/white", () => {
@@ -209,6 +231,118 @@ describe("curve LUT", () => {
   });
 });
 
+describe("multi-channel curves (Curves editor)", () => {
+  const diag = (): CurvePoint[] => [{ x: 0, y: 0 }, { x: 255, y: 255 }];
+  const channels = (over: Partial<Record<"rgb" | "r" | "g" | "b", CurvePoint[]>>): {
+    rgb: CurvePoint[]; r: CurvePoint[]; g: CurvePoint[]; b: CurvePoint[];
+  } => ({ rgb: diag(), r: diag(), g: diag(), b: diag(), ...over });
+
+  it("an all-identity channel set is inactive", () => {
+    const adj = createImageAdjustment({ type: "curves", channels: channels({}) });
+    expect(isActiveImageAdjustment(adj)).toBe(false);
+  });
+
+  it("a non-identity channel set is active", () => {
+    const adj = createImageAdjustment({ type: "curves", channels: channels({ rgb: [{ x: 0, y: 0 }, { x: 128, y: 160 }, { x: 255, y: 255 }] }) });
+    expect(isActiveImageAdjustment(adj)).toBe(true);
+  });
+
+  it("RGB midpoint up brightens; midpoint down darkens (tests 2 & 3)", () => {
+    const up = makeImageData(1, 1, () => [128, 128, 128]);
+    applyImageAdjustmentStack(up, [createImageAdjustment({ type: "curves", channels: channels({ rgb: [{ x: 0, y: 0 }, { x: 128, y: 170 }, { x: 255, y: 255 }] }) })]);
+    expect(px(up, 0)[0]).toBeGreaterThan(128);
+
+    const down = makeImageData(1, 1, () => [128, 128, 128]);
+    applyImageAdjustmentStack(down, [createImageAdjustment({ type: "curves", channels: channels({ rgb: [{ x: 0, y: 0 }, { x: 128, y: 90 }, { x: 255, y: 255 }] }) })]);
+    expect(px(down, 0)[0]).toBeLessThan(128);
+  });
+
+  it("RGB S-curve increases contrast (test 1)", () => {
+    const img = makeImageData(2, 1, (p) => (p === 0 ? [64, 64, 64] : [192, 192, 192]));
+    applyImageAdjustmentStack(img, [createImageAdjustment({ type: "curves", channels: channels({ rgb: [{ x: 0, y: 0 }, { x: 64, y: 44 }, { x: 192, y: 212 }, { x: 255, y: 255 }] }) })]);
+    expect(px(img, 0)[0]).toBeLessThan(64); // shadows darker
+    expect(px(img, 1)[0]).toBeGreaterThan(192); // highlights brighter
+  });
+
+  it("the red channel curve affects only red (test 4)", () => {
+    const img = makeImageData(1, 1, () => [128, 128, 128]);
+    applyImageAdjustmentStack(img, [createImageAdjustment({ type: "curves", channels: channels({ r: [{ x: 0, y: 0 }, { x: 128, y: 180 }, { x: 255, y: 255 }] }) })]);
+    const [r, g, b] = px(img, 0);
+    expect(r).toBeGreaterThan(128);
+    expect(g).toBe(128);
+    expect(b).toBe(128);
+  });
+
+  it("pulling the blue channel down warms the image (test 5)", () => {
+    const img = makeImageData(1, 1, () => [128, 128, 128]);
+    applyImageAdjustmentStack(img, [createImageAdjustment({ type: "curves", channels: channels({ b: [{ x: 0, y: 0 }, { x: 128, y: 80 }, { x: 255, y: 255 }] }) })]);
+    const [r, , b] = px(img, 0);
+    expect(b).toBeLessThan(128); // less blue → warmer/yellower
+    expect(r).toBe(128);
+  });
+
+  it("RGB curve is applied before the per-channel curve", () => {
+    // rgb maps 128→200, then r maps 200→100. Net: red 128→100.
+    const img = makeImageData(1, 1, () => [128, 128, 128]);
+    applyImageAdjustmentStack(img, [createImageAdjustment({ type: "curves", channels: channels({
+      rgb: [{ x: 0, y: 0 }, { x: 128, y: 200 }, { x: 255, y: 255 }],
+      r: [{ x: 0, y: 0 }, { x: 200, y: 100 }, { x: 255, y: 255 }]
+    }) })]);
+    const [r, g] = px(img, 0);
+    expect(Math.abs(r - 100)).toBeLessThanOrEqual(3);
+    expect(g).toBeGreaterThan(150); // green only got the rgb lift
+  });
+
+  it("fused path matches the single-op path for channel curves (test 10)", () => {
+    const fill = (p: number): [number, number, number] => [p * 11 % 256, p * 17 % 256, p * 23 % 256];
+    const ch = channels({ rgb: [{ x: 0, y: 0 }, { x: 96, y: 70 }, { x: 255, y: 255 }], b: [{ x: 0, y: 0 }, { x: 128, y: 150 }, { x: 255, y: 255 }] });
+    const ops: ImageAdjustment[] = [
+      createImageAdjustment({ type: "basicTone", contrast: 25 }),
+      createImageAdjustment({ type: "curves", channels: ch }),
+      createImageAdjustment({ type: "invert", strength: 20 })
+    ];
+    const fused = makeImageData(8, 8, fill);
+    applyImageAdjustmentStack(fused, ops);
+    const sequential = makeImageData(8, 8, fill);
+    for (const op of ops) applyImageAdjustmentStack(sequential, [op]);
+    expect(Array.from(fused.data)).toEqual(Array.from(sequential.data));
+  });
+
+  it("live Konva filter matches export for channel curves (test 8)", () => {
+    const fill = (p: number): [number, number, number] => [p * 11 % 256, p * 17 % 256, p * 23 % 256];
+    const stack = [createImageAdjustment({ type: "curves", channels: channels({
+      rgb: [{ x: 0, y: 0 }, { x: 128, y: 150 }, { x: 255, y: 255 }],
+      g: [{ x: 0, y: 0 }, { x: 128, y: 110 }, { x: 255, y: 255 }]
+    }) })];
+    const live = makeImageData(6, 6, fill);
+    const exported = makeImageData(6, 6, fill);
+    buildAdjustmentFilters(stack)[0]!(live);
+    applyImageAdjustmentStack(exported, stack, 1);
+    expect(Array.from(live.data)).toEqual(Array.from(exported.data));
+  });
+});
+
+describe("built-in curve presets", () => {
+  it("every built-in preset is a real (non-identity) adjustment", async () => {
+    const { BUILTIN_CURVE_PRESETS } = await import("@/core/presets/curveChannelPresets");
+    expect(BUILTIN_CURVE_PRESETS.length).toBeGreaterThan(0);
+    for (const preset of BUILTIN_CURVE_PRESETS) {
+      const adj = createImageAdjustment({ type: "curves", channels: preset.channels });
+      expect(isActiveImageAdjustment(adj)).toBe(true);
+    }
+  });
+
+  it("warm-highlights preset adds red and removes blue at a bright pixel", async () => {
+    const { BUILTIN_CURVE_PRESETS } = await import("@/core/presets/curveChannelPresets");
+    const warm = BUILTIN_CURVE_PRESETS.find((p) => p.id === "warmHighlights")!;
+    const img = makeImageData(1, 1, () => [160, 160, 160]);
+    applyImageAdjustmentStack(img, [createImageAdjustment({ type: "curves", channels: warm.channels })]);
+    const [r, , b] = px(img, 0);
+    expect(r).toBeGreaterThan(160);
+    expect(b).toBeLessThan(160);
+  });
+});
+
 describe("Konva ↔ pixel parity", () => {
   const stack: ImageAdjustment[] = [
     createImageAdjustment({ type: "basicTone", brightness: 25, contrast: 30, exposure: 0.2 }),
@@ -234,5 +368,70 @@ describe("Konva ↔ pixel parity", () => {
     expect(stackNeedsFilters([createImageAdjustment({ type: "detail", sharpness: 50 })], true)).toBe(false);
     expect(stackNeedsFilters([createImageAdjustment({ type: "detail", sharpness: 50 })], false)).toBe(true);
     expect(stackNeedsFilters([createImageAdjustment({ type: "basicTone", brightness: 20 })], true)).toBe(true);
+  });
+});
+
+describe("shadowHighlights (local Photoshop-style recovery)", () => {
+  // 40-wide split: left half dark (luma≈30), right half bright (luma≈230).
+  const W = 40;
+  const H = 8;
+  const split = (p: number): [number, number, number] =>
+    (p % W) < W / 2 ? [30, 30, 30] : [230, 230, 230];
+  const lumaOf = ([r, g, b]: [number, number, number]): number => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const DARK_IDX = 4; // well inside the dark half
+  const BRIGHT_IDX = W - 5; // well inside the bright half
+
+  it("is inactive only when every control is neutral", () => {
+    expect(
+      isActiveImageAdjustment(
+        createImageAdjustment({ type: "shadowHighlights", shadows: 0, highlights: 0, localContrast: 0, colorCorrection: 0, midtoneContrast: 0 })
+      )
+    ).toBe(false);
+    expect(isActiveImageAdjustment(createImageAdjustment({ type: "shadowHighlights", shadows: 50 }))).toBe(true);
+  });
+
+  it("lifts dark regions while leaving bright regions essentially unchanged", () => {
+    const img = makeImageData(W, H, split);
+    applyImageAdjustmentStack(
+      img,
+      [createImageAdjustment({ type: "shadowHighlights", shadows: 100, highlights: 0, localContrast: 0 })],
+      1
+    );
+    expect(lumaOf(px(img, DARK_IDX))).toBeGreaterThan(80); // 30 → noticeably brighter
+    expect(Math.abs(lumaOf(px(img, BRIGHT_IDX)) - 230)).toBeLessThan(8); // bright untouched
+  });
+
+  it("pulls bright regions while leaving dark regions essentially unchanged", () => {
+    const img = makeImageData(W, H, split);
+    applyImageAdjustmentStack(
+      img,
+      [createImageAdjustment({ type: "shadowHighlights", shadows: 0, highlights: 100, localContrast: 0 })],
+      1
+    );
+    expect(lumaOf(px(img, BRIGHT_IDX))).toBeLessThan(205); // 230 → recovered
+    expect(Math.abs(lumaOf(px(img, DARK_IDX)) - 30)).toBeLessThan(8); // shadows untouched
+  });
+
+  it("preserves true black (gamma lift keeps the endpoint)", () => {
+    const img = makeImageData(W, H, () => [0, 0, 0]);
+    applyImageAdjustmentStack(img, [createImageAdjustment({ type: "shadowHighlights", shadows: 100 })], 1);
+    expect(lumaOf(px(img, DARK_IDX))).toBeLessThan(2);
+  });
+
+  it("is treated as a heavy spatial filter (dropped during drag/zoom)", () => {
+    const stack = [createImageAdjustment({ type: "shadowHighlights", shadows: 60 })];
+    expect(stackNeedsFilters(stack, true)).toBe(false);
+    expect(stackNeedsFilters(stack, false)).toBe(true);
+  });
+
+  it("live filter matches the export pipeline pixel-for-pixel", () => {
+    const stack = [createImageAdjustment({ type: "shadowHighlights", shadows: 70, highlights: 40, localContrast: 30, colorCorrection: 20, midtoneContrast: 15 })];
+    const live = makeImageData(W, H, split);
+    const exported = makeImageData(W, H, split);
+    const filters = buildAdjustmentFilters(stack);
+    expect(filters).toHaveLength(1);
+    filters[0]!(live);
+    applyImageAdjustmentStack(exported, stack, 1);
+    expect(Array.from(live.data)).toEqual(Array.from(exported.data));
   });
 });

@@ -1,5 +1,6 @@
 import { useState, type ReactElement } from "react";
 import { useDocumentStore } from "@/state/documentStore";
+import { useCurvesStore } from "@/state/curvesStore";
 import { ThrottledSlider } from "@/ui/editor/ThrottledSlider";
 import { ToolLibrary } from "@/ui/editor/ToolLibrary";
 import { runWithBusy } from "@/state/uiBusyStore";
@@ -35,8 +36,10 @@ function getAdjustableAssetId(layer: AdjustableImageLayer): string | undefined {
 
 export function ImageAdjustmentsPanel({ layer }: { layer: AdjustableImageLayer }): ReactElement | null {
   const pageId = useDocumentStore((s) => s.activePageId);
+  const pageCount = useDocumentStore((s) => s.document?.pages.length ?? 1);
   const addImageAdjustment = useDocumentStore((s) => s.addImageAdjustment);
   const applyAdjustmentToAllImagesOnPage = useDocumentStore((s) => s.applyAdjustmentToAllImagesOnPage);
+  const applyAdjustmentToAllImagesOnAllPages = useDocumentStore((s) => s.applyAdjustmentToAllImagesOnAllPages);
   const updateImageAdjustment = useDocumentStore((s) => s.updateImageAdjustment);
   const removeImageAdjustment = useDocumentStore((s) => s.removeImageAdjustment);
   const toggleImageAdjustment = useDocumentStore((s) => s.toggleImageAdjustment);
@@ -46,8 +49,10 @@ export function ImageAdjustmentsPanel({ layer }: { layer: AdjustableImageLayer }
   const hasClipboard = useDocumentStore((s) => s.imageAdjustmentsClipboard !== null);
   const applyPresetToImage = useDocumentStore((s) => s.applyPresetToImage);
   const applyPresetToAllImagesOnPage = useDocumentStore((s) => s.applyPresetToAllImagesOnPage);
+  const applyPresetToAllImagesOnAllPages = useDocumentStore((s) => s.applyPresetToAllImagesOnAllPages);
   const applyPresetToDuplicatedImage = useDocumentStore((s) => s.applyPresetToDuplicatedImage);
   const applyPresetAsPageLook = useDocumentStore((s) => s.applyPresetAsPageLook);
+  const applyPresetAsPageLookToAllPages = useDocumentStore((s) => s.applyPresetAsPageLookToAllPages);
   const updateAppliedPresetStrength = useDocumentStore((s) => s.updateAppliedPresetStrength);
   const removeAppliedPreset = useDocumentStore((s) => s.removeAppliedPreset);
   const assetId = getAdjustableAssetId(layer);
@@ -66,17 +71,24 @@ export function ImageAdjustmentsPanel({ layer }: { layer: AdjustableImageLayer }
     strength: number,
     applyToAll: boolean,
     duplicate: boolean,
-    extra: ImageAdjustmentTemplate[]
+    extra: ImageAdjustmentTemplate[],
+    applyToAllPages: boolean
   ): void => {
     if (item.kind === "tool" || item.kind === "aiTool") {
       // `extra` carries the concrete, edited recipe (tool sliders / AI analysis).
-      if (applyToAll) {
+      if (applyToAllPages) {
+        for (const template of extra) applyAdjustmentToAllImagesOnAllPages(template);
+      } else if (applyToAll) {
         for (const template of extra) applyAdjustmentToAllImagesOnPage(pageId, template);
       } else {
         for (const template of extra) addImageAdjustment(pageId, layer.id, template);
       }
     } else if (item.kind === "imagePreset" && item.presetId !== undefined) {
-      if (applyToAll) {
+      if (applyToAllPages) {
+        void runWithBusy("מחיל פריסט על כל התמונות בכל העמודים...", () =>
+          applyPresetToAllImagesOnAllPages(item.presetId!, strength, extra)
+        );
+      } else if (applyToAll) {
         void runWithBusy("מחיל פריסט על כל תמונות העמוד…", () =>
           applyPresetToAllImagesOnPage(pageId, item.presetId!, strength, extra)
         );
@@ -86,7 +98,8 @@ export function ImageAdjustmentsPanel({ layer }: { layer: AdjustableImageLayer }
         applyPresetToImage(pageId, layer.id, item.presetId, strength, extra);
       }
     } else if (item.kind === "pageLookPreset" && item.presetId !== undefined) {
-      applyPresetAsPageLook(pageId, item.presetId, strength);
+      if (applyToAllPages) applyPresetAsPageLookToAllPages(item.presetId, strength);
+      else applyPresetAsPageLook(pageId, item.presetId, strength);
     }
   };
 
@@ -96,9 +109,19 @@ export function ImageAdjustmentsPanel({ layer }: { layer: AdjustableImageLayer }
         התאמות לא־הרסניות שרצות ישירות על התמונה. אותו צינור משמש לתצוגה ולייצוא — מה שרואים זה מה שמודפס.
       </p>
 
-      <button className="btn btn-primary" type="button" onClick={() => setLibraryOpen(true)}>
-        + ספריית כלים
-      </button>
+      <div style={{ display: "flex", gap: 6 }}>
+        <button className="btn btn-primary" type="button" style={{ flex: 1 }} onClick={() => setLibraryOpen(true)}>
+          + ספריית כלים
+        </button>
+        <button
+          className="btn btn-ghost"
+          type="button"
+          title="עריכת עקומות טונאליות (Curves)"
+          onClick={() => useCurvesStore.getState().open(layer.id)}
+        >
+          עקומות…
+        </button>
+      </div>
 
       {libraryOpen && (
         <ToolLibrary
@@ -106,6 +129,7 @@ export function ImageAdjustmentsPanel({ layer }: { layer: AdjustableImageLayer }
           previewSrc={assetSrc}
           previewLabel={layer.name}
           selectedCount={1}
+          pageCount={pageCount}
           onApply={handleLibraryApply}
           onClose={() => setLibraryOpen(false)}
         />
@@ -282,6 +306,24 @@ function AdjustmentCard({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const params = adjustment as any;
   const sliders = PARAM_CONFIG[adjustment.type];
+  const mainSliders = sliders.filter((s) => s.advanced !== true);
+  const advancedSliders = sliders.filter((s) => s.advanced === true);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  const renderSlider = (cfg: (typeof sliders)[number]): ReactElement => {
+    const value = typeof params[cfg.key] === "number" ? (params[cfg.key] as number) : cfg.min;
+    return (
+      <ThrottledSlider
+        key={cfg.key}
+        label={cfg.label}
+        value={value}
+        min={cfg.min}
+        max={cfg.max}
+        step={cfg.step ?? 1}
+        onCommit={(v) => onPatch({ [cfg.key]: v } as Partial<ImageAdjustment>)}
+      />
+    );
+  };
 
   return (
     <div
@@ -307,20 +349,28 @@ function AdjustmentCard({
         </button>
       </div>
 
-      {sliders.map((cfg) => {
-        const value = typeof params[cfg.key] === "number" ? (params[cfg.key] as number) : cfg.min;
-        return (
-          <ThrottledSlider
-            key={cfg.key}
-            label={cfg.label}
-            value={value}
-            min={cfg.min}
-            max={cfg.max}
-            step={cfg.step ?? 1}
-            onCommit={(v) => onPatch({ [cfg.key]: v } as Partial<ImageAdjustment>)}
-          />
-        );
-      })}
+      {mainSliders.map(renderSlider)}
+
+      {advancedSliders.length > 0 && (
+        <div style={{ marginTop: 6 }}>
+          <button
+            type="button"
+            onClick={() => setAdvancedOpen((v) => !v)}
+            style={{
+              background: "none",
+              border: "none",
+              padding: 0,
+              cursor: "pointer",
+              fontSize: 12,
+              fontWeight: 600,
+              color: "var(--color-text-secondary,#aaa)"
+            }}
+          >
+            {advancedOpen ? "▾" : "▸"} מתקדם
+          </button>
+          {advancedOpen && <div style={{ marginTop: 6 }}>{advancedSliders.map(renderSlider)}</div>}
+        </div>
+      )}
 
       {adjustment.type === "curves" && (
         <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12 }}>

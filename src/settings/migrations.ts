@@ -1,5 +1,6 @@
 import type { AppSettings } from "./types";
 import { DEFAULT_APP_SETTINGS } from "./defaults";
+import { BUILT_IN_OUTPUT_PRESETS } from "@/core/advancedPrint/builtInPresets";
 
 export interface SettingsMigration {
   fromVersion: number;
@@ -13,18 +14,27 @@ export interface SettingsMigration {
  * deepMerge handles them automatically.
  */
 export const SETTINGS_MIGRATIONS: SettingsMigration[] = [
-  // Example for future use:
-  // {
-  //   fromVersion: 1,
-  //   toVersion: 2,
-  //   migrate: (s) => ({
-  //     ...s,
-  //     general: { ...(s.general as object), newField: "defaultValue" }
-  //   })
-  // }
+  {
+    fromVersion: 1,
+    toVersion: 2,
+    migrate: (s) => {
+      const advancedPrint = (isPlainObject(s.advancedPrint) ? s.advancedPrint : {}) as Record<string, unknown>;
+      const customOutputPresets = Array.isArray(advancedPrint.outputPresets)
+        ? advancedPrint.outputPresets.filter((preset) => isPlainObject(preset) && preset.builtIn === false)
+        : [];
+      return {
+        ...s,
+        schemaVersion: 2,
+        advancedPrint: {
+          ...advancedPrint,
+          outputPresets: [...BUILT_IN_OUTPUT_PRESETS, ...customOutputPresets]
+        }
+      };
+    }
+  }
 ];
 
-export const CURRENT_SETTINGS_VERSION = 1;
+export const CURRENT_SETTINGS_VERSION = 2;
 
 type PlainObj = Record<string, unknown>;
 

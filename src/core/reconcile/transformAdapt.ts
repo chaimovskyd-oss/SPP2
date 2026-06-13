@@ -28,14 +28,17 @@ function aspect({ w, h }: SlotDims): number {
 /**
  * Adapt a ContentTransform from an old slot geometry to a new one.
  *
+ * `rotation` is treated as IMAGE-INTRINSIC (e.g. a sideways upload turned
+ * upright) and always survives — it is independent of slot geometry. Only the
+ * slot-relative pan/zoom (offsetX/offsetY/scale) may be reset.
+ *
  * Rules:
  * 1. If the user had a manual transform AND the new slot has a similar aspect
  *    ratio (within ASPECT_TOLERANCE), scale the offsets proportionally and
  *    keep scale + rotation. Manual work survives.
- * 2. Otherwise, if a faceAnchor is available, return identity here — the
- *    caller is expected to invoke smart-crop afterwards using the anchor.
- *    We surface `hasManual: false` so smart-crop is free to recompute.
- * 3. Otherwise: identity transform.
+ * 2. Otherwise (no manual pan/zoom, or the aspect changed too much): reset
+ *    pan/zoom to identity but KEEP rotation. `hasManual` stays true whenever a
+ *    rotation is present, so the rotation keeps surviving future reflows.
  */
 export function adaptContentTransform(
   prev: ContentTransform | undefined,
@@ -43,14 +46,21 @@ export function adaptContentTransform(
   newSlot: SlotDims,
   options: { hasManual?: boolean; faceAnchor?: FaceAnchorData } = {},
 ): AdaptResult {
+  const rotation = prev?.rotation ?? 0;
+  const hasRotation = rotation !== 0;
+  const resetKeepingRotation: AdaptResult = {
+    transform: { ...IDENTITY_TRANSFORM, rotation },
+    hasManual: hasRotation,
+  };
+
   if (!prev || !options.hasManual) {
-    return { transform: { ...IDENTITY_TRANSFORM }, hasManual: false };
+    return resetKeepingRotation;
   }
 
   const prevAspect = aspect(prevSlot);
   const newAspect = aspect(newSlot);
   if (prevAspect <= 0 || newAspect <= 0) {
-    return { transform: { ...IDENTITY_TRANSFORM }, hasManual: false };
+    return resetKeepingRotation;
   }
 
   const delta = Math.abs(newAspect - prevAspect) / prevAspect;
@@ -64,15 +74,14 @@ export function adaptContentTransform(
         offsetX: prev.offsetX * sx,
         offsetY: prev.offsetY * sy,
         scale: prev.scale,
-        rotation: prev.rotation,
+        rotation,
       },
       hasManual: true,
     };
   }
 
-  // Aspect change too large — fall back to identity. Caller can re-apply
-  // smart crop using the faceAnchor (if any) to recenter intelligently.
-  return { transform: { ...IDENTITY_TRANSFORM }, hasManual: false };
+  // Aspect change too large — reset pan/zoom but keep the rotation correction.
+  return resetKeepingRotation;
 }
 
 export function aspectChangedSignificantly(prev: SlotDims, next: SlotDims): boolean {

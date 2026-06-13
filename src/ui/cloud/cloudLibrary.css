@@ -1,0 +1,322 @@
+.cloud-shell {
+  min-height: 100%;
+  background:
+    radial-gradient(760px 420px at 82% -12%, rgba(82, 201, 122, 0.08), transparent 62%),
+    radial-gradient(760px 420px at 4% 110%, rgba(124, 111, 224, 0.09), transparent 62%),
+    var(--bg-base);
+  color: var(--text-primary);
+  overflow: auto;
+}
+
+.cloud-topbar {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto minmax(120px, 1fr);
+  align-items: center;
+  gap: 16px;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px 56px 12px;
+}
+
+.cloud-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--text-primary);
+  font-family: "Syne", sans-serif;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.cloud-title svg {
+  color: var(--accent);
+}
+
+.cloud-account {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-secondary);
+}
+
+.cloud-account span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cloud-auth-card,
+.cloud-library,
+.cloud-empty-state {
+  max-width: 920px;
+  margin: 34px auto;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--bg-surface);
+}
+
+.cloud-auth-card {
+  display: grid;
+  gap: 14px;
+  width: min(520px, calc(100vw - 34px));
+  padding: 24px;
+}
+
+.cloud-auth-card h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.cloud-auth-card p,
+.cloud-empty-state p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cloud-auth-card label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.cloud-auth-card input {
+  height: 36px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-input);
+  padding: 0 10px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.cloud-auth-card input:focus {
+  border-color: var(--accent);
+}
+
+.cloud-auth-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.cloud-auth-divider {
+  height: 1px;
+  margin: 2px 0;
+  background: var(--border-soft);
+}
+
+.cloud-status,
+.cloud-status-line {
+  border: 1px solid color-mix(in oklab, var(--accent) 35%, var(--border));
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: color-mix(in oklab, var(--accent) 9%, transparent);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.cloud-library {
+  display: grid;
+  gap: 14px;
+  max-width: 1180px;
+  padding: 18px;
+}
+
+.cloud-library-toolbar {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(240px, 360px) auto auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.cloud-library-toolbar > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.cloud-library-toolbar strong {
+  font-size: 16px;
+}
+
+.cloud-library-toolbar span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.cloud-search {
+  width: 100%;
+  margin: 0;
+}
+
+.cloud-tabs {
+  display: flex;
+  gap: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.cloud-tabs button {
+  height: 30px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-btn);
+  padding: 0 12px;
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.cloud-tabs button.active {
+  border-color: var(--accent);
+  color: var(--text-primary);
+  background: color-mix(in oklab, var(--accent) 12%, var(--bg-base));
+}
+
+.cloud-tabs button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.cloud-storage-meter {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 320px) auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: color-mix(in oklab, var(--bg-surface) 76%, var(--bg-base));
+}
+
+.cloud-storage-meter > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.cloud-storage-meter strong {
+  font-size: 13px;
+}
+
+.cloud-storage-meter span,
+.cloud-storage-meter b {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.cloud-storage-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg-base);
+  overflow: hidden;
+}
+
+.cloud-storage-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.cloud-project-list {
+  display: grid;
+  gap: 9px;
+}
+
+.cloud-project-row {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 78px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  padding: 9px 12px;
+  background: color-mix(in oklab, var(--bg-surface) 74%, var(--bg-base));
+}
+
+.cloud-project-thumb {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  border-radius: 6px;
+  background: repeating-linear-gradient(45deg, #2c2a35 0 6px, #26242e 6px 12px);
+  color: var(--accent);
+  overflow: hidden;
+}
+
+.cloud-project-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cloud-project-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cloud-project-copy strong,
+.cloud-project-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cloud-project-copy strong {
+  font-size: 13px;
+}
+
+.cloud-project-copy span {
+  color: var(--text-secondary);
+  font-size: 11.5px;
+}
+
+.cloud-project-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.cloud-empty-state {
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  width: min(620px, calc(100vw - 34px));
+  padding: 42px 24px;
+  text-align: center;
+}
+
+.cloud-empty-state.compact {
+  width: 100%;
+  margin: 0;
+  padding: 34px;
+  border-style: dashed;
+}
+
+@media (max-width: 860px) {
+  .cloud-topbar,
+  .cloud-library-toolbar,
+  .cloud-storage-meter,
+  .cloud-project-row {
+    grid-template-columns: 1fr;
+  }
+
+  .cloud-topbar {
+    padding: 18px;
+  }
+
+  .cloud-account,
+  .cloud-project-actions {
+    justify-content: flex-start;
+  }
+
+  .cloud-library {
+    margin: 18px;
+  }
+}

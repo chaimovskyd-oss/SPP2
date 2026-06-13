@@ -113,6 +113,76 @@ export function WorkspacePanel(): ReactElement {
         </SettingsRow>
       </SettingsSection>
 
+      <SettingsSection title="הצמדה חכמה וסיבוב" description="כיוונון תחושת ההצמדה, קווי העזר והצמדת זוויות סיבוב.">
+        <SettingsRow label="קווי עזר חכמים (Smart Guides)" description="הצג קווי יישור בזמן גרירת אלמנטים.">
+          <SettingsToggle value={ws.smartGuidesEnabled} onChange={(v) => update({ smartGuidesEnabled: v })} />
+        </SettingsRow>
+
+        <SettingsRow label="הצמדה לעמוד" description="הצמד לקצוות ולמרכז העמוד.">
+          <SettingsToggle value={ws.snapToCanvasEnabled} onChange={(v) => update({ snapToCanvasEnabled: v })} />
+        </SettingsRow>
+
+        <SettingsRow label="הצמדה לאלמנטים" description="הצמד לקצוות ולמרכז של אלמנטים אחרים.">
+          <SettingsToggle value={ws.snapToLayersEnabled} onChange={(v) => update({ snapToLayersEnabled: v })} />
+        </SettingsRow>
+
+        <SettingsRow label="מרחק הצמדה (פיקסלים)" description="מרחק התפיסה במסך. ערך גבוה = הצמדה אגרסיבית יותר.">
+          <input
+            type="number"
+            className="settings-number-input"
+            value={ws.snapTolerancePx}
+            min={1}
+            max={40}
+            step={1}
+            onChange={(e) => update({ snapTolerancePx: parseFloat(e.target.value) || 6 })}
+          />
+        </SettingsRow>
+
+        <SettingsRow label="מרחק הצמדה עם Shift (פיקסלים)" description="מרחק תפיסה מוגבר בזמן החזקת Shift.">
+          <input
+            type="number"
+            className="settings-number-input"
+            value={ws.shiftSnapTolerancePx}
+            min={1}
+            max={60}
+            step={1}
+            onChange={(e) => update({ shiftSnapTolerancePx: parseFloat(e.target.value) || 14 })}
+          />
+        </SettingsRow>
+
+        <SettingsRow label="הצמדת זווית סיבוב" description="הצמד סיבוב לזוויות 0/45/90/135/180...">
+          <SettingsToggle value={ws.rotationSnapEnabled} onChange={(v) => update({ rotationSnapEnabled: v })} />
+        </SettingsRow>
+
+        {ws.rotationSnapEnabled && (
+          <SettingsRow label="סבילות הצמדת סיבוב (מעלות)" description="כמה קרוב לזווית צריך להיות כדי שתיצמד.">
+            <input
+              type="number"
+              className="settings-number-input"
+              value={ws.rotationSnapToleranceDeg}
+              min={1}
+              max={20}
+              step={1}
+              onChange={(e) => update({ rotationSnapToleranceDeg: parseFloat(e.target.value) || 4 })}
+            />
+          </SettingsRow>
+        )}
+
+        {ws.rotationSnapEnabled && (
+          <SettingsRow label="מדרגת סיבוב עם Shift (מעלות)" description="גודל המדרגה הקבועה בסיבוב עם Shift.">
+            <input
+              type="number"
+              className="settings-number-input"
+              value={ws.shiftRotationStepDeg}
+              min={1}
+              max={90}
+              step={1}
+              onChange={(e) => update({ shiftRotationStepDeg: parseFloat(e.target.value) || 15 })}
+            />
+          </SettingsRow>
+        )}
+      </SettingsSection>
+
       <SettingsSection title="תמונות ואובייקטים" description="התנהגות ברירת מחדל של תמונות ואלמנטים.">
         <SettingsRow label={<>רווח ברירת מחדל בין אובייקטים (מ״מ) {SOON}</>}>
           <input

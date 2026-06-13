@@ -1,0 +1,1319 @@
+{
+  "version": 1,
+  "createdAt": "2026-06-05T05:29:01.735Z",
+  "total": 9,
+  "summary": {
+    "screenshotsCleaned": 0,
+    "colorCorrected": 9,
+    "croppedToTarget": 9,
+    "designPresetApplied": 0,
+    "lowResolutionWarnings": 8,
+    "manualReviewRequired": 9
+  },
+  "results": [
+    {
+      "id": "3ce6675d-681d-41b5-b018-38e2889c1bcc",
+      "fileName": "01_square_heads_near_edges.jpg",
+      "filePath": "C:\\Users\\chaim\\OneDrive\\Desktop\\SPP2\\דוחות צ'ט\\hadish_bad_test_images\\01_square_heads_near_edges.jpg",
+      "analysis": {
+        "width": 1200,
+        "height": 1200,
+        "aspectRatio": 1,
+        "screenshot": {
+          "isLikely": false,
+          "confidence": 0.491,
+          "cropRect": null,
+          "reasons": [
+            "meaningful crop area",
+            "confidence below threshold"
+          ]
+        },
+        "faces": {
+          "boxes": [],
+          "backend": "haar",
+          "groupBox": null
+        },
+        "colorIssues": [
+          "overexposed",
+          "washed_out"
+        ],
+        "quality": {
+          "effectiveDpi": 203.2,
+          "tier": "ok",
+          "message": "203 DPI - תקין לדפוס."
+        }
+      },
+      "recommendedOperations": [
+        {
+          "operation": "target_crop",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.78,
+          "reason": "נמצא crop מתאים למידת היעד."
+        },
+        {
+          "operation": "technical_color",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.82,
+          "reason": "נמצאה חשיפה/צבע שדורשים תיקון עדין."
+        },
+        {
+          "operation": "quality_check",
+          "enabled": true,
+          "autoApproved": true,
+          "confidence": 0.95,
+          "reason": "בדיקת DPI לפי מידת היעד."
+        }
+      ],
+      "recipe": {
+        "targetCrop": {
+          "enabled": true,
+          "rect": {
+            "x": 200,
+            "y": 0,
+            "width": 800,
+            "height": 1200
+          },
+          "confidence": 0.78,
+          "source": "center"
+        },
+        "technicalAdjustments": [
+          {
+            "id": "adj_0001",
+            "type": "basicTone",
+            "enabled": true,
+            "brightness": -15.639999999999999,
+            "contrast": 7.14,
+            "gamma": 1,
+            "offset": 0
+          },
+          {
+            "id": "adj_0002",
+            "type": "highlightsShadows",
+            "enabled": true,
+            "highlights": -12.41,
+            "shadows": 0,
+            "whites": 0,
+            "blacks": 0
+          },
+          {
+            "id": "adj_0003",
+            "type": "color",
+            "enabled": true,
+            "vibrance": 11.9,
+            "hue": 0
+          },
+          {
+            "id": "adj_0004",
+            "type": "detail",
+            "enabled": true,
+            "sharpness": 6.8,
+            "sharpnessRadius": 1,
+            "clarity": 10.2,
+            "noiseReduction": 0
+          }
+        ],
+        "technicalTemplates": [
+          {
+            "type": "basicTone",
+            "brightness": -15.639999999999999,
+            "contrast": 7.14
+          },
+          {
+            "type": "highlightsShadows",
+            "highlights": -12.41
+          },
+          {
+            "type": "color",
+            "vibrance": 11.9
+          },
+          {
+            "type": "detail",
+            "clarity": 10.2,
+            "sharpness": 6.8
+          }
+        ]
+      },
+      "warnings": [
+        {
+          "type": "manual_review_required",
+          "operation": "target_crop",
+          "confidence": 0.78,
+          "message": "מומלץ לבדוק ידנית לפני שמירה."
+        },
+        {
+          "type": "manual_review_required",
+          "operation": "technical_color",
+          "confidence": 0.82,
+          "message": "מומלץ לבדוק ידנית לפני שמירה."
+        }
+      ],
+      "confidence": 0.78,
+      "approved": true,
+      "keepOriginal": false
+    },
+    {
+      "id": "e9a17ddf-eba8-47a2-88c9-c944d80e9c17",
+      "fileName": "02_panoramic_many_people.jpg",
+      "filePath": "C:\\Users\\chaim\\OneDrive\\Desktop\\SPP2\\דוחות צ'ט\\hadish_bad_test_images\\02_panoramic_many_people.jpg",
+      "analysis": {
+        "width": 2400,
+        "height": 800,
+        "aspectRatio": 3,
+        "screenshot": {
+          "isLikely": false,
+          "confidence": 0.533,
+          "cropRect": null,
+          "reasons": [
+            "clear border/content difference",
+            "meaningful crop area",
+            "confidence below threshold"
+          ]
+        },
+        "faces": {
+          "boxes": [],
+          "backend": "haar",
+          "groupBox": null
+        },
+        "colorIssues": [
+          "green_cast"
+        ],
+        "quality": {
+          "effectiveDpi": 135.382,
+          "tier": "strong_warning",
+          "message": "135 DPI - אזהרה חזקה."
+        }
+      },
+      "recommendedOperations": [
+        {
+          "operation": "target_crop",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.78,
+          "reason": "נמצא crop מתאים למידת היעד."
+        },
+        {
+          "operation": "technical_color",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.82,
+          "reason": "נמצאה חשיפה/צבע שדורשים תיקון עדין."
+        },
+        {
+          "operation": "quality_check",
+          "enabled": false,
+          "autoApproved": false,
+          "confidence": 0.62,
+          "reason": "בדיקת DPI לפי מידת היעד."
+        }
+      ],
+      "recipe": {
+        "targetCrop": {
+          "enabled": true,
+          "rect": {
+            "x": 934,
+            "y": 0,
+            "width": 533,
+            "height": 800
+          },
+          "confidence": 0.78,
+          "source": "center"
+        },
+        "technicalAdjustments": [
+          {
+            "id": "adj_0005",
+            "type": "basicTone",
+            "enabled": true,
+            "contrast": 0.935,
+            "gamma": 1,
+            "offset": 0
+          },
+          {
+            "id": "adj_0006",
+            "type": "color",
+            "enabled": true,
+            "vibrance": 11.9,
+            "tint": 15.469999999999999,
+            "hue": 0
+          },
+          {
+            "id": "adj_0007",
+            "type": "detail",
+            "enabled": true,
+            "sharpness": 6.8,
+            "sharpnessRadius": 1,
+            "clarity": 10.2,
+            "noiseReduction": 0
+          }
+        ],
+        "technicalTemplates": [
+          {
+            "type": "basicTone",
+            "contrast": 0.935
+          },
+          {
+            "type": "color",
+            "tint": 15.469999999999999,
+            "vibrance": 11.9
+          },
+          {
+            "type": "detail",
+            "clarity": 10.2,
+            "sharpness": 6.8
+          }
+        ]
+      },
+      "warnings": [
+        {
+          "type": "manual_review_required",
+          "operation": "target_crop",
+          "confidence": 0.78,
+          "message": "מומלץ לבדוק ידנית לפני שמירה."
+        },
+        {
+          "type": "manual_review_required",
+          "operation": "technical_color",
+          "confidence": 0.82,
+          "message": "מומלץ לבדוק ידנית לפני שמירה."
+        },
+        {
+          "type": "low_confidence",
+          "operation": "quality_check",
+          "confidence": 0.62,
+          "message": "רמת הביטחון נמוכה, הפעולה לא תאושר אוטומטית."
+        },
+        {
+          "type": "manual_review_required",
+          "operation": "quality_check",
+          "message": "135 DPI - אזהרה חזקה."
+        }
+      ],
+      "confidence": 0.78,
+      "approved": true,
+      "keepOriginal": false
+    },
+    {
+      "id": "a47df066-944c-4032-a8a8-39cd35b4ae3a",
+      "fileName": "03_very_low_quality.jpg",
+      "filePath": "C:\\Users\\chaim\\OneDrive\\Desktop\\SPP2\\דוחות צ'ט\\hadish_bad_test_images\\03_very_low_quality.jpg",
+      "analysis": {
+        "width": 1200,
+        "height": 900,
+        "aspectRatio": 1.3333333333333333,
+        "screenshot": {
+          "isLikely": false,
+          "confidence": 0.481,
+          "cropRect": null,
+          "reasons": [
+            "clear border/content difference",
+            "meaningful crop area",
+            "confidence below threshold"
+          ]
+        },
+        "faces": {
+          "boxes": [
+            {
+              "x": 595,
+              "y": 400,
+              "width": 59,
+              "height": 59,
+              "score": 0.6455771327018738
+            }
+          ],
+          "backend": "mediapipe",
+          "groupBox": {
+            "x": 595,
+            "y": 400,
+            "width": 59,
+            "height": 59
+          }
+        },
+        "colorIssues": [
+          "washed_out"
+        ],
+        "quality": {
+          "effectiveDpi": 152.4,
+          "tier": "soft_warning",
+          "message": "152 DPI - אזהרה קלה."
+        }
+      },
+      "recommendedOperations": [
+        {
+          "operation": "target_crop",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.8813942831754684,
+          "reason": "נמצא crop מתאים למידת היעד."
+        },
+        {
+          "operation": "technical_color",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.82,
+          "reason": "נמצאה חשיפה/צבע שדורשים תיקון עדין."
+        },
+        {
+          "operation": "quality_check",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.78,
+          "reason": "בדיקת DPI לפי מידת היעד."
+        }
+      ],
+      "recipe": {
+        "targetCrop": {
+          "enabled": true,
+          "rect": {
+            "x": 325,
+            "y": 0,
+            "width": 600,
+            "height": 900
+          },
+          "confidence": 0.8813942831754684,
+          "source": "faces"
+        },
+        "technicalAdjustments": [
+          {
+            "id": "adj_0008",
+            "type": "basicTone",
+            "enabled": true,
+            "contrast": 1.4449999999999998,
+            "gamma": 1,
+            "offset": 0
+          },
+          {
+            "id": "adj_0009",
+            "type": "color",
+            "enabled": true,
+            "vibrance": 11.9,
+            "hue": 0
+          },
+          {
+            "id": "adj_000a",
+            "type": "detail",
+            "enabled": true,
+            "sharpness": 6.8,
+            "sharpnessRadius": 1,
+            "clarity": 10.2,
+            "noiseReduction": 0
+          }
+        ],
+        "technicalTemplates": [
+          {
+            "type": "basicTone",
+            "contrast": 1.4449999999999998
+          },
+          {
+            "type": "color",
+            "vibrance": 11.9
+          },
+          {
+            "type": "detail",
+            "clarity": 10.2,
+            "sharpness": 6.8
+          }
+        ]
+      },
+      "warnings": [
+        {
+          "type": "manual_review_required",
+          "operation": "target_crop",
+          "confidence": 0.8813942831754684,
+          "message": "מומלץ לבדוק ידנית לפני שמירה."
+        },
+        {
+          "type": "manual_review_required",
+          "operation": "technical_color",
+          "confidence": 0.82,
+          "message": "מומלץ לבדוק ידנית לפני שמירה."
+        },
+        {
+          "type": "low_resolution",
+          "operation": "quality_check",
+          "message": "152 DPI - אזהרה קלה."
+        }
+      ],
+      "confidence": 0.78,
+      "approved": true,
+      "keepOriginal": false
+    },
+    {
+      "id": "caddc78d-989e-4e67-8ca5-9c09fd8284ab",
+      "fileName": "04_screenshot_capture.png",
+      "filePath": "C:\\Users\\chaim\\OneDrive\\Desktop\\SPP2\\דוחות צ'ט\\hadish_bad_test_images\\04_screenshot_capture.png",
+      "analysis": {
+        "width": 1440,
+        "height": 900,
+        "aspectRatio": 1.6,
+        "screenshot": {
+          "isLikely": false,
+          "confidence": 0.538,
+          "cropRect": null,
+          "reasons": [
+            "meaningful crop area",
+            "confidence below threshold"
+          ]
+        },
+        "faces": {
+          "boxes": [],
+          "backend": "haar",
+          "groupBox": null
+        },
+        "colorIssues": [
+          "overexposed",
+          "washed_out"
+        ],
+        "quality": {
+          "effectiveDpi": 152.4,
+          "tier": "soft_warning",
+          "message": "152 DPI - אזהרה קלה."
+        }
+      },
+      "recommendedOperations": [
+        {
+          "operation": "target_crop",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.78,
+          "reason": "נמצא crop מתאים למידת היעד."
+        },
+        {
+          "operation": "technical_color",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.82,
+          "reason": "נמצאה חשיפה/צבע שדורשים תיקון עדין."
+        },
+        {
+          "operation": "quality_check",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.78,
+          "reason": "בדיקת DPI לפי מידת היעד."
+        }
+      ],
+      "recipe": {
+        "targetCrop": {
+          "enabled": true,
+          "rect": {
+            "x": 420,
+            "y": 0,
+            "width": 600,
+            "height": 900
+          },
+          "confidence": 0.78,
+          "source": "center"
+        },
+        "technicalAdjustments": [
+          {
+            "id": "adj_000b",
+            "type": "basicTone",
+            "enabled": true,
+            "brightness": -18.7,
+            "contrast": 4.59,
+            "gamma": 1,
+            "offset": 0
+          },
+          {
+            "id": "adj_000c",
+            "type": "highlightsShadows",
+            "enabled": true,
+            "highlights": -32.3,
+            "shadows": 0,
+            "whites": 0,
+            "blacks": 0
+          },
+          {
+            "id": "adj_000d",
+            "type": "color",
+            "enabled": true,
+            "vibrance": 11.9,
+            "hue": 0
+          },
+          {
+            "id": "adj_000e",
+            "type": "detail",
+            "enabled": true,
+            "sharpness": 6.8,
+            "sharpnessRadius": 1,
+            "clarity": 10.2,
+            "noiseReduction": 0
+          }
+        ],
+        "technicalTemplates": [
+          {
+            "type": "basicTone",
+            "brightness": -18.7,
+            "contrast": 4.59
+          },
+          {
+            "type": "highlightsShadows",
+            "highlights": -32.3
+          },
+          {
+            "type": "color",
+            "vibrance": 11.9
+          },
+          {
+            "type": "detail",
+            "clarity": 10.2,
+            "sharpness": 6.8
+          }
+        ]
+      },
+      "warnings": [
+        {
+          "type": "manual_review_required",
+          "operation": "target_crop",
+          "confidence": 0.78,
+          "message": "מומלץ לבדוק ידנית לפני שמירה."
+        },
+        {
+          "type": "manual_review_required",
+          "operation": "technical_color",
+          "confidence": 0.82,
+          "message": "מומלץ לבדוק ידנית לפני שמירה."
+        },
+        {
+          "type": "low_resolution",
+          "operation": "quality_check",
+          "message": "152 DPI - אזהרה קלה."
+        }
+      ],
+      "confidence": 0.78,
+      "approved": true,
+      "keepOriginal": false
+    },
+    {
+      "id": "ec635f2a-b4f2-4a09-b297-75f1c15883ae",
+      "fileName": "05_too_yellow_people.jpg",
+      "filePath": "C:\\Users\\chaim\\OneDrive\\Desktop\\SPP2\\דוחות צ'ט\\hadish_bad_test_images\\05_too_yellow_people.jpg",
+      "analysis": {
+        "width": 1400,
+        "height": 1000,
+        "aspectRatio": 1.4,
+        "screenshot": {
+          "isLikely": false,
+          "confidence": 0.497,
+          "cropRect": null,
+          "reasons": [
+            "meaningful crop area",
+            "confidence below threshold"
+          ]
+        },
+        "faces": {
+          "boxes": [],
+          "backend": "haar",
+          "groupBox": null
+        },
+        "colorIssues": [
+          "yellow_cast",
+          "overexposed"
+        ],
+        "quality": {
+          "effectiveDpi": 169.33333333333331,
+          "tier": "soft_warning",
+          "message": "169 DPI - אזהרה קלה."
+        }
+      },
+      "recommendedOperations": [
+        {
+          "operation": "target_crop",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.78,
+          "reason": "נמצא crop מתאים למידת היעד."
+        },
+        {
+          "operation": "technical_color",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.82,
+          "reason": "נמצאה חשיפה/צבע שדורשים תיקון עדין."
+        },
+        {
+          "operation": "quality_check",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.78,
+          "reason": "בדיקת DPI לפי מידת היעד."
+        }
+      ],
+      "recipe": {
+        "targetCrop": {
+          "enabled": true,
+          "rect": {
+            "x": 367,
+            "y": 0,
+            "width": 667,
+            "height": 1000
+          },
+          "confidence": 0.78,
+          "source": "center"
+        },
+        "technicalAdjustments": [
+          {
+            "id": "adj_000f",
+            "type": "basicTone",
+            "enabled": true,
+            "brightness": -18.53,
+            "contrast": 5.27,
+            "gamma": 1,
+            "offset": 0
+          },
+          {
+            "id": "adj_000g",
+            "type": "highlightsShadows",
+            "enabled": true,
+            "highlights": -32.3,
+            "shadows": 0,
+            "whites": 0,
+            "blacks": 0
+          },
+          {
+            "id": "adj_000h",
+            "type": "color",
+            "enabled": true,
+            "vibrance": 11.9,
+            "temperature": -42,
+            "hue": 0
+          },
+          {
+            "id": "adj_000i",
+            "type": "detail",
+            "enabled": true,
+            "sharpness": 6.8,
+            "sharpnessRadius": 1,
+            "clarity": 10.2,
+            "noiseReduction": 0
+          }
+        ],
+        "technicalTemplates": [
+          {
+            "type": "basicTone",
+            "brightness": -18.53,
+            "contrast": 5.27
+          },
+          {
+            "type": "highlightsShadows",
+            "highlights": -32.3
+          },
+          {
+            "type": "color",
+            "temperature": -42,
+            "vibrance": 11.9
+          },
+          {
+            "type": "detail",
+            "clarity": 10.2,
+            "sharpness": 6.8
+          }
+        ]
+      },
+      "warnings": [
+        {
+          "type": "manual_review_required",
+          "operation": "target_crop",
+          "confidence": 0.78,
+          "message": "מומלץ לבדוק ידנית לפני שמירה."
+        },
+        {
+          "type": "manual_review_required",
+          "operation": "technical_color",
+          "confidence": 0.82,
+          "message": "מומלץ לבדוק ידנית לפני שמירה."
+        },
+        {
+          "type": "low_resolution",
+          "operation": "quality_check",
+          "message": "169 DPI - אזהרה קלה."
+        }
+      ],
+      "confidence": 0.78,
+      "approved": true,
+      "keepOriginal": false
+    },
+    {
+      "id": "4cac30fa-8f45-48a4-8dc2-bf2aad0b122f",
+      "fileName": "06_too_blue_people.jpg",
+      "filePath": "C:\\Users\\chaim\\OneDrive\\Desktop\\SPP2\\דוחות צ'ט\\hadish_bad_test_images\\06_too_blue_people.jpg",
+      "analysis": {
+        "width": 1400,
+        "height": 1000,
+        "aspectRatio": 1.4,
+        "screenshot": {
+          "isLikely": false,
+          "confidence": 0.509,
+          "cropRect": null,
+          "reasons": [
+            "clear border/content difference",
+            "meaningful crop area",
+            "confidence below threshold"
+          ]
+        },
+        "faces": {
+          "boxes": [],
+          "backend": "haar",
+          "groupBox": null
+        },
+        "colorIssues": [
+          "blue_cast",
+          "low_contrast"
+        ],
+        "quality": {
+          "effectiveDpi": 169.33333333333331,
+          "tier": "soft_warning",
+          "message": "169 DPI - אזהרה קלה."
+        }
+      },
+      "recommendedOperations": [
+        {
+          "operation": "target_crop",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.78,
+          "reason": "נמצא crop מתאים למידת היעד."
+        },
+        {
+          "operation": "technical_color",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.82,
+          "reason": "נמצאה חשיפה/צבע שדורשים תיקון עדין."
+        },
+        {
+          "operation": "quality_check",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.78,
+          "reason": "בדיקת DPI לפי מידת היעד."
+        }
+      ],
+      "recipe": {
+        "targetCrop": {
+          "enabled": true,
+          "rect": {
+            "x": 367,
+            "y": 0,
+            "width": 667,
+            "height": 1000
+          },
+          "confidence": 0.78,
+          "source": "center"
+        },
+        "technicalAdjustments": [
+          {
+            "id": "adj_000j",
+            "type": "basicTone",
+            "enabled": true,
+            "contrast": 5.1,
+            "gamma": 1,
+            "offset": 0
+          },
+          {
+            "id": "adj_000k",
+            "type": "color",
+            "enabled": true,
+            "vibrance": 11.9,
+            "temperature": 42,
+            "hue": 0
+          },
+          {
+            "id": "adj_000l",
+            "type": "detail",
+            "enabled": true,
+            "sharpness": 6.8,
+            "sharpnessRadius": 1,
+            "clarity": 10.2,
+            "noiseReduction": 0
+          }
+        ],
+        "technicalTemplates": [
+          {
+            "type": "basicTone",
+            "contrast": 5.1
+          },
+          {
+            "type": "color",
+            "temperature": 42,
+            "vibrance": 11.9
+          },
+          {
+            "type": "detail",
+            "clarity": 10.2,
+            "sharpness": 6.8
+          }
+        ]
+      },
+      "warnings": [
+        {
+          "type": "manual_review_required",
+          "operation": "target_crop",
+          "confidence": 0.78,
+          "message": "מומלץ לבדוק ידנית לפני שמירה."
+        },
+        {
+          "type": "manual_review_required",
+          "operation": "technical_color",
+          "confidence": 0.82,
+          "message": "מומלץ לבדוק ידנית לפני שמירה."
+        },
+        {
+          "type": "low_resolution",
+          "operation": "quality_check",
+          "message": "169 DPI - אזהרה קלה."
+        }
+      ],
+      "confidence": 0.78,
+      "approved": true,
+      "keepOriginal": false
+    },
+    {
+      "id": "0ca3eb62-76bd-4ee9-9296-d4398c840d5e",
+      "fileName": "07_too_red_people.jpg",
+      "filePath": "C:\\Users\\chaim\\OneDrive\\Desktop\\SPP2\\דוחות צ'ט\\hadish_bad_test_images\\07_too_red_people.jpg",
+      "analysis": {
+        "width": 1400,
+        "height": 1000,
+        "aspectRatio": 1.4,
+        "screenshot": {
+          "isLikely": false,
+          "confidence": 0.51,
+          "cropRect": null,
+          "reasons": [
+            "clear border/content difference",
+            "meaningful crop area",
+            "confidence below threshold"
+          ]
+        },
+        "faces": {
+          "boxes": [],
+          "backend": "haar",
+          "groupBox": null
+        },
+        "colorIssues": [
+          "red_cast",
+          "low_contrast"
+        ],
+        "quality": {
+          "effectiveDpi": 169.33333333333331,
+          "tier": "soft_warning",
+          "message": "169 DPI - אזהרה קלה."
+        }
+      },
+      "recommendedOperations": [
+        {
+          "operation": "target_crop",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.78,
+          "reason": "נמצא crop מתאים למידת היעד."
+        },
+        {
+          "operation": "technical_color",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.82,
+          "reason": "נמצאה חשיפה/צבע שדורשים תיקון עדין."
+        },
+        {
+          "operation": "quality_check",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.78,
+          "reason": "בדיקת DPI לפי מידת היעד."
+        }
+      ],
+      "recipe": {
+        "targetCrop": {
+          "enabled": true,
+          "rect": {
+            "x": 367,
+            "y": 0,
+            "width": 667,
+            "height": 1000
+          },
+          "confidence": 0.78,
+          "source": "center"
+        },
+        "technicalAdjustments": [
+          {
+            "id": "adj_000m",
+            "type": "basicTone",
+            "enabled": true,
+            "contrast": 5.779999999999999,
+            "gamma": 1,
+            "offset": 0
+          },
+          {
+            "id": "adj_000n",
+            "type": "color",
+            "enabled": true,
+            "vibrance": 11.9,
+            "temperature": -30.599999999999998,
+            "tint": -30.599999999999998,
+            "hue": 0
+          },
+          {
+            "id": "adj_000o",
+            "type": "detail",
+            "enabled": true,
+            "sharpness": 6.8,
+            "sharpnessRadius": 1,
+            "clarity": 10.2,
+            "noiseReduction": 0
+          }
+        ],
+        "technicalTemplates": [
+          {
+            "type": "basicTone",
+            "contrast": 5.779999999999999
+          },
+          {
+            "type": "color",
+            "temperature": -30.599999999999998,
+            "tint": -30.599999999999998,
+            "vibrance": 11.9
+          },
+          {
+            "type": "detail",
+            "clarity": 10.2,
+            "sharpness": 6.8
+          }
+        ]
+      },
+      "warnings": [
+        {
+          "type": "manual_review_required",
+          "operation": "target_crop",
+          "confidence": 0.78,
+          "message": "מומלץ לבדוק ידנית לפני שמירה."
+        },
+        {
+          "type": "manual_review_required",
+          "operation": "technical_color",
+          "confidence": 0.82,
+          "message": "מומלץ לבדוק ידנית לפני שמירה."
+        },
+        {
+          "type": "low_resolution",
+          "operation": "quality_check",
+          "message": "169 DPI - אזהרה קלה."
+        }
+      ],
+      "confidence": 0.78,
+      "approved": true,
+      "keepOriginal": false
+    },
+    {
+      "id": "7e31a446-fbb9-461f-82b8-fec8edfbbd74",
+      "fileName": "08_oversaturated_people.jpg",
+      "filePath": "C:\\Users\\chaim\\OneDrive\\Desktop\\SPP2\\דוחות צ'ט\\hadish_bad_test_images\\08_oversaturated_people.jpg",
+      "analysis": {
+        "width": 1400,
+        "height": 1000,
+        "aspectRatio": 1.4,
+        "screenshot": {
+          "isLikely": false,
+          "confidence": 0.496,
+          "cropRect": null,
+          "reasons": [
+            "meaningful crop area",
+            "confidence below threshold"
+          ]
+        },
+        "faces": {
+          "boxes": [
+            {
+              "x": 284,
+              "y": 413,
+              "width": 72,
+              "height": 72,
+              "score": 0.6362873315811157
+            },
+            {
+              "x": 492,
+              "y": 441,
+              "width": 71,
+              "height": 71,
+              "score": 0.6306789517402649
+            },
+            {
+              "x": 692,
+              "y": 441,
+              "width": 68,
+              "height": 68,
+              "score": 0.6233938932418823
+            }
+          ],
+          "backend": "mediapipe",
+          "groupBox": {
+            "x": 284,
+            "y": 413,
+            "width": 476,
+            "height": 99
+          }
+        },
+        "colorIssues": [
+          "overexposed",
+          "yellow_cast",
+          "washed_out"
+        ],
+        "quality": {
+          "effectiveDpi": 169.33333333333331,
+          "tier": "soft_warning",
+          "message": "169 DPI - אזהרה קלה."
+        }
+      },
+      "recommendedOperations": [
+        {
+          "operation": "target_crop",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.8775300147136053,
+          "reason": "נמצא crop מתאים למידת היעד."
+        },
+        {
+          "operation": "technical_color",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.82,
+          "reason": "נמצאה חשיפה/צבע שדורשים תיקון עדין."
+        },
+        {
+          "operation": "quality_check",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.78,
+          "reason": "בדיקת DPI לפי מידת היעד."
+        }
+      ],
+      "recipe": {
+        "targetCrop": {
+          "enabled": true,
+          "rect": {
+            "x": 188,
+            "y": 0,
+            "width": 667,
+            "height": 1000
+          },
+          "confidence": 0.8775300147136053,
+          "source": "faces"
+        },
+        "technicalAdjustments": [
+          {
+            "id": "adj_000p",
+            "type": "basicTone",
+            "enabled": true,
+            "brightness": -18.7,
+            "contrast": 0.255,
+            "gamma": 1,
+            "offset": 0
+          },
+          {
+            "id": "adj_000q",
+            "type": "highlightsShadows",
+            "enabled": true,
+            "highlights": -32.3,
+            "shadows": 0,
+            "whites": 0,
+            "blacks": 0
+          },
+          {
+            "id": "adj_000r",
+            "type": "color",
+            "enabled": true,
+            "vibrance": 11.9,
+            "temperature": -25.075,
+            "hue": 0
+          },
+          {
+            "id": "adj_000s",
+            "type": "detail",
+            "enabled": true,
+            "sharpness": 6.8,
+            "sharpnessRadius": 1,
+            "clarity": 10.2,
+            "noiseReduction": 0
+          }
+        ],
+        "technicalTemplates": [
+          {
+            "type": "basicTone",
+            "brightness": -18.7,
+            "contrast": 0.255
+          },
+          {
+            "type": "highlightsShadows",
+            "highlights": -32.3
+          },
+          {
+            "type": "color",
+            "temperature": -25.075,
+            "vibrance": 11.9
+          },
+          {
+            "type": "detail",
+            "clarity": 10.2,
+            "sharpness": 6.8
+          }
+        ]
+      },
+      "warnings": [
+        {
+          "type": "manual_review_required",
+          "operation": "target_crop",
+          "confidence": 0.8775300147136053,
+          "message": "מומלץ לבדוק ידנית לפני שמירה."
+        },
+        {
+          "type": "manual_review_required",
+          "operation": "technical_color",
+          "confidence": 0.82,
+          "message": "מומלץ לבדוק ידנית לפני שמירה."
+        },
+        {
+          "type": "low_resolution",
+          "operation": "quality_check",
+          "message": "169 DPI - אזהרה קלה."
+        }
+      ],
+      "confidence": 0.78,
+      "approved": true,
+      "keepOriginal": false
+    },
+    {
+      "id": "8f8c6f3a-127b-4e3c-bede-eaa6defcff41",
+      "fileName": "09_pale_flat_people.jpg",
+      "filePath": "C:\\Users\\chaim\\OneDrive\\Desktop\\SPP2\\דוחות צ'ט\\hadish_bad_test_images\\09_pale_flat_people.jpg",
+      "analysis": {
+        "width": 1400,
+        "height": 1000,
+        "aspectRatio": 1.4,
+        "screenshot": {
+          "isLikely": false,
+          "confidence": 0.499,
+          "cropRect": null,
+          "reasons": [
+            "meaningful crop area",
+            "confidence below threshold"
+          ]
+        },
+        "faces": {
+          "boxes": [],
+          "backend": "haar",
+          "groupBox": null
+        },
+        "colorIssues": [
+          "low_contrast",
+          "washed_out"
+        ],
+        "quality": {
+          "effectiveDpi": 169.33333333333331,
+          "tier": "soft_warning",
+          "message": "169 DPI - אזהרה קלה."
+        }
+      },
+      "recommendedOperations": [
+        {
+          "operation": "target_crop",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.78,
+          "reason": "נמצא crop מתאים למידת היעד."
+        },
+        {
+          "operation": "technical_color",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.82,
+          "reason": "נמצאה חשיפה/צבע שדורשים תיקון עדין."
+        },
+        {
+          "operation": "quality_check",
+          "enabled": true,
+          "autoApproved": false,
+          "confidence": 0.78,
+          "reason": "בדיקת DPI לפי מידת היעד."
+        }
+      ],
+      "recipe": {
+        "targetCrop": {
+          "enabled": true,
+          "rect": {
+            "x": 367,
+            "y": 0,
+            "width": 667,
+            "height": 1000
+          },
+          "confidence": 0.78,
+          "source": "center"
+        },
+        "technicalAdjustments": [
+          {
+            "id": "adj_000t",
+            "type": "basicTone",
+            "enabled": true,
+            "contrast": 7.31,
+            "gamma": 1,
+            "offset": 0
+          },
+          {
+            "id": "adj_000u",
+            "type": "color",
+            "enabled": true,
+            "vibrance": 11.9,
+            "hue": 0
+          },
+          {
+            "id": "adj_000v",
+            "type": "detail",
+            "enabled": true,
+            "sharpness": 6.8,
+            "sharpnessRadius": 1,
+            "clarity": 10.2,
+            "noiseReduction": 0
+          }
+        ],
+        "technicalTemplates": [
+          {
+            "type": "basicTone",
+            "contrast": 7.31
+          },
+          {
+            "type": "color",
+            "vibrance": 11.9
+          },
+          {
+            "type": "detail",
+            "clarity": 10.2,
+            "sharpness": 6.8
+          }
+        ]
+      },
+      "warnings": [
+        {
+          "type": "manual_review_required",
+          "operation": "target_crop",
+          "confidence": 0.78,
+          "message": "מומלץ לבדוק ידנית לפני שמירה."
+        },
+        {
+          "type": "manual_review_required",
+          "operation": "technical_color",
+          "confidence": 0.82,
+          "message": "מומלץ לבדוק ידנית לפני שמירה."
+        },
+        {
+          "type": "low_resolution",
+          "operation": "quality_check",
+          "message": "169 DPI - אזהרה קלה."
+        }
+      ],
+      "confidence": 0.78,
+      "approved": true,
+      "keepOriginal": false
+    }
+  ]
+}

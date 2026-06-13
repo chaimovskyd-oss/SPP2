@@ -3,10 +3,13 @@ from __future__ import annotations
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
+import threading
 from typing import Any
 
 import numpy as np
 from PIL import Image
+
+from smart_selection.providers import preferred_onnx_providers, selected_provider
 
 
 MAX_EMBEDDING_CACHE = 20
@@ -43,6 +46,7 @@ class SamService:
         self._model_key: str | None = None
         self._vision_session: Any | None = None
         self._decoder_session: Any | None = None
+        self._run_lock = threading.Lock()
 
     def prepare_model(self, files: list[dict[str, Any]] | None, providers: list[str] | None = None) -> dict[str, Any]:
         if not files:
@@ -59,17 +63,7 @@ class SamService:
         try:
             import onnxruntime as ort  # type: ignore
 
-            available = set(ort.get_available_providers())
-            requested = [provider for provider in (providers or []) if provider in available]
-            if not requested:
-                preferred = [
-                    "CUDAExecutionProvider",
-                    "DmlExecutionProvider",
-                    "DirectMLExecutionProvider",
-                    "CoreMLExecutionProvider",
-                    "CPUExecutionProvider",
-                ]
-                requested = [provider for provider in preferred if provider in available] or ["CPUExecutionProvider"]
+            requested = preferred_onnx_providers(ort.get_available_providers(), providers)
             self._vision_session = ort.InferenceSession(vision_path, providers=requested)
             self._decoder_session = ort.InferenceSession(decoder_path, providers=requested)
             self._model_key = key
@@ -192,24 +186,38 @@ class SamService:
         arr = np.asarray(resized).astype(np.float32) / 255.0
         arr = (arr - IMAGENET_MEAN) / IMAGENET_STD
         pixel_values = np.transpose(arr, (2, 0, 1))[None, ...].astype(np.float32)
-        outputs = self._vision_session.run(None, {"pixel_values": pixel_values})
+        with self._run_lock:
+            outputs = self._vision_session.run(None, {"pixel_values": pixel_values})
         return [np.asarray(output, dtype=np.float32) for output in outputs]
+
+    def warmup_vision(self) -> None:
+        if self._vision_session is None:
+            return
+        pixel_values = np.zeros((1, 3, SAM_IMAGE_SIZE, SAM_IMAGE_SIZE), dtype=np.float32)
+        with self._run_lock:
+            self._vision_session.run(None, {"pixel_values": pixel_values})
+
+    def provider(self) -> str | None:
+        if self._vision_session is None:
+            return None
+        return selected_provider(self._vision_session)
 
     def _run_decoder(self, embeddings: list[np.ndarray], prompts: list[dict[str, Any]], target_width: int, target_height: int) -> np.ndarray:
         if self._decoder_session is None:
             raise RuntimeError("SAM decoder session is not ready")
         points, labels, boxes = prompts_to_tensors(prompts)
-        outputs = self._decoder_session.run(
-            None,
-            {
-                "input_points": points,
-                "input_labels": labels,
-                "input_boxes": boxes,
-                "image_embeddings.0": embeddings[0],
-                "image_embeddings.1": embeddings[1],
-                "image_embeddings.2": embeddings[2],
-            },
-        )
+        with self._run_lock:
+            outputs = self._decoder_session.run(
+                None,
+                {
+                    "input_points": points,
+                    "input_labels": labels,
+                    "input_boxes": boxes,
+                    "image_embeddings.0": embeddings[0],
+                    "image_embeddings.1": embeddings[1],
+                    "image_embeddings.2": embeddings[2],
+                },
+            )
         iou_scores = np.asarray(outputs[0])
         pred_masks = np.asarray(outputs[1])
         if pred_masks.ndim != 5:

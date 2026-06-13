@@ -17,7 +17,7 @@ import { applyImageAdjustmentStack, isActiveImageAdjustment } from "@/core/rende
 /** Konva filter signature: mutate the supplied ImageData in place. */
 export type KonvaImageFilter = (imageData: ImageData) => void;
 
-const HEAVY_TYPES = new Set<ImageAdjustment["type"]>(["detail"]);
+const HEAVY_TYPES = new Set<ImageAdjustment["type"]>(["detail", "shadowHighlights"]);
 
 export interface AdjustmentFilterOptions {
   /** Master strength multiplier (1 = full). */

@@ -1,0 +1,82 @@
+- main [ref=e247]:
+  - generic [ref=e248]:
+    - generic [ref=e249]:
+      - generic [ref=e250]:
+        - text: מצב גריד
+        - heading "הגדרת דף" [level=1] [ref=e251]
+      - button "חזרה" [ref=e252] [cursor=pointer]
+    - generic "שלבי הגדרה" [ref=e253]:
+      - generic [ref=e254]: 1. דף
+      - generic [ref=e255]: 2. גריד
+    - region "Customer / Project Info" [ref=e256]:
+      - generic [ref=e257]: Customer / Project Info
+      - generic [ref=e258]:
+        - generic [ref=e259]:
+          - generic [ref=e260]: Customer Name
+          - textbox "Customer Name" [ref=e261]
+        - generic [ref=e262]:
+          - generic [ref=e263]: Phone Number
+          - textbox "Phone Number" [ref=e264]
+        - generic [ref=e265]:
+          - generic [ref=e266]: Email
+          - textbox "Email" [ref=e267]
+    - generic [ref=e268]:
+      - generic [ref=e269]:
+        - generic [ref=e270]: מידת דף
+        - combobox "מידת דף" [ref=e271]:
+          - option "A5"
+          - option "A4" [selected]
+          - option "A3"
+          - option "Letter"
+          - option "Legal"
+          - option "10x15"
+          - option "13x18"
+          - option "15x20"
+          - option "20×20"
+          - option "20x30"
+          - option "Instagram"
+          - option "סטורי"
+          - option "ריבוע"
+          - option "ספל סובלימציה 11oz"
+          - option "חולצת סובלימציה A3"
+          - option "Mitsubishi 10x15"
+          - option "מותאם אישית"
+      - generic [ref=e272]:
+        - generic [ref=e273]: יחידות
+        - combobox "יחידות" [ref=e274]:
+          - option "מ\"מ" [selected]
+          - option "ס\"מ"
+          - option "אינץ'"
+          - option "פיקסלים"
+      - generic [ref=e275]:
+        - generic [ref=e276]: DPI
+        - spinbutton "DPI" [ref=e277]: "300"
+      - generic [ref=e278]:
+        - generic [ref=e279]: כיוון
+        - generic [ref=e280]:
+          - button "לאורך" [ref=e281] [cursor=pointer]
+          - button "לרוחב" [ref=e282] [cursor=pointer]
+          - button "כפולה" [disabled] [ref=e283] [cursor=pointer]
+      - generic [ref=e284]:
+        - checkbox "מידה מותאמת אישית" [ref=e285]
+        - text: מידה מותאמת אישית
+      - generic [ref=e286]:
+        - generic [ref=e287]: רוחב (mm)
+        - spinbutton "רוחב (mm)" [disabled] [ref=e288]: "210"
+      - generic [ref=e289]:
+        - generic [ref=e290]: גובה (mm)
+        - spinbutton "גובה (mm)" [disabled] [ref=e291]: "297"
+      - generic [ref=e292]:
+        - generic [ref=e293]: בליד (mm)
+        - spinbutton "בליד (mm)" [ref=e294]: "0"
+      - generic [ref=e295]:
+        - generic [ref=e296]: שוליים (mm)
+        - spinbutton "שוליים (mm)" [ref=e297]: "0"
+      - generic [ref=e298]:
+        - generic [ref=e299]: אזור בטוח (mm)
+        - spinbutton "אזור בטוח (mm)" [ref=e300]: "0"
+    - generic [ref=e301]:
+      - generic [ref=e302]: 2480 x 3508 px
+      - generic [ref=e303]: 300 DPI
+      - generic [ref=e304]: press
+    - button "המשך להגדרת גריד" [ref=e306] [cursor=pointer]

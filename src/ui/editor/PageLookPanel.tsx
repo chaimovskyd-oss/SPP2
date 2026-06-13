@@ -4,13 +4,14 @@ import { ToolLibrary } from "@/ui/editor/ToolLibrary";
 import { PageLookCard } from "@/ui/editor/PageLookCard";
 import type { LibraryItem } from "@/core/presets/toolLibrary";
 import { ENABLE_PAGE_LOOK_LAYERS } from "@/core/features/adjustmentFlags";
-import { createPageLookLayer, type PageLookLayer } from "@/types/imageAdjustments";
+import { createPageLookLayer, type ImageAdjustmentTemplate, type PageLookLayer } from "@/types/imageAdjustments";
 
 /** Stable empty reference — see PageAdjustmentsSection for why this matters. */
 const EMPTY_LOOKS: PageLookLayer[] = [];
 
 export function PageLookPanel(): ReactElement | null {
   const pageId = useDocumentStore((s) => s.activePageId);
+  const pageCount = useDocumentStore((s) => s.document?.pages.length ?? 1);
   const pageLooks = useDocumentStore(
     (s) => s.document?.pages.find((p) => p.id === s.activePageId)?.pageLooks ?? EMPTY_LOOKS
   );
@@ -21,16 +22,20 @@ export function PageLookPanel(): ReactElement | null {
   const removePageLook = useDocumentStore((s) => s.removePageLook);
   const reorderPageLook = useDocumentStore((s) => s.reorderPageLook);
   const applyPresetAsPageLook = useDocumentStore((s) => s.applyPresetAsPageLook);
+  const addPageLookToAllPages = useDocumentStore((s) => s.addPageLookToAllPages);
+  const applyPresetAsPageLookToAllPages = useDocumentStore((s) => s.applyPresetAsPageLookToAllPages);
 
   const [libraryOpen, setLibraryOpen] = useState(false);
 
   if (!ENABLE_PAGE_LOOK_LAYERS || pageId === null) return null;
 
-  const handleLibraryApply = (item: LibraryItem, strength: number): void => {
+  const handleLibraryApply = (item: LibraryItem, strength: number, _applyToAll: boolean, _duplicate: boolean, _extra: ImageAdjustmentTemplate[], applyToAllPages: boolean): void => {
     if (item.kind === "effect" && item.effectKind !== undefined) {
-      addPageLook(pageId, createPageLookLayer({ kind: item.effectKind }));
+      if (applyToAllPages) addPageLookToAllPages({ kind: item.effectKind });
+      else addPageLook(pageId, createPageLookLayer({ kind: item.effectKind }));
     } else if (item.kind === "pageLookPreset" && item.presetId !== undefined) {
-      applyPresetAsPageLook(pageId, item.presetId, strength);
+      if (applyToAllPages) applyPresetAsPageLookToAllPages(item.presetId, strength);
+      else applyPresetAsPageLook(pageId, item.presetId, strength);
     }
   };
 
@@ -45,7 +50,7 @@ export function PageLookPanel(): ReactElement | null {
       </button>
 
       {libraryOpen && (
-        <ToolLibrary context="page" onApply={handleLibraryApply} onClose={() => setLibraryOpen(false)} />
+        <ToolLibrary context="page" pageCount={pageCount} onApply={handleLibraryApply} onClose={() => setLibraryOpen(false)} />
       )}
 
       {pageLooks.length === 0 ? (

@@ -2,6 +2,15 @@ import { Brush, Check, Copy, Crop, Eraser, RectangleHorizontal, RotateCcw, Sciss
 import type { ReactElement } from "react";
 import { useImageEditStore, type ImageEditTool } from "@/state/imageEditStore";
 import type { AiTool } from "@/state/aiToolsStore";
+import { warmSdEngine, type ContentFillEngine } from "@/services/ai/contentAwareFillService";
+
+const FILL_ENGINE_OPTIONS: { value: ContentFillEngine; label: string }[] = [
+  { value: "auto", label: "מילוי: אוטומטי" },
+  { value: "lama", label: "מילוי: LaMa (מהיר)" },
+  { value: "sd_inpaint", label: "מילוי: SD (איכותי)" },
+  { value: "texture_fill", label: "מילוי: טקסטורה (דשא/דפוס)" },
+  { value: "quick_heal", label: "מילוי: תיקון מהיר" }
+];
 
 interface ImageEditToolbarProps {
   onApply: () => void;
@@ -18,7 +27,7 @@ interface ImageEditToolbarProps {
 }
 
 function isSelectionTool(tool: ImageEditTool | null): boolean {
-  return tool === "wand" || tool === "rect-select" || tool === "smart-select" || tool === "brush-select";
+  return tool === "wand" || tool === "rect-select" || tool === "smart-select" || tool === "brush-select" || tool === "lasso";
 }
 
 export function ImageEditToolbar({
@@ -43,6 +52,8 @@ export function ImageEditToolbar({
   const selectionBrushMode = useImageEditStore((s) => s.selectionBrushMode);
   const setSelectionBrushMode = useImageEditStore((s) => s.setSelectionBrushMode);
   const aiFillWorking = useImageEditStore((s) => s.aiFillStatus === "working" || s.aiFillStatus === "preparing");
+  const contentFillEngine = useImageEditStore((s) => s.contentFillEngine);
+  const setContentFillEngine = useImageEditStore((s) => s.setContentFillEngine);
 
   function toolBtn(tool: ImageEditTool, icon: ReactElement, label: string): ReactElement {
     return (
@@ -127,9 +138,23 @@ export function ImageEditToolbar({
               <Scissors size={14} />
               <span className="ctx-btn-label">Cut Layer</span>
             </button>
-            <button className="context-icon" title="Remove selection and fill naturally" type="button" disabled={aiFillWorking} onClick={onAiFillSelection}>
+            <select
+              className="context-select"
+              title="בחירת מנוע מילוי"
+              value={contentFillEngine}
+              onChange={(e) => {
+                const engine = e.target.value as ContentFillEngine;
+                setContentFillEngine(engine);
+                if (engine === "sd_inpaint") void warmSdEngine();
+              }}
+            >
+              {FILL_ENGINE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            <button className="context-icon" title="הסר את הבחירה ומלא באופן טבעי (Shift+F5)" type="button" disabled={aiFillWorking} onClick={onAiFillSelection}>
               <Sparkles size={14} />
-              <span className="ctx-btn-label">AI Fill</span>
+              <span className="ctx-btn-label">{contentFillEngine === "sd_inpaint" ? "מילוי איכותי" : "מילוי חכם"}</span>
             </button>
             <button className="context-icon danger" title="Delete selection" type="button" onClick={onDeleteSelection}>
               <Trash2 size={14} />

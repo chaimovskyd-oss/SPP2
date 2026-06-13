@@ -51,6 +51,8 @@ export * from "./text/defaults";
 export * from "./text/measurement";
 export * from "./text/migration";
 export * from "./text/presets";
+export * from "./text/richText";
+export * from "./text/smartTextBlock";
 export * from "./text/smartTextFit";
 export * from "./text/shapeTextFit";
 export * from "./transform/alignmentEngine";

@@ -2,10 +2,51 @@ import { describe, expect, it } from "vitest";
 import { createPage } from "@/core/document/factory";
 import { createCollageModeDocument, createCollageRule, createCollageSlot } from "@/core/collage/collageFactory";
 import { focalPointToContentTransform } from "@/core/collage/collageFaceDetect";
-import { applyLayoutFamily, assignByPoolOrder, mergeLiveFrameEditsIntoCollageRule, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
+import { applyLayoutFamily, assignByPoolOrder, buildCollageImageInputs, mergeLiveFrameEditsIntoCollageRule, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
 import { clampContentTransformToFillBounds, computeContentRect } from "@/core/rendering/frameFitEngine";
 import { useDocumentStore } from "@/state/documentStore";
 import type { FrameLayer, ShapeLayer } from "@/types/layers";
+import type { Asset } from "@/types/document";
+import type { CollageRule } from "@/types/collage";
+
+describe("buildCollageImageInputs", () => {
+  const assets = [
+    { id: "a1", width: 400, height: 800, metadata: {} },
+    { id: "a2", width: 1000, height: 500, metadata: {} },
+  ] as unknown as Asset[];
+
+  const ruleWith = (rotations: Record<string, number>): Pick<CollageRule, "imageAssignments"> =>
+    ({
+      imageAssignments: Object.entries(rotations).map(([assetId, rotation]) => ({
+        assetId,
+        contentTransform: { version: 1, offsetX: 0, offsetY: 0, scale: 1, rotation },
+      })),
+    } as unknown as Pick<CollageRule, "imageAssignments">);
+
+  it("uses raw asset dimensions when there is no rotation", () => {
+    const inputs = buildCollageImageInputs(assets, ["a1", "a2"], ruleWith({ a1: 0, a2: 0 }));
+    expect(inputs[0]).toMatchObject({ assetId: "a1", width: 400, height: 800 });
+    expect(inputs[1]).toMatchObject({ assetId: "a2", width: 1000, height: 500 });
+  });
+
+  it("swaps width/height for a quarter-turn rotation (90°/270°)", () => {
+    const inputs = buildCollageImageInputs(assets, ["a1", "a2"], ruleWith({ a1: 90, a2: 270 }));
+    // a1 portrait 400x800 → displayed landscape 800x400
+    expect(inputs[0]).toMatchObject({ assetId: "a1", width: 800, height: 400 });
+    // a2 landscape 1000x500 → displayed portrait 500x1000
+    expect(inputs[1]).toMatchObject({ assetId: "a2", width: 500, height: 1000 });
+  });
+
+  it("does not swap for a half turn (180°)", () => {
+    const inputs = buildCollageImageInputs(assets, ["a1"], ruleWith({ a1: 180 }));
+    expect(inputs[0]).toMatchObject({ assetId: "a1", width: 400, height: 800 });
+  });
+
+  it("falls back to rotation 0 for pool images with no assignment yet", () => {
+    const inputs = buildCollageImageInputs(assets, ["a1"], ruleWith({}));
+    expect(inputs[0]).toMatchObject({ assetId: "a1", width: 400, height: 800 });
+  });
+});
 
 describe("Collage mode frame sync", () => {
   it("keeps managed collage frames pointer-interactive while locking their layout by behavior", () => {

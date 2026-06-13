@@ -71,6 +71,7 @@ export interface SmartArrangeLayerUpdate {
   y?: number;
   width?: number;
   height?: number;
+  rotation?: number;
   fontSize?: number;
   alignment?: TextAlignment;
 }

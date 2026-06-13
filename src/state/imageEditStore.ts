@@ -1,6 +1,7 @@
 import { create } from "zustand";
+import type { ContentFillEngine } from "@/services/ai/contentAwareFillService";
 
-export type ImageEditTool = "crop" | "eraser" | "white-bg" | "wand" | "rect-select" | "smart-select" | "brush-select";
+export type ImageEditTool = "crop" | "eraser" | "white-bg" | "wand" | "rect-select" | "smart-select" | "brush-select" | "lasso";
 
 export type SelectionBrushMode = "add" | "subtract";
 
@@ -73,6 +74,7 @@ export interface ImageEditState {
   aiFillStatus: SmartSelectionStatus;
   aiFillMessage: string | null;
   aiFillProgress: SmartSelectionProgress | null;
+  contentFillEngine: ContentFillEngine;
 
   selectionBrushSize: number;
   selectionBrushMode: SelectionBrushMode;
@@ -104,6 +106,7 @@ export interface ImageEditState {
   clearSmartSelectionPrompts: () => void;
   setAiFillStatus: (status: SmartSelectionStatus, message?: string | null) => void;
   setAiFillProgress: (progress: SmartSelectionProgress | null) => void;
+  setContentFillEngine: (engine: ContentFillEngine) => void;
 
   setSelectionBrushSize: (v: number) => void;
   setSelectionBrushMode: (mode: SelectionBrushMode) => void;
@@ -143,6 +146,7 @@ export const useImageEditStore = create<ImageEditState>((set) => ({
   aiFillStatus: "idle",
   aiFillMessage: null,
   aiFillProgress: null,
+  contentFillEngine: "sd_inpaint",
   selectionBrushSize: 40,
   selectionBrushMode: "add",
 
@@ -242,6 +246,7 @@ export const useImageEditStore = create<ImageEditState>((set) => ({
   clearSmartSelectionPrompts: () => set({ smartSelectionPrompts: [] }),
   setAiFillStatus: (status, message = null) => set({ aiFillStatus: status, aiFillMessage: message }),
   setAiFillProgress: (progress) => set({ aiFillProgress: progress }),
+  setContentFillEngine: (engine) => set({ contentFillEngine: engine }),
   setSelectionBrushSize: (v) => set({ selectionBrushSize: Math.max(2, Math.min(400, Math.round(v))) }),
   setSelectionBrushMode: (mode) => set({ selectionBrushMode: mode }),
   subtractFromSelectionMask: (mask) =>

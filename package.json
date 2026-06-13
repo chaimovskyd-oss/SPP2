@@ -9,10 +9,13 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "electron": "node scripts/run-electron.cjs",
+    "build:print-hub-server": "node scripts/build-print-hub-server.cjs",
+    "build:advanced-print-worker": "node scripts/build-advanced-print-worker.cjs",
+    "print-hub-server": "node scripts/build-print-hub-server.cjs && electron electron/printHubServer.cjs",
     "fetch:python": "node scripts/fetch-python-embed.cjs",
-    "pack": "vite build && electron-builder --dir",
-    "dist": "vite build && electron-builder --win nsis",
-    "dist:mac": "vite build && electron-builder --mac dmg",
+    "pack": "vite build && npm run build:print-hub-server && npm run build:advanced-print-worker && electron-builder --dir",
+    "dist": "vite build && npm run build:print-hub-server && npm run build:advanced-print-worker && electron-builder --win nsis",
+    "dist:mac": "vite build && npm run build:print-hub-server && electron-builder --mac dmg",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
@@ -27,6 +30,13 @@
       "package.json"
     ],
     "extraResources": [
+      {
+        "from": "spp2_advanced_print_worker/dist",
+        "to": "spp2_advanced_print_worker",
+        "filter": [
+          "**/*"
+        ]
+      },
       {
         "from": "image.editor.engine",
         "to": "image.editor.engine",
@@ -62,6 +72,14 @@
       {
         "from": "build/python-embed",
         "to": "python-embed"
+      },
+      {
+        "from": "docs/guide-mapping",
+        "to": "docs/guide-mapping"
+      },
+      {
+        "from": "output/playwright/guide-mapping/screenshots",
+        "to": "output/playwright/guide-mapping/screenshots"
       }
     ],
     "directories": {
@@ -70,18 +88,18 @@
     },
     "fileAssociations": [
       {
+        "ext": "spp",
+        "name": "SPP Project",
+        "description": "SPP project file",
+        "icon": "build/icon.ico",
+        "role": "Editor"
+      },
+      {
         "ext": "spp2",
         "name": "SPP2 Project",
         "description": "קובץ פרויקט SPP2",
         "icon": "build/icon.ico",
         "role": "Editor"
-      },
-      {
-        "ext": "psd",
-        "name": "Photoshop Document",
-        "description": "ייבוא PSD לתוכנה",
-        "icon": "build/icon.ico",
-        "role": "Viewer"
       }
     ],
     "win": {
@@ -95,13 +113,14 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
+      "createDesktopShortcut": false,
       "createStartMenuShortcut": true,
       "shortcutName": "SPP2",
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
       "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico"
+      "uninstallerIcon": "build/icon.ico",
+      "include": "build/installer.nsh"
     },
     "mac": {
       "target": [
@@ -116,6 +135,7 @@
     "@mediapipe/tasks-vision": "^0.10.35",
     "@types/qrcode": "^1.5.6",
     "@vitejs/plugin-react": "^5.1.1",
+    "busboy": "^1.6.0",
     "heic2any": "^0.0.4",
     "konva": "^10.0.12",
     "lucide-react": "^0.555.0",
@@ -129,6 +149,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
+    "@types/busboy": "^1.5.4",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "concurrently": "^9.2.1",

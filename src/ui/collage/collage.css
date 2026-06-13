@@ -2,6 +2,15 @@
    COLLAGE MODE – Phase 5
    ═══════════════════════════════════════════════════════ */
 
+/* ─── Cell image rotate row ──────────────────────────── */
+.collage-rotate-row {
+  display: flex;
+  gap: 8px;
+}
+.collage-rotate-row .btn {
+  flex: 1;
+}
+
 /* ─── Wizard overlay ─────────────────────────────────── */
 .collage-wizard-overlay {
   position: fixed; inset: 0;
@@ -204,6 +213,10 @@
 .panel-field { display: flex; flex-direction: column; gap: 4px; }
 .panel-field label { font-size: 12px; color: var(--text-secondary); }
 .panel-field input[type=range] { accent-color: var(--accent); }
+.panel-subsection {
+  display: flex; flex-direction: column; gap: 10px;
+  padding-top: 10px; border-top: 1px solid var(--border);
+}
 .panel-field select {
   background: var(--bg-elevated); border: 1px solid var(--border);
   color: var(--text-primary); border-radius: 4px; padding: 4px 8px; font-size: 12px;

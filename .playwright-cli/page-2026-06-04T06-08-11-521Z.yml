@@ -1,0 +1,479 @@
+- main [ref=e335]:
+  - generic [ref=e336]:
+    - generic [ref=e337]:
+      - button "בית" [ref=e1537] [cursor=pointer]:
+        - img [ref=e1538]
+      - button "Undo" [ref=e343] [cursor=pointer]:
+        - img [ref=e344]
+      - button "Redo" [disabled] [ref=e347]:
+        - img [ref=e348]
+      - generic [ref=e351]: פרויקט grid
+    - generic [ref=e352]:
+      - generic [ref=e353]: עיצוב חופשי
+      - generic [ref=e354]: Free Mode
+      - button "עריכת פריסה" [ref=e356] [cursor=pointer]
+      - button "Align left" [ref=e358] [cursor=pointer]:
+        - img [ref=e359]
+      - button "Align horizontal center" [ref=e360] [cursor=pointer]:
+        - img [ref=e361]
+      - button "Align right" [ref=e362] [cursor=pointer]:
+        - img [ref=e363]
+      - button "Align top" [ref=e364] [cursor=pointer]:
+        - img [ref=e365]
+      - button "Align vertical center" [ref=e368] [cursor=pointer]:
+        - img [ref=e369]
+      - button "Align bottom" [ref=e370] [cursor=pointer]:
+        - img [ref=e371]
+      - button "Distribute horizontally" [disabled] [ref=e374] [cursor=pointer]:
+        - img [ref=e375]
+      - button "Distribute vertically" [disabled] [ref=e382] [cursor=pointer]:
+        - img [ref=e383]
+    - generic [ref=e386]:
+      - button "הגדרות (Ctrl+,)" [ref=e1541] [cursor=pointer]:
+        - img [ref=e1542]
+      - button "כלי עזר" [ref=e1546] [cursor=pointer]:
+        - img [ref=e1547]
+        - text: כלי עזר
+        - img [ref=e1549]
+      - button "טעינה" [ref=e1551] [cursor=pointer]:
+        - img [ref=e1552]
+        - text: טעינה
+      - button "ייבוא PSD" [ref=e1556] [cursor=pointer]:
+        - img [ref=e1557]
+        - text: ייבוא PSD
+      - button "שמירה" [ref=e1562] [cursor=pointer]:
+        - img [ref=e1563]
+        - text: שמירה
+        - img [ref=e1567]
+      - button "הדפסה" [ref=e1569] [cursor=pointer]:
+        - img [ref=e1570]
+        - text: הדפסה
+      - button "עותק אחד" [ref=e1573] [cursor=pointer]:
+        - img [ref=e1574]
+        - text: עותק אחד
+  - region "Image context toolbar" [ref=e1284]:
+    - button "התאם לקנבס" [ref=e1286] [cursor=pointer]
+    - generic [ref=e1287]:
+      - generic [ref=e1288]: גודל
+      - combobox "יחידת מידה" [ref=e1289]:
+        - option "מ\"מ" [selected]
+        - option "ס\"מ"
+        - option "אינץ'"
+      - generic "רוחב" [ref=e1290]:
+        - generic [ref=e1291]: W
+        - spinbutton "W" [ref=e1292]: "64.7"
+      - button "שמור יחס (פעיל)" [disabled] [ref=e1293]:
+        - img [ref=e1294]
+      - generic "גובה" [ref=e1297]:
+        - generic [ref=e1298]: H
+        - spinbutton "H" [ref=e1299]: "144.5"
+    - combobox "מצב התאמה" [ref=e1301]:
+      - option "Fit"
+      - option "Fill" [selected]
+      - option "Stretch"
+    - generic "Radius" [ref=e1305]:
+      - generic [ref=e1306]: Radius
+      - slider "Radius" [ref=e1307]: "0"
+    - button "Border" [ref=e1309] [cursor=pointer]
+    - button "Shadow" [ref=e1311] [cursor=pointer]
+    - generic [ref=e1312]:
+      - generic "Opacity" [ref=e1313]:
+        - generic [ref=e1314]: Opacity
+        - slider "Opacity" [ref=e1315]: "1"
+      - generic "Blend mode" [ref=e1316]:
+        - generic [ref=e1317]: Blend
+        - combobox "Blend" [ref=e1318]:
+          - option "Normal" [selected]
+          - option "Multiply"
+          - option "Screen"
+          - option "Overlay"
+          - option "Darken"
+          - option "Lighten"
+    - button "Image" [ref=e1320] [cursor=pointer]
+    - generic [ref=e1321]:
+      - button "סובב 90°" [ref=e1322] [cursor=pointer]:
+        - img [ref=e1323]
+      - button "היפוך אופקי" [ref=e1326] [cursor=pointer]:
+        - img [ref=e1327]
+      - button "היפוך אנכי" [ref=e1330] [cursor=pointer]:
+        - img [ref=e1331]
+    - generic [ref=e1340]:
+      - button "שכפל" [ref=e1341] [cursor=pointer]:
+        - img [ref=e1342]
+      - button "נעל שכבה" [ref=e1345] [cursor=pointer]:
+        - img [ref=e1346]
+      - button "הבא קדימה" [ref=e1349] [cursor=pointer]:
+        - img [ref=e1350]
+      - button "שלח אחורה" [ref=e1353] [cursor=pointer]:
+        - img [ref=e1354]
+      - button "מחק" [ref=e1357] [cursor=pointer]:
+        - img [ref=e1358]
+  - generic [ref=e450]:
+    - complementary "ניווט" [ref=e451]:
+      - generic [ref=e452]:
+        - button "הזזה" [ref=e453] [cursor=pointer]:
+          - img [ref=e454]
+          - generic: הזזה
+        - button "טקסט" [ref=e456] [cursor=pointer]:
+          - img [ref=e457]
+          - generic: טקסט
+        - button "תמונה" [ref=e459] [cursor=pointer]:
+          - img [ref=e460]
+          - generic: תמונה
+        - button "בחירת מלבן" [ref=e464] [cursor=pointer]:
+          - img [ref=e465]
+          - generic: בחירת מלבן
+        - button "לאסו" [ref=e467] [cursor=pointer]:
+          - img [ref=e468]
+          - generic: לאסו
+        - button "מטה קסם" [ref=e472] [cursor=pointer]:
+          - img [ref=e473]
+          - generic: מטה קסם
+        - button "עריכת פריסה" [ref=e476] [cursor=pointer]:
+          - img [ref=e477]
+          - generic: עריכת פריסה
+      - navigation "סעיפי לוח שמאל" [ref=e478]:
+        - button "שכבות" [pressed] [ref=e479] [cursor=pointer]:
+          - img [ref=e480]
+          - text: שכבות
+        - button "עמודים" [ref=e484] [cursor=pointer]:
+          - img [ref=e485]
+          - text: עמודים
+        - button "הגדרות" [ref=e488] [cursor=pointer]:
+          - img [ref=e489]
+          - text: הגדרות
+        - button "גרפיקה" [ref=e492] [cursor=pointer]:
+          - img [ref=e493]
+          - text: גרפיקה
+      - region "שכבות" [ref=e497]:
+        - generic [ref=e498]:
+          - button "הוסף קבוצה" [ref=e499] [cursor=pointer]:
+            - img [ref=e500]
+          - button "הוסף שכבה" [ref=e502] [cursor=pointer]:
+            - img [ref=e503]
+          - generic [ref=e504]:
+            - button "סידור חכם" [ref=e505] [cursor=pointer]:
+              - img [ref=e506]
+            - button "אפשרויות סידור חכם" [ref=e509] [cursor=pointer]:
+              - img [ref=e510]
+          - button "איחוד שכבות" [disabled] [ref=e512] [cursor=pointer]:
+            - img [ref=e513]
+          - button "שיטוח התמונה" [ref=e517] [cursor=pointer]:
+            - img [ref=e518]
+        - heading "שכבות" [level=3] [ref=e525]
+        - generic "Layer filters" [ref=e526]:
+          - button "All" [pressed] [ref=e527] [cursor=pointer]
+          - button "Images" [ref=e528] [cursor=pointer]
+          - button "Text" [ref=e529] [cursor=pointer]
+          - button "Frames" [ref=e530] [cursor=pointer]
+          - button "Frames-Masks" [ref=e531] [cursor=pointer]
+          - button "Shapes" [ref=e532] [cursor=pointer]
+          - button "Adj" [ref=e533] [cursor=pointer]
+          - button "Hidden" [ref=e534] [cursor=pointer]
+          - button "Locked" [ref=e535] [cursor=pointer]
+        - generic [ref=e536]: 6/6
+        - generic [ref=e1576]:
+          - img [ref=e1577]
+          - button "FRA Grid cell 6" [ref=e1584] [cursor=pointer]:
+            - generic [ref=e1585]: FRA
+            - img [ref=e1587]
+            - strong [ref=e1588]: Grid cell 6
+          - button "הסתר שכבה" [ref=e1589] [cursor=pointer]:
+            - img [ref=e1590]
+          - button "Lock layer" [ref=e1593] [cursor=pointer]:
+            - img [ref=e1594]
+          - button "Layer menu" [ref=e1598] [cursor=pointer]:
+            - img [ref=e1599]
+        - generic [ref=e1603]:
+          - img [ref=e1604]
+          - button "FRA Grid cell 5" [ref=e1611] [cursor=pointer]:
+            - generic [ref=e1612]: FRA
+            - img [ref=e1614]
+            - strong [ref=e1615]: Grid cell 5
+          - button "הסתר שכבה" [ref=e1616] [cursor=pointer]:
+            - img [ref=e1617]
+          - button "Lock layer" [ref=e1620] [cursor=pointer]:
+            - img [ref=e1621]
+          - button "Layer menu" [ref=e1625] [cursor=pointer]:
+            - img [ref=e1626]
+        - generic [ref=e1630]:
+          - img [ref=e1631]
+          - button "FRA Grid cell 4" [ref=e1638] [cursor=pointer]:
+            - generic [ref=e1639]: FRA
+            - img [ref=e1641]
+            - strong [ref=e1642]: Grid cell 4
+          - button "הסתר שכבה" [ref=e1643] [cursor=pointer]:
+            - img [ref=e1644]
+          - button "Lock layer" [ref=e1647] [cursor=pointer]:
+            - img [ref=e1648]
+          - button "Layer menu" [ref=e1652] [cursor=pointer]:
+            - img [ref=e1653]
+        - generic [ref=e1657]:
+          - img [ref=e1658]
+          - button "FRA Grid cell 3" [ref=e1665] [cursor=pointer]:
+            - generic [ref=e1666]: FRA
+            - img [ref=e1668]
+            - strong [ref=e1669]: Grid cell 3
+          - button "הסתר שכבה" [ref=e1670] [cursor=pointer]:
+            - img [ref=e1671]
+          - button "Lock layer" [ref=e1674] [cursor=pointer]:
+            - img [ref=e1675]
+          - button "Layer menu" [ref=e1679] [cursor=pointer]:
+            - img [ref=e1680]
+        - generic [ref=e1684]:
+          - img [ref=e1685]
+          - button "FRA Grid cell 2" [ref=e1692] [cursor=pointer]:
+            - generic [ref=e1693]: FRA
+            - img [ref=e1695]
+            - strong [ref=e1696]: Grid cell 2
+          - button "הסתר שכבה" [ref=e1697] [cursor=pointer]:
+            - img [ref=e1698]
+          - button "Lock layer" [ref=e1701] [cursor=pointer]:
+            - img [ref=e1702]
+          - button "Layer menu" [ref=e1706] [cursor=pointer]:
+            - img [ref=e1707]
+        - generic [ref=e1711]:
+          - img [ref=e1712]
+          - button "ChatGPT Image May 16, 2026, 10_44_03 PM.png" [ref=e1719] [cursor=pointer]:
+            - img [ref=e1721]
+            - strong [ref=e1722]: ChatGPT Image May 16, 2026, 10_44_03 PM.png
+          - button "הסתר שכבה" [ref=e1723] [cursor=pointer]:
+            - img [ref=e1724]
+          - button "Lock layer" [ref=e1727] [cursor=pointer]:
+            - img [ref=e1728]
+          - button "Layer menu" [ref=e1732] [cursor=pointer]:
+            - img [ref=e1733]
+    - generic [ref=e699]:
+      - generic [ref=e702]:
+        - generic:
+          - generic: "0"
+          - generic: "60"
+          - generic: "120"
+          - generic: "180"
+          - generic: "240"
+          - generic: "300"
+          - generic: "360"
+          - generic: "420"
+          - generic: "480"
+          - generic: "540"
+          - generic: "600"
+          - generic: "660"
+          - generic: "720"
+          - generic: "780"
+          - generic: "840"
+          - generic: "900"
+        - generic:
+          - generic: "0"
+          - generic: "60"
+          - generic: "120"
+          - generic: "180"
+          - generic: "240"
+          - generic: "300"
+          - generic: "360"
+          - generic: "420"
+          - generic: "480"
+          - generic: "540"
+          - generic: "600"
+          - generic: "660"
+          - generic: "720"
+          - generic: "780"
+          - generic: "840"
+          - generic: "900"
+      - generic [ref=e707]: גרור תמונות אל הקנבס או לחץ על כלי התמונה
+    - complementary [ref=e708]:
+      - generic [ref=e709]:
+        - generic [ref=e710]:
+          - button "כווץ פאנל צבע" [expanded] [ref=e711] [cursor=pointer]:
+            - img [ref=e712]
+          - generic [ref=e714]: צבע
+          - button "טפטפת — דגום צבע מהקנבס (I)" [ref=e715] [cursor=pointer]:
+            - img [ref=e716]
+          - button "מכחול (B)" [ref=e720] [cursor=pointer]:
+            - img [ref=e721]
+          - button "דלי צבע (G)" [ref=e725] [cursor=pointer]:
+            - img [ref=e726]
+        - generic [ref=e730]:
+          - generic "#000000" [ref=e731]
+          - generic [ref=e732]:
+            - textbox "בחר צבע" [ref=e733] [cursor=pointer]: "#000000"
+            - textbox [ref=e734]: "#000000"
+            - button "העתק" [ref=e735] [cursor=pointer]:
+              - img [ref=e736]
+              - generic [ref=e739]: העתק
+        - generic [ref=e740]:
+          - generic [ref=e741]:
+            - generic [ref=e742]: צבעי קנבס
+            - button "חשב מחדש את הצבעים הדומיננטיים בקנבס" [ref=e743] [cursor=pointer]:
+              - img [ref=e744]
+          - generic [ref=e750]: לחץ Refresh כדי לחלץ צבעים מהקנבס
+        - generic [ref=e751]:
+          - generic [ref=e753]: הרמוניות
+          - generic [ref=e754]:
+            - button "משלים" [ref=e755] [cursor=pointer]
+            - button "אנלוגי" [ref=e756] [cursor=pointer]
+            - button "משולש" [ref=e757] [cursor=pointer]
+            - button "מתפצל" [ref=e758] [cursor=pointer]
+            - button "מונוכרום" [ref=e759] [cursor=pointer]
+          - generic [ref=e760]:
+            - button "#000000" [ref=e761] [cursor=pointer]
+            - button "#000000" [ref=e762] [cursor=pointer]
+        - generic [ref=e764]: היסטוריה
+        - generic [ref=e766]: דגום צבעים מהקנבס כדי לבנות פאלטה
+      - generic [ref=e1095]:
+        - generic [ref=e1391]:
+          - generic [ref=e1392]: ChatGPT Image May 16, 2026, 10_44_03 PM.png
+          - generic [ref=e1393]: פריים
+          - button "החלף" [ref=e1394] [cursor=pointer]:
+            - img [ref=e1395]
+            - text: החלף
+        - generic [ref=e1737]:
+          - tablist "Managed image tools" [ref=e1738]:
+            - button "כוונון תמונה" [ref=e1739] [cursor=pointer]
+            - button "כלי מצב" [ref=e1740] [cursor=pointer]
+          - generic [ref=e1741]:
+            - button "עריכה מהירה" [ref=e1742] [cursor=pointer]:
+              - img [ref=e1743]
+              - text: עריכה מהירה
+            - button "טיפים" [ref=e1744] [cursor=pointer]:
+              - img [ref=e1745]
+              - text: טיפים
+            - button "AI" [ref=e1748] [cursor=pointer]:
+              - img [ref=e1749]
+              - text: AI
+          - group [ref=e1751]:
+            - generic "שכבה" [ref=e1752] [cursor=pointer]:
+              - text: שכבה
+              - img [ref=e1753]
+            - generic [ref=e1755]:
+              - generic [ref=e1756]:
+                - generic [ref=e1757]:
+                  - generic [ref=e1758]: X
+                  - strong [ref=e1759]: "1716"
+                - generic [ref=e1760]:
+                  - generic [ref=e1761]: "Y"
+                  - strong [ref=e1762]: "0"
+                - generic [ref=e1763]:
+                  - generic [ref=e1764]: W
+                  - strong [ref=e1765]: "764"
+                - generic [ref=e1766]:
+                  - generic [ref=e1767]: H
+                  - strong [ref=e1768]: "1707"
+              - generic [ref=e1769]:
+                - button "תצוגה" [ref=e1770] [cursor=pointer]:
+                  - img [ref=e1771]
+                  - text: תצוגה
+                - button "נעילה" [ref=e1774] [cursor=pointer]:
+                  - img [ref=e1775]
+                  - text: נעילה
+              - generic [ref=e1778]:
+                - generic [ref=e1779]:
+                  - generic [ref=e1780]: שקיפות
+                  - generic [ref=e1781]: "1.00"
+                - slider "שקיפות 1.00" [ref=e1782] [cursor=pointer]: "1"
+          - group [ref=e1783]:
+            - generic "תאורה וצבע — React / Konva" [ref=e1784] [cursor=pointer]:
+              - text: תאורה וצבע — React / Konva
+              - img [ref=e1785]
+            - generic [ref=e1787]:
+              - paragraph [ref=e1788]: הכלים כאן עובדים מיידית על הקנבס, בלי Python. הטווחים מוגבלים בכוונה כדי לקבל תוצאה טבעית ולא קיצונית.
+              - generic [ref=e1789]:
+                - generic [ref=e1790]:
+                  - generic "תיקון חשיפה עדין — לא שורף לבן ולא מחשיך מדי" [ref=e1791]: חשיפה
+                  - spinbutton "חשיפה value" [ref=e1793]: "0"
+                - slider [ref=e1794]: "0"
+              - generic [ref=e1795]:
+                - generic [ref=e1796]:
+                  - generic "בהירות כללית בטווח נורמלי להדפסה" [ref=e1797]: בהירות
+                  - spinbutton "בהירות value" [ref=e1799]: "0"
+                - slider [ref=e1800]: "0"
+              - generic [ref=e1801]:
+                - generic [ref=e1802]:
+                  - generic "קונטרסט מתון, בלי תוצאה שרופה או קשה מדי" [ref=e1803]: קונטרסט
+                  - spinbutton "קונטרסט value" [ref=e1805]: "0"
+                - slider [ref=e1806]: "0"
+              - generic [ref=e1807]:
+                - generic [ref=e1808]:
+                  - generic "הבהרה/הכהיה עדינה דרך HSL" [ref=e1809]: לומיננס
+                  - spinbutton "לומיננס value" [ref=e1811]: "0"
+                - slider [ref=e1812]: "0"
+              - generic [ref=e1813]:
+                - generic [ref=e1814]:
+                  - generic "חיזוק או החלשה מתונה של צבעים" [ref=e1815]: רוויה
+                  - spinbutton "רוויה value" [ref=e1817]: "0"
+                - slider [ref=e1818]: "0"
+              - generic [ref=e1819]:
+                - generic [ref=e1820]:
+                  - generic "הסטת גוון עדינה בלבד" [ref=e1821]: גוון
+                  - spinbutton "גוון value" [ref=e1823]: "0"
+                - slider [ref=e1824]: "0"
+              - generic [ref=e1825]:
+                - generic [ref=e1826]:
+                  - generic "טשטוש קל ומהיר — לטשטוש חזק עדיף עורך מתקדם" [ref=e1827]: טשטוש קל
+                  - spinbutton "טשטוש קל value" [ref=e1829]: "0"
+                - slider [ref=e1830]: "0"
+          - group [ref=e1831]:
+            - generic "התאמות תמונה (חכם)" [ref=e1832] [cursor=pointer]:
+              - text: התאמות תמונה (חכם)
+              - img [ref=e1833]
+          - group [ref=e1835]:
+            - generic "אפקטים מהירים" [ref=e1836] [cursor=pointer]:
+              - text: אפקטים מהירים
+              - img [ref=e1837]
+          - group [ref=e1839]:
+            - generic "עריכה מתקדמת" [ref=e1840] [cursor=pointer]:
+              - text: עריכה מתקדמת
+              - img [ref=e1841]
+          - group [ref=e1843]:
+            - generic "אפקטים ויזואליים (FX)" [ref=e1844] [cursor=pointer]:
+              - text: אפקטים ויזואליים (FX)
+              - img [ref=e1845]
+          - group [ref=e1847]:
+            - generic "ייצור סדרתי" [ref=e1848] [cursor=pointer]:
+              - text: ייצור סדרתי
+              - img [ref=e1849]
+          - button "מחק שכבה" [ref=e1852] [cursor=pointer]:
+            - img [ref=e1853]
+            - text: מחק שכבה
+  - generic [ref=e824]:
+    - generic [ref=e825]:
+      - generic "2480×3508px" [ref=e1856]: "קנבס: 21.00×29.70 ס״מ · 300DPI"
+      - combobox "יחידת מידה" [ref=e827] [cursor=pointer]:
+        - option "ס״מ" [selected]
+        - option "מ״מ"
+        - option "אינץ׳"
+        - option "פיקסלים"
+    - generic [ref=e1857]:
+      - generic [ref=e1858]: מסגרת
+      - generic [ref=e1859]: "· גודל:"
+      - textbox "רוחב" [ref=e1860]: "6.47"
+      - generic [ref=e1861]: ×
+      - textbox "גובה" [ref=e1862]: "14.45"
+      - generic [ref=e1863]: ס״מ
+      - button "שמירת יחס פעילה" [ref=e1864] [cursor=pointer]:
+        - img [ref=e1865]
+      - button "החל" [ref=e1868] [cursor=pointer]:
+        - img [ref=e1869]
+        - text: החל
+    - generic [ref=e830]:
+      - generic [ref=e831]:
+        - button "הקטן תצוגה" [ref=e832] [cursor=pointer]:
+          - img [ref=e833]
+        - combobox "זום" [ref=e836] [cursor=pointer]:
+          - option "25%"
+          - option "50%"
+          - option "75%"
+          - option "100%" [selected]
+          - option "125%"
+          - option "150%"
+          - option "200%"
+        - button "הגדל תצוגה" [ref=e837] [cursor=pointer]:
+          - img [ref=e838]
+        - button "התאם דף" [ref=e841] [cursor=pointer]:
+          - img [ref=e842]
+      - generic "Autosave queued" [ref=e1871]: שומר…
+  - generic [ref=e849]:
+    - generic [ref=e850]: עמוד 1 מתוך 1
+    - generic "ניווט עמודים" [ref=e851]:
+      - button "עמוד קודם" [disabled] [ref=e852]: < ג€¹
+      - button "עמוד 1" [ref=e1872] [cursor=pointer]: "1"
+      - button "עמוד הבא" [disabled] [ref=e854]: "> ג€÷"

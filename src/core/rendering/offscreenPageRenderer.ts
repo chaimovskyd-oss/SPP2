@@ -1,9 +1,11 @@
 import { resolveExportAssetPath } from "@/core/assets/assetManager";
 import { ENABLE_CLASSIC_ADJUSTMENT_LAYER_RENDERING, ENABLE_IMAGE_LEVEL_ADJUSTMENTS, ENABLE_PAGE_LOOK_LAYERS } from "@/core/features/adjustmentFlags";
 import { applyAdjustmentImageData, hasActiveAdjustment } from "@/core/rendering/adjustmentPipeline";
+import { applyEdgeFadeToImageData, hasActiveEdgeFade } from "@/core/rendering/edgeFade";
 import { applyImageAdjustmentStack, hasActiveImageAdjustments } from "@/core/rendering/imageAdjustmentPipeline";
 import { renderPageLookEffect } from "@/core/rendering/pageLookEffects";
 import { pageLookMaster } from "@/types/imageAdjustments";
+import { persistedMutedSet, resolveEffectiveLayer } from "@/core/layerEdits";
 import type { Asset, Page } from "@/types/document";
 import type { BlendMode, ImageLayer } from "@/types/layers";
 
@@ -153,12 +155,16 @@ async function renderBackground(
 }
 
 async function renderImageLayerSegment(
-  layer: ImageLayer,
+  rawLayer: ImageLayer,
   assetById: Map<string, Asset>,
   widthPx: number,
   heightPx: number,
   pixelRatio: number
 ): Promise<RenderSegment | null> {
+  // Honor edits the user persisted as disabled (Layer Edits panel). Export uses
+  // ONLY the persisted disabled set — never the transient before/after preview —
+  // so what prints matches the canvas for the saved state.
+  const layer = resolveEffectiveLayer(rawLayer, persistedMutedSet(rawLayer));
   const asset = assetById.get(layer.assetId);
   const src = resolveExportAssetPath(asset);
   if (src === undefined) return null;
@@ -179,8 +185,9 @@ async function renderImageLayerSegment(
 
   const stack = ENABLE_IMAGE_LEVEL_ADJUSTMENTS ? layer.imageAdjustments : undefined;
   const adjustmentsActive = stack !== undefined && stack.enabled !== false && hasActiveImageAdjustments(stack.stack);
+  const edgeFadeActive = hasActiveEdgeFade(layer.edgeFade);
 
-  if (adjustmentsActive) {
+  if (adjustmentsActive || edgeFadeActive) {
     // Apply the stack to an image-sized bitmap (matching the live Konva node cache),
     // then composite onto the page — guarantees live === export parity.
     const iw = Math.max(1, Math.round(dw));
@@ -190,7 +197,8 @@ async function renderImageLayerSegment(
     if (imageContext === null) return null;
     imageContext.drawImage(image, sx, sy, sw, sh, 0, 0, iw, ih);
     const imageData = imageContext.getImageData(0, 0, iw, ih);
-    applyImageAdjustmentStack(imageData, stack!.stack, 1);
+    if (adjustmentsActive) applyImageAdjustmentStack(imageData, stack!.stack, 1);
+    if (edgeFadeActive) applyEdgeFadeToImageData(imageData, layer.edgeFade);
     imageContext.putImageData(imageData, 0, 0);
     context.drawImage(imageCanvas, dx, dy);
   } else {

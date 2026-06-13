@@ -1,0 +1,207 @@
+/* Smart Repeat / שכפול חכם לדף — dialog styles (dark theme) */
+
+.sr-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.sr-dialog {
+  position: relative;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  width: min(94vw, 860px);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  direction: rtl;
+  color: var(--text-primary);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+}
+
+.sr-header {
+  padding: 20px 24px 12px;
+  flex-shrink: 0;
+}
+
+.sr-title {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.sr-subtitle {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.sr-close {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.sr-close:hover { background: var(--bg-surface); }
+
+.sr-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 20px;
+  padding: 0 24px 8px;
+  overflow: auto;
+  min-height: 0;
+}
+
+.sr-controls { display: flex; flex-direction: column; gap: 14px; }
+
+.sr-group { display: flex; flex-direction: column; gap: 8px; }
+.sr-group-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+
+.sr-segmented { display: flex; gap: 6px; flex-wrap: wrap; }
+.sr-seg {
+  flex: 1;
+  min-width: 90px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: center;
+}
+.sr-seg.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.sr-slider-row { display: flex; flex-direction: column; gap: 4px; }
+.sr-slider-head { display: flex; align-items: center; justify-content: space-between; font-size: 12px; }
+.sr-slider-row input[type="range"] { width: 100%; accent-color: var(--accent); }
+
+.sr-num-wrap { display: flex; align-items: center; gap: 4px; }
+.sr-num {
+  width: 64px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.sr-num::-webkit-outer-spin-button,
+.sr-num::-webkit-inner-spin-button { opacity: 1; height: 18px; }
+.sr-num-unit { font-size: 11px; color: var(--text-secondary); }
+
+.sr-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  gap: 10px;
+}
+.sr-toggle-row input { accent-color: var(--accent); }
+
+/* Preview panel */
+.sr-preview { display: flex; flex-direction: column; gap: 10px; }
+.sr-preview-canvas {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+}
+.sr-preview svg { display: block; max-width: 100%; height: auto; }
+.sr-stats { font-size: 12px; color: var(--text-secondary); line-height: 1.7; }
+.sr-stats b { color: var(--text-primary); }
+.sr-warn {
+  font-size: 12px;
+  color: #f0b34a;
+  background: rgba(240, 179, 74, 0.12);
+  border: 1px solid rgba(240, 179, 74, 0.3);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.sr-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 24px 18px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.sr-btn {
+  padding: 9px 18px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 13px;
+}
+.sr-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.sr-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ─── Photo Packing wizard extras ───────────────────────────────────────── */
+.sp-dialog { width: min(96vw, 1040px); }
+.sp-dropzone {
+  border: 1.5px dashed var(--border);
+  border-radius: 10px;
+  padding: 18px;
+  text-align: center;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  background: var(--bg-surface);
+  transition: var(--t);
+}
+.sp-dropzone.dragging { border-color: var(--accent); color: var(--text-primary); }
+.sp-thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 56px);
+  gap: 6px;
+  max-height: 120px;
+  overflow: auto;
+  padding: 2px;
+}
+.sp-thumb {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+.sp-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.sp-thumb-del {
+  position: absolute;
+  top: 1px;
+  inset-inline-end: 1px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1;
+  padding: 1px 4px;
+  cursor: pointer;
+}
+.sp-presets { display: flex; gap: 6px; flex-wrap: wrap; }
+.sp-count { font-size: 12px; color: var(--text-secondary); }

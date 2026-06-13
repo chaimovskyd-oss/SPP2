@@ -1,8 +1,9 @@
 import { DEFAULT_SHORTCUT_DEFINITIONS } from "@/core/input/inputSystem";
+import { BUILT_IN_OUTPUT_PRESETS } from "@/core/advancedPrint/builtInPresets";
 import type { AppSettings } from "./types";
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
-  schemaVersion: 1,
+  schemaVersion: 2,
 
   general: {
     defaultUnit: "mm",
@@ -30,6 +31,14 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     defaultObjectSpacingMm: 3,
     defaultImageFillMode: "cover",
     autoRotateImagesInFrames: false,
+    smartGuidesEnabled: true,
+    snapToCanvasEnabled: true,
+    snapToLayersEnabled: true,
+    rotationSnapEnabled: true,
+    snapTolerancePx: 6,
+    shiftSnapTolerancePx: 14,
+    rotationSnapToleranceDeg: 4,
+    shiftRotationStepDeg: 15,
     freeModeDefaults: {
       snappingEnabled: true,
       showAlignmentGuides: true,
@@ -94,7 +103,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     undoHistoryLimit: 100,
     warnLargeFileMb: 50,
     performanceMode: false,
-    lowResWhileDragging: false
+    lowResWhileDragging: false,
+    aiPerformanceMode: "balanced",
+    aiShowLoadingVideo: true
   },
 
   filesAutosave: {
@@ -141,5 +152,31 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   advanced: {
     debugMode: false,
     enableDiagnostics: false
+  },
+
+  printHub: {
+    networkFolderPath: "",
+    stationRole: "designer",
+    defaultApprovalMode: "require_approval",
+    serverHubRoot: "",
+    retentionDays: 14,
+    transportMode: "folder",
+    lanHost: "",
+    lanPort: 8788,
+    lanToken: "",
+    cloudStatusEnabled: false
+  },
+
+  advancedPrint: {
+    enabled: true,
+    profiles: [],
+    outputPresets: BUILT_IN_OUTPUT_PRESETS,
+    iccProfiles: [],
+    defaultProfileId: null,
+    lastSuccessfulByPrinter: {}
+  },
+
+  components: {
+    lastCheckedAt: ""
   }
 };

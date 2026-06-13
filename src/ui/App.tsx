@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
-import { AUTOSAVE_TEMPORARILY_DISABLED, cleanupRecovery, createGridModeDocument, createMaskModeDocument, createPhotoPrintModeDocument, createProjectEnvelope, discardRecoveryRecord, getLatestRecoveryRecord, restoreRecoveryRecord, withProjectMetadata, type AutosaveRecord } from "@/core";
+import { AUTOSAVE_TEMPORARILY_DISABLED, cleanupRecovery, createGridModeDocument, createMaskModeDocument, createPhotoPrintModeDocument, createProjectEnvelope, discardRecoveryRecord, getLatestRecoveryRecord, restoreRecoveryRecord, withProjectMetadata, type AutosaveRecord, type ProjectIndexEntry } from "@/core";
 import { applyFaceDetectionToPhotoPrint } from "@/core/photoPrint/photoPrintModeEngine";
 import { captureError, writeLog } from "@/core/logging/logger";
 import { createPage } from "@/core/document/factory";
@@ -12,7 +12,7 @@ import { createCollageModeDocument } from "@/core/collage/collageFactory";
 import { createBatchCollageDocument } from "@/core/collage/batchCollageBuilder";
 import { collageMaskSnapshotToJson } from "@/core/collage/collageMaskShape";
 import { assignByPoolOrder, syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
-import { importImageAsset } from "@/core/assets/assetManager";
+import { importImageAsset, rehydrateAssetsFromDiskCache } from "@/core/assets/assetManager";
 import { generateMaskThumbnail } from "@/state/maskLibraryStore";
 import { createClassPhotoModeDocument, defaultLayoutSettings } from "@/core/classPhoto/classPhotoFactory";
 import { syncClassPhotoToPage } from "@/core/classPhoto/classPhotoLayoutEngine";
@@ -33,11 +33,16 @@ import { useSelectionStore } from "@/state/selectionStore";
 import { useViewportStore } from "@/state/viewportStore";
 import { useProjectLifecycleStore } from "@/state/projectLifecycleStore";
 import { HomeScreen } from "./home/HomeScreen";
+import { CloudLibraryScreen } from "./cloud/CloudLibraryScreen";
+import { SmartPrintPreparePanel } from "./utilities/SmartPrintPreparePanel";
+import { PrintHubPanel } from "./printHub/PrintHubPanel";
 import { createFreeModeDocument, loadProject } from "./projectActions";
 import { buildDocumentFromPsdManifest, createPsdProjectEnvelope, type PsdImportManifest } from "@/services/psdImport";
 import { DocumentSetupScreen } from "./setup/DocumentSetupScreen";
 import { CollageSetupWizard } from "./collage/CollageSetupWizard";
 import { PhotoPrintSetupWizard } from "./photoPrint/PhotoPrintSetupWizard";
+import { SmartPhotoSetupWizard, type SmartPhotoWizardResult } from "./smartLayout/SmartPhotoSetupWizard";
+import { createSmartPhotoPackDocument } from "@/features/smartLayout";
 import { ClassPhotoSetupWizard } from "./classPhoto/ClassPhotoSetupWizard";
 import { BlessingSetupWizard } from "./blessing/BlessingSetupWizard";
 import { createBlessingModeDocument, createMinimalBlessingAsset } from "@/core/blessing/blessingModeEngine";
@@ -68,7 +73,7 @@ const PdfStudioScreen = lazy(() =>
   }))
 );
 
-type AppScreen = "home" | "setup" | "editor" | "collage-wizard" | "photo-print-wizard" | "pdf-studio" | "class-photo-wizard" | "mask-wizard" | "product-library" | "batch-production-library" | "batch-wizard" | "blessing-wizard";
+type AppScreen = "home" | "setup" | "editor" | "collage-wizard" | "photo-print-wizard" | "pdf-studio" | "class-photo-wizard" | "mask-wizard" | "smart-photo-wizard" | "product-library" | "batch-production-library" | "batch-wizard" | "blessing-wizard" | "cloud-library";
 
 interface ModeWindowInfo {
   mode: string;
@@ -136,7 +141,9 @@ const MODE_WINDOW_TITLES: Record<string, string> = {
   "collage-wizard": "SPP2-COLLAGE",
   "photo-print-wizard": "SPP2-PHOTO PRINT",
   "class-photo-wizard": "SPP2-CLASS PHOTO",
-  "mask-wizard": "SPP2-MASK"
+  "mask-wizard": "SPP2-MASK",
+  "smart-photo-wizard": "SPP2-SMART PHOTO PACK",
+  "smart-prepare": "SPP2-SMART PRINT PREPARE"
 };
 
 function parseModeWindowHash(hash: string): ModeWindowInfo | null {
@@ -156,6 +163,14 @@ function parseModeWindowHash(hash: string): ModeWindowInfo | null {
   };
 }
 
+function initialAppScreenFromHash(hash: string, fallback: AppScreen): AppScreen {
+  if (window.location.pathname.endsWith("/auth/confirm")) return "cloud-library";
+  const route = hash.replace(/^#\/?/, "");
+  if (route.includes("access_token=")) return "cloud-library";
+  if (route === "cloud" || route.startsWith("cloud-auth")) return "cloud-library";
+  return fallback;
+}
+
 function modeToScreen(mode: string): AppScreen | null {
   switch (mode) {
     case "pdf-studio":
@@ -166,7 +181,10 @@ function modeToScreen(mode: string): AppScreen | null {
     case "photo-print-wizard":
     case "class-photo-wizard":
     case "mask-wizard":
+    case "smart-photo-wizard":
       return mode;
+    case "smart-prepare":
+      return "home";
     default:
       return null;
   }
@@ -189,7 +207,7 @@ function dragEventHasFiles(event: DragEvent): boolean {
 export function App(): ReactElement {
   const modeWindow = useMemo(() => parseModeWindowHash(window.location.hash), []);
   const isModeWindow = modeWindow !== null;
-  const [screen, setScreen] = useState<AppScreen>(modeWindow?.screen ?? "home");
+  const [screen, setScreen] = useState<AppScreen>(() => initialAppScreenFromHash(window.location.hash, modeWindow?.screen ?? "home"));
   const [classPhotoWizardInitialState, setClassPhotoWizardInitialState] = useState<ClassPhotoWizardInitialState | undefined>(undefined);
   const [pendingMode, setPendingMode] = useState<ModeType>("free");
   const [recoveryRecord, setRecoveryRecord] = useState<AutosaveRecord | null>(() => {
@@ -303,6 +321,21 @@ export function App(): ReactElement {
     });
   }, []);
 
+  // Window close (the X button): the main process asks before closing so we can
+  // guard unsaved work. In the editor with unsaved changes, hand off to the
+  // editor's own "unsaved changes" prompt; otherwise it's safe to close now.
+  useEffect(() => {
+    if (window.spp?.onCloseRequested === undefined) return;
+    return window.spp.onCloseRequested(() => {
+      const dirty = useProjectLifecycleStore.getState().isDirty;
+      if (screen === "editor" && dirty) {
+        window.dispatchEvent(new CustomEvent("spp2:close-requested"));
+      } else {
+        window.spp?.confirmClose?.();
+      }
+    });
+  }, [screen]);
+
   // Global Ctrl+, shortcut to open settings from anywhere in the app
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
@@ -384,6 +417,8 @@ export function App(): ReactElement {
       setScreen("batch-production-library");
     } else if (mode === "blessing") {
       setScreen("blessing-wizard");
+    } else if (mode === "smart_photo_pack") {
+      setScreen("smart-photo-wizard");
     } else {
       setScreen("setup");
     }
@@ -755,6 +790,32 @@ export function App(): ReactElement {
     }
   }
 
+  async function handleSmartPhotoWizardComplete(result: SmartPhotoWizardResult): Promise<void> {
+    const { images, pageSetup, options } = result;
+    if (images.length === 0) { backHome(); return; }
+
+    setScreen("home");
+    setIsCreatingPhotoPrint(true);
+    setCreatingProgress(`מייבא תמונות (0/${images.length})...`);
+
+    const importedAssets: Asset[] = [];
+    for (let i = 0; i < images.length; i += 1) {
+      const asset = await importCollageWizardImage(images[i], importedAssets, "smart-photo-pack-file-reader");
+      importedAssets.push(asset);
+      setCreatingProgress(`מייבא תמונות (${i + 1}/${images.length})...`);
+    }
+
+    setCreatingProgress("מסדר תמונות בדפים...");
+    const { document: doc } = createSmartPhotoPackDocument("סידור תמונות חכם", pageSetup, importedAssets, options);
+    const envelope = beginProject(createProjectEnvelope({ document: doc, linkedGroups: [], batchJobs: [] }));
+    setDocument(withProjectMetadata(envelope.document, envelope.metadata));
+    resetViewport();
+    clearSelection();
+    setIsCreatingPhotoPrint(false);
+    setCreatingProgress("");
+    setScreen("editor");
+  }
+
   async function handleClassPhotoWizardComplete(result: ClassPhotoWizardResult): Promise<void> {
     const {
       images,
@@ -1056,7 +1117,9 @@ export function App(): ReactElement {
     const envelope = beginProject(
       createProjectEnvelope({ document: doc, linkedGroups: [], batchJobs: [] })
     );
-    void envelope;
+    setDocument(withProjectMetadata(envelope.document, envelope.metadata));
+    resetViewport();
+    clearSelection();
     setScreen("editor");
   }
 
@@ -1159,9 +1222,13 @@ export function App(): ReactElement {
     }
   }
 
-  function renderSeparateWindowButton(): ReactElement | null {
+  function canOpenCurrentScreenInSeparateWindow(): boolean {
     const mode = screenToMode(screen);
-    if (isModeWindow || mode === null || mode === "pdf-studio" || window.spp?.openModeWindow === undefined) return null;
+    return !isModeWindow && mode !== null && mode !== "pdf-studio" && window.spp?.openModeWindow !== undefined;
+  }
+
+  function renderSeparateWindowButton(): ReactElement | null {
+    if (!canOpenCurrentScreenInSeparateWindow()) return null;
     return (
       <button
         aria-label="פתח בחלון נפרד"
@@ -1221,24 +1288,32 @@ export function App(): ReactElement {
     };
   }
 
-  function restoreRecovery(): void {
+  async function restoreRecovery(): Promise<void> {
     if (recoveryRecord === null) return;
     try {
       const result = restoreRecoveryRecord(recoveryRecord);
-      const { envelope } = result;
+      // Autosave strips embedded image bytes to stay under the localStorage
+      // quota but keeps each asset's on-disk cache path. Re-load those originals
+      // from disk before opening so recovered projects keep their images.
+      const envelope = await rehydrateAssetsFromDiskCache(result.envelope);
+      const stillMissing = envelope.document.assets.filter(
+        (asset) =>
+          asset.kind === "image" &&
+          asset.originalPath === undefined &&
+          asset.previewPath === undefined &&
+          asset.thumbnailPath === undefined
+      );
       const opened = beginProject(envelope, envelope.metadata.currentFilePath);
       setDocument(withProjectMetadata(opened.document, opened.metadata));
       resetViewport();
       clearSelection();
       setRecoveryRecord(null);
       setScreen("editor");
-      if (result.status === "assetsMissing") {
-        // Autosave intentionally strips embedded image bytes to stay under
-        // the localStorage quota. The document skeleton (layouts, layers,
-        // texts, transforms) is preserved; affected assets are flagged
-        // with status: "missing" so existing UI placeholders kick in.
+      if (stillMissing.length > 0) {
+        // Skeleton (layouts, layers, texts, transforms) is preserved; assets
+        // with no surviving path and no recoverable cache are flagged missing.
         window.alert(
-          `הפרויקט שוחזר חלקית: ${result.missingAssetIds.length} תמונות חסרות וצריך לקשר אותן מחדש.`
+          `הפרויקט שוחזר חלקית: ${stillMissing.length} תמונות חסרות וצריך לקשר אותן מחדש.`
         );
       }
     } catch (error) {
@@ -1272,6 +1347,28 @@ export function App(): ReactElement {
       setScreen("editor");
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "לא ניתן לפתוח את הפרויקט");
+    }
+  }
+
+  // Open a project directly from a "recent projects" card. Returns true when the
+  // project was opened by its on-disk path; returns false to signal the caller
+  // to fall back to the manual file-picker (no path, or running outside Electron).
+  async function openRecentProject(entry: ProjectIndexEntry): Promise<boolean> {
+    const filePath = entry.filePath;
+    if (filePath === undefined || window.spp?.readFileBase64 === undefined) {
+      return false;
+    }
+    try {
+      const base64 = await window.spp.readFileBase64(filePath);
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+      const fileName = filePath.replace(/\\/g, "/").split("/").pop() ?? "project.spp2";
+      await openProjectFile(new File([bytes], fileName));
+      return true;
+    } catch (error) {
+      window.alert(
+        `לא ניתן לפתוח את הקובץ:\n${filePath}\n\n${error instanceof Error ? error.message : "ייתכן שהקובץ הוזז או נמחק."}`
+      );
+      return true;
     }
   }
 
@@ -1317,6 +1414,23 @@ export function App(): ReactElement {
 
   const pdfStudioInitialDocument = modeWindowSnapshot?.pdfStudioDocument;
 
+  // Standalone Print Hub management window (opened by the tray app via #print-hub).
+  if (typeof window !== "undefined" && window.location.hash.includes("print-hub")) {
+    return (
+      <main className="spp-print-hub-standalone">
+        <PrintHubPanel onClose={() => window.close()} standalone />
+      </main>
+    );
+  }
+
+  if (modeWindow?.mode === "smart-prepare") {
+    return (
+      <main className="spp-prepare-standalone">
+        <SmartPrintPreparePanel onClose={() => window.close()} />
+      </main>
+    );
+  }
+
   if (screen === "mask-wizard") {
     return (
       <>
@@ -1347,6 +1461,18 @@ export function App(): ReactElement {
         {renderSeparateWindowButton()}
         <PhotoPrintSetupWizard
           onComplete={(result) => void handlePhotoPrintWizardComplete(result)}
+          onCancel={backHome}
+        />
+      </>
+    );
+  }
+
+  if (screen === "smart-photo-wizard") {
+    return (
+      <>
+        {renderSeparateWindowButton()}
+        <SmartPhotoSetupWizard
+          onComplete={(result) => void handleSmartPhotoWizardComplete(result)}
           onCancel={backHome}
         />
       </>
@@ -1433,6 +1559,10 @@ export function App(): ReactElement {
     );
   }
 
+  if (screen === "cloud-library") {
+    return <CloudLibraryScreen onBack={backHome} onOpenProjectFile={(file) => void openProjectFile(file)} />;
+  }
+
   if (screen === "pdf-studio") {
     return (
       <Suspense fallback={<main className="loading-screen">טוען את כלי ה-PDF...</main>}>
@@ -1462,12 +1592,12 @@ export function App(): ReactElement {
 
   return (
     <>
-      {canShowEditor ? renderSeparateWindowButton() : null}
       {canShowEditor ? (
         <Suspense fallback={<main className="loading-screen">טוען את סביבת העריכה...</main>}>
           <EditorScreen
             onBackHome={backHome}
             onImportPsd={() => void handleImportPsd()}
+            onOpenSeparateWindow={canOpenCurrentScreenInSeparateWindow() ? () => void openCurrentScreenInSeparateWindow() : undefined}
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenClassPhotoWizard={() => {
               setClassPhotoWizardInitialState(buildClassPhotoWizardStateFromDocument());
@@ -1480,16 +1610,18 @@ export function App(): ReactElement {
           {recoveryRecord !== null ? (
             <div className="recovery-banner">
               <span>נמצאה שמירה אוטומטית אחרונה: {recoveryRecord.projectName}</span>
-              <button className="btn btn-accent" onClick={restoreRecovery} type="button">שחזר</button>
+              <button className="btn btn-accent" onClick={() => void restoreRecovery()} type="button">שחזר</button>
               <button className="btn btn-ghost" onClick={() => { discardRecoveryRecord(recoveryRecord.id); setRecoveryRecord(null); }} type="button">התעלם</button>
             </div>
           ) : null}
           <HomeScreen
             onOpenMode={openMode}
             onOpenProjectFile={(file) => void openProjectFile(file)}
+            onOpenRecentProject={openRecentProject}
             onImportPsd={() => void handleImportPsd()}
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenBatchLibrary={handleOpenBatchLibrary}
+            onOpenCloudLibrary={() => setScreen("cloud-library")}
           />
         </>
       )}

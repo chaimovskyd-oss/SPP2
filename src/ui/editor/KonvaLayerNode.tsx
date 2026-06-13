@@ -4,12 +4,18 @@ import { useMaskContentEditStore } from "@/state/maskContentEditStore";
 import { Circle, Ellipse, Group, Image as KonvaImage, Line, Path, Rect, Shape, Text } from "react-konva";
 import { drawPuzzlePath } from "@/core/collage/collagePuzzle";
 import { generateTornEdgePoints } from "@/core/collage/collageTornPaper";
-import type { CollageEdgeConfig } from "@/types/collage";
+import type { CellFeatherSettings, CollageEdgeConfig } from "@/types/collage";
 import Konva from "konva";
 import { resolveCanvasAssetPath } from "@/core/assets/assetManager";
 import { combineAssetAndLayerCrop, getEffectiveAssetCrop, getEffectiveSourceSize } from "@/core/image/screenshotCropMetadata";
+import { applyEdgeFadeToImageData, hasActiveEdgeFade } from "@/core/rendering/edgeFade";
+import { autoImageContinuityOverscanMm, cellFeatherAmountPx, cellFeatherBlurPx, normalizeCellFeather } from "@/core/rendering/cellFeather";
 import { clampContentTransform, clampContentTransformToFillBounds, computeContentRect, computeFillPanBounds, type ContentRect } from "@/core/rendering/frameFitEngine";
+import { mmToPx, pxToMm } from "@/core/units/conversion";
 import { measureTextLayerSize } from "@/core/text/measurement";
+import { hasRichText, richTextSegmentsForRange, type RichTextSegment } from "@/core/text/richText";
+import { layoutSmartTextBlock, withoutSmartTextBlock, type SmartTextBlockLineLayout } from "@/core/text/smartTextBlock";
+import { measureLineWidth } from "@/core/text/smartTextFit";
 import type { Asset } from "@/types/document";
 import type { ContentTransform, FrameLayer, ImageLayer, ShapeLayer, TextLayer, VisualLayer } from "@/types/layers";
 import type { BlendMode } from "@/types/layers";
@@ -24,6 +30,7 @@ import type {
 import { useKonvaImage } from "./useKonvaImage";
 import { collageAdjToKonva, EMPTY_EXTRA_QUICK_EFFECTS, extractExtraQuickEffects, imageEffectsToKonva, imageLayerAdjToKonva, type CollageColorAdj, type ExtraQuickEffects } from "@/core/rendering/colorAdjustUtils";
 import { buildAdjustmentFilters, stackNeedsFilters } from "@/core/rendering/konvaCustomFilters";
+import { useEffectiveRenderLayer } from "@/ui/editor/useEffectiveRenderLayer";
 import { ENABLE_IMAGE_LEVEL_ADJUSTMENTS } from "@/core/features/adjustmentFlags";
 import { renderTextToCanvas } from "./warpText";
 import { renderFrameTextToCanvas } from "./shapeTextRenderer";
@@ -49,6 +56,23 @@ interface KonvaLayerNodeProps {
   onImageDoubleClick?: (layerId: string) => void;
   onContextMenu?: (target: CanvasContextMenuTarget) => void;
   reduceImageEffects?: boolean;
+}
+
+function selectLayerOnPointerDown(
+  event: Konva.KonvaEventObject<MouseEvent | TouchEvent>,
+  layerId: string,
+  onSelect: (layerId: string, additive?: boolean) => void,
+  canSelect = true
+): void {
+  event.cancelBubble = true;
+  if (!canSelect) return;
+  const evt = event.evt;
+  const additive = "ctrlKey" in evt ? evt.ctrlKey || evt.metaKey : false;
+  onSelect(layerId, additive);
+}
+
+function stopLayerBubble(event: Konva.KonvaEventObject<Event>): void {
+  event.cancelBubble = true;
 }
 
 export function KonvaLayerNode({
@@ -109,7 +133,8 @@ function ShapeNode({
     opacity: layer.opacity * fillOpacity,
     listening: layer.locked !== true,
     draggable: !layer.locked,
-    onMouseDown: (e: Konva.KonvaEventObject<MouseEvent>) => { e.cancelBubble = true; onSelect(layer.id, e.evt.ctrlKey || e.evt.metaKey); },
+    onMouseDown: (e: Konva.KonvaEventObject<MouseEvent>) => selectLayerOnPointerDown(e, layer.id, onSelect),
+    onTap: (e: Konva.KonvaEventObject<TouchEvent>) => selectLayerOnPointerDown(e, layer.id, onSelect),
     onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) => {
       onChange({ ...layer, x: e.target.x(), y: e.target.y() });
     }
@@ -339,6 +364,36 @@ function cloudPath(ctx: any, x: number, y: number, w: number, h: number): void {
   ctx.closePath();
 }
 
+function createCellFeatherMaskCanvas(
+  width: number,
+  height: number,
+  spreadPx: number,
+  blurPx: number,
+  drawClip: (ctx: CanvasRenderingContext2D) => void
+): HTMLCanvasElement | null {
+  const canvas = document.createElement("canvas");
+  const pad = Math.max(1, Math.ceil(spreadPx + blurPx * 2));
+  canvas.width = width + pad * 2;
+  canvas.height = height + pad * 2;
+  (canvas as HTMLCanvasElement & { sppMaskOffset?: number }).sppMaskOffset = pad;
+  const ctx = canvas.getContext("2d");
+  if (ctx === null) return null;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.translate(pad, pad);
+  ctx.save();
+  ctx.filter = `blur(${Math.max(0.25, blurPx).toFixed(2)}px)`;
+  drawClip(ctx);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+  ctx.restore();
+  ctx.save();
+  drawClip(ctx);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+  ctx.restore();
+  return canvas;
+}
+
 function mapBlendMode(mode: BlendMode): string {
   const table: Record<BlendMode, string> = {
     normal: "source-over",
@@ -421,30 +476,16 @@ function TextNode({
     return () => window.removeEventListener("spp2:text-pattern-ready", update);
   }, []);
 
+  // Render-only projection: text edits (shadow/stroke/gradient/warp) the user
+  // muted via the Layer Edits panel are neutralized for display only. onChange
+  // below always operates on the original `layer`, so nothing is lost.
+  const renderLayer = useEffectiveRenderLayer(layer);
+  const smartBlock = layoutSmartTextBlock(renderLayer);
+
   const warpCanvas = useMemo(
-    () => renderTextToCanvas(layer),
+    () => smartBlock !== null ? null : renderTextToCanvas(renderLayer),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
-      layer.text,
-      layer.fontFamily,
-      layer.fontSize,
-      layer.fontWeight,
-      layer.fontStyle,
-      layer.color,
-      layer.fillOpacity,
-      layer.letterSpacing,
-      layer.lineHeight,
-      layer.direction,
-      layer.stroke,
-      layer.shadow,
-      layer.warpSettings.enabled,
-      layer.warpSettings.type,
-      layer.warpSettings.amount,
-      layer.warpSettings.horizontalDistortion,
-      layer.warpSettings.verticalDistortion,
-      patternVersion,
-      JSON.stringify(layer.effects)
-    ]
+    [renderLayer, patternVersion, smartBlock !== null]
   );
 
   const isClassPhotoText =
@@ -456,6 +497,8 @@ function TextNode({
   const commonDrag = {
     draggable: !layer.locked,
     listening: !layer.locked,
+    onMouseDown: (event: Konva.KonvaEventObject<MouseEvent>) => selectLayerOnPointerDown(event, layer.id, onSelect),
+    onTap: (event: Konva.KonvaEventObject<TouchEvent>) => selectLayerOnPointerDown(event, layer.id, onSelect),
     onDragEnd: (event: Konva.KonvaEventObject<DragEvent>) => {
       onChange({ ...layer, x: event.target.x(), y: event.target.y() });
     }
@@ -504,10 +547,12 @@ function TextNode({
         onDragEnd={(event) => {
           onChange({ ...layer, x: event.target.x() - alignmentOffsetX, y: event.target.y() - alignmentOffsetY });
         }}
-        onClick={(event) => onSelect(layer.id, event.evt.ctrlKey || event.evt.metaKey)}
+        onClick={stopLayerBubble}
         onContextMenu={handleTextContextMenu}
-        onDblClick={() => onBeginTextEdit(layer.id)}
-        onTap={() => onSelect(layer.id)}
+        onDblClick={(event) => {
+          event.cancelBubble = true;
+          onBeginTextEdit(layer.id);
+        }}
         onTransformEnd={(event) => {
           const node = event.target;
           const scaleX = node.scaleX();
@@ -538,11 +583,11 @@ function TextNode({
     );
   }
 
-  const gradientProps = gradientFillProps(layer);
-  const shadow = layer.shadow;
-  const stroke = layer.stroke;
-  const measuredSize = measureTextLayerSize(layer);
-  const outerGlow = resolveOuterGlow(layer);
+  const richTextEnabled = hasRichText(renderLayer);
+  const gradientProps = gradientFillProps(renderLayer);
+  const shadow = renderLayer.shadow;
+  const stroke = renderLayer.stroke;
+  const outerGlow = resolveOuterGlow(renderLayer);
   const shadowProps =
     shadow !== undefined && (shadow.offsetX !== 0 || shadow.offsetY !== 0 || shadow.blur <= 8)
       ? {
@@ -561,6 +606,79 @@ function TextNode({
           shadowOpacity: outerGlow.opacity
         }
       : {};
+  if (smartBlock !== null) {
+    return (
+      <Group
+        id={layer.id}
+        name={selected ? "selected-layer" : undefined}
+        x={layer.x}
+        y={layer.y}
+        width={smartBlock.width}
+        height={smartBlock.height}
+        rotation={layer.rotation}
+        opacity={layer.opacity}
+        visible={layer.visible}
+        globalCompositeOperation={mapBlendMode(layer.blendMode) as "source-over"}
+        {...commonDrag}
+        onClick={stopLayerBubble}
+        onContextMenu={handleTextContextMenu}
+        onDblClick={(event) => {
+          event.cancelBubble = true;
+          onBeginTextEdit(layer.id);
+        }}
+        onTransformEnd={(event) => {
+          const node = event.target;
+          const scaleX = node.scaleX();
+          const scaleY = node.scaleY();
+          const fontScale = Math.max(0.1, (Math.abs(scaleX) + Math.abs(scaleY)) / 2);
+          node.scaleX(1);
+          node.scaleY(1);
+          const nextLayer = {
+            ...layer,
+            fontSize: Math.max(4, Math.round(layer.fontSize * fontScale)),
+            x: node.x(),
+            y: node.y(),
+            rotation: node.rotation()
+          };
+          const nextSize = measureTextLayerSize(nextLayer);
+          onChange({ ...nextLayer, width: nextSize.width, height: nextSize.height });
+        }}
+      >
+        <Rect x={0} y={0} width={smartBlock.width} height={smartBlock.height} fill="rgba(0,0,0,0)" />
+        {smartBlock.lines.map((line, index) =>
+          line.blank ? null : (
+            <SmartTextBlockLineNode
+              key={`${index}-${line.text}`}
+              line={line}
+              layer={renderLayer}
+              gradientProps={gradientProps}
+              shadowProps={shadowProps}
+              stroke={stroke}
+              richTextEnabled={richTextEnabled}
+            />
+          )
+        )}
+      </Group>
+    );
+  }
+
+  if (richTextEnabled) {
+    return (
+      <RichTextLayerNode
+        layer={renderLayer}
+        selected={selected}
+        onChange={onChange}
+        onBeginTextEdit={onBeginTextEdit}
+        onContextMenu={handleTextContextMenu}
+        commonDrag={commonDrag}
+        gradientProps={gradientProps}
+        shadowProps={shadowProps}
+        stroke={stroke}
+      />
+    );
+  }
+
+  const measuredSize = measureTextLayerSize(layer);
 
   // Managed text layers are real text boxes: their saved rect controls wrapping,
   // alignment and vertical footprint instead of shrinking to natural text bounds.
@@ -597,10 +715,12 @@ function TextNode({
       opacity={layer.opacity}
       visible={layer.visible}
       globalCompositeOperation={mapBlendMode(layer.blendMode) as "source-over"}
-      onClick={(event) => onSelect(layer.id, event.evt.ctrlKey || event.evt.metaKey)}
+      onClick={stopLayerBubble}
       onContextMenu={handleTextContextMenu}
-      onDblClick={() => onBeginTextEdit(layer.id)}
-      onTap={() => onSelect(layer.id)}
+      onDblClick={(event) => {
+        event.cancelBubble = true;
+        onBeginTextEdit(layer.id);
+      }}
       onTransformEnd={(event) => {
         const node = event.target;
         const scaleX = node.scaleX();
@@ -615,6 +735,344 @@ function TextNode({
       }}
     />
   );
+}
+
+function SmartTextBlockLineNode({
+  line,
+  layer,
+  gradientProps,
+  shadowProps,
+  stroke,
+  richTextEnabled
+}: {
+  line: SmartTextBlockLineLayout;
+  layer: TextLayer;
+  gradientProps: Record<string, unknown>;
+  shadowProps: Record<string, unknown>;
+  stroke: TextLayer["stroke"];
+  richTextEnabled: boolean;
+}): React.ReactElement {
+  if (richTextEnabled) {
+    return (
+      <RichTextLineSegments
+        layer={layer}
+        start={line.start}
+        end={line.end}
+        x={line.x}
+        y={line.y}
+        lineFontSize={line.fontSize}
+        lineHeight={line.height}
+        lineLetterSpacing={line.letterSpacing}
+        targetWidth={line.width}
+        gradientProps={gradientProps}
+        shadowProps={shadowProps}
+        stroke={stroke}
+      />
+    );
+  }
+
+  return (
+    <PlainSmartTextBlockLineNode
+      line={line}
+      layer={layer}
+      gradientProps={gradientProps}
+      shadowProps={shadowProps}
+      stroke={stroke}
+    />
+  );
+}
+
+function PlainSmartTextBlockLineNode({
+  line,
+  layer,
+  gradientProps,
+  shadowProps,
+  stroke
+}: {
+  line: SmartTextBlockLineLayout;
+  layer: TextLayer;
+  gradientProps: Record<string, unknown>;
+  shadowProps: Record<string, unknown>;
+  stroke: TextLayer["stroke"];
+}): React.ReactElement {
+  const lineLayer: TextLayer = useMemo(() => withoutSmartTextBlock({
+    ...layer,
+    text: line.text,
+    x: 0,
+    y: 0,
+    width: Math.max(1, line.width),
+    height: Math.max(1, line.height),
+    fontSize: line.fontSize,
+    letterSpacing: line.letterSpacing,
+    alignment: "left"
+  }), [layer, line.fontSize, line.height, line.letterSpacing, line.text, line.width]);
+  const lineCanvas = useMemo(() => renderTextToCanvas(lineLayer), [lineLayer]);
+
+  if (lineCanvas !== null) {
+    const canvasMeta = lineCanvas as HTMLCanvasElement & { sppTextOffsetX?: number; sppTextOffsetY?: number };
+    return (
+      <KonvaImage
+        image={lineCanvas}
+        x={line.x - (canvasMeta.sppTextOffsetX ?? 0)}
+        y={line.y - (canvasMeta.sppTextOffsetY ?? 0)}
+        width={lineCanvas.width}
+        height={lineCanvas.height}
+        listening={false}
+      />
+    );
+  }
+
+  return (
+    <Text
+      x={line.x}
+      y={line.y}
+      width={line.width}
+      height={line.height}
+      text={line.text}
+      fontFamily={layer.fontFamily}
+      fontSize={line.fontSize}
+      fontStyle={konvaFontStyle(layer)}
+      fontVariant="normal"
+      fill={rgba(layer.color, layer.fillOpacity)}
+      {...gradientProps}
+      stroke={stroke !== undefined ? rgba(stroke.color, stroke.opacity) : undefined}
+      strokeWidth={stroke !== undefined && (stroke.position ?? "outside") === "outside" ? (stroke.width ?? 0) * 2 : (stroke?.width ?? 0)}
+      strokeEnabled={stroke !== undefined && stroke.width > 0 && stroke.opacity > 0}
+      fillAfterStrokeEnabled={stroke !== undefined && (stroke.position ?? "outside") === "outside"}
+      {...shadowProps}
+      lineHeight={layer.lineHeight}
+      letterSpacing={line.letterSpacing}
+      align="center"
+      direction={layer.direction === "auto" ? "rtl" : layer.direction}
+      listening={false}
+    />
+  );
+}
+
+function RichTextLayerNode({
+  layer,
+  selected,
+  onChange,
+  onBeginTextEdit,
+  onContextMenu,
+  commonDrag,
+  gradientProps,
+  shadowProps,
+  stroke
+}: {
+  layer: TextLayer;
+  selected: boolean;
+  onChange: (layer: VisualLayer) => void;
+  onBeginTextEdit: (layerId: string) => void;
+  onContextMenu: (event: Konva.KonvaEventObject<PointerEvent>) => void;
+  commonDrag: Record<string, unknown>;
+  gradientProps: Record<string, unknown>;
+  shadowProps: Record<string, unknown>;
+  stroke: TextLayer["stroke"];
+}): React.ReactElement {
+  const lines = useMemo(() => {
+    let offset = 0;
+    return layer.text.split(/\r?\n/).map((text) => {
+      const start = offset;
+      const end = start + text.length;
+      offset = end + 1;
+      return { text, start, end };
+    });
+  }, [layer.text]);
+  const lineHeight = layer.fontSize * layer.lineHeight;
+
+  return (
+    <Group
+      id={layer.id}
+      name={selected ? "selected-layer" : undefined}
+      x={layer.x}
+      y={layer.y}
+      width={layer.width}
+      height={layer.height}
+      rotation={layer.rotation}
+      opacity={layer.opacity}
+      visible={layer.visible}
+      globalCompositeOperation={mapBlendMode(layer.blendMode) as "source-over"}
+      {...commonDrag}
+      onClick={stopLayerBubble}
+      onContextMenu={onContextMenu}
+      onDblClick={(event) => {
+        event.cancelBubble = true;
+        onBeginTextEdit(layer.id);
+      }}
+      onTransformEnd={(event) => {
+        const node = event.target;
+        const scaleX = node.scaleX();
+        const scaleY = node.scaleY();
+        const fontScale = Math.max(0.1, (Math.abs(scaleX) + Math.abs(scaleY)) / 2);
+        node.scaleX(1);
+        node.scaleY(1);
+        const nextLayer = { ...layer, fontSize: Math.max(4, Math.round(layer.fontSize * fontScale)), x: node.x(), y: node.y(), rotation: node.rotation() };
+        const nextSize = measureTextLayerSize(nextLayer);
+        onChange({ ...nextLayer, width: nextSize.width, height: nextSize.height });
+      }}
+    >
+      <Rect x={0} y={0} width={layer.width} height={layer.height} fill="rgba(0,0,0,0)" />
+      {lines.map((line, index) => (
+        <RichTextLineSegments
+          key={`${line.start}-${line.end}`}
+          layer={layer}
+          start={line.start}
+          end={line.end}
+          x={0}
+          y={index * lineHeight}
+          lineFontSize={layer.fontSize}
+          lineHeight={lineHeight}
+          lineLetterSpacing={layer.letterSpacing}
+          targetWidth={layer.width}
+          gradientProps={gradientProps}
+          shadowProps={shadowProps}
+          stroke={stroke}
+        />
+      ))}
+    </Group>
+  );
+}
+
+function RichTextLineSegments({
+  layer,
+  start,
+  end,
+  x,
+  y,
+  lineFontSize,
+  lineHeight,
+  lineLetterSpacing,
+  targetWidth,
+  gradientProps,
+  shadowProps,
+  stroke
+}: {
+  layer: TextLayer;
+  start: number;
+  end: number;
+  x: number;
+  y: number;
+  lineFontSize: number;
+  lineHeight: number;
+  lineLetterSpacing: number;
+  targetWidth: number;
+  gradientProps: Record<string, unknown>;
+  shadowProps: Record<string, unknown>;
+  stroke: TextLayer["stroke"];
+}): React.ReactElement | null {
+  const segments = richTextSegmentsForRange(layer, start, end);
+  if (segments.length === 0) return null;
+  const scale = lineFontSize / Math.max(1, layer.fontSize);
+  const measured = segments.map((segment) => {
+    const segmentLayer = segmentLayerForRichSegment(layer, segment, scale, lineLetterSpacing);
+    const width = measureLineWidth(segment.text || " ", segmentLayer, segmentLayer.fontSize);
+    return { segment, segmentLayer, width };
+  });
+  const totalWidth = measured.reduce((sum, item) => sum + item.width, 0);
+  let cursorX = x + Math.max(0, (targetWidth - totalWidth) / 2);
+  return (
+    <>
+      {measured.map((item) => {
+        const node = (
+          <RichTextSegmentNode
+            key={`${item.segment.start}-${item.segment.end}`}
+            layer={item.segmentLayer}
+            x={cursorX}
+            y={y}
+            width={item.width}
+            height={lineHeight}
+            gradientProps={gradientProps}
+            shadowProps={shadowProps}
+            stroke={stroke}
+          />
+        );
+        cursorX += item.width;
+        return node;
+      })}
+    </>
+  );
+}
+
+function RichTextSegmentNode({
+  layer,
+  x,
+  y,
+  width,
+  height,
+  gradientProps,
+  shadowProps,
+  stroke
+}: {
+  layer: TextLayer;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  gradientProps: Record<string, unknown>;
+  shadowProps: Record<string, unknown>;
+  stroke: TextLayer["stroke"];
+}): React.ReactElement {
+  const lineCanvas = useMemo(() => renderTextToCanvas(layer), [layer]);
+  if (lineCanvas !== null) {
+    const canvasMeta = lineCanvas as HTMLCanvasElement & { sppTextOffsetX?: number; sppTextOffsetY?: number };
+    return (
+      <KonvaImage
+        image={lineCanvas}
+        x={x - (canvasMeta.sppTextOffsetX ?? 0)}
+        y={y - (canvasMeta.sppTextOffsetY ?? 0)}
+        width={lineCanvas.width}
+        height={lineCanvas.height}
+        listening={false}
+      />
+    );
+  }
+  return (
+    <Text
+      x={x}
+      y={y}
+      width={width}
+      height={height}
+      text={layer.text}
+      fontFamily={layer.fontFamily}
+      fontSize={layer.fontSize}
+      fontStyle={konvaFontStyle(layer)}
+      fontVariant="normal"
+      fill={rgba(layer.color, layer.fillOpacity)}
+      {...gradientProps}
+      stroke={stroke !== undefined ? rgba(stroke.color, stroke.opacity) : undefined}
+      strokeWidth={stroke !== undefined && (stroke.position ?? "outside") === "outside" ? (stroke.width ?? 0) * 2 : (stroke?.width ?? 0)}
+      strokeEnabled={stroke !== undefined && stroke.width > 0 && stroke.opacity > 0}
+      fillAfterStrokeEnabled={stroke !== undefined && (stroke.position ?? "outside") === "outside"}
+      {...shadowProps}
+      lineHeight={layer.lineHeight}
+      letterSpacing={layer.letterSpacing}
+      align="left"
+      direction={layer.direction === "auto" ? "rtl" : layer.direction}
+      listening={false}
+    />
+  );
+}
+
+function segmentLayerForRichSegment(layer: TextLayer, segment: RichTextSegment, scale: number, fallbackLetterSpacing: number): TextLayer {
+  const style = segment.style;
+  const fontSize = Math.max(1, (style.fontSize ?? layer.fontSize) * scale);
+  return withoutSmartTextBlock({
+    ...layer,
+    text: segment.text,
+    x: 0,
+    y: 0,
+    width: 1,
+    height: fontSize * layer.lineHeight,
+    fontFamily: style.fontFamily ?? layer.fontFamily,
+    fontWeight: style.fontWeight ?? layer.fontWeight,
+    fontStyle: style.fontStyle ?? layer.fontStyle,
+    fontSize,
+    letterSpacing: style.letterSpacing ?? fallbackLetterSpacing,
+    color: style.color ?? layer.color,
+    fillOpacity: style.fillOpacity ?? layer.fillOpacity,
+    alignment: "left"
+  });
 }
 
 function clampContentNodeToFrame(node: Konva.Node, rect: ContentRect, layer: FrameLayer): void {
@@ -719,6 +1177,139 @@ function rgba(color: string, opacity: number): string {
   return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(1, opacity))})`;
 }
 
+function drawImageAlphaClipPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, imageShape: string, cornerRadius: number): void {
+  ctx.beginPath();
+  if (imageShape === "circle" || imageShape === "ellipse") {
+    ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+    ctx.closePath();
+    return;
+  }
+  const r = Math.min(cornerRadius, w / 2, h / 2);
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function createTintedAlphaCanvas(alphaCanvas: HTMLCanvasElement, color: string, opacity: number): HTMLCanvasElement | null {
+  const tint = document.createElement("canvas");
+  tint.width = alphaCanvas.width;
+  tint.height = alphaCanvas.height;
+  const tintContext = tint.getContext("2d");
+  if (tintContext === null) return null;
+  tintContext.drawImage(alphaCanvas, 0, 0);
+  tintContext.globalCompositeOperation = "source-in";
+  tintContext.fillStyle = rgba(color, opacity);
+  tintContext.fillRect(0, 0, tint.width, tint.height);
+  return tint;
+}
+
+function renderImageAlphaEffectsCanvas(options: {
+  image: HTMLImageElement;
+  maskImage: HTMLImageElement | null;
+  width: number;
+  height: number;
+  crop: { x: number; y: number; width: number; height: number } | null;
+  imageX: number;
+  imageY: number;
+  imageScaleX: number;
+  imageScaleY: number;
+  imageShape: string;
+  cornerRadius: number;
+  hasClip: boolean;
+  shadow: { color: string; opacity: number; offsetX: number; offsetY: number; blur: number } | null;
+  stroke: { color: string; opacity: number; width: number } | null;
+}): HTMLCanvasElement | null {
+  const shadowPad = options.shadow === null ? 0 : options.shadow.blur * 2 + Math.max(Math.abs(options.shadow.offsetX), Math.abs(options.shadow.offsetY));
+  const strokePad = options.stroke === null ? 0 : options.stroke.width * 2;
+  const pad = Math.ceil(Math.max(2, shadowPad, strokePad) + 4);
+  const canvasWidth = Math.max(1, Math.ceil(options.width + pad * 2));
+  const canvasHeight = Math.max(1, Math.ceil(options.height + pad * 2));
+  const alphaCanvas = document.createElement("canvas");
+  alphaCanvas.width = canvasWidth;
+  alphaCanvas.height = canvasHeight;
+  const alphaContext = alphaCanvas.getContext("2d");
+  if (alphaContext === null) return null;
+
+  alphaContext.save();
+  if (options.hasClip) {
+    drawImageAlphaClipPath(alphaContext, pad, pad, options.width, options.height, options.imageShape, options.cornerRadius);
+    alphaContext.clip();
+  }
+  alphaContext.translate(pad + options.imageX, pad + options.imageY);
+  alphaContext.scale(options.imageScaleX, options.imageScaleY);
+  if (options.crop !== null) {
+    alphaContext.drawImage(
+      options.image,
+      options.crop.x,
+      options.crop.y,
+      options.crop.width,
+      options.crop.height,
+      0,
+      0,
+      options.width,
+      options.height
+    );
+  } else {
+    alphaContext.drawImage(options.image, 0, 0, options.width, options.height);
+  }
+  alphaContext.restore();
+
+  if (options.maskImage !== null) {
+    alphaContext.save();
+    alphaContext.globalCompositeOperation = "destination-in";
+    alphaContext.drawImage(options.maskImage, pad, pad, options.width, options.height);
+    alphaContext.restore();
+  }
+
+  const effectCanvas = document.createElement("canvas");
+  effectCanvas.width = canvasWidth;
+  effectCanvas.height = canvasHeight;
+  const effectContext = effectCanvas.getContext("2d");
+  if (effectContext === null) return null;
+
+  if (options.shadow !== null && options.shadow.opacity > 0) {
+    const shadowSource = createTintedAlphaCanvas(alphaCanvas, options.shadow.color, 1);
+    if (shadowSource === null) return null;
+    effectContext.save();
+    effectContext.shadowColor = rgba(options.shadow.color, options.shadow.opacity);
+    effectContext.shadowBlur = options.shadow.blur;
+    effectContext.shadowOffsetX = options.shadow.offsetX;
+    effectContext.shadowOffsetY = options.shadow.offsetY;
+    effectContext.drawImage(shadowSource, 0, 0);
+    effectContext.globalCompositeOperation = "destination-out";
+    effectContext.shadowColor = "transparent";
+    effectContext.shadowBlur = 0;
+    effectContext.shadowOffsetX = 0;
+    effectContext.shadowOffsetY = 0;
+    effectContext.drawImage(alphaCanvas, 0, 0);
+    effectContext.restore();
+  }
+
+  if (options.stroke !== null && options.stroke.width > 0 && options.stroke.opacity > 0) {
+    const strokeSource = createTintedAlphaCanvas(alphaCanvas, options.stroke.color, options.stroke.opacity);
+    if (strokeSource === null) return null;
+    const radius = Math.max(1, Math.ceil(options.stroke.width));
+    effectContext.save();
+    for (let y = -radius; y <= radius; y += 1) {
+      for (let x = -radius; x <= radius; x += 1) {
+        if (x === 0 && y === 0) continue;
+        if (x * x + y * y > radius * radius) continue;
+        effectContext.drawImage(strokeSource, x, y);
+      }
+    }
+    effectContext.globalCompositeOperation = "destination-out";
+    effectContext.drawImage(alphaCanvas, 0, 0);
+    effectContext.restore();
+  }
+
+  (effectCanvas as HTMLCanvasElement & { sppOffsetX?: number; sppOffsetY?: number }).sppOffsetX = -pad;
+  (effectCanvas as HTMLCanvasElement & { sppOffsetX?: number; sppOffsetY?: number }).sppOffsetY = -pad;
+  return effectCanvas;
+}
+
 
 type KonvaQuickAdjustment = {
   brightness: number;
@@ -775,6 +1366,14 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+// Konva's HSL/HSV filters read `saturation` as an exponent: s = 2^value, so
+// value 0 = neutral, +1 = 2×, −1 = 0.5×. Our pipeline carries saturation as a
+// *multiplier* (1 = neutral), so it must be log2-converted before reaching the
+// node — otherwise a neutral 1 becomes 2× and even negative sliders brighten.
+function toKonvaSaturation(multiplier: number): number {
+  return Math.log2(clampNumber(multiplier, 0.05, 4));
+}
+
 function quickEditParamsToKonva(params: Record<string, unknown> | null | undefined): KonvaQuickAdjustment {
   const exposure = typeof params?.["exposure"] === "number" ? params["exposure"] : 0;
   const brightness = typeof params?.["brightness"] === "number" ? params["brightness"] : 0;
@@ -786,7 +1385,7 @@ function quickEditParamsToKonva(params: Record<string, unknown> | null | undefin
 
   const mappedBrightness = clampNumber(exposure / 175 + brightness / 220, -0.45, 0.45);
   const mappedContrast = clampNumber(contrast, -40, 40);
-  const mappedSaturation = clampNumber(1 + saturation / 200, 0.7, 1.35);
+  const mappedSaturation = clampNumber(1 + saturation / 130, 0.35, 1.9);
   const mappedHue = clampNumber(hue, -45, 45);
   const mappedBlur = clampNumber(blur, 0, 8);
 
@@ -817,7 +1416,7 @@ function mergeKonvaAdjustments(
 ): KonvaQuickAdjustment {
   const brightness = clampNumber((base?.brightness ?? 0) + quick.brightness, -0.55, 0.55);
   const contrast = clampNumber((base?.contrast ?? 0) + quick.contrast, -55, 55);
-  const saturation = clampNumber((base?.saturation ?? 1) * quick.saturation, 0.6, 1.6);
+  const saturation = clampNumber((base?.saturation ?? 1) * quick.saturation, 0.35, 1.9);
   const hue = clampNumber((base?.hue ?? 0) + quick.hue, -60, 60);
   const grayscale = Boolean(base?.grayscale) || quick.grayscale;
 
@@ -921,13 +1520,17 @@ function ImageNode({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [image, maskImage, libMaskImage, libMaskDataUrl, layer.pixelMask, layer.width, layer.height, layer.imageOffsetX ?? 0, layer.imageOffsetY ?? 0, layer.imageScale ?? 1.0]);
 
+  // Render-only projection: edits the user muted via the Layer Edits panel /
+  // before-after preview are neutralized here, never in the persisted `layer`.
+  const renderLayer = useEffectiveRenderLayer(layer);
+
   const fx = useMemo(
-    () => resolveFrameEffects(layer.visualEffects),
+    () => resolveFrameEffects(renderLayer.visualEffects),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [JSON.stringify(layer.visualEffects)]
+    [JSON.stringify(renderLayer.visualEffects)]
   );
   const softEdgeBlurRadius = fx.softEdge?.radius ?? 0;
-  const colorAdj = imageEffectsToKonva(layer.effects);
+  const colorAdj = imageEffectsToKonva(renderLayer.effects);
   const blurRadius = Math.max(softEdgeBlurRadius, colorAdj.blurRadius);
 
   const extras = colorAdj.extras;
@@ -935,7 +1538,7 @@ function ImageNode({
   // Non-destructive Smart-Preset adjustment stack (Phase 2). Wraps the SAME pixel
   // pipeline used by export, so live === export. Heavy spatial tools are dropped
   // during drag/zoom (reduceImageEffects) for responsiveness.
-  const adjustmentStack = layer.imageAdjustments;
+  const adjustmentStack = renderLayer.imageAdjustments;
   const adjustmentFilters = useMemo(() => {
     if (!ENABLE_IMAGE_LEVEL_ADJUSTMENTS) return [];
     if (adjustmentStack === undefined || adjustmentStack.enabled === false) return [];
@@ -969,6 +1572,24 @@ function ImageNode({
 
   const needsCache = activeFilters.length > 0;
   const filterCount = activeFilters.length;
+  const imageCacheSignature = JSON.stringify({
+    blurRadius,
+    colorAdj,
+    extras,
+    adjustmentStack,
+    crop: layer.crop,
+    cropPreview: cropPreviewFromStore,
+    imageOffsetX: layer.imageOffsetX ?? 0,
+    imageOffsetY: layer.imageOffsetY ?? 0,
+    imageScale: layer.imageScale ?? 1,
+    assetId: layer.assetId,
+    assetHash: asset?.hash ?? asset?.checksum ?? null,
+    previewPath: asset?.previewPath ?? null,
+    originalPath: asset?.originalPath ?? null,
+    edgeFade: layer.edgeFade,
+    width: layer.width,
+    height: layer.height
+  });
 
   // Cache the node whenever filters are active, image changes, or dimensions change.
   // Dimensions must be in deps because Konva's cached bitmap is frozen at cache() time —
@@ -978,14 +1599,22 @@ function ImageNode({
   useEffect(() => {
     const node = imageRef.current;
     if (node === null || image === null) return;
-    if (needsCache) {
-      node.cache();
-    } else {
-      node.clearCache();
+    try {
+      if (needsCache) {
+        if (node.isCached()) node.clearCache();
+        node.cache();
+      } else if (node.isCached()) {
+        node.clearCache();
+      }
+      node.getLayer()?.batchDraw();
+    } catch (error) {
+      markDebugEvent("konva-image-cache:error", {
+        layerId: layer.id,
+        message: error instanceof Error ? error.message : String(error)
+      });
     }
-    node.getLayer()?.batchDraw();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [needsCache, filterCount, image, layer.width, layer.height]);
+  }, [needsCache, filterCount, imageCacheSignature, image, layer.width, layer.height]);
 
   // Release Konva node bitmap caches on unmount so GPU memory does not
   // accumulate across multi-page documents (e.g. 50-page class photo / photo
@@ -1001,20 +1630,26 @@ function ImageNode({
     };
   }, []);
 
-  // Shadow on the outer Group — effects.shadow takes precedence over visualEffects dropShadow
-  const shadowProps =
+  // Effects are rendered from the image alpha, so transparent PNGs get a real
+  // silhouette shadow/outline instead of a rectangular layer-box effect.
+  const alphaShadow =
     colorAdj.shadow !== null
-      ? colorAdj.shadow
+      ? {
+          color: colorAdj.shadow.shadowColor,
+          blur: colorAdj.shadow.shadowBlur,
+          offsetX: colorAdj.shadow.shadowOffsetX,
+          offsetY: colorAdj.shadow.shadowOffsetY,
+          opacity: colorAdj.shadow.shadowOpacity
+        }
       : fx.shadow !== undefined
-        ? {
-            shadowColor: fx.shadow.color,
-            shadowBlur: fx.shadow.blur,
-            shadowOffsetX: fx.shadow.offsetX,
-            shadowOffsetY: fx.shadow.offsetY,
-            shadowOpacity: fx.shadow.opacity,
-            shadowEnabled: true
-          }
-        : {};
+        ? fx.shadow
+        : null;
+  const alphaStroke =
+    colorAdj.outline !== null
+      ? { color: colorAdj.outline.stroke, width: colorAdj.outline.strokeWidth, opacity: 1 }
+      : fx.stroke !== undefined
+        ? { color: fx.stroke.color, width: fx.stroke.width, opacity: fx.stroke.opacity }
+        : null;
 
   // ─── Shape clip + flip from metadata ──────────────────────────────────────
   // (Moved before groupCommon so hasAnyMask/flipH/flipV are available in drag handlers)
@@ -1039,9 +1674,11 @@ function ImageNode({
     globalCompositeOperation: mapBlendMode(layer.blendMode) as "source-over",
     draggable: !layer.locked && !isBeingEdited && !isMaskContentEditMode,
     listening: !layer.locked || isBeingEdited || isMaskContentEditMode,
-    onClick: (event: Konva.KonvaEventObject<MouseEvent>) => { if (!isBeingEdited && !isMaskContentEditMode) onSelect(layer.id, event.evt.ctrlKey || event.evt.metaKey); },
-    onTap: () => { if (!isBeingEdited && !isMaskContentEditMode) onSelect(layer.id); },
-    onDblClick: () => {
+    onMouseDown: (event: Konva.KonvaEventObject<MouseEvent>) => selectLayerOnPointerDown(event, layer.id, onSelect, !isBeingEdited && !isMaskContentEditMode),
+    onTap: (event: Konva.KonvaEventObject<TouchEvent>) => selectLayerOnPointerDown(event, layer.id, onSelect, !isBeingEdited && !isMaskContentEditMode),
+    onClick: stopLayerBubble,
+    onDblClick: (event: Konva.KonvaEventObject<MouseEvent>) => {
+      event.cancelBubble = true;
       if (onImageDoubleClick !== undefined && layer.metadata["psdText"] !== undefined) {
         onImageDoubleClick(layer.id);
         return;
@@ -1248,24 +1885,140 @@ function ImageNode({
   const hasMask = layer.pixelMask !== undefined && maskImage !== null;
   const hasLibMask = isLibMask && libMaskImage !== null;
   const activeCompositeMask = hasMask ? maskImage : hasLibMask ? libMaskImage : null;
+  const edgeFadeImageCanvas = useMemo(() => {
+    if (image === null || !hasActiveEdgeFade(layer.edgeFade)) return null;
+    const canvasWidth = Math.max(1, Math.round(layer.width));
+    const canvasHeight = Math.max(1, Math.round(layer.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    const context = canvas.getContext("2d");
+    if (context === null) return null;
+
+    context.save();
+    context.translate(imgX, imgY);
+    context.scale(imgScaleX, imgScaleY);
+    if (hasCrop && combinedCrop !== null) {
+      context.drawImage(
+        image,
+        combinedCrop.x,
+        combinedCrop.y,
+        combinedCrop.width,
+        combinedCrop.height,
+        0,
+        0,
+        layer.width,
+        layer.height
+      );
+    } else {
+      context.drawImage(image, 0, 0, layer.width, layer.height);
+    }
+    context.restore();
+
+    if (activeCompositeMask !== null) {
+      context.save();
+      context.globalCompositeOperation = "destination-in";
+      context.drawImage(activeCompositeMask, 0, 0, canvasWidth, canvasHeight);
+      context.restore();
+    }
+
+    const imageData = context.getImageData(0, 0, canvasWidth, canvasHeight);
+    applyEdgeFadeToImageData(imageData, layer.edgeFade);
+    context.putImageData(imageData, 0, 0);
+    return canvas;
+  }, [
+    image,
+    activeCompositeMask,
+    layer.edgeFade,
+    layer.width,
+    layer.height,
+    hasCrop,
+    combinedCrop?.x,
+    combinedCrop?.y,
+    combinedCrop?.width,
+    combinedCrop?.height,
+    imgX,
+    imgY,
+    imgScaleX,
+    imgScaleY
+  ]);
+  const hasCompositeMask = edgeFadeImageCanvas === null && activeCompositeMask !== null;
+  useEffect(() => {
+    const group = maskedGroupRef.current;
+    if (group === null || !hasCompositeMask || image === null) return;
+    try {
+      if (group.isCached()) group.clearCache();
+      group.cache();
+      group.getLayer()?.batchDraw();
+    } catch (error) {
+      markDebugEvent("konva-masked-image-cache:error", {
+        layerId: layer.id,
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }, [activeCompositeMask, hasCompositeMask, image, imageCacheSignature, layer.id]);
+
+  const alphaEffectsCanvas = useMemo(() => {
+    if (image === null || (alphaShadow === null && alphaStroke === null)) return null;
+    return renderImageAlphaEffectsCanvas({
+      image,
+      maskImage: activeCompositeMask,
+      width: layer.width,
+      height: layer.height,
+      crop: combinedCrop,
+      imageX: imgX,
+      imageY: imgY,
+      imageScaleX: imgScaleX,
+      imageScaleY: imgScaleY,
+      imageShape,
+      cornerRadius,
+      hasClip,
+      shadow: alphaShadow,
+      stroke: alphaStroke
+    });
+  }, [
+    image,
+    activeCompositeMask,
+    layer.width,
+    layer.height,
+    combinedCrop?.x,
+    combinedCrop?.y,
+    combinedCrop?.width,
+    combinedCrop?.height,
+    imgX,
+    imgY,
+    imgScaleX,
+    imgScaleY,
+    imageShape,
+    cornerRadius,
+    hasClip,
+    alphaShadow?.color,
+    alphaShadow?.opacity,
+    alphaShadow?.offsetX,
+    alphaShadow?.offsetY,
+    alphaShadow?.blur,
+    alphaStroke?.color,
+    alphaStroke?.opacity,
+    alphaStroke?.width
+  ]);
 
   const konvaImageNode = (
     <KonvaImage
       ref={imageRef}
-      x={imgX}
-      y={imgY}
-      scaleX={imgScaleX}
-      scaleY={imgScaleY}
+      x={edgeFadeImageCanvas !== null ? 0 : imgX}
+      y={edgeFadeImageCanvas !== null ? 0 : imgY}
+      scaleX={edgeFadeImageCanvas !== null ? 1 : imgScaleX}
+      scaleY={edgeFadeImageCanvas !== null ? 1 : imgScaleY}
       width={layer.width}
       height={layer.height}
-      image={image ?? undefined}
-      {...cropProp}
+      image={edgeFadeImageCanvas ?? image ?? undefined}
+      {...(edgeFadeImageCanvas !== null ? {} : cropProp)}
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       filters={activeFilters as any}
       blurRadius={blurRadius}
       brightness={colorAdj.brightness}
       contrast={colorAdj.contrast}
-      saturation={colorAdj.saturation}
+      saturation={toKonvaSaturation(colorAdj.saturation)}
       hue={colorAdj.hue}
       luminance={extras.luminance}
       threshold={extras.threshold}
@@ -1274,14 +2027,21 @@ function ImageNode({
       colorPopColor={extras.colorPop?.color}
       colorPopTolerance={extras.colorPop?.tolerance}
       colorPopBackground={extras.colorPop?.background}
-      stroke={colorAdj.outline !== null ? colorAdj.outline.stroke : (fx.stroke?.color)}
-      strokeWidth={colorAdj.outline !== null ? colorAdj.outline.strokeWidth : (fx.stroke?.width ?? 0)}
-      strokeEnabled={colorAdj.outline !== null ? colorAdj.outline.strokeEnabled : fx.stroke !== undefined}
     />
   );
 
   return (
-    <Group {...groupCommon} {...shadowProps}>
+    <Group {...groupCommon}>
+      {alphaEffectsCanvas !== null && (
+        <KonvaImage
+          x={(alphaEffectsCanvas as HTMLCanvasElement & { sppOffsetX?: number }).sppOffsetX ?? 0}
+          y={(alphaEffectsCanvas as HTMLCanvasElement & { sppOffsetY?: number }).sppOffsetY ?? 0}
+          width={alphaEffectsCanvas.width}
+          height={alphaEffectsCanvas.height}
+          image={alphaEffectsCanvas}
+          listening={false}
+        />
+      )}
       {/* Visual indicator when in mask content edit mode */}
       {isMaskContentEditMode && (
         <Rect x={0} y={0} width={layer.width} height={layer.height} fill="transparent" stroke="#7C6FE0" strokeWidth={2.5} dash={[6, 3]} listening={false} />
@@ -1295,20 +2055,22 @@ function ImageNode({
       )}
       {/* Inner group clips to shape/corner-radius */}
       <Group clipFunc={imageClipFunc}>
-        {activeCompositeMask !== null ? (
+        {hasCompositeMask ? (
           // Wrap image + mask in a cached Group so destination-in compositing is isolated
           <Group ref={maskedGroupRef}>
             {konvaImageNode}
-            <KonvaImage
-              x={0}
-              y={0}
-              width={layer.width}
-              height={layer.height}
-              image={activeCompositeMask}
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              globalCompositeOperation={"destination-in" as any}
-              listening={false}
-            />
+            {activeCompositeMask !== null && (
+              <KonvaImage
+                x={0}
+                y={0}
+                width={layer.width}
+                height={layer.height}
+                image={activeCompositeMask}
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                globalCompositeOperation={"destination-in" as any}
+                listening={false}
+              />
+            )}
           </Group>
         ) : konvaImageNode}
         {/* Draggable overlay for mask content edit mode — lets user reposition image inside mask */}
@@ -1401,18 +2163,29 @@ function FrameNode({
     }
     return undefined;
   });
+  const pageDpi = useDocumentStore((state) => {
+    for (const page of state.document?.pages ?? []) {
+      if (page.layers.some((item) => item.id === layer.id)) return page.setup?.dpi ?? 300;
+    }
+    return 300;
+  });
   const enterMaskContentEditFrame = useMaskContentEditStore((s) => s.enter);
   const isFrameContentEditMode = useMaskContentEditStore((s) => s.active && s.editingLayerId === layer.id);
+  // Render-only projection: muted edits neutralized for display only (see hook).
+  const renderLayer = useEffectiveRenderLayer(layer);
   const fx = useMemo(
-    () => resolveFrameEffects(layer.visualEffects),
+    () => resolveFrameEffects(renderLayer.visualEffects),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [JSON.stringify(layer.visualEffects)]
+    [JSON.stringify(renderLayer.visualEffects)]
   );
   const softEdgeBlurRadius = fx.softEdge?.radius ?? 0;
   const isGridCell = layer.metadata["gridCell"] !== undefined;
   const isMaskFrame = layer.metadata["maskFrame"] !== undefined;
   const isPhotoPrintFrame = layer.metadata["photoPrintSlot"] !== undefined;
-  const collageFrameMeta = layer.metadata["collageFrame"] as { isCollageFrame?: boolean; layoutManaged?: boolean; slotType?: string; slotId?: string; slotShape?: string; vertices?: Array<{ x: number; y: number }>; edgeConfig?: CollageEdgeConfig; globalMask?: CollageGlobalMaskMeta; globalRasterMask?: { enabled?: boolean; canvasW?: number; canvasH?: number } } | undefined;
+  const collageFrameMeta = layer.metadata["collageFrame"] as { collageRuleId?: string; isCollageFrame?: boolean; layoutManaged?: boolean; slotType?: string; slotId?: string; slotShape?: string; vertices?: Array<{ x: number; y: number }>; edgeConfig?: CollageEdgeConfig; cellFeather?: CellFeatherSettings; globalMask?: CollageGlobalMaskMeta; globalRasterMask?: { enabled?: boolean; canvasW?: number; canvasH?: number } } | undefined;
+  const globalCellFeather = useDocumentStore((state) =>
+    state.document?.collageRules.find((rule) => rule.id === collageFrameMeta?.collageRuleId)?.canvasSettings.globalCellFeather
+  );
   const isCollageFrame = collageFrameMeta?.isCollageFrame === true;
   const isCollageEmpty = isCollageFrame && collageFrameMeta?.slotType === "empty";
   const collageSelectColor = "#22d3ee";
@@ -1429,13 +2202,24 @@ function FrameNode({
 
   // Edge config mirrored from collage assignment
   const collageEdgeConfig = layer.metadata["collageEdgeConfig"] as CollageEdgeConfig | null | undefined;
+  const rawCellFeather = globalCellFeather
+    ?? (layer.metadata["collageCellFeather"] as Partial<CellFeatherSettings> | null | undefined)
+    ?? collageFrameMeta?.cellFeather;
+  const cellShortestSideMm = pxToMm(Math.max(1, Math.min(layer.width, layer.height)), pageDpi);
+  const cellFeather = normalizeCellFeather(rawCellFeather, cellShortestSideMm);
+  const cellFeatherPx = cellFeatherAmountPx(cellFeather, pageDpi);
+  const autoOverscanPx = cellFeather.enabled
+    ? mmToPx(autoImageContinuityOverscanMm(cellFeather.amountMm, cellShortestSideMm), pageDpi)
+    : 0;
+  const contentFrameWidth = layer.width + autoOverscanPx * 2;
+  const contentFrameHeight = layer.height + autoOverscanPx * 2;
 
   const frameExtras = frameColorAdj.extras ?? EMPTY_EXTRA_QUICK_EFFECTS;
 
   // Non-destructive Image-Adjustment stack (Smart Presets / Tool Library) applied
   // to the image inside the frame. Wraps the SAME pixel pipeline used by export,
   // so live === export (frames always export through the Konva stage path).
-  const adjustmentStack = layer.imageAdjustments;
+  const adjustmentStack = renderLayer.imageAdjustments;
   const adjustmentFilters = useMemo(() => {
     if (!ENABLE_IMAGE_LEVEL_ADJUSTMENTS) return [];
     if (adjustmentStack === undefined || adjustmentStack.enabled === false) return [];
@@ -1533,7 +2317,7 @@ function FrameNode({
     } catch {
       // node may be in a transitional state — safe to ignore.
     }
-  }, [frameMaskImage, image, layer.width, layer.height, layer.contentType, layer.imageAssetId, layer.contentTransform]);
+  }, [frameMaskImage, image, frameCacheSignature, frameFilterCount, layer.width, layer.height, layer.contentType, layer.imageAssetId, layer.contentTransform]);
 
   // Release Konva node bitmap caches on unmount (FrameNode) — see comment in ImageNode.
   useEffect(() => {
@@ -1563,19 +2347,19 @@ function FrameNode({
     if (image === null) return null;
     const sourceSize = getEffectiveSourceSize(asset, image.naturalWidth, image.naturalHeight);
     return computeContentRect(
-      layer.width,
-      layer.height,
+      contentFrameWidth,
+      contentFrameHeight,
       sourceSize.width,
       sourceSize.height,
       layer.fitMode,
       layer.contentTransform,
       layer.padding
     );
-  }, [asset, image, layer.width, layer.height, layer.fitMode, layer.contentTransform, layer.padding]);
+  }, [asset, image, contentFrameWidth, contentFrameHeight, layer.fitMode, layer.contentTransform, layer.padding]);
 
   const isFillLike = layer.fitMode === "fill" || layer.fitMode === "smartCrop";
-  const innerW = Math.max(1, layer.width - layer.padding * 2);
-  const innerH = Math.max(1, layer.height - layer.padding * 2);
+  const innerW = Math.max(1, contentFrameWidth - layer.padding * 2);
+  const innerH = Math.max(1, contentFrameHeight - layer.padding * 2);
   const hasPanRoom =
     contentRect !== null &&
     (contentRect.width > innerW + 0.5 || contentRect.height > innerH + 0.5);
@@ -1606,8 +2390,8 @@ function FrameNode({
     if (contentRect === null) return undefined;
     if (!isFillLike) return undefined;
     const { ox, oy, boxW, boxH } = contentRotationOffsets;
-    const innerX = layer.padding;
-    const innerY = layer.padding;
+    const innerX = layer.padding - autoOverscanPx;
+    const innerY = layer.padding - autoOverscanPx;
     return function dragBound(this: Konva.Node, pos: { x: number; y: number }): { x: number; y: number } {
       try {
         const parent = this.getParent();
@@ -1636,7 +2420,7 @@ function FrameNode({
         return pos;
       }
     };
-  }, [contentRect, contentRotationOffsets, innerH, innerW, isFillLike, layer.padding]);
+  }, [autoOverscanPx, contentRect, contentRotationOffsets, innerH, innerW, isFillLike, layer.padding]);
 
   const cornerRadius = layer.shape === "circle"
     ? Math.min(layer.width, layer.height) / 2
@@ -1742,6 +2526,55 @@ function FrameNode({
     }
   };
 
+  const cellFeatherMask = useMemo(() => {
+    if (!cellFeather.enabled || cellFeatherPx <= 0 || layer.width <= 1 || layer.height <= 1) return null;
+    return createCellFeatherMaskCanvas(
+      Math.max(1, Math.round(layer.width)),
+      Math.max(1, Math.round(layer.height)),
+      Math.max(cellFeatherPx, autoOverscanPx),
+      cellFeatherBlurPx(cellFeatherPx, cellFeather.softness),
+      clipFunc
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    cellFeather.enabled,
+    cellFeather.amountMm,
+    cellFeather.softness,
+    cellFeatherPx,
+    autoOverscanPx,
+    layer.width,
+    layer.height,
+    layer.padding,
+    layer.shape,
+    layer.cornerRadius,
+    collageSlotShape,
+    JSON.stringify(collageVertices),
+    JSON.stringify(puzzleTabs),
+    JSON.stringify(collageEdgeConfig),
+    JSON.stringify(collageGlobalMask)
+  ]);
+
+  useEffect(() => {
+    const group = frameMaskGroupRef.current;
+    if (group === null || cellFeatherMask === null) return;
+    const pad = (cellFeatherMask as HTMLCanvasElement & { sppMaskOffset?: number }).sppMaskOffset ?? 0;
+    try {
+      if (group.isCached()) group.clearCache();
+      group.cache({
+        x: -pad,
+        y: -pad,
+        width: layer.width + pad * 2,
+        height: layer.height + pad * 2
+      });
+      group.getLayer()?.batchDraw();
+    } catch (error) {
+      markDebugEvent("konva-cell-feather-cache:error", {
+        layerId: layer.id,
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }, [cellFeatherMask, image, frameCacheSignature, frameFilterCount, layer.id, layer.width, layer.height, layer.contentType, layer.imageAssetId, layer.contentTransform]);
+
   // Render text content into the frame's content rect (fitBox / fitInsideShape).
   // clipFunc is reused to derive the shape occupancy so the fit matches the visual clip.
   const frameTextCanvas = useMemo(() => {
@@ -1821,8 +2654,8 @@ function FrameNode({
       contentRect.renderWidth,
       contentRect.renderHeight
     );
-    const originalPivotX = contentRect.x + rotOx;
-    const originalPivotY = contentRect.y + rotOy;
+    const originalPivotX = contentRect.x + rotOx - autoOverscanPx;
+    const originalPivotY = contentRect.y + rotOy - autoOverscanPx;
     const rawDx = node.x() - originalPivotX;
     const rawDy = node.y() - originalPivotY;
     // Defensive: if Konva ever hands us NaN/Infinity (seen when a node was
@@ -1843,8 +2676,8 @@ function FrameNode({
       : isFillLike
       ? clampContentTransformToFillBounds(
           nextTransform,
-          layer.width,
-          layer.height,
+          contentFrameWidth,
+          contentFrameHeight,
           sourceSize?.width ?? image.naturalWidth,
           sourceSize?.height ?? image.naturalHeight,
           layer.fitMode,
@@ -1887,15 +2720,18 @@ function FrameNode({
       globalCompositeOperation={mapBlendMode(layer.blendMode) as "source-over"}
       draggable={frameIsDraggable}
       listening={!layer.locked}
-      onClick={(event) => onSelect(layer.id, event.evt.ctrlKey || event.evt.metaKey)}
-      onTap={() => onSelect(layer.id)}
-      onDblClick={() => {
+      onMouseDown={(event) => selectLayerOnPointerDown(event, layer.id, onSelect)}
+      onTap={(event) => selectLayerOnPointerDown(event, layer.id, onSelect)}
+      onClick={stopLayerBubble}
+      onDblClick={(event) => {
+        event.cancelBubble = true;
         if (layer.imageAssetId !== undefined) {
           onSelect(layer.id);
           enterMaskContentEditFrame(layer.id);
         }
       }}
-      onDblTap={() => {
+      onDblTap={(event) => {
+        event.cancelBubble = true;
         if (layer.imageAssetId !== undefined) {
           onSelect(layer.id);
           enterMaskContentEditFrame(layer.id);
@@ -1907,7 +2743,7 @@ function FrameNode({
       {...shadowProps}
     >
       {/* שכבת תוכן עם clip לפי צורת הפריים */}
-      <Group clipFunc={clipFunc}>
+      <Group clipFunc={cellFeatherMask !== null ? undefined : clipFunc}>
         <Group ref={frameMaskGroupRef}>
         {/* רקע פריים ריק */}
         <Rect
@@ -1949,8 +2785,8 @@ function FrameNode({
         {image !== null && contentRect !== null && (
           <KonvaImage
             ref={blurRef}
-            x={contentRect.x + contentRotationOffsets.ox}
-            y={contentRect.y + contentRotationOffsets.oy}
+            x={contentRect.x + contentRotationOffsets.ox - autoOverscanPx}
+            y={contentRect.y + contentRotationOffsets.oy - autoOverscanPx}
             width={contentRect.renderWidth}
             height={contentRect.renderHeight}
             rotation={layer.contentTransform.rotation ?? 0}
@@ -1963,7 +2799,7 @@ function FrameNode({
             blurRadius={blurRadius}
             brightness={frameColorAdj.brightness}
             contrast={frameColorAdj.contrast}
-            saturation={frameColorAdj.saturation}
+            saturation={toKonvaSaturation(frameColorAdj.saturation)}
             hue={frameColorAdj.hue}
             luminance={frameExtras.luminance}
             threshold={frameExtras.threshold}
@@ -1997,6 +2833,18 @@ function FrameNode({
         )}
         {fx.gradientOverlay !== undefined && (
           <Rect x={0} y={0} width={layer.width} height={layer.height} {...gradientOverlayRectProps(fx.gradientOverlay, layer.width, layer.height)} opacity={fx.gradientOverlay.opacity} globalCompositeOperation={mapBlendMode(fx.gradientOverlay.blendMode) as "source-over"} listening={false} />
+        )}
+        {cellFeatherMask !== null && (
+          <KonvaImage
+            x={-((cellFeatherMask as HTMLCanvasElement & { sppMaskOffset?: number }).sppMaskOffset ?? 0)}
+            y={-((cellFeatherMask as HTMLCanvasElement & { sppMaskOffset?: number }).sppMaskOffset ?? 0)}
+            width={cellFeatherMask.width}
+            height={cellFeatherMask.height}
+            image={cellFeatherMask}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            globalCompositeOperation={"destination-in" as any}
+            listening={false}
+          />
         )}
         {frameMaskImage !== null && (
           <KonvaImage

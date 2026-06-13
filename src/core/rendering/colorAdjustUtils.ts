@@ -15,7 +15,8 @@ export interface KonvaColorParams {
   brightness: number;
   /** Konva.Filters.Contrast: roughly -50..50 (0 = neutral) */
   contrast: number;
-  /** Konva.Filters.HSL saturation: 0..2 (1 = neutral, 0 = gray) */
+  /** Saturation as a multiplier (1 = neutral). The renderer log2-converts this
+   *  to Konva.Filters.HSL's 2^value exponent via toKonvaSaturation(). */
   saturation: number;
   /** Konva.Filters.HSL hue: degrees (-180..180) */
   hue: number;
@@ -201,7 +202,9 @@ export function extractExtraQuickEffects(
   const posterize = posterizeRaw > 0 ? clamp((7 - posterizeRaw) / 7, 0.05, 1) : 0;
 
   const luminanceRaw = num("luminance");
-  const luminance = clamp(luminanceRaw / 50, -0.6, 0.6);
+  // Konva HSL adds luminance*127 to lightness — /50 was far too aggressive and
+  // washed images out. /90 keeps a ±25 slider to a natural ±35/255 lift.
+  const luminance = clamp(luminanceRaw / 90, -0.45, 0.45);
 
   const removeWhite = bool("remove_white")
     ? { tolerance: clamp(num("remove_white_tolerance", 22) * 2.55, 5, 200) }
@@ -239,7 +242,9 @@ export interface ImageEffectsKonva extends KonvaColorParams {
 export function imageEffectsToKonva(effects: ImageLayerEffects): ImageEffectsKonva {
   const brightness = clamp(effects.exposure / 175 + effects.brightness / 220, -0.55, 0.55);
   const contrast = clamp(effects.contrast, -55, 55);
-  const saturation = clamp(1 + effects.saturation / 200, 0.6, 1.6);
+  // Saturation multiplier (1 = neutral). Converted to Konva's 2^value exponent at
+  // the node via toKonvaSaturation(); keep this centred on 1 here.
+  const saturation = clamp(1 + effects.saturation / 130, 0.35, 1.9);
   const hue = clamp(effects.hue, -60, 60);
   const grayscale = effects.grayscale;
   const blurRadius = clamp(effects.blur, 0, 8);

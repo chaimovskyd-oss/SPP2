@@ -36,6 +36,73 @@ export function getTransformedBounds(layer: VisualLayer): Rect {
   return getRotatedLayerBounds(layer).aabb;
 }
 
+/**
+ * Size of the axis-aligned bounding box that a `width × height` rectangle occupies
+ * once rotated by `rotationDeg` (independent of pivot/position).
+ */
+export function rotatedAabbSize(width: number, height: number, rotationDeg: number): { width: number; height: number } {
+  const rad = (rotationDeg * Math.PI) / 180;
+  const cos = Math.abs(Math.cos(rad));
+  const sin = Math.abs(Math.sin(rad));
+  return {
+    width: width * cos + height * sin,
+    height: width * sin + height * cos
+  };
+}
+
+/**
+ * Konva renders rect/image/text/frame layers rotating around their node origin
+ * (the unrotated top-left = `x, y`). The visible center therefore sits at
+ * `origin + R(θ) · (w/2, h/2)`. Given a desired visible center `(cx, cy)`, returns
+ * the `x, y` (node origin) that places the layer's visual center there.
+ *
+ * For rotation 0 this reduces to `(cx - w/2, cy - h/2)` — identical to the naive
+ * top-left placement, so unrotated layers are unaffected.
+ */
+export function originForVisualCenter(
+  cx: number,
+  cy: number,
+  width: number,
+  height: number,
+  rotationDeg: number
+): Point {
+  const rad = (rotationDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const hw = width / 2;
+  const hh = height / 2;
+  return {
+    x: cx - (hw * cos - hh * sin),
+    y: cy - (hw * sin + hh * cos)
+  };
+}
+
+/** Circle/ellipse shapes rotate around their own center; everything else rotates around its top-left origin. */
+export function isCenterPivotLayer(layer: VisualLayer): boolean {
+  const shapeKind = layer.type === "shape" ? (layer as unknown as { shape?: string }).shape : undefined;
+  return shapeKind === "circle" || shapeKind === "ellipse";
+}
+
+/**
+ * Returns the node origin (`x, y`) that places a layer's visual center at `(cx, cy)`,
+ * accounting for rotation and the layer's pivot convention. Pass `sizeOverride` when
+ * the layer is being resized in the same operation (e.g. fit-to-canvas); otherwise the
+ * layer's measured bounds are used (handles auto-sized text).
+ */
+export function visualCenterToOrigin(
+  layer: VisualLayer,
+  cx: number,
+  cy: number,
+  sizeOverride?: { width: number; height: number }
+): Point {
+  const size = sizeOverride ?? getLayerBounds(layer);
+  const rotation = layer.rotation ?? 0;
+  if (isCenterPivotLayer(layer) || rotation === 0) {
+    return { x: cx - size.width / 2, y: cy - size.height / 2 };
+  }
+  return originForVisualCenter(cx, cy, size.width, size.height, rotation);
+}
+
 export function getGroupBounds(group: GroupLayer, layers: VisualLayer[]): Rect {
   const children = layers.filter((layer) => group.childIds.includes(layer.id));
   return unionRects(children.map(getTransformedBounds));

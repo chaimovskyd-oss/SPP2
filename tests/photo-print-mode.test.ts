@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   computeBestGridForCount,
+  computePhotoPrintLayout,
   createPhotoPrintModeDocument,
   regeneratePhotoPrint
 } from "@/core/photoPrint/photoPrintModeEngine";
@@ -12,6 +13,58 @@ describe("Photo Print Mode", () => {
     expect(computeBestGridForCount(0, 0, 0, 0)).toEqual({ rows: 1, cols: 1 });
     expect(computeBestGridForCount(-100, 200, 0, 4, "portrait")).toEqual({ rows: 1, cols: 4 });
     expect(computeBestGridForCount(100, 100, 1_000, 9, "landscape")).toEqual({ rows: 1, cols: 9 });
+  });
+
+  it("forces fixed photo-print slots to the requested orientation", () => {
+    const layout = computePhotoPrintLayout(
+      3000,
+      2200,
+      100,
+      150,
+      300,
+      0,
+      0,
+      true,
+      1,
+      1,
+      0,
+      "landscape"
+    );
+
+    expect(layout.rotatedOnSheet).toBe(false);
+    expect(layout.slotWidthPx).toBeGreaterThan(layout.slotHeightPx);
+  });
+
+  it("stores oriented print dimensions when creating and regenerating photo print pages", () => {
+    const setup = pageSetupFromPreset(getPagePreset("photo_20x30"));
+    const document = createPhotoPrintModeDocument(
+      "Landscape forced",
+      setup,
+      imageInputs(2),
+      {
+        printWidthMm: 100,
+        printHeightMm: 150,
+        orientationPolicy: "landscape",
+        targetsPerPage: 0,
+        globalCopies: 1,
+        fitMode: "fill"
+      }
+    );
+
+    const rule = document.photoPrintRules[0]!;
+    const firstFrame = document.pages[0]!.layers.find((layer) => layer.type === "frame");
+
+    expect(rule.printWidthMm).toBe(150);
+    expect(rule.printHeightMm).toBe(100);
+    expect(firstFrame?.type === "frame" ? firstFrame.width : 0).toBeGreaterThan(firstFrame?.type === "frame" ? firstFrame.height : 0);
+
+    const regenerated = regeneratePhotoPrint(document, rule.id, { orientationPolicy: "portrait" });
+    const nextRule = regenerated.photoPrintRules[0]!;
+    const nextFrame = regenerated.pages[0]!.layers.find((layer) => layer.type === "frame");
+
+    expect(nextRule.printWidthMm).toBe(100);
+    expect(nextRule.printHeightMm).toBe(150);
+    expect(nextFrame?.type === "frame" ? nextFrame.height : 0).toBeGreaterThan(nextFrame?.type === "frame" ? nextFrame.width : 0);
   });
 
   it("keeps photo-print pages and slots stable enough for second-page content edits", () => {

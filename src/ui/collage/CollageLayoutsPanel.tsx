@@ -1,6 +1,6 @@
 ﻿import { useEffect, useRef, useState, type ChangeEvent, type ReactElement } from "react";
 import { ImagePlus, LayoutGrid, Shapes, Sparkles, Trash2 } from "lucide-react";
-import { generateCollageSuggestions } from "@/core/collage/collageModeEngine";
+import { buildCollageImageInputs, generateCollageSuggestions } from "@/core/collage/collageModeEngine";
 import { createCollageMaskSnapshot, readCollageMaskSnapshot, renderTemplateToAlphaMask } from "@/core/collage/collageMaskShape";
 import { applySmartCropToAssignment } from "@/core/collage/collageFrameSync";
 import { mmToPx } from "@/core/units/conversion";
@@ -10,7 +10,7 @@ import { useDocumentStore } from "@/state/documentStore";
 import { useCollageShapeTemplateStore } from "@/state/collageShapeTemplateStore";
 import { CollageMiniPreview } from "./CollageMiniPreview";
 import type { CollageShapeTemplate } from "@/types/collage";
-import type { CollageImageInput, CollageRule, ScoredLayoutSuggestion } from "@/types/collage";
+import type { CollageRule, ScoredLayoutSuggestion } from "@/types/collage";
 
 interface CollageLayoutsPanelProps {
   rule: CollageRule;
@@ -40,10 +40,9 @@ export function CollageLayoutsPanel({ rule }: CollageLayoutsPanelProps): ReactEl
     const dpi = page.setup?.dpi ?? 300;
     const spacingPx = mmToPx(rule.spacingMM, dpi);
     const marginPx = mmToPx(rule.marginMM, dpi);
-    const imageInputs: CollageImageInput[] = rule.imagePool.map((assetId) => {
-      const asset = document.assets.find((a) => a.id === assetId);
-      return { assetId, width: asset?.width ?? 800, height: asset?.height ?? 600 };
-    });
+    // Rotated cell images contribute their displayed (W/H-swapped) aspect so the
+    // recommended layouts reflect how the images actually sit in their cells.
+    const imageInputs = buildCollageImageInputs(document.assets, rule.imagePool, rule);
     setSuggestions(generateCollageSuggestions(imageInputs, page.width, page.height, spacingPx, marginPx, "creative"));
   }, [rule.id, rule.imagePool.length, rule.spacingMM, rule.marginMM, document]);
 

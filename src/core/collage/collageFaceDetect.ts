@@ -2,7 +2,7 @@
  * Face/content focal-point detection for collage + photo-print smart crop.
  *
  * Priority (first available wins):
- * 1. Python sidecar (MediaPipe BlazeFace → OpenCV Haar). Real face detection,
+ * 1. Python sidecar (SCRFD_2.5G_KPS → MediaPipe BlazeFace → OpenCV Haar). Real face detection,
  *    requires Electron with the smart-selection sidecar running.
  * 2. window.FaceDetector — experimental Web API (Chrome flag only). Inactive
  *    in stock Electron.
@@ -95,7 +95,8 @@ export async function detectFocalPoint(
 }
 
 /**
- * Attempt face detection via the Python sidecar (MediaPipe). Returns null if
+ * Attempt face detection via the Python sidecar (SCRFD first, with MediaPipe/Haar fallback).
+ * Returns null if
  * the sidecar is unreachable, the image cannot be loaded, or no faces are
  * found — caller falls back to the next strategy.
  */
@@ -180,8 +181,8 @@ interface SppFaceBridge {
       ok: boolean;
       width: number;
       height: number;
-      backend: string;
-      faces: { x: number; y: number; width: number; height: number; score: number }[];
+      backend: "scrfd_2.5g_kps" | "mediapipe" | "haar" | "none";
+      faces: { x: number; y: number; width: number; height: number; score: number; landmarks?: { x: number; y: number }[] }[];
     }>;
   };
 }

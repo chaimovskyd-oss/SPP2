@@ -9,7 +9,9 @@ import {
   ChevronRight,
   Circle,
   Clipboard,
+  Combine,
   Copy,
+  Crop,
   Eraser,
   Download,
   FileDown,
@@ -18,6 +20,9 @@ import {
   FolderPlus,
   ChevronsDown,
   ChevronsUp,
+  Crosshair,
+  MoveHorizontal,
+  MoveVertical,
   FlipHorizontal,
   FlipVertical,
   Frame,
@@ -29,6 +34,8 @@ import {
   Italic,
   LayoutGrid,
   Layers,
+  CloudUpload,
+  Contrast,
   Link2,
   Lock,
   Maximize2,
@@ -39,6 +46,7 @@ import {
   Replace,
   RotateCcw,
   RotateCw,
+  LineChart,
   Save,
   Settings,
   Scissors,
@@ -65,10 +73,14 @@ import {
   Heart as HeartIcon,
   Minus as LineIcon,
   ArrowRight as ArrowIcon,
-  RectangleHorizontal
+  RectangleHorizontal,
+  Wand2,
+  Lasso
 } from "lucide-react";
 import {
   Fragment,
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -77,9 +89,12 @@ import {
   type ChangeEvent,
   type CSSProperties,
   type DragEvent,
+  type MouseEvent as ReactMouseEvent,
+  type RefObject,
   type ReactElement,
   type ReactNode
 } from "react";
+import { createPortal } from "react-dom";
 import type Konva from "konva";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -94,6 +109,7 @@ import {
   AUTOSAVE_TEMPORARILY_DISABLED,
   createGridTextOverlay,
   createAdjustmentLayer,
+  createDocument,
   createFrameLayer,
   createGroupLayer,
   createImageLayer,
@@ -127,11 +143,14 @@ import {
   swapGridCellImages,
   unitToPx,
   withProjectMetadata,
+  centerToCanvas,
   type AlignmentCommand,
   type AutosaveResult
 } from "@/core";
 import { MASK_DIMENSION_LABELS, MASK_DIMENSION_UNITS, type MaskDimensionUnit } from "@/core/mask/maskDimensions";
-import { importImageAsset, createMaskAsset, resolveCanvasAssetPath } from "@/core/assets/assetManager";
+import { importImageAsset, createMaskAsset, createImageAssetFromDataUrl, resolveCanvasAssetPath } from "@/core/assets/assetManager";
+import { getTransformedBounds, unionRects, getPageBounds, rotatedAabbSize, isCenterPivotLayer, visualCenterToOrigin } from "@/core/bounds/bounds";
+import { rasterizeLayers } from "./layerRasterizer";
 import { HEIC_CONVERSION_ERROR_MESSAGE, SUPPORTED_IMAGE_ACCEPT, isSupportedIncomingImageFile, normalizeIncomingImage, normalizeIncomingImages } from "@/core/image/normalizeIncomingImage";
 import { analyzeScreenshotCrop } from "@/core/image/screenshotCropDetector";
 import {
@@ -151,6 +170,14 @@ import {
   type SmartTextFitMode
 } from "@/core/text/smartTextFit";
 import {
+  DEFAULT_SMART_TEXT_BLOCK_SETTINGS,
+  readSmartTextBlockSettings,
+  withSmartTextBlockSettings,
+  withoutSmartTextBlock,
+  type SmartTextBlockSettings
+} from "@/core/text/smartTextBlock";
+import { applyRichTextStyleToRange, clampTextSelection, pruneRichTextForText, type TextSelectionRange } from "@/core/text/richText";
+import {
   applyTextPresetToLayer,
   BUILTIN_TEXT_PRESETS,
   createTextPresetFromLayer,
@@ -160,6 +187,8 @@ import {
   updateUserTextPreset
 } from "@/core/text/presets";
 import { useDocumentStore } from "@/state/documentStore";
+import { SmartRepeatDialog } from "@/ui/smartLayout/SmartRepeatDialog";
+import { applyRepeatToDocument, type RepeatOptions } from "@/features/smartLayout";
 import { generateMaskThumbnail, useMaskLibraryStore } from "@/state/maskLibraryStore";
 import { useSelectionStore } from "@/state/selectionStore";
 import { useImageEditStore } from "@/state/imageEditStore";
@@ -172,8 +201,8 @@ import { ImageEditFloatingBar } from "./ImageEditFloatingBar";
 import { CropUI } from "./CropUI";
 import { useViewportStore, type ViewportStore } from "@/state/viewportStore";
 import type { Asset, Document, Page } from "@/types/document";
-import type { AdjustmentLayer, AdjustmentOperation, BlendMode, ContentTransform, FaceAnchorData, FrameLayer, GroupLayer, ImageLayer, ImageLayerEffects, TextLayer, VisualLayer } from "@/types/layers";
-import { DEFAULT_IMAGE_LAYER_EFFECTS } from "@/types/layers";
+import type { AdjustmentLayer, AdjustmentOperation, BlendMode, ContentTransform, EdgeFadeSettings, EdgeFadeShape, FaceAnchorData, FrameLayer, GroupLayer, ImageLayer, ImageLayerEffects, TextLayer, VisualLayer } from "@/types/layers";
+import { DEFAULT_EDGE_FADE_SETTINGS, DEFAULT_IMAGE_LAYER_EFFECTS } from "@/types/layers";
 import type { GridLayoutRule } from "@/types/grid";
 import type { MaskLayoutRule } from "@/types/mask";
 import type { PageSetup, Unit } from "@/types/primitives";
@@ -196,10 +225,13 @@ import {
   exportStagePng,
   exportStagePrintImage,
   exportRenderedPagesAsPdf,
-  downloadRenderedPagesAsImages,
+  exportRenderedPagesToFolder,
+  type FolderExportResult,
   loadProject,
   savePortableProject,
-  saveProject
+  saveProject,
+  saveProjectToCloud,
+  saveProjectToDisk
 } from "../projectActions";
 import type { PrintableStageImage } from "../projectActions";
 import { composeFrameMaskFromImageLayer } from "@/core/layers/composeFrameMask";
@@ -212,26 +244,37 @@ import {
 } from "@/core/layers/frameMask";
 import { CanvasStage } from "./CanvasStage";
 import { EditorStatusBar } from "./EditorStatusBar";
+import { ExactSizeDialog } from "./ExactSizeDialog";
 import { ColorPanel } from "./ColorPanel";
 import { CanvasErrorBoundary } from "./CanvasErrorBoundary";
 import { renderTextToAlphaCanvas } from "./warpText";
 import { renderPageOffscreen, canRenderPageOffscreen } from "@/core/rendering/offscreenPageRenderer";
 import type { CanvasContextMenuTarget } from "./KonvaLayerNode";
+import { AutoFixModal } from "./AutoFixModal";
+import { useAutoFixStore } from "@/state/autoFixStore";
+import { CurvesModal } from "./CurvesModal";
+import { useCurvesStore } from "@/state/curvesStore";
+import { ShadowHighlightsModal } from "./ShadowHighlightsModal";
+import { useShadowHighlightsStore } from "@/state/shadowHighlightsStore";
 import { isImageEditorAvailable, openImageEditorForAsset } from "@/services/imageEditorService";
-import { isPrintPreviewAvailable, openPrintPreviewForRenderedPage, openPrintPreviewForPages } from "@/services/printPreviewService";
-import { preloadAssetsForPrint, waitForKonvaPageImages, type PrintImageStatus } from "@/services/printAssetLoader";
+import { preloadAssetsForPrint, waitForKonvaPageImages } from "@/services/printAssetLoader";
 import {
   makeSmartSelectionInput,
   maskResultToSelectionMask,
   runSmartAutoSegment,
-  runSmartInpaintRemove,
   runSmartRefineMask
 } from "@/services/ai/smartSelectionService";
-import { PrintRangeDialog } from "@/ui/print/PrintRangeDialog";
-import { PrintPreviewModal } from "@/ui/print/PrintPreviewModal";
-import type { PrintRangeMode } from "@/ui/print/printRangeUtils";
-import { getPagesForPrint } from "@/ui/print/printRangeUtils";
-import { loadLastPrintSettings, saveLastPrintSettings } from "@/ui/print/lastPrintSettings";
+import { runContentAwareFill, warmContentFillEngine } from "@/services/ai/contentAwareFillService";
+import { ContentAwareFillWorkspace } from "@/ui/contentFill/ContentAwareFillWorkspace";
+import { AdvancedPrintDialog } from "@/ui/advancedPrint/AdvancedPrintDialog";
+import { PrintActionsButton } from "@/ui/printHub/PrintActionsButton";
+import { SendToPrintHubDialog, type SendToPrintHubOptions } from "@/ui/printHub/SendToPrintHubDialog";
+import { buildAndSubmitJob, type JobSourceImage } from "@/core/printHub/jobBuilder";
+import { lanConfigFromSettings, type LanUploadProgress } from "@/services/lan/lanQueueClient";
+import { buildClientPreset } from "@/core/printHub/sizes";
+import { generateJobId } from "@/core/printHub/jobPackage";
+import { orderSummaryFromFields } from "@/core/printHub/orderSummary";
+import { renderOrderSummaryImage } from "@/core/printHub/orderSummaryRender";
 import { useProjectLifecycleStore } from "@/state/projectLifecycleStore";
 import { CollageModePanel } from "@/ui/collage/CollageModePanel";
 import { PhotoPrintModePanel } from "@/ui/photoPrint/PhotoPrintModePanel";
@@ -247,8 +290,13 @@ import { UtilitiesMenu } from "@/ui/utilities/UtilitiesMenu";
 import { GoogleFontsBrowser } from "@/ui/utilities/GoogleFontsBrowser";
 import { HarmonizePanel } from "@/ui/editor/HarmonizePanel";
 import { ImageAdjustmentsPanel } from "@/ui/editor/ImageAdjustmentsPanel";
+import { LayerEditsPanel } from "@/ui/editor/LayerEditsPanel";
+import { countLayerEdits, hasDisabledLayerEdits, setAllLayerEditsEnabled, resetAllLayerEdits as resetAllLayerEditsFor } from "@/core/layerEdits";
+import { useLayerEditsPreviewStore } from "@/state/layerEditsPreviewStore";
 import { AiToolsContainer } from "@/ui/aiTools/AiToolsContainer";
+import { SmartExpandModal } from "@/ui/aiTools/SmartExpandModal";
 import { useAiToolsStore } from "@/state/aiToolsStore";
+import { useSmartExpandStore } from "@/state/smartExpandStore";
 import { AiStyleStudioContainer } from "@/ui/aiStyles/AiStyleStudioContainer";
 import { useAiStyleStore } from "@/state/aiStyleStore";
 import { PageLookPanel } from "@/ui/editor/PageLookPanel";
@@ -259,13 +307,24 @@ import { createImageAdjustment, createPageLookLayer, type ImageAdjustmentTemplat
 import { ENABLE_IMAGE_LEVEL_ADJUSTMENTS, ENABLE_PAGE_LOOK_LAYERS, ENABLE_LEGACY_ADJUSTMENT_LAYER_CREATION } from "@/core/features/adjustmentFlags";
 import { runWithBusy, useUiBusyStore } from "@/state/uiBusyStore";
 import { LoadingToast } from "@/ui/editor/LoadingToast";
+const PdfImportDialog = lazy(() =>
+  import("@/ui/pdf/PdfImportDialog").then((module) => ({ default: module.PdfImportDialog }))
+);
+import {
+  applyImportAsSeparatePages,
+  applyImportToCurrentCanvas,
+  buildCanvasImports,
+  buildSeparatePageImports,
+  type PdfImportMode,
+  type PdfImportRenderedPage
+} from "@/ui/pdf/pdfCanvasImport";
 import { SmartArrangeControl } from "@/ui/editor/SmartArrangeControl";
 import { analyzeLayersForSmartArrange, runSmartArrange, type SmartArrangeMode } from "@/core/smartArrange";
 import { openInPhotoshop, stopPhotoshopWatch } from "@/integrations/photoshopIntegration";
 import { openInColorLab, stopColorLabWatch } from "@/integrations/colorLabIntegration";
 import { useUtilitiesSettings } from "@/utilities/settingsStore";
 import { isEditableShortcutTarget, matchShortcut, shortcutBindingsToShortcuts } from "@/core/input/inputSystem";
-import { createExportRenderOptions, getExportPixelRatio, getImportPreviewMaxSide, useAppSettings } from "@/settings";
+import { createExportRenderOptions, getExportPixelRatio, getImportPreviewMaxSide, resolvePdfExportProfile, useAppSettings, type PdfQualityPreset } from "@/settings";
 import { safeFilename } from "@/core";
 import { downloadDataUrl } from "@/ui/file";
 import { syncFrameLayersToPage } from "@/core/collage/collageModeEngine";
@@ -304,6 +363,58 @@ const BLEND_MODE_OPTIONS: Array<{ value: BlendMode; label: string }> = [
 
 function layerHasEditableImage(layer: VisualLayer | null | undefined): layer is ImageLayer | FrameLayer {
   return layer?.type === "image" || (layer?.type === "frame" && layer.imageAssetId !== undefined);
+}
+
+function contextTargetFromLayer(layer: ImageLayer): CanvasContextMenuTarget {
+  return {
+    layerId: layer.id,
+    layerType: "image",
+    hasImage: true,
+    screenX: Math.round(layer.x + layer.width / 2),
+    screenY: Math.round(layer.y + layer.height / 2)
+  };
+}
+
+// Center-preserving rotation is performed on the live Konva node inside CanvasStage
+// (rotate around the node origin, then compensate x/y so the visual center stays fixed,
+// committed as a single undo step). All rotation entry points dispatch this event so
+// the object never drifts off-canvas. Optional `layerIds` targets specific layers
+// (e.g. right-click menu); otherwise the current selection is rotated.
+function rotateSelectionByEvent(delta: number, layerIds?: string[]): void {
+  window.dispatchEvent(new CustomEvent("spp2:rotate-selection", { detail: { delta, layerIds } }));
+}
+
+// Fill / fit / center a layer to the page, accounting for rotation. Konva renders
+// rect/image/text/frame layers around their top-left origin, so for a rotated layer
+// the naive `x = (pageW - width) / 2` places the *unrotated* box at center and the
+// real (rotated) box drifts off-canvas. Here we scale by the rotated AABB and position
+// the origin so the layer's true visual center lands at the page center.
+// Circle/ellipse shapes rotate around their own center, so they keep the simple placement.
+function placeLayerToCanvas(
+  layer: VisualLayer,
+  pageW: number,
+  pageH: number,
+  mode: "fill" | "fit" | "center"
+): { x?: number; y?: number; width?: number; height?: number } {
+  const rotation = layer.rotation ?? 0;
+  const centerPivot = isCenterPivotLayer(layer);
+  const cx = pageW / 2;
+  const cy = pageH / 2;
+
+  if (mode === "center") {
+    return visualCenterToOrigin(layer, cx, cy);
+  }
+
+  const aabb = centerPivot ? { width: layer.width, height: layer.height } : rotatedAabbSize(layer.width, layer.height, rotation);
+  if (aabb.width <= 0 || aabb.height <= 0) return {};
+  const scaleX = pageW / aabb.width;
+  const scaleY = pageH / aabb.height;
+  const scale = mode === "fill" ? Math.max(scaleX, scaleY) : Math.min(scaleX, scaleY);
+  const width = layer.width * scale;
+  const height = layer.height * scale;
+
+  const origin = visualCenterToOrigin(layer, cx, cy, { width, height });
+  return { width, height, x: origin.x, y: origin.y };
 }
 
 function medianNumber(values: number[]): number | undefined {
@@ -399,26 +510,45 @@ function hasManagedModeMetadata(layer: VisualLayer | null): layer is FrameLayer 
   );
 }
 
+interface IsolatedImageEditSession {
+  sourcePageId: string;
+  sourceFrameId: string;
+  sourceAssetId: string;
+  sourceWidth: number;
+  sourceHeight: number;
+  sourceDocumentState: ReturnType<typeof useDocumentStore.getState>;
+  sourceSelectionState: ReturnType<typeof useSelectionStore.getState>;
+  sourceViewportState: ReturnType<typeof useViewportStore.getState>;
+}
+
 interface EditorScreenProps {
   onBackHome: () => void;
   onImportPsd?: () => void;
   onOpenClassPhotoWizard?: () => void;
+  onOpenSeparateWindow?: () => void;
   onOpenSettings?: () => void;
 }
 
-export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, onOpenSettings }: EditorScreenProps): ReactElement {
+export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, onOpenSeparateWindow, onOpenSettings }: EditorScreenProps): ReactElement {
   const stageRef = useRef<Konva.Stage | null>(null);
   const canvasAreaRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const replaceImageInputRef = useRef<HTMLInputElement>(null);
   const classPhotoAddInputRef = useRef<HTMLInputElement>(null);
   const projectInputRef = useRef<HTMLInputElement>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
+  const [pdfImportFile, setPdfImportFile] = useState<File | null>(null);
   const lastAutosavedRevisionRef = useRef(0);
   const aiFillInFlightRef = useRef(false);
+  const activateImageRegionToolRef = useRef<(t: "rect-select" | "lasso" | "wand") => void>(() => {});
+  const isolatedImageEditRef = useRef<IsolatedImageEditSession | null>(null);
+  const [isolatedImageEdit, setIsolatedImageEdit] = useState<IsolatedImageEditSession | null>(null);
+  const [contentFillWorkspace, setContentFillWorkspace] = useState<{ asset: Asset; layer: ImageLayer; imageDataUrl: string; width: number; height: number } | null>(null);
   const [tool, setTool] = useState<ToolId>("move");
   const [leftTab, setLeftTab] = useState<"layers" | "pages" | "settings" | "collage" | "emoji">("layers");
   const [collageSwapSourceSlotId, setCollageSwapSourceSlotId] = useState<string | null>(null);
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
+  const [activeTextSelection, setActiveTextSelection] = useState<{ layerId: string; selection: TextSelectionRange | null } | null>(null);
   const [status, setStatus] = useState("שמירה אוטומטית מוכנה");
   const [collageTemplateToast, setCollageTemplateToast] = useState<string | null>(null);
   const [statusBarUnit, setStatusBarUnit] = useState<Unit>("cm");
@@ -465,7 +595,10 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
   }, [collageTemplateToast]);
 
   const [canvasContextMenu, setCanvasContextMenu] = useState<CanvasContextMenuTarget | null>(null);
+  const [smartRepeatTargetIds, setSmartRepeatTargetIds] = useState<string[] | null>(null);
   const [layerContextMenu, setLayerContextMenu] = useState<{ layerId: string; screenX: number; screenY: number } | null>(null);
+  // Right-inspector top-level tab: layer properties vs. the unified Layer Edits list.
+  const [inspectorTab, setInspectorTab] = useState<"props" | "edits">("props");
   const [harmonizeTarget, setHarmonizeTarget] = useState<{ layerId: string; bbox: { x: number; y: number; w: number; h: number } } | null>(null);
   const [effectsClipboard, setEffectsClipboard] = useState<LayerEffectsClipboard | null>(null);
   const [layerClipboard, setLayerClipboard] = useState<VisualLayer[] | null>(null);
@@ -474,14 +607,19 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
   const [hoveredLayerId, setHoveredLayerId] = useState<string | null>(null);
   const [imageEditorBusy, setImageEditorBusy] = useState(false);
   const [showFontsBrowser, setShowFontsBrowser] = useState(false);
+  const [showExactSizeDialog, setShowExactSizeDialog] = useState(false);
   const [extWatchId, setExtWatchId] = useState<string | null>(null);
   const [showBackHomeDialog, setShowBackHomeDialog] = useState(false);
-  const [showPrintDialog, setShowPrintDialog] = useState(false);
-  const [isPrintBusy, setIsPrintBusy] = useState(false);
-  const [showPrintPreviewModal, setShowPrintPreviewModal] = useState(false);
-  const [printPreviewPageIndices, setPrintPreviewPageIndices] = useState<number[]>([]);
+  // When true, resolving the unsaved-changes dialog quits the app instead of
+  // returning to the home screen (the dialog was triggered by the X button).
+  const [exitAfterDialog, setExitAfterDialog] = useState(false);
+  const [advancedPrintOpen, setAdvancedPrintOpen] = useState<{ initialSelection: number[] | null } | null>(null);
+  const [showSendRemote, setShowSendRemote] = useState(false);
+  const [sendRemoteBusy, setSendRemoteBusy] = useState(false);
+  const [sendRemoteProgress, setSendRemoteProgress] = useState<LanUploadProgress | null>(null);
   const [saveDropdownOpen, setSaveDropdownOpen] = useState(false);
   const [exportScope, setExportScope] = useState<"current" | "all">("all");
+  const [pdfQualityPreset, setPdfQualityPreset] = useState<PdfQualityPreset>("balanced");
   const [fileDropActive, setFileDropActive] = useState(false);
   const [dropTargetFrame, setDropTargetFrame] = useState<{
     id: string;
@@ -570,6 +708,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
   const imageEditMode = useImageEditStore((s) => s.imageEditMode);
   const imageEditLayerId = useImageEditStore((s) => s.editingLayerId);
   const imageActiveTool = useImageEditStore((s) => s.activeTool);
+  const armedDrawingTool = useDrawingToolsStore((s) => s.activeTool);
   const cropPreview = useImageEditStore((s) => s.cropPreview);
   const whiteBackgroundThreshold = useImageEditStore((s) => s.whiteBackgroundThreshold);
   const setWhiteBackgroundThreshold = useImageEditStore((s) => s.setWhiteBackgroundThreshold);
@@ -876,17 +1015,9 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
 
     function imageCanvasFitPatch(layer: Extract<VisualLayer, { type: "image" }>, mode: "fit" | "fill"): Partial<VisualLayer> | null {
       if (activePage === null || layer.width <= 0 || layer.height <= 0) return null;
-      const scaleX = activePage.width / layer.width;
-      const scaleY = activePage.height / layer.height;
-      const scale = mode === "fill" ? Math.max(scaleX, scaleY) : Math.min(scaleX, scaleY);
-      const width = layer.width * scale;
-      const height = layer.height * scale;
-      return {
-        x: (activePage.width - width) / 2,
-        y: (activePage.height - height) / 2,
-        width,
-        height
-      } as Partial<VisualLayer>;
+      // Rotation-aware: scales by the rotated bounding box and centers the true visual
+      // center on the page, so a rotated image (e.g. after Rotate Left) stays on-canvas.
+      return placeLayerToCanvas(layer, activePage.width, activePage.height, mode) as Partial<VisualLayer>;
     }
 
     function isNearPatch(layer: VisualLayer, patch: Partial<VisualLayer>): boolean {
@@ -957,6 +1088,9 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
   ]);
 
   useEffect(() => {
+    if (isolatedImageEditRef.current !== null) {
+      return;
+    }
     if (document === null) {
       return;
     }
@@ -1007,6 +1141,22 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     };
   }, []);
 
+  // The X button (window close) routes here from App when there are unsaved
+  // changes. Show the same prompt as the home button, but resolve it by quitting
+  // the app instead of returning home.
+  useEffect(() => {
+    function onCloseRequested(): void {
+      if (!useProjectLifecycleStore.getState().isDirty) {
+        window.spp?.confirmClose?.();
+        return;
+      }
+      setExitAfterDialog(true);
+      setShowBackHomeDialog(true);
+    }
+    window.addEventListener("spp2:close-requested", onCloseRequested);
+    return () => window.removeEventListener("spp2:close-requested", onCloseRequested);
+  }, []);
+
   const editorShortcuts = useMemo(
     () => [
       ...shortcutBindingsToShortcuts(shortcutSettings),
@@ -1027,12 +1177,18 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
       const handledActions = new Set([
         "save", "saveAs", "undo", "redo", "delete", "duplicate", "selectAll", "deselect",
         "copy", "paste", "cut", "zoomIn", "zoomOut", "zoomFit", "zoom100",
-        "toggleGrid", "toggleRulers", "settings"
+        "toggleGrid", "toggleRulers", "settings", "quickContentFill", "contentFill",
+        "rotate90Right", "rotate90Left", "centerToCanvas", "centerToTop", "centerToBottom", "exactSize"
       ]);
       if (!handledActions.has(action)) return;
 
       event.preventDefault();
       event.stopPropagation();
+
+      if (isolatedImageEditRef.current !== null && (action === "save" || action === "saveAs")) {
+        handleApplyIsolatedImageEdit();
+        return;
+      }
 
       if (imageEditMode) {
         if (action === "delete") handleDeleteSelection();
@@ -1046,15 +1202,23 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
           if (useImageEditStore.getState().selectionMask !== null) handleClearImageSelection();
           else handleImageEditCancel();
         }
+        if (action === "quickContentFill") {
+          if (useImageEditStore.getState().selectionMask !== null) void handleAiFillSelection();
+          else useUiBusyStore.getState().flashToast("סמן אזור למחיקה ואז הפעל מילוי חכם");
+        }
+        if (action === "contentFill") {
+          const fillTarget = getSmartSelectionTarget();
+          if (fillTarget !== null) void openContentFillWorkspace(fillTarget.layer);
+        }
         return;
       }
 
       switch (action) {
         case "save":
-          handleSaveLifecycle();
+          void handleSaveLifecycle();
           break;
         case "saveAs":
-          void handleSavePortableLifecycle();
+          void handleSaveAsToDisk();
           break;
         case "undo":
           undo();
@@ -1113,6 +1277,43 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
         case "settings":
           onOpenSettings?.();
           break;
+        case "quickContentFill":
+          if (selectedLayer?.type === "image") {
+            enterImageEditMode(selectedLayer.id, { x: 0, y: 0, width: 1, height: 1 });
+            useUiBusyStore.getState().flashToast("מצב מילוי חכם • סמן אזור ולחץ Shift+F5");
+          } else {
+            useUiBusyStore.getState().flashToast("בחר תמונה כדי להשתמש במילוי חכם");
+          }
+          break;
+        case "contentFill":
+          if (selectedLayer?.type === "image") void openContentFillWorkspace(selectedLayer);
+          else useUiBusyStore.getState().flashToast("בחר תמונה כדי לפתוח מילוי מתקדם");
+          break;
+        case "smartExpand":
+          if (selectedLayer?.type === "image" || (selectedLayer?.type === "frame" && layerHasEditableImage(selectedLayer))) {
+            useSmartExpandStore.getState().open({ kind: "canvas", layerId: selectedLayer.id });
+          } else {
+            useUiBusyStore.getState().flashToast("יש לבחור תמונה כדי להשתמש בהרחבה חכמה.");
+          }
+          break;
+        case "rotate90Right":
+          if (hasSelection) rotateSelectionByEvent(90);
+          break;
+        case "rotate90Left":
+          if (hasSelection) rotateSelectionByEvent(-90);
+          break;
+        case "centerToCanvas":
+          if (hasSelection) handleCenterToCanvas("both");
+          break;
+        case "centerToTop":
+          if (hasSelection) handleCenterToEdge("top");
+          break;
+        case "centerToBottom":
+          if (hasSelection) handleCenterToEdge("bottom");
+          break;
+        case "exactSize":
+          if (selectedLayerIds.length === 1 && selectedLayer !== null) setShowExactSizeDialog(true);
+          break;
       }
     }
 
@@ -1128,6 +1329,8 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     selectionClipboard,
     selectedLayerIds,
     selectedLayers,
+    selectedLayer,
+    enterImageEditMode,
     undo,
     redo,
     clearSelection,
@@ -1135,15 +1338,18 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     onOpenSettings
   ]);
 
-  // Drawing tool shortcuts: I/B/G/U/M/L toggle their respective tools
+  // Drawing tool shortcuts: I/B/G/U toggle drawing tools; M/L/W mark an image region (→ Shift+F5 fill)
   useEffect(() => {
-    const KEY_TO_TOOL: Record<string, "eyedropper" | "brush" | "bucket" | "shape" | "marquee" | "lasso"> = {
+    const KEY_TO_TOOL: Record<string, "eyedropper" | "brush" | "bucket" | "shape"> = {
       i: "eyedropper", I: "eyedropper",
       b: "brush", B: "brush",
       g: "bucket", G: "bucket",
-      u: "shape", U: "shape",
-      m: "marquee", M: "marquee",
-      l: "lasso", L: "lasso"
+      u: "shape", U: "shape"
+    };
+    const KEY_TO_REGION_TOOL: Record<string, "rect-select" | "lasso" | "wand"> = {
+      m: "rect-select", M: "rect-select",
+      l: "lasso", L: "lasso",
+      w: "wand", W: "wand"
     };
     function onKey(event: KeyboardEvent): void {
       if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
@@ -1154,6 +1360,12 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
           event.preventDefault();
           store.setActiveTool(null);
         }
+        return;
+      }
+      const regionTool = KEY_TO_REGION_TOOL[event.key];
+      if (regionTool !== undefined) {
+        event.preventDefault();
+        activateImageRegionToolRef.current(regionTool);
         return;
       }
       const tool = KEY_TO_TOOL[event.key];
@@ -1176,6 +1388,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     [batchProductionMeta]
   );
   const [templateSaveModal, setTemplateSaveModal] = useState<{ name: string } | null>(null);
+  const [cloudSaveAsModal, setCloudSaveAsModal] = useState<{ name: string } | null>(null);
   const [maskOverflowPrompt, setMaskOverflowPrompt] = useState<{ rule: MaskLayoutRule; patch: Partial<MaskLayoutRule> } | null>(null);
 
   if (document === null || activePage === null) {
@@ -1652,6 +1865,202 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     return null;
   }
 
+  function restoreIsolatedImageSource(session: IsolatedImageEditSession): void {
+    useDocumentStore.setState(session.sourceDocumentState, true);
+    useSelectionStore.setState(session.sourceSelectionState, true);
+    useViewportStore.setState(session.sourceViewportState, true);
+    isolatedImageEditRef.current = null;
+    setIsolatedImageEdit(null);
+    exitImageEditMode();
+    exitMaskContentEdit();
+  }
+
+  function handleCancelIsolatedImageEdit(): void {
+    const session = isolatedImageEditRef.current;
+    if (session === null) return;
+    restoreIsolatedImageSource(session);
+    setStatus("עריכת התמונה המבודדת בוטלה");
+  }
+
+  useEffect(() => {
+    function handleIsolatedEditEscape(event: KeyboardEvent): void {
+      if (event.key !== "Escape" || isolatedImageEditRef.current === null) return;
+      event.preventDefault();
+      event.stopPropagation();
+      handleCancelIsolatedImageEdit();
+    }
+    window.addEventListener("keydown", handleIsolatedEditEscape, true);
+    return () => window.removeEventListener("keydown", handleIsolatedEditEscape, true);
+  }, []);
+
+  function openIsolatedImageEditor(target: CanvasContextMenuTarget): void {
+    const frame = getCanvasMenuLayer(target);
+    if (frame?.type !== "frame" || frame.imageAssetId === undefined) {
+      setCanvasContextMenu(null);
+      setStatus("עריכה מבודדת זמינה רק לתמונה בתוך תא");
+      return;
+    }
+    const sourceAsset = currentDocument.assets.find((asset) => asset.id === frame.imageAssetId);
+    const fullSource = sourceAsset?.originalPath ?? resolveCanvasAssetPath(sourceAsset);
+    if (sourceAsset === undefined || fullSource === undefined) {
+      setCanvasContextMenu(null);
+      setStatus("לא ניתן לפתוח את התמונה המקורית לעריכה");
+      return;
+    }
+
+    const width = Math.max(1, Math.round(sourceAsset.width ?? frame.width));
+    const height = Math.max(1, Math.round(sourceAsset.height ?? frame.height));
+    const isolatedAsset: Asset = {
+      ...sourceAsset,
+      previewPath: fullSource,
+      thumbnailPath: fullSource,
+      metadata: { ...sourceAsset.metadata, isolatedEditSource: true }
+    };
+    const isolatedLayer = createImageLayer({
+      name: sourceAsset.name,
+      rect: { x: 0, y: 0, width, height },
+      assetId: isolatedAsset.id,
+      fitMode: "stretch",
+      zIndex: 0,
+      metadata: { isolatedEditSource: true }
+    });
+    const isolatedPage = createPage({
+      name: "עריכת תמונה מבודדת",
+      setup: {
+        size: { width, height },
+        units: "px",
+        dpi: currentDocument.dpi,
+        orientation: width >= height ? "landscape" : "portrait",
+        backgroundColor: "#ffffff",
+        backgroundTransparent: false,
+        margins: { top: 0, right: 0, bottom: 0, left: 0 },
+        safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
+        bleed: { top: 0, right: 0, bottom: 0, left: 0 }
+      },
+      layers: [isolatedLayer],
+      metadata: { isolatedImageEdit: true }
+    });
+    const isolatedDocument: Document = {
+      ...createDocument({
+        name: `עריכת תמונה - ${sourceAsset.name}`,
+        dpi: currentDocument.dpi,
+        pages: [isolatedPage],
+        metadata: { mode: "free", isolatedImageEdit: true }
+      }),
+      assets: [isolatedAsset]
+    };
+    const session: IsolatedImageEditSession = {
+      sourcePageId: currentPage.id,
+      sourceFrameId: frame.id,
+      sourceAssetId: sourceAsset.id,
+      sourceWidth: width,
+      sourceHeight: height,
+      sourceDocumentState: useDocumentStore.getState(),
+      sourceSelectionState: useSelectionStore.getState(),
+      sourceViewportState: useViewportStore.getState()
+    };
+
+    isolatedImageEditRef.current = session;
+    setIsolatedImageEdit(session);
+    setCanvasContextMenu(null);
+    exitImageEditMode();
+    exitMaskContentEdit();
+    useSelectionStore.getState().resetSelection();
+    setDocument(isolatedDocument);
+    requestAnimationFrame(() => {
+      useSelectionStore.getState().setSelection([isolatedLayer.id]);
+      useViewportStore.getState().fitPage();
+    });
+    setStatus("מצב עריכת תמונה מבודדת");
+  }
+
+  function handleApplyIsolatedImageEdit(): void {
+    const session = isolatedImageEditRef.current;
+    const stage = stageRef.current;
+    if (session === null || stage === null) return;
+    const temporaryDocument = useDocumentStore.getState().document;
+    const temporaryPage = temporaryDocument?.pages[0];
+    if (temporaryDocument === null || temporaryDocument === undefined || temporaryPage === undefined) return;
+    if (Math.round(temporaryPage.width) !== session.sourceWidth || Math.round(temporaryPage.height) !== session.sourceHeight) {
+      setStatus("לא ניתן להחיל: גודל קנבס העריכה השתנה");
+      return;
+    }
+
+    const visibleLayerIds = new Set(
+      temporaryPage.layers
+        .filter((layer) => layer.visible !== false && layer.type !== "guide")
+        .map((layer) => layer.id)
+    );
+    const raster = rasterizeLayers(stage, temporaryPage, visibleLayerIds, getPageBounds(temporaryPage), 1);
+    const sourceAsset = session.sourceDocumentState.document?.assets.find((asset) => asset.id === session.sourceAssetId);
+    const updatedAsset = createImageAssetFromDataUrl(
+      raster.dataUrl,
+      raster.width,
+      raster.height,
+      `${sourceAsset?.name.replace(/\.[^/.]+$/, "") ?? "image"} edited.png`
+    );
+    updatedAsset.metadata = {
+      ...updatedAsset.metadata,
+      isolatedEditSourceAssetId: session.sourceAssetId,
+      isolatedEditSourceFrameId: session.sourceFrameId
+    };
+
+    restoreIsolatedImageSource(session);
+    useDocumentStore.getState().applyDocumentChange("ApplyIsolatedFrameImageEdit", (doc) => {
+      const sourceFrame = doc.pages
+        .find((page) => page.id === session.sourcePageId)
+        ?.layers.find((layer): layer is FrameLayer => layer.id === session.sourceFrameId && layer.type === "frame");
+      const collageMeta = sourceFrame?.metadata["collageFrame"] as { collageRuleId?: string; slotId?: string } | undefined;
+      const classPhotoMeta = sourceFrame?.metadata["classPhotoFrame"] as { ruleId?: string; personId?: string } | undefined;
+      return {
+        ...doc,
+        assets: [...doc.assets, updatedAsset],
+        gridImageAssignments: doc.gridImageAssignments.map((assignment) =>
+          assignment.frameId === session.sourceFrameId ? { ...assignment, assetId: updatedAsset.id } : assignment
+        ),
+        maskImageAssignments: doc.maskImageAssignments.map((assignment) =>
+          assignment.frameId === session.sourceFrameId ? { ...assignment, assetId: updatedAsset.id } : assignment
+        ),
+        photoPrintImageAssignments: doc.photoPrintImageAssignments.map((assignment) =>
+          assignment.frameId === session.sourceFrameId ? { ...assignment, assetId: updatedAsset.id } : assignment
+        ),
+        collageRules: doc.collageRules.map((rule) => {
+          if (collageMeta?.collageRuleId !== rule.id || collageMeta.slotId === undefined) return rule;
+          let replacedPoolEntry = false;
+          return {
+            ...rule,
+            imagePool: rule.imagePool.map((assetId) => {
+              if (replacedPoolEntry || assetId !== session.sourceAssetId) return assetId;
+              replacedPoolEntry = true;
+              return updatedAsset.id;
+            }),
+            imageAssignments: rule.imageAssignments.map((assignment) =>
+              assignment.slotId === collageMeta.slotId ? { ...assignment, assetId: updatedAsset.id } : assignment
+            )
+          };
+        }),
+        classPhotoRules: doc.classPhotoRules.map((rule) => ({
+          ...rule,
+          personRecords: rule.personRecords.map((person) =>
+            person.frameLayerId === session.sourceFrameId || person.id === classPhotoMeta?.personId
+              ? { ...person, assetId: updatedAsset.id }
+              : person
+          )
+        })),
+        pages: doc.pages.map((page) => page.id === session.sourcePageId ? {
+          ...page,
+          layers: page.layers.map((layer) =>
+            layer.id === session.sourceFrameId && layer.type === "frame"
+              ? { ...layer, imageAssetId: updatedAsset.id }
+              : layer
+          )
+        } : page)
+      };
+    }, session.sourcePageId);
+    useSelectionStore.getState().setSelection([session.sourceFrameId]);
+    setStatus("התמונה עודכנה בתא");
+  }
+
   function updateCanvasMenuLayer(
     target: CanvasContextMenuTarget,
     updater: (layer: Extract<VisualLayer, { type: "image" | "frame" }>) => Extract<VisualLayer, { type: "image" | "frame" }>,
@@ -1668,26 +2077,14 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
   function fitCanvasMenuLayer(target: CanvasContextMenuTarget, mode: "fill" | "fit"): void {
     updateCanvasMenuLayer(target, (layer) => {
       if (layer.width <= 0 || layer.height <= 0) return layer;
-      const scaleX = currentPage.width / layer.width;
-      const scaleY = currentPage.height / layer.height;
-      const scale = mode === "fill" ? Math.max(scaleX, scaleY) : Math.min(scaleX, scaleY);
-      const width = layer.width * scale;
-      const height = layer.height * scale;
-      return {
-        ...layer,
-        width,
-        height,
-        x: (currentPage.width - width) / 2,
-        y: (currentPage.height - height) / 2
-      };
+      return { ...layer, ...placeLayerToCanvas(layer, currentPage.width, currentPage.height, mode) };
     }, mode === "fill" ? "Image filled to canvas" : "Image fitted inside canvas");
   }
 
   function centerCanvasMenuLayer(target: CanvasContextMenuTarget): void {
     updateCanvasMenuLayer(target, (layer) => ({
       ...layer,
-      x: (currentPage.width - layer.width) / 2,
-      y: (currentPage.height - layer.height) / 2
+      ...placeLayerToCanvas(layer, currentPage.width, currentPage.height, "center")
     }), "Image centered on canvas");
   }
 
@@ -2033,11 +2430,14 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
   }
 
   function centerCanvasMenuText(target: CanvasContextMenuTarget, axis: "both" | "x" | "y"): void {
-    updateCanvasMenuTextLayer(target, (layer) => ({
-      ...layer,
-      ...(axis === "both" || axis === "x" ? { x: (currentPage.width - layer.width) / 2 } : {}),
-      ...(axis === "both" || axis === "y" ? { y: (currentPage.height - layer.height) / 2 } : {})
-    }), axis === "both" ? "Text centered on canvas" : "Text aligned to canvas");
+    updateCanvasMenuTextLayer(target, (layer) => {
+      const origin = visualCenterToOrigin(layer, currentPage.width / 2, currentPage.height / 2);
+      return {
+        ...layer,
+        ...(axis === "both" || axis === "x" ? { x: origin.x } : {}),
+        ...(axis === "both" || axis === "y" ? { y: origin.y } : {})
+      };
+    }, axis === "both" ? "Text centered on canvas" : "Text aligned to canvas");
   }
 
   function applyQuickTextStroke(target: CanvasContextMenuTarget, color: "#ffffff" | "#000000"): void {
@@ -2635,8 +3035,8 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
   }
 
   async function handleImageFiles(files: FileList | File[], targetFrameId?: string): Promise<void> {
-    const { files: imageFiles, failed } = await normalizeIncomingImages(Array.from(files).filter(isSupportedIncomingImageFile));
-    if (failed.length > 0) setStatus(HEIC_CONVERSION_ERROR_MESSAGE);
+    const { files: imageFiles, failed, message: failureMessage } = await normalizeIncomingImages(Array.from(files).filter(isSupportedIncomingImageFile));
+    if (failed.length > 0) setStatus(failureMessage ?? HEIC_CONVERSION_ERROR_MESSAGE);
     if (!confirmLargeFiles(imageFiles)) {
       setStatus("Image import cancelled");
       return;
@@ -2703,6 +3103,43 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     }
   }
 
+  // ─── PDF import ───────────────────────────────────────────────────────────
+  function isPdfFile(file: File): boolean {
+    return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+  }
+
+  /** Open the PDF import dialog for the first PDF among the given files. */
+  function openPdfImport(files: FileList | File[]): void {
+    const pdf = Array.from(files).find(isPdfFile);
+    if (pdf !== undefined) setPdfImportFile(pdf);
+  }
+
+  async function handlePdfImportConfirm(result: { mode: PdfImportMode; pages: PdfImportRenderedPage[] }): Promise<void> {
+    const { mode, pages } = result;
+    const fileName = pdfImportFile?.name ?? "document.pdf";
+    setPdfImportFile(null);
+    if (pages.length === 0) return;
+    await runWithBusy("מוסיף PDF לפרויקט…", () => {
+      if (mode === "currentCanvas") {
+        const baseZIndex = Math.max(0, ...currentPage.layers.map((l) => l.zIndex)) + 1;
+        const build = buildCanvasImports(pages, fileName, currentPage.width, currentPage.height, baseZIndex);
+        applyDocumentChange(
+          "ImportPdfToCanvasCommand",
+          (doc) => applyImportToCurrentCanvas(doc, currentPage.id, build),
+          currentPage.id
+        );
+        setSelection(build.layers.map((layer) => layer.id));
+        setTool("image");
+        setStatus(`נוספו ${build.layers.length} עמודי PDF לקנבס`);
+      } else {
+        const build = buildSeparatePageImports(pages, fileName, currentPage.setup, currentPage.width, currentPage.height);
+        const firstNewPageId = build.pages[0]?.id ?? currentPage.id;
+        applyDocumentChange("ImportPdfAsPagesCommand", (doc) => applyImportAsSeparatePages(doc, build), firstNewPageId);
+        setStatus(`נוספו ${build.pages.length} עמודי PDF כעמודים נפרדים`);
+      }
+    });
+  }
+
   async function handleProjectLoad(event: ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = event.target.files?.[0];
     if (file === undefined) return;
@@ -2721,7 +3158,16 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
 
   function handleImageInput(event: ChangeEvent<HTMLInputElement>): void {
     const files = event.target.files;
-    if (files !== null) void handleImageFiles(files);
+    if (files !== null) {
+      if (Array.from(files).some(isPdfFile)) openPdfImport(files);
+      else void handleImageFiles(files);
+    }
+    event.target.value = "";
+  }
+
+  function handlePdfInput(event: ChangeEvent<HTMLInputElement>): void {
+    const files = event.target.files;
+    if (files !== null) openPdfImport(files);
     event.target.value = "";
   }
 
@@ -2738,8 +3184,8 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     let normalizedFile: File;
     try {
       normalizedFile = await normalizeIncomingImage(file);
-    } catch {
-      setStatus(HEIC_CONVERSION_ERROR_MESSAGE);
+    } catch (err) {
+      setStatus(err instanceof Error && err.message ? err.message : HEIC_CONVERSION_ERROR_MESSAGE);
       return;
     }
     const { asset } = await importImageAssetForEditor(normalizedFile, currentDocument.assets, { createPreview: true });
@@ -2775,6 +3221,10 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     if (emojiUrl) {
       const name = event.dataTransfer.getData("emoji/name") || "אמוג'י";
       handleInsertGraphic(emojiUrl, name);
+      return;
+    }
+    if (Array.from(event.dataTransfer.files).some(isPdfFile)) {
+      openPdfImport(event.dataTransfer.files);
       return;
     }
     const targetFrame = findFrameAtClientPoint(event.clientX, event.clientY);
@@ -2847,8 +3297,12 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
       setFileDropActive(false);
       if (!eventTargetsCanvas(event)) return;
       event.stopPropagation();
-      const targetFrame = findFrameAtClientPoint(event.clientX, event.clientY);
       setDropTargetFrame(null);
+      if (Array.from(dataTransfer.files).some(isPdfFile)) {
+        openPdfImport(dataTransfer.files);
+        return;
+      }
+      const targetFrame = findFrameAtClientPoint(event.clientX, event.clientY);
       void handleImageFiles(dataTransfer.files, targetFrame?.id);
     }
 
@@ -2902,20 +3356,36 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     }
   }
 
-  function handleSaveLifecycle(): void {
+  // Save (Ctrl+S): overwrite the current file in place when its path is known;
+  // the first save (no path yet) opens a native "Save As" dialog.
+  async function handleSaveLifecycle(): Promise<void> {
+    await saveToDisk({ forceDialog: false });
+  }
+
+  // Save As (Ctrl+Shift+S): always open the native dialog to choose a new path.
+  async function handleSaveAsToDisk(): Promise<void> {
+    await saveToDisk({ forceDialog: true });
+  }
+
+  async function saveToDisk(opts: { forceDialog: boolean }): Promise<void> {
     try {
       const stage = stageRef.current;
       const thumbnail = stage === null ? undefined : safeCaptureThumbnail(stage, currentPage);
-      const saved = saveProject(withViewport(currentDocument, viewport), {
+      const outcome = await saveProjectToDisk(withViewport(currentDocument, viewport), {
         filePath: lifecycle.currentFilePath ?? undefined,
-        thumbnailPath: thumbnail
+        thumbnailPath: thumbnail,
+        forceDialog: opts.forceDialog
       });
-      lifecycle.markSaved(saved, saved.metadata.currentFilePath, thumbnail);
-      setDocument(withProjectMetadata(saved.document, saved.metadata));
-      setStatus("Project saved");
+      if (outcome.canceled) {
+        setStatus("השמירה בוטלה");
+        return;
+      }
+      lifecycle.markSaved(outcome.saved, outcome.saved.metadata.currentFilePath, thumbnail);
+      setDocument(withProjectMetadata(outcome.saved.document, outcome.saved.metadata));
+      setStatus(outcome.filePath !== null ? `נשמר: ${outcome.filePath}` : "הפרויקט נשמר");
     } catch (error) {
       lifecycle.markSaveFailed(error instanceof Error ? error.message : "Save failed");
-      setStatus("Save failed");
+      setStatus(`שגיאה בשמירה: ${error instanceof Error ? error.message : ""}`);
     }
   }
 
@@ -2934,6 +3404,46 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
       lifecycle.markSaveFailed(error instanceof Error ? error.message : "Save failed");
       setStatus("Save failed");
     }
+  }
+
+  async function runCloudSave(filename?: string): Promise<void> {
+    try {
+      const stage = stageRef.current;
+      const thumbnail = stage === null ? undefined : safeCaptureThumbnail(stage, currentPage);
+      setStatus("שומר בענן...");
+      const outcome = await saveProjectToCloud(withViewport(currentDocument, viewport), {
+        filePath: lifecycle.currentFilePath ?? undefined,
+        thumbnailPath: thumbnail,
+        filename
+      });
+      lifecycle.markSaved(outcome.saved, outcome.saved.metadata.currentFilePath, thumbnail);
+      setDocument(withProjectMetadata(outcome.saved.document, outcome.saved.metadata));
+      setStatus(`נשמר בענן: ${outcome.project.name}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Save failed";
+      lifecycle.markSaveFailed(message);
+      setStatus(formatCloudSaveError(message));
+    }
+  }
+
+  async function handleSaveCloudLifecycle(): Promise<void> {
+    await runCloudSave();
+  }
+
+  // Save to cloud with a chosen name (instead of the auto-generated default).
+  function handleSaveCloudAsLifecycle(): void {
+    const fallback = `פרויקט_${new Date().toISOString().slice(0, 10)}`;
+    const base = currentDocument.name?.trim();
+    const suggested = base && base.toLowerCase() !== "unknown" ? base : fallback;
+    setCloudSaveAsModal({ name: suggested.replace(/\.spp2?$/i, "") });
+  }
+
+  async function confirmSaveCloudAs(name: string): Promise<void> {
+    setCloudSaveAsModal(null);
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const filename = /\.spp2?$/i.test(trimmed) ? trimmed : `${trimmed}.spp2`;
+    await runCloudSave(filename);
   }
 
   function withViewport(documentToSave: Document, viewportState: ViewportStore): Document {
@@ -2964,21 +3474,41 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     }
   }
 
+  function formatCloudSaveError(message: string): string {
+    if (message === "CLOUD_NOT_CONFIGURED") return "הענן לא מוגדר עדיין";
+    if (message === "CLOUD_NOT_SIGNED_IN") return "צריך להתחבר לענן לפני שמירה";
+    if (message === "CLOUD_PROJECT_FILE_TOO_LARGE_FREE") return "הקובץ גדול ממגבלת 50MB של Supabase Free";
+    if (message.includes("413")) return "הקובץ גדול מדי לשמירה בענן";
+    return `שגיאה בשמירה לענן: ${message}`;
+  }
+
   function handleBackHome(): void {
     if (lifecycle.isDirty) {
+      setExitAfterDialog(false);
       setShowBackHomeDialog(true);
     } else {
       onBackHome();
     }
   }
 
-  function confirmBackHome(action: "save" | "discard" | "cancel"): void {
+  async function confirmBackHome(action: "save" | "discard" | "cancel"): Promise<void> {
     setShowBackHomeDialog(false);
+    const exiting = exitAfterDialog;
+    setExitAfterDialog(false);
     if (action === "cancel") return;
     if (action === "save") {
-      handleSaveLifecycle();
+      await handleSaveLifecycle();
+      // If the save was canceled or failed the project is still dirty — don't
+      // quit and lose the work; leave the app open so the user can retry.
+      if (exiting && useProjectLifecycleStore.getState().isDirty) {
+        return;
+      }
     }
-    onBackHome();
+    if (exiting) {
+      window.spp?.confirmClose?.();
+    } else {
+      onBackHome();
+    }
   }
 
   function handleAddPage(): void {
@@ -3030,13 +3560,23 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     });
   }
 
-  async function renderPageForExport(page: Page, mimeType: "image/png" | "image/jpeg"): Promise<PrintableStageImage | null> {
+  interface ExportQualityOverride {
+    jpgQuality?: number;
+    maxLongSidePx?: number;
+  }
+
+  async function renderPageForExport(
+    page: Page,
+    mimeType: "image/png" | "image/jpeg",
+    override?: ExportQualityOverride
+  ): Promise<PrintableStageImage | null> {
+    const jpegQuality = override?.jpgQuality ?? exportRenderOptions.jpgQuality;
     if (canRenderPageOffscreen(page)) {
       try {
         const rendered = await renderPageOffscreen(page, currentDocument.assets, {
           mimeType,
-          pixelRatio: getExportPixelRatio(page, performanceSettings),
-          jpegQuality: exportRenderOptions.jpgQuality
+          pixelRatio: getExportPixelRatio(page, performanceSettings, override?.maxLongSidePx),
+          jpegQuality
         });
         markDebugEvent("export:offscreen-render-used", { pageId: page.id, mimeType });
         return rendered;
@@ -3054,15 +3594,24 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
       setActivePage(page.id);
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     }
-    return exportStagePrintImage(stage, page, mimeType, exportRenderOptions);
+    // Safety net against blank/black captures: wait for the page's Konva images to finish loading.
+    try {
+      await waitForKonvaPageImages(stage, 1);
+    } catch {
+      /* proceed — better a best-effort capture than hanging */
+    }
+    return exportStagePrintImage(stage, page, mimeType, { ...exportRenderOptions, jpgQuality: jpegQuality, maxLongSidePx: override?.maxLongSidePx });
   }
 
-  async function renderPagesForExport(mimeType: "image/png" | "image/jpeg"): Promise<PrintableStageImage[]> {
+  async function renderPagesForExport(
+    mimeType: "image/png" | "image/jpeg",
+    override?: ExportQualityOverride
+  ): Promise<PrintableStageImage[]> {
     const allPages = currentDocument.pages;
     const originalPageId = currentPage.id;
     const rendered: PrintableStageImage[] = [];
     for (const page of allPages) {
-      const renderedPage = await renderPageForExport(page, mimeType);
+      const renderedPage = await renderPageForExport(page, mimeType, override);
       if (renderedPage !== null) rendered.push(renderedPage);
     }
     if (useDocumentStore.getState().activePageId !== originalPageId) {
@@ -3072,11 +3621,23 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     return rendered;
   }
 
+  function setFolderExportStatus(result: FolderExportResult, format: string): void {
+    if (result.canceled === true) {
+      setStatus("הייצוא בוטל");
+    } else if (!result.ok) {
+      setStatus(`שגיאה בייצוא: ${result.error ?? "לא ידוע"}`);
+    } else if (result.method === "folder") {
+      setStatus(`יוצאו ${result.count} עמודי ${format} לתיקייה`);
+    } else {
+      setStatus(`יוצאו ${result.count} עמודי ${format} ל-ZIP`);
+    }
+  }
+
   async function handleExportPng(): Promise<void> {
     if (exportScope === "all" && currentDocument.pages.length > 1) {
       const pages = await renderPagesForExport("image/png");
-      downloadRenderedPagesAsImages(pages, currentDocument.name);
-      setStatus(`יוצאו ${pages.length} עמודי PNG`);
+      const result = await exportRenderedPagesToFolder(pages, currentDocument.name);
+      setFolderExportStatus(result, "PNG");
     } else {
       const rendered = await renderPageForExport(currentPage, "image/png");
       if (rendered === null) {
@@ -3091,16 +3652,18 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
   }
 
   async function handleExportPdf(): Promise<void> {
+    const profile = resolvePdfExportProfile(pdfQualityPreset);
+    const override: ExportQualityOverride = { jpgQuality: profile.jpgQuality, maxLongSidePx: profile.maxLongSidePx };
     if (exportScope === "all" && currentDocument.pages.length > 1) {
-      const pages = await renderPagesForExport("image/png");
+      const pages = await renderPagesForExport(profile.mimeType, override);
       await exportRenderedPagesAsPdf(pages, currentDocument.name);
       setStatus(`PDF יוצא (${pages.length} עמודים)`);
     } else {
-      const rendered = await renderPageForExport(currentPage, "image/png");
+      const rendered = await renderPageForExport(currentPage, profile.mimeType, override);
       if (rendered === null) {
         const stage = stageRef.current;
         if (stage === null) return;
-        await exportStagePdf(stage, currentDocument.name, currentPage, exportRenderOptions);
+        await exportStagePdf(stage, currentDocument.name, currentPage, { ...exportRenderOptions, jpgQuality: profile.jpgQuality, maxLongSidePx: profile.maxLongSidePx }, profile.mimeType);
       } else {
         await exportRenderedPagesAsPdf([rendered], currentDocument.name);
       }
@@ -3111,8 +3674,8 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
   async function handleExportJpg(): Promise<void> {
     if (exportScope === "all" && currentDocument.pages.length > 1) {
       const pages = await renderPagesForExport("image/jpeg");
-      downloadRenderedPagesAsImages(pages, currentDocument.name);
-      setStatus(`יוצאו ${pages.length} עמודי JPEG`);
+      const result = await exportRenderedPagesToFolder(pages, currentDocument.name);
+      setFolderExportStatus(result, "JPEG");
     } else {
       const rendered = await renderPageForExport(currentPage, "image/jpeg");
       if (rendered === null) {
@@ -3126,229 +3689,104 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     }
   }
 
-  function handlePrintPreview(): void {
-    if (!isPrintPreviewAvailable()) {
-      setStatus("מודול ההדפסה זמין רק בהרצה דרך Electron");
-      return;
-    }
-    setShowPrintDialog(true);
+  function handlePrint(): void {
+    setAdvancedPrintOpen({ initialSelection: null });
   }
-
-  /**
-   * Open the fast in-app preview modal immediately.
-   * No rendering happens here — the modal renders low-res thumbnails lazily
-   * in a background queue while the user browses the page list.
-   */
-  async function handlePrintFromDialog(mode: PrintRangeMode, customRange: string | undefined): Promise<void> {
-    const allPages = currentDocument.pages;
-    const rangeResult = getPagesForPrint(mode, customRange, allPages.length, currentPageIndex);
-
-    if ("error" in rangeResult) {
-      setStatus(rangeResult.error);
-      return;
-    }
-
-    saveLastPrintSettings({ printRangeMode: mode, customPageRange: customRange });
-    setShowPrintDialog(false);
-    setPrintPreviewPageIndices(rangeResult);
-    setShowPrintPreviewModal(true);
-  }
-
-  /**
-   * Full-quality print flow — called when the user clicks "הדפסה" inside the
-   * preview modal.  Uses the UNCHANGED high-quality render path (full pixelRatio,
-   * PNG) and the Python print preview subprocess.
-   *
-   * Preview thumbnails shown in PrintPreviewModal are stored only in that
-   * component's local state and CANNOT reach this function — onPrint() carries
-   * no image data, only a signal to start a fresh render.
-   *
-   * GRAY-IMAGE FIX
-   * ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
-   * Step 1 — preloadAssetsForPrint: loads every asset into the browser image
-   *   decode cache before any page is switched.  This ensures useKonvaImage's
-   *   onload fires within the RAF cycle that follows each page switch, preventing
-   *   the race condition where stage.toDataURL() runs before images are decoded.
-   *
-   * Step 2 — waitForKonvaPageImages: after each page switch + double-RAF, polls
-   *   the Konva stage until no HTMLImageElement is still in loading state.
-   *   Safety net for large images / slow machines.
-   *
-   * URL.revokeObjectURL is not called anywhere in this path; assets use data URLs
-   * that persist for the lifetime of the document.
-   */
-  async function executeFinalPrint(pageIndices: number[]): Promise<void> {
+  /** Renders every page of the document to JPEG sources for a Print Hub job. */
+  async function renderPagesAsPrintSources(): Promise<JobSourceImage[]> {
     const stage = stageRef.current;
-    if (!stage) return;
-
-    const allPages = currentDocument.pages;
-    setIsPrintBusy(true);
-    markDebugEvent("print:prepare", { pageCount: pageIndices.length });
-
-    // ג”€ג”€ Step 1: Pre-load all assets into the browser image decode cache ג”€ג”€ג”€ג”€ג”€ג”€
-    // Must happen BEFORE any page switching so the cache is warm when
-    // useKonvaImage sets img.src after the page switch.
-    setStatus("טוען תמונות לפני הדפסה…");
-
-    let preloadStatuses: PrintImageStatus[];
-    try {
-      preloadStatuses = await preloadAssetsForPrint(allPages, pageIndices, currentDocument.assets);
-    } catch (err) {
-      setStatus(`שגיאה בטעינת תמונות: ${err instanceof Error ? err.message : "לא ידוע"}`);
-      setIsPrintBusy(false);
-      return;
-    }
-
-    // If any asset could not be loaded, warn the user and abort.
-    // The user can retry by clicking "הדפסה" again (e.g., after reconnecting
-    // to a drive or waiting for a slow asset to load).
-    const failedStatuses = preloadStatuses.filter((s) => !s.loaded);
-    if (failedStatuses.length > 0) {
-      const first = failedStatuses[0]!;
-      const label = first.layerName ? `"${first.layerName}"` : "תמונה";
-      setStatus(
-        `תמונה לא נטענה: עמוד ${first.pageIndex}, שכבה ${label}` +
-        ` — ${first.error ?? "שגיאה לא ידועה"}. לחץ שוב על הדפסה לניסיון נוסף.`,
-      );
-      markDebugEvent("print:preload-failed", {
-        failedCount: failedStatuses.length,
-        first: {
-          pageIndex: first.pageIndex,
-          assetId: first.assetId,
-          layerName: first.layerName,
-          error: first.error,
-        },
-      });
-      setIsPrintBusy(false);
-      return;
-    }
-
-    markDebugEvent("print:preload-complete", {
-      pageCount: pageIndices.length,
-      assetCount: preloadStatuses.length,
-    });
-    setStatus("מכין עמודים להדפסה…");
-
-    try {
-      if (pageIndices.length === 1) {
-        // Single page → Python print preview
-        const page = allPages[pageIndices[0]];
-        if (!page) { setStatus("עמוד לא נמצא"); return; }
-
-        if (page.id !== currentPage.id) {
-          markDebugEvent("print:page-switch-for-render", { from: currentPage.id, to: page.id });
-          setActivePage(page.id);
-          await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-        }
-
-        // ג”€ג”€ Step 2: Verify all Konva.Image nodes are fully loaded ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
-        const imageCheck = await waitForKonvaPageImages(stage, 1);
-        if (!imageCheck.allLoaded) {
-          console.warn(
-            `[print] Page 1: ${imageCheck.unloadedCount} image(s) still loading after timeout — printing anyway`,
-          );
-        }
-
-        markDebugEvent("print:render-single-start", { pageId: page.id });
-        const rendered = exportStagePrintImage(stage, page, "image/png", exportRenderOptions);
-        markDebugEvent("print:render-single-end", { pageId: page.id, dataUrlLength: rendered.dataUrl.length });
-        const pageName = typeof page.metadata["name"] === "string" ? page.metadata["name"] : undefined;
-
-        const result = await openPrintPreviewForRenderedPage({
-          ...rendered,
-          documentName: currentDocument.name,
-          pageName,
-        });
-
-        if (!result.success) {
-          setStatus(`שגיאה בפתיחת הדפסה: ${result.error ?? "לא ידוע"}`);
-          return;
-        }
-        setStatus("חלון הדפסה נפתח");
-
-      } else {
-        // Multi-page → render all pages at full quality → Python print preview
-        const originalPageId = currentPage.id;
-        const renderedPages: PrintableStageImage[] = [];
-        const renderedPageNames: string[] = [];
-
-        for (const idx of pageIndices) {
-          const page = allPages[idx];
-          if (!page) continue;
-          markDebugEvent("print:page-switch-for-render", {
-            from: useDocumentStore.getState().activePageId, to: page.id, index: idx,
-          });
-          setActivePage(page.id);
-          await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-
-          // ג”€ג”€ Step 2: Verify all Konva.Image nodes are fully loaded ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
-          const imageCheck = await waitForKonvaPageImages(stage, idx + 1);
-          if (!imageCheck.allLoaded) {
-            console.warn(
-              `[print] Page ${idx + 1}: ${imageCheck.unloadedCount} image(s) still loading after timeout — printing anyway`,
-            );
-          }
-
-          markDebugEvent("print:render-page-start", { pageId: page.id, index: idx });
-          renderedPages.push(exportStagePrintImage(stage, page, "image/png", exportRenderOptions));
-          markDebugEvent("print:render-page-end", {
-            pageId: page.id, index: idx, renderedCount: renderedPages.length,
-          });
-          const name = typeof page.metadata["name"] === "string" ? page.metadata["name"] : `עמוד ${idx + 1}`;
-          renderedPageNames.push(name);
-        }
-
-        markDebugEvent("print:restore-original-page", { originalPageId });
-        setActivePage(originalPageId);
-
-        if (renderedPages.length === 0) {
-          setStatus("לא נמצאו עמודים להדפסה");
-          return;
-        }
-
-        markDebugEvent("print:open-preview-pages", { pageCount: renderedPages.length });
-        const result = await openPrintPreviewForPages(renderedPages, currentDocument.name, renderedPageNames);
-
-        if (!result.success) {
-          setStatus(`שגיאה במודול ההדפסה — פותח בכלי Windows: ${result.error ?? ""}`);
-          const sppFallback = (window as unknown as { spp?: { openPath?: (p: string) => Promise<{ error?: string }> } }).spp;
-          if (sppFallback?.openPath) {
-            const sppWrite = (window as unknown as { spp?: { writeTempImage?: (d: string, e: string) => Promise<string> } }).spp;
-            if (sppWrite?.writeTempImage) {
-              const p = renderedPages[0];
-              const fp = await sppWrite.writeTempImage(p.dataUrl, p.mimeType === "image/jpeg" ? "jpg" : "png");
-              await sppFallback.openPath(fp);
-            }
-          }
-          return;
-        }
-
-        setStatus(`נשלחו ${renderedPages.length} עמודים לתצוגת ההדפסה`);
+    if (stage === null) return [];
+    const pages = currentDocument.pages;
+    const originalPageId = currentPage.id;
+    const sources: JobSourceImage[] = [];
+    for (let i = 0; i < pages.length; i += 1) {
+      const page = pages[i];
+      if (page.id !== useDocumentStore.getState().activePageId) {
+        setActivePage(page.id);
+        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       }
+      await waitForKonvaPageImages(stage, i + 1);
+      const rendered = exportStagePrintImage(stage, page, "image/jpeg", exportRenderOptions);
+      sources.push({ sourceUrl: rendered.dataUrl, fileName: `${String(i + 1).padStart(3, "0")}.jpg` });
+    }
+    if (originalPageId !== useDocumentStore.getState().activePageId) {
+      setActivePage(originalPageId);
+    }
+    return sources;
+  }
+
+  /** Sends the document to the remote Print Hub queue (sender side, no local driver needed). */
+  async function handleSendToPrintHub(opts: SendToPrintHubOptions): Promise<void> {
+    const phCfg = useAppSettings.getState().settings.printHub;
+    const lanCfg = lanConfigFromSettings(phCfg);
+    const hubRoot = phCfg.serverHubRoot || phCfg.networkFolderPath;
+    if (!lanCfg && !hubRoot) {
+      setStatus("הגדר תחילה תיקיית תור או חיבור LAN בכלי \"מרכז הדפסות\"");
+      return;
+    }
+    setSendRemoteBusy(true);
+    setSendRemoteProgress(null);
+    setStatus("מרנדר עמודים לשליחה…");
+    try {
+      const sources = await renderPagesAsPrintSources();
+      if (sources.length === 0) {
+        setStatus("לא נמצאו עמודים לשליחה");
+        return;
+      }
+      const stationInfo = await window.spp?.printHub?.stationInfo?.();
+      const station = stationInfo?.computerName ?? "SPP2";
+      const jobId = generateJobId();
+
+      // Optional order-summary slip appended as the last image of the job (spec §20).
+      if (opts.includeSummary) {
+        const summaryData = orderSummaryFromFields({
+          orderId: jobId,
+          createdAt: new Date().toISOString(),
+          customerName: opts.customerName,
+          customerPhone: opts.customerPhone,
+          note: opts.note,
+          imageCount: sources.length,
+          copies: opts.copies,
+          size: opts.size,
+          finish: opts.finish,
+          borderMode: opts.borderMode,
+          station
+        });
+        const slip = await renderOrderSummaryImage(summaryData, opts.size);
+        sources.push({ sourceUrl: slip, fileName: "summary.jpg" });
+      }
+
+      const preset = buildClientPreset(opts.size, opts.finish, opts.borderMode);
+      const result = await buildAndSubmitJob({
+        hubRoot,
+        lan: lanCfg ?? undefined,
+        onLanProgress: setSendRemoteProgress,
+        sources,
+        preset,
+        size: opts.size,
+        source: "spp2_editor",
+        sourceComputer: station,
+        jobId,
+        copies: opts.copies,
+        approvalMode: opts.approvalMode,
+        testPrintFirstOnly: opts.testPrintFirstOnly,
+        customer: { name: opts.customerName, phone: opts.customerPhone, note: opts.note },
+        onProgress: (done, total) => setStatus(`מרנדר ${done}/${total}…`)
+      });
+      if (!result.success) {
+        setStatus(result.error ?? "שגיאה בשליחה לתור");
+        return;
+      }
+      setShowSendRemote(false);
+      setStatus(result.destination === "outbox"
+        ? "השרת לא זמין — העבודה נשמרה מקומית ותישלח כשהחיבור יחזור"
+        : `העבודה נשלחה לתור ההדפסה (${result.jobId})`);
     } catch (err) {
-      setStatus(`שגיאה בהדפסה: ${err instanceof Error ? err.message : "לא ידוע"}`);
+      setStatus(`שגיאה בשליחה: ${err instanceof Error ? err.message : "לא ידוע"}`);
     } finally {
-      setIsPrintBusy(false);
+      setSendRemoteBusy(false);
+      setSendRemoteProgress(null);
     }
-  }
-
-  /** Called by the preview modal's "הדפסה" button. */
-  async function handlePreviewModalPrint(): Promise<void> {
-    setShowPrintPreviewModal(false);
-    await executeFinalPrint(printPreviewPageIndices);
-  }
-
-  async function handlePrintOneCopy(): Promise<void> {
-    if (!isPrintPreviewAvailable()) {
-      setStatus("מודול ההדפסה זמין רק בהרצה דרך Electron");
-      return;
-    }
-    const last = loadLastPrintSettings();
-    if (!last) {
-      setShowPrintDialog(true);
-      return;
-    }
-    await handlePrintFromDialog(last.printRangeMode, last.customPageRange);
   }
 
   function handleDeleteSelected(): void {
@@ -3392,6 +3830,124 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     );
     setSelection(clones.map((layer) => layer.id));
     setStatus("Layer duplicated");
+  }
+
+  /**
+   * Expands a set of layers to include the children of any selected groups,
+   * dropping the group layers themselves (they have no pixels of their own).
+   */
+  function expandLayersWithGroupChildren(layers: VisualLayer[]): VisualLayer[] {
+    const result = new Map<string, VisualLayer>();
+    for (const layer of layers) {
+      if (layer.type === "group") {
+        const childIds = new Set((layer as GroupLayer).childIds);
+        for (const child of currentPage.layers) {
+          if (childIds.has(child.id)) result.set(child.id, child);
+        }
+      } else {
+        result.set(layer.id, layer);
+      }
+    }
+    return [...result.values()];
+  }
+
+  // Photoshop-style "Merge Layers": rasterize the selected layers (2+) into a
+  // single image layer, preserving effects/blend modes exactly as displayed.
+  function handleMergeSelected(): void {
+    const stage = stageRef.current;
+    if (stage === null) return;
+    const targets = expandLayersWithGroupChildren(selectedLayers)
+      .filter((layer) => layer.visible !== false && layer.type !== "guide");
+    if (targets.length < 2) {
+      setStatus("בחר לפחות שתי שכבות גלויות לאיחוד");
+      return;
+    }
+    // Content is clipped to the page, so clamp the union to the page bounds.
+    const page = currentPage;
+    const union = unionRects(targets.map(getTransformedBounds));
+    const bounds = {
+      x: Math.max(0, union.x),
+      y: Math.max(0, union.y),
+      width: Math.min(page.width, union.x + union.width) - Math.max(0, union.x),
+      height: Math.min(page.height, union.y + union.height) - Math.max(0, union.y)
+    };
+    if (bounds.width <= 0 || bounds.height <= 0) {
+      setStatus("השכבות שנבחרו מחוץ לגבולות העמוד");
+      return;
+    }
+    const targetIds = new Set(targets.map((layer) => layer.id));
+    const maxZ = Math.max(...targets.map((layer) => layer.zIndex));
+    const pixelRatio = getExportPixelRatio(page, performanceSettings);
+    const raster = rasterizeLayers(stage, page, targetIds, bounds, pixelRatio);
+    const asset = createImageAssetFromDataUrl(raster.dataUrl, raster.width, raster.height, "שכבה ממוזגת");
+    const mergedLayer = createImageLayer({
+      name: "שכבה ממוזגת",
+      rect: bounds,
+      assetId: asset.id,
+      fitMode: "fill",
+      zIndex: maxZ
+    });
+    applyDocumentChange(
+      "MergeLayersCommand",
+      (doc) => ({
+        ...doc,
+        assets: [...doc.assets, asset],
+        pages: doc.pages.map((p) => {
+          if (p.id !== page.id) return p;
+          const kept = p.layers.filter((layer) => !targetIds.has(layer.id));
+          const reindexed = [...kept, mergedLayer]
+            .sort((a, b) => a.zIndex - b.zIndex)
+            .map((layer, index) => ({ ...layer, zIndex: index }));
+          return { ...p, layers: reindexed };
+        })
+      }),
+      page.id
+    );
+    setSelection([mergedLayer.id]);
+    setStatus("השכבות אוחדו");
+  }
+
+  // Photoshop-style "Flatten": rasterize all visible layers into one image
+  // layer at page size. Hidden layers (and guides) are preserved above it.
+  function handleFlattenVisible(): void {
+    const stage = stageRef.current;
+    if (stage === null) return;
+    const page = currentPage;
+    const targets = page.layers.filter((layer) => layer.visible !== false && layer.type !== "guide");
+    if (targets.length === 0) {
+      setStatus("אין שכבות גלויות לשיטוח");
+      return;
+    }
+    const bounds = getPageBounds(page);
+    const targetIds = new Set(targets.map((layer) => layer.id));
+    const pixelRatio = getExportPixelRatio(page, performanceSettings);
+    const raster = rasterizeLayers(stage, page, targetIds, bounds, pixelRatio);
+    const asset = createImageAssetFromDataUrl(raster.dataUrl, raster.width, raster.height, "תמונה משוטחת");
+    const flatLayer = createImageLayer({
+      name: "תמונה משוטחת",
+      rect: bounds,
+      assetId: asset.id,
+      fitMode: "fill",
+      zIndex: 0
+    });
+    applyDocumentChange(
+      "FlattenPageCommand",
+      (doc) => ({
+        ...doc,
+        assets: [...doc.assets, asset],
+        pages: doc.pages.map((p) => {
+          if (p.id !== page.id) return p;
+          const preserved = p.layers
+            .filter((layer) => !targetIds.has(layer.id))
+            .sort((a, b) => a.zIndex - b.zIndex);
+          const layers = [flatLayer, ...preserved].map((layer, index) => ({ ...layer, zIndex: index }));
+          return { ...p, layers };
+        })
+      }),
+      page.id
+    );
+    setSelection([flatLayer.id]);
+    setStatus("השכבות שוטחו");
   }
 
   function cloneLayerForPaste(layer: VisualLayer, index: number, maxZIndex: number): VisualLayer {
@@ -3441,6 +3997,39 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
       wrap: "פריסת שורות"
     };
     setStatus(result.overflows ? `${labels[mode]} בוצעה ככל האפשר, אבל הטקסט עדיין ארוך מדי` : `${labels[mode]} בוצעה`);
+  }
+
+  function applySmartTextBlockToLayer(layerId: string): void {
+    const layer = currentPage.layers.find((item): item is TextLayer => item.id === layerId && item.type === "text");
+    if (layer === undefined) return;
+    const centerX = layer.x + layer.width / 2;
+    const centerY = layer.y + layer.height / 2;
+    const smartLayer = withSmartTextBlockSettings(layer, {
+      enabled: true,
+      strength: readSmartTextBlockSettings(layer)?.strength ?? DEFAULT_SMART_TEXT_BLOCK_SETTINGS.strength
+    });
+    const size = measureTextLayerSize(smartLayer);
+    const result: TextLayer = {
+      ...smartLayer,
+      x: Math.round(centerX - size.width / 2),
+      y: Math.round(centerY - size.height / 2),
+      width: size.width,
+      height: size.height
+    };
+    applyDocumentChange(
+      "SmartTextBlockCommand",
+      (doc) => ({
+        ...doc,
+        pages: doc.pages.map((docPage) =>
+          docPage.id === currentPage.id
+            ? { ...docPage, layers: docPage.layers.map((item) => (item.id === result.id ? result : item)) }
+            : docPage
+        )
+      }),
+      currentPage.id
+    );
+    setSelection([result.id]);
+    setStatus("Smart Text Block applied");
   }
 
   function handleCopySelectedLayers(): void {
@@ -3761,6 +4350,82 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     return { layer, asset };
   }
 
+  // General selection tools (Marquee/Lasso/Magic Wand) mark a pixel REGION inside an image
+  // (feeding Shift+F5), rather than rubber-band-selecting whole layers. We just ARM the tool here;
+  // CanvasStage then enters image-edit mode on whichever image the user drags on, and runs the
+  // matching image-edit selection (overlay, undo, refine, AI Fill all reused).
+  function activateImageRegionTool(imageTool: "rect-select" | "lasso" | "wand"): void {
+    const armed = imageTool === "wand" ? "regionWand" : imageTool === "lasso" ? "regionLasso" : "regionRect";
+    const current = useDrawingToolsStore.getState().activeTool;
+    useDrawingToolsStore.getState().setActiveTool(current === armed ? null : armed);
+    if (current !== armed) {
+      const label = imageTool === "wand" ? "מטה קסם" : imageTool === "lasso" ? "לאסו" : "בחירת מלבן";
+      useUiBusyStore.getState().flashToast(`${label}: גרור על תמונה לסימון אזור → Shift+F5 למילוי`);
+    }
+  }
+  activateImageRegionToolRef.current = activateImageRegionTool;
+
+  // Open the dedicated Content-Aware Fill workspace (Before/After preview + sampling) on an image.
+  async function openContentFillWorkspace(targetLayer: ImageLayer): Promise<void> {
+    const targetAsset = currentDocument.assets.find((a) => a.id === targetLayer.assetId);
+    if (targetAsset === undefined) { useUiBusyStore.getState().flashToast("בחר תמונה כדי לפתוח מילוי מתקדם"); return; }
+    // Cap the working resolution so painting + fills stay responsive on large photos.
+    const natW = Math.max(1, Math.round(targetLayer.width));
+    const natH = Math.max(1, Math.round(targetLayer.height));
+    const CAP = 1400;
+    const fit = Math.min(1, CAP / Math.max(natW, natH));
+    const w = Math.max(1, Math.round(natW * fit));
+    const h = Math.max(1, Math.round(natH * fit));
+    useUiBusyStore.getState().flashToast("פותח מילוי מתקדם...");
+    const canvas = await renderImageLayerToSelectionCanvas(targetLayer, targetAsset, currentDocument.assets, w, h);
+    if (canvas === null) { useUiBusyStore.getState().flashToast("לא ניתן לטעון את התמונה"); return; }
+    if (useImageEditStore.getState().imageEditMode) exitImageEditMode();
+    setContentFillWorkspace({ asset: targetAsset, layer: targetLayer, imageDataUrl: canvas.toDataURL("image/png"), width: w, height: h });
+    window.setTimeout(() => { void warmContentFillEngine(); }, 250);
+  }
+
+  function commitFilledLayerImage(targetLayer: ImageLayer, targetAsset: Asset, filledDataUrl: string, w: number, h: number): void {
+    if (activePage === null) return;
+    const generatedAsset: Asset = {
+      version: 1,
+      id: crypto.randomUUID(),
+      name: `${targetAsset.name.replace(/\.[^/.]+$/, "")} fill.png`,
+      kind: "image",
+      status: "ready",
+      originalPath: filledDataUrl,
+      previewPath: filledDataUrl,
+      thumbnailPath: filledDataUrl,
+      mimeType: "image/png",
+      width: w,
+      height: h,
+      fileSize: Math.round(filledDataUrl.length * 0.75),
+      hash: `${targetAsset.hash ?? targetAsset.checksum ?? targetAsset.id}:content-fill:${Date.now()}`,
+      checksum: `${targetAsset.checksum ?? targetAsset.hash ?? targetAsset.id}:content-fill:${Date.now()}`,
+      metadata: { generatedBy: "content-fill", sourceAssetId: targetAsset.id, sourceLayerId: targetLayer.id, createdAt: new Date().toISOString() }
+    };
+    const nextMetadata = { ...targetLayer.metadata };
+    delete nextMetadata["flipH"];
+    delete nextMetadata["flipV"];
+    const nextLayer: ImageLayer = {
+      ...targetLayer,
+      assetId: generatedAsset.id,
+      crop: { x: 0, y: 0, width: 1, height: 1 },
+      pixelMask: undefined,
+      imageOffsetX: 0,
+      imageOffsetY: 0,
+      imageScale: 1,
+      metadata: nextMetadata
+    };
+    applyDocumentChange("ContentFillAction", (doc) => ({
+      ...doc,
+      assets: [...doc.assets, generatedAsset],
+      pages: doc.pages.map((page) => page.id === activePage.id ? {
+        ...page,
+        layers: page.layers.map((l) => l.id === targetLayer.id ? nextLayer : l)
+      } : page)
+    }), activePage.id);
+  }
+
   async function handleSmartAutoSelect(): Promise<void> {
     const target = getSmartSelectionTarget();
     if (target === null) {
@@ -3874,7 +4539,13 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
         throw new Error("Cannot render the selected layer for AI Fill");
       }
       const renderedDataUrl = rendered.toDataURL("image/png");
-      const result = await runSmartInpaintRemove(target.asset, target.layer, selection, renderedDataUrl);
+      const result = await runContentAwareFill({
+        asset: target.asset,
+        layer: target.layer,
+        targetMask: selection,
+        renderedImageDataUrl: renderedDataUrl,
+        engine: store.contentFillEngine
+      });
       if (result === null) {
         const message = "AI Fill is unavailable";
         store.setAiFillStatus("error", message);
@@ -3950,6 +4621,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
       store.setAiFillStatus(result.fallback ? "fallback" : "ready", result.message);
       store.setAiFillProgress(null);
       setStatus(result.fallback ? `Fallback: OpenCV${result.fallbackReason ? ` (${result.fallbackReason})` : ""}` : `AI Fill: LaMa${result.backendDevice ? ` (${result.backendDevice})` : ""}`);
+      useUiBusyStore.getState().flashToast("המילוי הוחל • Ctrl+Z לביטול");
     } catch (error) {
       const rawMessage = error instanceof Error ? error.message : "AI Fill failed";
       const message = rawMessage.startsWith("selection_too_large")
@@ -3973,7 +4645,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
 
   function updateSelectedText(text: string): void {
     if (selectedLayer?.type !== "text") return;
-    const nextLayer = { ...selectedLayer, text };
+    const nextLayer = pruneRichTextForText({ ...selectedLayer, text });
     const size = measureTextLayerSize(nextLayer);
     const updatedLayer = { ...nextLayer, width: size.width, height: size.height };
     updateLayer(currentPage.id, updatedLayer);
@@ -4306,6 +4978,20 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     );
   }
 
+  // Collect {x,y} deltas from an aligned layer set and commit them in ONE undo step.
+  function commitAlignGeometry(alignedLayers: VisualLayer[], label: string, status: string): void {
+    const updates: Array<{ layerId: string; x: number; y: number }> = [];
+    alignedLayers.forEach((layer) => {
+      const original = currentPage.layers.find((item) => item.id === layer.id);
+      if (original !== undefined && (original.x !== layer.x || original.y !== layer.y)) {
+        updates.push({ layerId: layer.id, x: layer.x, y: layer.y });
+      }
+    });
+    if (updates.length === 0) return;
+    applySmartArrange(currentPage.id, updates, label);
+    setStatus(status);
+  }
+
   function handleAlign(command: AlignmentCommand): void {
     if (selectedLayerIds.length === 0) return;
     const alignedLayers = alignLayers({
@@ -4314,13 +5000,51 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
       selectedLayerIds,
       command
     });
-    alignedLayers.forEach((layer) => {
-      const original = currentPage.layers.find((item) => item.id === layer.id);
-      if (original !== undefined && (original.x !== layer.x || original.y !== layer.y)) {
-        updateLayer(currentPage.id, layer);
-      }
+    commitAlignGeometry(alignedLayers, "AlignLayersAction", "Alignment updated");
+  }
+
+  function handleCenterToCanvas(axis: "both" | "x" | "y"): void {
+    if (selectedLayerIds.length === 0) return;
+    const centered = centerToCanvas({
+      page: currentPage,
+      layers: currentPage.layers,
+      selectedLayerIds,
+      axis
     });
-    setStatus("Alignment updated");
+    commitAlignGeometry(centered, "CenterToCanvasAction", "Centered to page");
+  }
+
+  // Center horizontally on the page and snap to the top/bottom edge.
+  function handleCenterToEdge(edge: "top" | "bottom"): void {
+    if (selectedLayerIds.length === 0) return;
+    const centeredX = centerToCanvas({
+      page: currentPage,
+      layers: currentPage.layers,
+      selectedLayerIds,
+      axis: "x"
+    });
+    const aligned = alignLayers({
+      page: currentPage,
+      layers: centeredX,
+      selectedLayerIds,
+      command: edge,
+      target: "page"
+    });
+    commitAlignGeometry(aligned, "CenterToEdgeAction", edge === "top" ? "מורכז למעלה" : "מורכז למטה");
+  }
+
+  function resizeSelectedLayer(wPx: number, hPx: number): void {
+    if (selectedLayer === null) return;
+    const cx = selectedLayer.x + selectedLayer.width / 2;
+    const cy = selectedLayer.y + selectedLayer.height / 2;
+    const nextLayer = {
+      ...selectedLayer,
+      x: cx - wPx / 2,
+      y: cy - hPx / 2,
+      width: wPx,
+      height: hPx
+    } as VisualLayer;
+    handleCanvasLayerChange(nextLayer);
   }
 
   function handleRegenerateGrid(rule: GridLayoutRule, patch: Partial<GridLayoutRule>): void {
@@ -4616,8 +5340,8 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
     if (!activeClassPhotoRule) return;
     const { createClassPhotoPersonRecord: makeRecord } = await import("@/core/classPhoto/classPhotoFactory");
     const { addPeopleToClassPhoto } = useDocumentStore.getState();
-    const { files: fileArr, failed } = await normalizeIncomingImages(Array.from(files).filter(isSupportedIncomingImageFile));
-    if (failed.length > 0) setStatus(HEIC_CONVERSION_ERROR_MESSAGE);
+    const { files: fileArr, failed, message: failureMessage } = await normalizeIncomingImages(Array.from(files).filter(isSupportedIncomingImageFile));
+    if (failed.length > 0) setStatus(failureMessage ?? HEIC_CONVERSION_ERROR_MESSAGE);
     const imported: import("@/types/document").Asset[] = [];
     const newRecords: import("@/types/classPhoto").ClassPhotoPersonRecord[] = [];
     const maxOrder = activeClassPhotoRule.personRecords.reduce((m, r) => Math.max(m, r.orderIndex), -1);
@@ -4882,30 +5606,55 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
           onCancel={() => setTemplateSaveModal(null)}
         />
       )}
-      {/* Print range dialog */}
-      {showPrintDialog && (
-        <PrintRangeDialog
-          totalPages={currentDocument.pages.length}
-          currentPageIndex={currentPageIndex}
-          onPrint={(mode, range) => { void handlePrintFromDialog(mode, range); }}
-          onPrintOneCopy={() => { void handlePrintOneCopy(); }}
-          onCancel={() => { if (!isPrintBusy) setShowPrintDialog(false); }}
-          isBusy={isPrintBusy}
+      {cloudSaveAsModal !== null && (
+        <CloudSaveAsModal
+          initialName={cloudSaveAsModal.name}
+          onConfirm={confirmSaveCloudAs}
+          onCancel={() => setCloudSaveAsModal(null)}
         />
       )}
-      {/* Fast in-app print preview modal — shows low-res thumbnails lazily.
-          Final print quality is unchanged; clicking "הדפסה" here runs the
-          full-quality render path via handlePreviewModalPrint / executeFinalPrint. */}
-      {showPrintPreviewModal && stageRef.current && (
-        <PrintPreviewModal
-          pages={currentDocument.pages}
-          selectedIndices={printPreviewPageIndices}
-          stage={stageRef.current}
-          originalPageId={currentPage.id}
-          setActivePage={setActivePage}
+      {advancedPrintOpen !== null && (
+        <AdvancedPrintDialog
+          pagesMeta={currentDocument.pages.map((p, index) => {
+            const dpi = p?.setup?.dpi || 300;
+            const widthMm = (p.width / dpi) * 25.4;
+            const heightMm = (p.height / dpi) * 25.4;
+            return {
+              index,
+              name: `עמוד ${index + 1}`,
+              widthMm,
+              heightMm,
+              orientation: widthMm >= heightMm ? ("landscape" as const) : ("portrait" as const)
+            };
+          })}
+          currentPageIndex={currentPageIndex}
+          initialSelection={advancedPrintOpen.initialSelection}
+          renderPage={async (index) => {
+            const page = currentDocument.pages[index];
+            if (!page) return null;
+            try {
+              await preloadAssetsForPrint(currentDocument.pages, [index], currentDocument.assets);
+            } catch {
+              /* best-effort preload */
+            }
+            const image = await renderPageForExport(page, "image/png");
+            return image ? { rendered: image, dataUrl: image.dataUrl } : null;
+          }}
           documentName={currentDocument.name}
-          onClose={() => setShowPrintPreviewModal(false)}
-          onPrint={() => { void handlePreviewModalPrint(); }}
+          onClose={() => setAdvancedPrintOpen(null)}
+        />
+      )}
+      {showSendRemote && (
+        <SendToPrintHubDialog
+          defaultApprovalMode={useAppSettings.getState().settings.printHub.defaultApprovalMode}
+          customerName={typeof currentDocument.metadata.customerName === "string" ? currentDocument.metadata.customerName : ""}
+          customerPhone={typeof currentDocument.metadata.customerPhone === "string" ? currentDocument.metadata.customerPhone : ""}
+          pageCount={currentDocument.pages.length}
+          busy={sendRemoteBusy}
+          hubConfigured={(() => { const p = useAppSettings.getState().settings.printHub; return Boolean(lanConfigFromSettings(p)) || (p.serverHubRoot || p.networkFolderPath).length > 0; })()}
+          uploadProgress={sendRemoteProgress}
+          onCancel={() => { if (!sendRemoteBusy) setShowSendRemote(false); }}
+          onConfirm={(opts) => { void handleSendToPrintHub(opts); }}
         />
       )}
       {maskOverflowPrompt !== null && (() => {
@@ -4943,16 +5692,16 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
           <div style={{ background: "var(--color-surface, #fff)", borderRadius: 12, padding: "28px 32px", boxShadow: "0 8px 32px rgba(0,0,0,0.25)", maxWidth: 380, width: "90%", textAlign: "center" }}>
             <h3 style={{ margin: "0 0 10px", fontSize: 17 }}>יש שינויים שלא נשמרו</h3>
             <p style={{ margin: "0 0 22px", fontSize: 14, color: "var(--color-text-secondary, #666)" }}>
-              שמירה אוטומטית היא גיבוי בלבד. האם לשמור לפני החזרה לדף הבית?
+              שמירה אוטומטית היא גיבוי בלבד. {exitAfterDialog ? "האם לשמור לפני היציאה מהתוכנה?" : "האם לשמור לפני החזרה לדף הבית?"}
             </p>
             <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-              <button className="btn btn-primary" type="button" onClick={() => confirmBackHome("save")}>
+              <button className="btn btn-primary" type="button" onClick={() => void confirmBackHome("save")}>
                 <Save size={14} /> שמור וצא
               </button>
-              <button className="btn btn-ghost" type="button" style={{ color: "#e53e3e" }} onClick={() => confirmBackHome("discard")}>
+              <button className="btn btn-ghost" type="button" style={{ color: "#e53e3e" }} onClick={() => void confirmBackHome("discard")}>
                 צא ללא שמירה
               </button>
-              <button className="btn btn-ghost" type="button" onClick={() => confirmBackHome("cancel")}>
+              <button className="btn btn-ghost" type="button" onClick={() => void confirmBackHome("cancel")}>
                 ביטול
               </button>
             </div>
@@ -4961,8 +5710,8 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
       )}
       <header className="topbar">
         <div className="topbar-side">
-          <button className="icon-btn" onClick={handleBackHome} title="בית" type="button">
-            <Home size={16} />
+          <button className="icon-btn" onClick={isolatedImageEdit !== null ? handleCancelIsolatedImageEdit : handleBackHome} title={isolatedImageEdit !== null ? "ביטול עריכה מבודדת" : "בית"} type="button">
+            {isolatedImageEdit !== null ? <X size={16} /> : <Home size={16} />}
           </button>
           <span className="topbar-divider" />
           <button
@@ -4983,15 +5732,28 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
           >
             <Redo2 size={16} />
           </button>
-          <span className="project-name">{currentDocument.name}</span>
+          <span className="project-name">{isolatedImageEdit !== null ? "עריכת תמונה מבודדת" : currentDocument.name}</span>
         </div>
 
         <div className="topbar-center">
-          <span className="mode-label">עיצוב חופשי</span>
-          <span className="mode-chip">
-            <span />
-            Free Mode
-          </span>
+          <span className="mode-label">{isolatedImageEdit !== null ? "עריכת התמונה המלאה" : "עיצוב חופשי"}</span>
+          {onOpenSeparateWindow !== undefined ? (
+            <button
+              aria-label="פתח בחלון נפרד"
+              className="mode-chip mode-chip-button"
+              onClick={onOpenSeparateWindow}
+              title="פתח בחלון נפרד"
+              type="button"
+            >
+              <Maximize2 size={13} />
+              פתח בחלון נפרד
+            </button>
+          ) : (
+            <span className="mode-chip">
+              <span className="mode-chip-dot" />
+              {isolatedImageEdit !== null ? "Isolated Image" : "Free Mode"}
+            </span>
+          )}
           {!isMaskMode && (
             <button
               className={`btn btn-ghost ${layoutEditMode ? "btn-accent" : ""}`}
@@ -5027,9 +5789,32 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
           <button className="icon-btn" disabled={selectedLayerIds.length < 3} onClick={() => handleAlign("distributeY")} title="Distribute vertically" type="button">
             <ChevronsDown size={15} />
           </button>
+          <span className="topbar-divider" />
+          <button className="icon-btn" disabled={selectedLayerIds.length === 0} onClick={() => handleCenterToCanvas("both")} title="מרכז לעמוד" type="button">
+            <Crosshair size={15} />
+          </button>
+          <button className="icon-btn" disabled={selectedLayerIds.length === 0} onClick={() => handleCenterToCanvas("x")} title="מרכז אופקית לעמוד" type="button">
+            <MoveHorizontal size={15} />
+          </button>
+          <button className="icon-btn" disabled={selectedLayerIds.length === 0} onClick={() => handleCenterToCanvas("y")} title="מרכז אנכית לעמוד" type="button">
+            <MoveVertical size={15} />
+          </button>
         </div>
 
         <div className="topbar-side topbar-actions">
+          {isolatedImageEdit !== null ? (
+            <>
+              <button className="btn btn-ghost" onClick={handleCancelIsolatedImageEdit} type="button">
+                <X size={14} />
+                ביטול
+              </button>
+              <button className="btn btn-primary" onClick={handleApplyIsolatedImageEdit} type="button">
+                <Save size={14} />
+                החל וחזור
+              </button>
+            </>
+          ) : (
+            <>
           <button
             type="button"
             className="icon-btn"
@@ -5056,6 +5841,10 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
               ייבוא PSD
             </button>
           ) : null}
+          <button className="btn btn-ghost" onClick={() => pdfInputRef.current?.click()} type="button">
+            <FileText size={14} />
+            ייבוא PDF
+          </button>
           {/* Save dropdown */}
           <div className="save-dropdown-wrapper" style={{ position: "relative" }}>
             <button
@@ -5083,10 +5872,18 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                   <button
                     className="save-dropdown-item"
                     type="button"
-                    onClick={() => { handleSaveLifecycle(); setSaveDropdownOpen(false); }}
+                    onClick={() => { void handleSaveLifecycle(); setSaveDropdownOpen(false); }}
                     style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "var(--text-primary)" }}
                   >
-                    <Save size={13} /> שמירה (JSON)
+                    <Save size={13} /> שמירה <span style={{ marginInlineStart: "auto", opacity: 0.5, fontSize: 11 }}>Ctrl+S</span>
+                  </button>
+                  <button
+                    className="save-dropdown-item"
+                    type="button"
+                    onClick={() => { void handleSaveAsToDisk(); setSaveDropdownOpen(false); }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "var(--text-primary)" }}
+                  >
+                    <Save size={13} /> שמירה בשם… <span style={{ marginInlineStart: "auto", opacity: 0.5, fontSize: 11 }}>Ctrl+Shift+S</span>
                   </button>
                   <button
                     className="save-dropdown-item"
@@ -5094,7 +5891,23 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                     onClick={() => { void handleSavePortableLifecycle(); setSaveDropdownOpen(false); }}
                     style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "var(--text-primary)" }}
                   >
-                    <FileDown size={13} /> שמירה SPP
+                    <FileDown size={13} /> שמירה SPP (נייד)
+                  </button>
+                  <button
+                    className="save-dropdown-item"
+                    type="button"
+                    onClick={() => { void handleSaveCloudLifecycle(); setSaveDropdownOpen(false); }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "var(--text-primary)" }}
+                  >
+                    <CloudUpload size={13} /> שמירה בענן
+                  </button>
+                  <button
+                    className="save-dropdown-item"
+                    type="button"
+                    onClick={() => { handleSaveCloudAsLifecycle(); setSaveDropdownOpen(false); }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "var(--text-primary)" }}
+                  >
+                    <CloudUpload size={13} /> שמירה בענן בשם…
                   </button>
                   <button
                     className="save-dropdown-item"
@@ -5143,6 +5956,30 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                   >
                     <Download size={13} /> ייצוא JPEG
                   </button>
+                  <hr style={{ margin: "4px 0", border: "none", borderTop: "1px solid var(--border)" }} />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "4px 10px" }}>
+                    <span style={{ fontSize: 10, opacity: 0.7 }}>איכות PDF</span>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      {([
+                        { key: "high", label: "גבוה" },
+                        { key: "balanced", label: "מאוזן" },
+                        { key: "compact", label: "קומפקטי" }
+                      ] as { key: PdfQualityPreset; label: string }[]).map((opt) => (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          onClick={() => setPdfQualityPreset(opt.key)}
+                          title={opt.key === "high" ? "איכות מקסימלית להדפסה" : opt.key === "balanced" ? "איזון בין איכות לגודל קובץ" : "קובץ קל לשיתוף ואימייל"}
+                          style={{
+                            flex: 1, padding: "4px 6px", borderRadius: 4, fontSize: 11, cursor: "pointer",
+                            background: pdfQualityPreset === opt.key ? "var(--accent)" : "var(--bg-elevated)",
+                            color: pdfQualityPreset === opt.key ? "#fff" : "var(--text-primary)",
+                            border: "1px solid var(--border)"
+                          }}
+                        >{opt.label}</button>
+                      ))}
+                    </div>
+                  </div>
                   <button
                     className="save-dropdown-item"
                     type="button"
@@ -5155,26 +5992,11 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
               </>
             )}
           </div>
-          {/* Print Preview */}
-          <button
-            className="btn btn-ghost"
-            type="button"
-            title="הדפסה — בחר עמודים להדפסה"
-            onClick={handlePrintPreview}
-          >
-            <FileText size={14} />
-            הדפסה
-          </button>
-          <button
-            className="btn btn-ghost"
-            type="button"
-            title="הדפס עותק אחד לפי הגדרות אחרונות"
-            onClick={() => { void handlePrintOneCopy(); }}
-            style={{ fontSize: 12, opacity: 0.8 }}
-          >
-            <Zap size={13} />
-            עותק אחד
-          </button>
+          {/* Print actions — Advanced Print / send to remote (Print Hub) */}
+          <PrintActionsButton
+            onPrint={handlePrint}
+            onSendRemote={() => setShowSendRemote(true)}
+          />
           {/* Send to client buttons */}
           {currentDocument.metadata.customerEmail && (
             <button
@@ -5199,6 +6021,8 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
               💬 וואטסאפ
             </button>
           )}
+            </>
+          )}
         </div>
       </header>
 
@@ -5216,7 +6040,12 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
         onAddText={handleAddText}
         onApplyPreset={(preset) => {
           if (selectedLayer?.type === "text") {
-            applyTextPreset(currentPage.id, selectedLayer.id, preset);
+            const textIds = selectedLayers
+              .filter((layer): layer is Extract<VisualLayer, { type: "text" }> => layer.type === "text")
+              .map((layer) => layer.id);
+            (textIds.length > 1 ? textIds : [selectedLayer.id]).forEach((layerId) => {
+              applyTextPreset(currentPage.id, layerId, preset);
+            });
           }
         }}
         onBrowseFonts={() => setShowFontsBrowser(true)}
@@ -5251,22 +6080,31 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
         onImageEditResetMask={handleImageEditResetMask}
         onSmartScreenshotCrop={() => { void handleSmartScreenshotCropSelectedImages(); }}
         onResetSmartScreenshotCrop={handleResetSmartScreenshotCropSelectedImage}
+        onAlign={handleAlign}
         onMoveLayer={(direction) => {
-          if (selectedLayer !== null) {
-            moveLayer(currentPage.id, selectedLayer.id, direction);
-          }
+          const targets = selectedLayers.length > 1 ? selectedLayers : selectedLayer !== null ? [selectedLayer] : [];
+          targets
+            .slice()
+            .sort((a, b) => direction === "backward" || direction === "back" ? a.zIndex - b.zIndex : b.zIndex - a.zIndex)
+            .forEach((layer) => moveLayer(currentPage.id, layer.id, direction));
         }}
         onNotify={setStatus}
         onPasteTextStyle={() => {
           if (selectedLayer?.type === "text") {
-            pasteTextStyle(currentPage.id, [selectedLayer.id]);
-            setStatus("Text style pasted");
+            const textIds = selectedLayers
+              .filter((layer): layer is Extract<VisualLayer, { type: "text" }> => layer.type === "text")
+              .map((layer) => layer.id);
+            pasteTextStyle(currentPage.id, textIds.length > 1 ? textIds : [selectedLayer.id]);
+            setStatus(textIds.length > 1 ? "Text style pasted to selection" : "Text style pasted");
           }
         }}
         onPatch={patchSelectedLayer}
         onSmartTextFit={(mode) => {
           if (selectedLayer?.type === "text") {
-            applySmartTextFitToLayer(selectedLayer.id, mode);
+            const textIds = selectedLayers
+              .filter((layer): layer is Extract<VisualLayer, { type: "text" }> => layer.type === "text")
+              .map((layer) => layer.id);
+            (textIds.length > 1 ? textIds : [selectedLayer.id]).forEach((layerId) => applySmartTextFitToLayer(layerId, mode));
           }
         }}
         onToggleGrid={viewport.toggleGrid}
@@ -5291,6 +6129,9 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
             <ToolButton active={tool === "move"} icon={MousePointer2} label="הזזה" onClick={() => setTool("move")} testId="tool-move" />
             <ToolButton active={tool === "text"} icon={Type} label="טקסט" onClick={handleAddText} testId="tool-text" />
             <ToolButton active={tool === "image"} icon={ImagePlus} label="תמונה" onClick={() => imageInputRef.current?.click()} testId="tool-image" />
+            <ToolButton active={armedDrawingTool === "regionRect" || (imageEditMode && imageActiveTool === "rect-select")} icon={RectangleHorizontal} label="בחירת מלבן" onClick={() => activateImageRegionTool("rect-select")} testId="tool-region-rect" />
+            <ToolButton active={armedDrawingTool === "regionLasso" || (imageEditMode && imageActiveTool === "lasso")} icon={Lasso} label="לאסו" onClick={() => activateImageRegionTool("lasso")} testId="tool-region-lasso" />
+            <ToolButton active={armedDrawingTool === "regionWand" || (imageEditMode && imageActiveTool === "wand")} icon={Wand2} label="מטה קסם" onClick={() => activateImageRegionTool("wand")} testId="tool-region-wand" />
             {!isMaskMode && (
               <ToolButton
                 active={layoutEditMode}
@@ -5408,6 +6249,10 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                   if (!selectedLayerIds.includes(layerId)) setSelection([layerId]);
                   setLayerContextMenu({ layerId, screenX, screenY });
                 }}
+                onOpenLayerEdits={(layerId) => {
+                  setSelection([layerId]);
+                  setInspectorTab("edits");
+                }}
                 onHoverLayer={setHoveredLayerId}
                 onMoveImageIntoFrame={(imageLayerId, frameId) => {
                   applyDocumentChange(
@@ -5421,6 +6266,8 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                 onMoveLayerIntoGroup={(layerId, groupId) => moveLayerIntoGroup(currentPage.id, layerId, groupId)}
                 onDeleteGroup={handleDeleteGroup}
                 onDuplicateGroup={handleDuplicateGroup}
+                onMergeLayers={handleMergeSelected}
+                onFlattenVisible={handleFlattenVisible}
               />
             )}
             {leftTab === "pages" && (
@@ -5490,6 +6337,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                 setTool("text");
               }}
               onEndTextEdit={() => setEditingLayerId(null)}
+              onTextSelectionChange={(layerId, selection) => setActiveTextSelection({ layerId, selection })}
               onImageDoubleClick={convertPsdTextImageToEditable}
               onLayerChange={handleCanvasLayerChange}
               onSelectLayer={(layerId) => (layerId === null ? clearSelection() : setSelection([layerId]))}
@@ -5516,6 +6364,34 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
             <ImageEditFloatingBar
               onSmartAutoSelect={() => { void handleSmartAutoSelect(); }}
               onSmartRefine={() => { void handleSmartRefineSelection(); }}
+            />
+          )}
+          {selectedLayers.length === 1 && selectedLayer?.type === "image" && !maskContentEditActive && (
+            <ContextualImageBar
+              canvasAreaRef={canvasAreaRef}
+              layer={selectedLayer}
+              stageRef={stageRef}
+              viewportSignature={`${viewport.zoom}:${viewport.panX}:${viewport.panY}`}
+              onEdit={() => {
+                if (!imageEditMode) {
+                  enterImageEditMode(selectedLayer.id, { x: 0, y: 0, width: 1, height: 1 });
+                }
+              }}
+              onPatch={(patch) => updateLayer(currentPage.id, { ...(selectedLayer as ImageLayer), ...patch })}
+              onSmartExpand={() => useSmartExpandStore.getState().open({ kind: "canvas", layerId: selectedLayer.id })}
+              onSelectObject={() => void selectCanvasMenuObject(contextTargetFromLayer(selectedLayer))}
+              onRemoveBackground={() => void removeCanvasMenuBackground(contextTargetFromLayer(selectedLayer))}
+              onRotate={(delta) => rotateSelectionByEvent(delta, [selectedLayer.id])}
+              onFitCanvasFill={() => fitCanvasMenuLayer(contextTargetFromLayer(selectedLayer), "fill")}
+              onFitCanvasFit={() => fitCanvasMenuLayer(contextTargetFromLayer(selectedLayer), "fit")}
+              onCenterCanvas={() => centerCanvasMenuLayer(contextTargetFromLayer(selectedLayer))}
+              onResetTransform={() => resetCanvasMenuLayerTransform(contextTargetFromLayer(selectedLayer))}
+              onFlipHorizontal={() => updateCanvasMenuLayer(contextTargetFromLayer(selectedLayer), (layer) => ({ ...layer, metadata: { ...layer.metadata, flipH: !((layer.metadata["flipH"] as boolean | undefined) ?? false) } }), "Image flipped horizontally")}
+              onFlipVertical={() => updateCanvasMenuLayer(contextTargetFromLayer(selectedLayer), (layer) => ({ ...layer, metadata: { ...layer.metadata, flipV: !((layer.metadata["flipV"] as boolean | undefined) ?? false) } }), "Image flipped vertically")}
+              onOpenAdvancedEditor={() => void handleOpenImageEditor(contextTargetFromLayer(selectedLayer))}
+              onReplaceImage={() => replaceCanvasMenuImage(contextTargetFromLayer(selectedLayer))}
+              onDuplicate={() => duplicateCanvasMenuLayer(contextTargetFromLayer(selectedLayer))}
+              onDelete={() => deleteCanvasMenuTarget(contextTargetFromLayer(selectedLayer))}
             />
           )}
           {/* Mask content edit mode banner */}
@@ -5589,6 +6465,24 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
               onSkipAll={() => updateScreenshotCropAssets(suspiciousScreenshotCropAssets.map((asset) => asset.id), "ignore")}
             />
           ) : null}
+          {smartRepeatTargetIds !== null && (
+            <SmartRepeatDialog
+              page={currentPage}
+              selectedLayerIds={smartRepeatTargetIds}
+              onClose={() => setSmartRepeatTargetIds(null)}
+              onApply={(options: RepeatOptions) => {
+                const ids = smartRepeatTargetIds;
+                applyDocumentChange(
+                  "SMART_REPEAT",
+                  (doc) => applyRepeatToDocument(doc, { pageId: currentPage.id, selectedLayerIds: ids, options }),
+                  currentPage.id
+                );
+                setSmartRepeatTargetIds(null);
+                clearSelection();
+                setStatus("נוצרה פריסת שכפול חכם");
+              }}
+            />
+          )}
           {canvasContextMenu !== null && (
             <CanvasContextMenu
               target={canvasContextMenu}
@@ -5599,6 +6493,19 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
               onClose={() => setCanvasContextMenu(null)}
               onSelectObject={() => void selectCanvasMenuObject(canvasContextMenu)}
               onRemoveBackground={() => void removeCanvasMenuBackground(canvasContextMenu)}
+              onAutoFix={canvasContextMenu.hasImage ? () => {
+                useAutoFixStore.getState().open(canvasContextMenu.layerId);
+                setCanvasContextMenu(null);
+              } : undefined}
+              onCurves={canvasContextMenu.hasImage ? () => {
+                useCurvesStore.getState().open(canvasContextMenu.layerId);
+                setCanvasContextMenu(null);
+              } : undefined}
+              onShadowHighlights={canvasContextMenu.hasImage ? () => {
+                useShadowHighlightsStore.getState().open(canvasContextMenu.layerId);
+                setCanvasContextMenu(null);
+              } : undefined}
+              onOpenIsolatedImageEditor={() => openIsolatedImageEditor(canvasContextMenu)}
               onConvertAlphaToFrame={() => {
                 setCanvasContextMenu(null);
                 void handleConvertLayerAlphaToFrameMask(canvasContextMenu.layerId);
@@ -5623,14 +6530,21 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
               onFitCanvasFit={() => fitCanvasMenuLayer(canvasContextMenu, "fit")}
               onCenterCanvas={() => centerCanvasMenuLayer(canvasContextMenu)}
               onResetTransform={() => resetCanvasMenuLayerTransform(canvasContextMenu)}
-              onRotate90={() => updateCanvasMenuLayer(canvasContextMenu, (layer) => ({ ...layer, rotation: ((layer.rotation ?? 0) + 90) % 360 }), "Image rotated 90 degrees")}
-              onRotate180={() => updateCanvasMenuLayer(canvasContextMenu, (layer) => ({ ...layer, rotation: ((layer.rotation ?? 0) + 180) % 360 }), "Image rotated 180 degrees")}
+              onRotate90={() => { rotateSelectionByEvent(90, [canvasContextMenu.layerId]); setCanvasContextMenu(null); }}
+              onRotate180={() => { rotateSelectionByEvent(180, [canvasContextMenu.layerId]); setCanvasContextMenu(null); }}
               onFlipHorizontal={() => updateCanvasMenuLayer(canvasContextMenu, (layer) => ({ ...layer, metadata: { ...layer.metadata, flipH: !((layer.metadata["flipH"] as boolean | undefined) ?? false) } }), "Image flipped horizontally")}
               onFlipVertical={() => updateCanvasMenuLayer(canvasContextMenu, (layer) => ({ ...layer, metadata: { ...layer.metadata, flipV: !((layer.metadata["flipV"] as boolean | undefined) ?? false) } }), "Image flipped vertically")}
               onWhiteBorder={() => applyQuickBorder(canvasContextMenu, "#ffffff")}
               onBlackBorder={() => applyQuickBorder(canvasContextMenu, "#000000")}
               onReplaceImage={() => replaceCanvasMenuImage(canvasContextMenu)}
               onDuplicate={() => canvasContextMenu.layerType === "text" ? duplicateCanvasMenuTextLayer(canvasContextMenu) : duplicateCanvasMenuLayer(canvasContextMenu)}
+              onSmartRepeat={() => {
+                const ids = selectedLayerIds.includes(canvasContextMenu.layerId) && selectedLayerIds.length > 0
+                  ? selectedLayerIds
+                  : [canvasContextMenu.layerId];
+                setSmartRepeatTargetIds(ids);
+                setCanvasContextMenu(null);
+              }}
               onDeleteTarget={() => deleteCanvasMenuTarget(canvasContextMenu)}
               onToggleLock={() => {
                 if (canvasContextMenu.layerType === "text") {
@@ -5663,6 +6577,10 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
               onTextDirectionLtr={() => updateCanvasMenuTextLayer(canvasContextMenu, (layer) => ({ ...layer, direction: "ltr" }), "Text direction set to LTR")}
               onTextIncreaseSize={() => updateCanvasMenuTextLayer(canvasContextMenu, (layer) => ({ ...layer, fontSize: Math.min(240, layer.fontSize + 4) }), "Text size increased")}
               onTextDecreaseSize={() => updateCanvasMenuTextLayer(canvasContextMenu, (layer) => ({ ...layer, fontSize: Math.max(8, layer.fontSize - 4) }), "Text size decreased")}
+              onTextSmartBlock={() => {
+                applySmartTextBlockToLayer(canvasContextMenu.layerId);
+                setCanvasContextMenu(null);
+              }}
               onTextSmartFitFull={() => {
                 applySmartTextFitToLayer(canvasContextMenu.layerId, "balanced");
                 setCanvasContextMenu(null);
@@ -5695,12 +6613,21 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                 }
                 setCanvasContextMenu(null);
               } : undefined}
+              onSmartExpand={canvasContextMenu.hasImage ? () => {
+                useSmartExpandStore.getState().open({ kind: "canvas", layerId: canvasContextMenu.layerId });
+                setCanvasContextMenu(null);
+              } : undefined}
               onAiExpand={canvasContextMenu.hasImage ? () => {
                 useAiToolsStore.getState().openTool({ tool: "expand", layerId: canvasContextMenu.layerId, pageId: currentPage.id });
                 setCanvasContextMenu(null);
               } : undefined}
               onAiRemove={canvasContextMenu.hasImage ? () => {
                 useAiToolsStore.getState().openTool({ tool: "remove", layerId: canvasContextMenu.layerId, pageId: currentPage.id });
+                setCanvasContextMenu(null);
+              } : undefined}
+              onContentFill={canvasContextMenu.hasImage ? () => {
+                const fillLayer = currentPage.layers.find((l): l is ImageLayer => l.id === canvasContextMenu.layerId && l.type === "image");
+                if (fillLayer !== undefined) void openContentFillWorkspace(fillLayer);
                 setCanvasContextMenu(null);
               } : undefined}
               onAiUpscale={canvasContextMenu.hasImage ? () => {
@@ -5745,6 +6672,8 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                 onMoveToBack={() => moveLayer(currentPage.id, layerContextMenu.layerId, "back")}
                 onDuplicate={handleDuplicateSelected}
                 onDelete={handleDeleteSelected}
+                onMergeLayers={selectedLayerIds.length >= 2 ? handleMergeSelected : undefined}
+                onFlatten={handleFlattenVisible}
                 onToggleBatchVariable={
                   ctxLayer !== undefined &&
                   (ctxLayer.type === "frame" || ctxLayer.type === "text" || ctxLayer.type === "image")
@@ -5823,6 +6752,39 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                   });
                   setStatus("אפקטים הודבקו");
                 }}
+                onOpenLayerEdits={
+                  ctxLayer !== undefined
+                    ? () => {
+                        setSelection([ctxLayer.id]);
+                        setInspectorTab("edits");
+                        setLayerContextMenu(null);
+                      }
+                    : undefined
+                }
+                onToggleBeforeAfter={
+                  ctxLayer !== undefined
+                    ? () => {
+                        useLayerEditsPreviewStore.getState().toggleBeforeAfter(ctxLayer.id);
+                        setLayerContextMenu(null);
+                      }
+                    : undefined
+                }
+                onDisableAllEdits={
+                  ctxLayer !== undefined && countLayerEdits(ctxLayer) > 0
+                    ? () => {
+                        updateLayer(currentPage.id, setAllLayerEditsEnabled(ctxLayer, false));
+                        setLayerContextMenu(null);
+                      }
+                    : undefined
+                }
+                onResetAllEdits={
+                  ctxLayer !== undefined && countLayerEdits(ctxLayer) > 0
+                    ? () => {
+                        updateLayer(currentPage.id, resetAllLayerEditsFor(ctxLayer));
+                        setLayerContextMenu(null);
+                      }
+                    : undefined
+                }
               />
             );
           })()}
@@ -5935,7 +6897,45 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
           <div className="rs-body">
             {selectedLayer === null ? (
               <EmptyInspectorState />
-            ) : selectedLayer.type === "text" ? (
+            ) : (
+              <>
+                {(() => {
+                  const editCount = countLayerEdits(selectedLayer);
+                  return (
+                    <div className="rs-inspector-tabs" role="tablist" aria-label="Inspector sections">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={inspectorTab === "props"}
+                        className={inspectorTab === "props" ? "on" : ""}
+                        onClick={() => setInspectorTab("props")}
+                      >
+                        מאפיינים
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={inspectorTab === "edits"}
+                        className={inspectorTab === "edits" ? "on" : ""}
+                        onClick={() => setInspectorTab("edits")}
+                      >
+                        עריכות
+                        {editCount > 0 ? (
+                          <span className={`layer-edits-dot${hasDisabledLayerEdits(selectedLayer) ? " has-disabled" : ""}`}>{editCount}</span>
+                        ) : null}
+                      </button>
+                    </div>
+                  );
+                })()}
+                {inspectorTab === "edits" ? (
+                  <>
+                    <div className="rs-inspector-header">
+                      <span className="rs-inspector-name">{selectedLayer.name}</span>
+                      <span className="rs-inspector-type">עריכות</span>
+                    </div>
+                    <LayerEditsPanel layer={selectedLayer} />
+                  </>
+                ) : selectedLayer.type === "text" ? (
               <>
                 <div className="rs-inspector-header">
                   <span className="rs-inspector-name">{selectedLayer.name}</span>
@@ -5958,6 +6958,8 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                     pasteTextStyle(currentPage.id, [selectedLayer.id]);
                     setStatus("סגנון טקסט הודבק");
                   }}
+                  selectedTextRange={activeTextSelection?.layerId === selectedLayer.id ? activeTextSelection.selection : null}
+                  onTextSelectionChange={(selection) => setActiveTextSelection({ layerId: selectedLayer.id, selection })}
                   onTextChange={updateSelectedText}
                 />
               </>
@@ -6190,6 +7192,8 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
                 />
               </>
             )}
+              </>
+            )}
           </div>
         </aside>
       </section>
@@ -6208,19 +7212,7 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
         autosaveStatus={status}
         unit={statusBarUnit}
         onUnitChange={setStatusBarUnit}
-        onResizeSelectedLayer={(wPx, hPx) => {
-          if (selectedLayer === null) return;
-          const cx = selectedLayer.x + selectedLayer.width / 2;
-          const cy = selectedLayer.y + selectedLayer.height / 2;
-          const nextLayer = {
-            ...selectedLayer,
-            x: cx - wPx / 2,
-            y: cy - hPx / 2,
-            width: wPx,
-            height: hPx
-          } as VisualLayer;
-          handleCanvasLayerChange(nextLayer);
-        }}
+        onResizeSelectedLayer={resizeSelectedLayer}
       />
 
       <footer className="bottombar">
@@ -6275,7 +7267,28 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
       <input ref={imageInputRef} accept={SUPPORTED_IMAGE_ACCEPT} hidden multiple onChange={handleImageInput} type="file" />
       <input ref={replaceImageInputRef} accept={SUPPORTED_IMAGE_ACCEPT} hidden onChange={(e) => void handleReplaceImageInput(e)} type="file" />
       <input ref={projectInputRef} accept=".json,.spp.json,.spp" hidden onChange={(event) => void handleProjectLoadLifecycle(event)} type="file" />
+      <input ref={pdfInputRef} accept=".pdf,application/pdf" hidden onChange={handlePdfInput} type="file" />
       <input ref={classPhotoAddInputRef} accept={SUPPORTED_IMAGE_ACCEPT} hidden multiple onChange={(e) => { if (e.target.files) void handleClassPhotoAddFiles(e.target.files); e.target.value = ""; }} type="file" />
+
+      {pdfImportFile !== null && (
+        <Suspense fallback={null}>
+          <PdfImportDialog
+            file={pdfImportFile}
+            onClose={() => setPdfImportFile(null)}
+            onConfirm={(result) => void handlePdfImportConfirm(result)}
+          />
+        </Suspense>
+      )}
+
+      {showExactSizeDialog && selectedLayer !== null && (
+        <ExactSizeDialog
+          layer={selectedLayer}
+          dpi={currentDocument.dpi}
+          defaultUnit={statusBarUnit}
+          onApply={resizeSelectedLayer}
+          onClose={() => setShowExactSizeDialog(false)}
+        />
+      )}
 
       {showFontsBrowser && (
         <div className="util-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowFontsBrowser(false); }}>
@@ -6337,7 +7350,27 @@ export function EditorScreen({ onBackHome, onImportPsd, onOpenClassPhotoWizard, 
       })()}
 
       <AiToolsContainer />
+      <SmartExpandModal stageRef={stageRef} />
       <AiStyleStudioContainer />
+      <AutoFixModal />
+      <CurvesModal />
+      <ShadowHighlightsModal />
+
+      {contentFillWorkspace !== null && (
+        <ContentAwareFillWorkspace
+          baseImageDataUrl={contentFillWorkspace.imageDataUrl}
+          width={contentFillWorkspace.width}
+          height={contentFillWorkspace.height}
+          asset={contentFillWorkspace.asset}
+          layer={contentFillWorkspace.layer}
+          onApplied={(url) => {
+            commitFilledLayerImage(contentFillWorkspace.layer, contentFillWorkspace.asset, url, contentFillWorkspace.width, contentFillWorkspace.height);
+            setContentFillWorkspace(null);
+            useUiBusyStore.getState().flashToast("המילוי הוחל • Ctrl+Z לביטול");
+          }}
+          onClose={() => setContentFillWorkspace(null)}
+        />
+      )}
 
     </main>
   );
@@ -6611,6 +7644,7 @@ function ContextToolbar({
   onImageEditResetMask,
   onSmartScreenshotCrop,
   onResetSmartScreenshotCrop,
+  onAlign,
   onMoveLayer,
   onNotify,
   onPasteTextStyle,
@@ -6651,6 +7685,7 @@ function ContextToolbar({
   onImageEditResetMask: () => void;
   onSmartScreenshotCrop: () => void;
   onResetSmartScreenshotCrop: () => void;
+  onAlign: (command: AlignmentCommand) => void;
   onMoveLayer: (direction: "forward" | "backward" | "front" | "back") => void;
   onNotify: (message: string) => void;
   onPasteTextStyle: () => void;
@@ -6679,7 +7714,46 @@ function ContextToolbar({
     );
   }
   if (selectedLayers.length > 1) {
-    return <MixedSelectionToolbar selectedLayers={selectedLayers} onDelete={onDelete} onDuplicate={onDuplicate} onMoveLayer={onMoveLayer} />;
+    const allText = selectedLayers.every((layer) => layer.type === "text");
+    const sameImageKind = selectedLayer !== null &&
+      (selectedLayer.type === "image" || selectedLayer.type === "frame") &&
+      selectedLayers.every((layer) => layer.type === selectedLayer.type);
+
+    if (allText && selectedLayer?.type === "text") {
+      return (
+        <TextContextToolbar
+          hasTextStyleClipboard={hasTextStyleClipboard}
+          layer={selectedLayer}
+          selectionCount={selectedLayers.length}
+          onApplyPreset={onApplyPreset}
+          onBrowseFonts={onBrowseFonts}
+          onCopyTextStyle={onCopyTextStyle}
+          onDelete={onDelete}
+          onDuplicate={onDuplicate}
+          onMoveLayer={onMoveLayer}
+          onNotify={onNotify}
+          onPasteTextStyle={onPasteTextStyle}
+          onPatch={onPatch}
+          onSmartTextFit={onSmartTextFit}
+        />
+      );
+    }
+
+    if (sameImageKind && (selectedLayer?.type === "image" || selectedLayer?.type === "frame")) {
+      return (
+        <BatchImageSelectionToolbar
+          layer={selectedLayer}
+          selectedLayers={selectedLayers as Array<Extract<VisualLayer, { type: "image" | "frame" }>>}
+          onAlign={onAlign}
+          onDelete={onDelete}
+          onDuplicate={onDuplicate}
+          onMoveLayer={onMoveLayer}
+          onPatch={onPatch}
+        />
+      );
+    }
+
+    return <MixedSelectionToolbar selectedLayers={selectedLayers} onAlign={onAlign} onDelete={onDelete} onDuplicate={onDuplicate} onMoveLayer={onMoveLayer} />;
   }
   if (selectedLayer?.type === "text") {
     return (
@@ -6796,26 +7870,6 @@ function EmptyContextToolbar({
         ) : null}
       </div>
       <div className="context-group">
-        <button
-          type="button"
-          className={`context-icon${drawingTool === "marquee" ? " on" : ""}`}
-          onClick={() => setDrawingTool(drawingTool === "marquee" ? null : "marquee")}
-          title="בחירת מלבן (M)"
-          data-testid="tool-marquee"
-        >
-          <RectangleHorizontal size={14} />
-        </button>
-        <button
-          type="button"
-          className={`context-icon${drawingTool === "lasso" ? " on" : ""}`}
-          onClick={() => setDrawingTool(drawingTool === "lasso" ? null : "lasso")}
-          title="לאסו (L)"
-          data-testid="tool-lasso"
-        >
-          <span style={{ fontSize: 11, fontWeight: 700 }}>⌒</span>
-        </button>
-      </div>
-      <div className="context-group">
         <ToolbarButton icon={Type} label="הוסף טקסט" onClick={onAddText} />
         <ToolbarButton icon={ImagePlus} label="הוסף תמונה" onClick={onAddImage} />
       </div>
@@ -6830,6 +7884,7 @@ function EmptyContextToolbar({
 function TextContextToolbar({
   hasTextStyleClipboard,
   layer,
+  selectionCount = 1,
   onApplyPreset,
   onBrowseFonts,
   onCopyTextStyle,
@@ -6843,6 +7898,7 @@ function TextContextToolbar({
 }: {
   hasTextStyleClipboard: boolean;
   layer: Extract<VisualLayer, { type: "text" }>;
+  selectionCount?: number;
   onApplyPreset: (preset: TextPreset) => void;
   onBrowseFonts: () => void;
   onCopyTextStyle: () => void;
@@ -6911,8 +7967,8 @@ function TextContextToolbar({
     let normalizedFile: File;
     try {
       normalizedFile = await normalizeIncomingImage(file);
-    } catch {
-      onNotify(HEIC_CONVERSION_ERROR_MESSAGE);
+    } catch (err) {
+      onNotify(err instanceof Error && err.message ? err.message : HEIC_CONVERSION_ERROR_MESSAGE);
       return;
     }
     const reader = new FileReader();
@@ -6930,7 +7986,7 @@ function TextContextToolbar({
 
   return (
     <section className="context-toolbar text-mode" aria-label="Text context toolbar" data-testid="context-toolbar">
-      <span className="context-toolbar-label">טקסט</span>
+      <span className="context-toolbar-label">{selectionCount > 1 ? `טקסטים (${selectionCount})` : "טקסט"}</span>
       <div className="context-group font-context">
         <FontSelector value={layer.fontFamily} onChange={(family) => onPatch({ fontFamily: family } as Partial<VisualLayer>)} />
         <button className="btn btn-ghost compact" onClick={onBrowseFonts} title="גלישת Google Fonts" type="button">
@@ -7038,9 +8094,109 @@ function TextContextToolbar({
   );
 }
 
-function MixedSelectionToolbar({ selectedLayers, onDelete, onDuplicate, onMoveLayer }: { selectedLayers: VisualLayer[]; onDelete: () => void; onDuplicate: () => void; onMoveLayer: (direction: "forward" | "backward" | "front" | "back") => void; }): ReactElement {
-  const allText = selectedLayers.every((layer) => layer.type === "text");
-  return <section className="context-toolbar" aria-label="Mixed selection toolbar" data-testid="context-toolbar"><span className="context-toolbar-label">{allText ? "בחירת טקסטים" : "בחירה מרובה"} ({selectedLayers.length})</span><div className="context-group"><ToolbarButton icon={Copy} label="שכפל בחירה" onClick={onDuplicate} /><ToolbarButton icon={ChevronsUp} label="הבא קדימה" onClick={() => onMoveLayer("forward")} /><ToolbarButton icon={ChevronsDown} label="שלח אחורה" onClick={() => onMoveLayer("backward")} /><ToolbarButton danger icon={Trash2} label="מחק בחירה" onClick={onDelete} /></div><span className="context-muted">ערכים מעורבים יוצגו כאן בהמשך</span></section>;
+function BatchImageSelectionToolbar({
+  layer,
+  selectedLayers,
+  onAlign,
+  onDelete,
+  onDuplicate,
+  onMoveLayer,
+  onPatch
+}: {
+  layer: Extract<VisualLayer, { type: "image" | "frame" }>;
+  selectedLayers: Array<Extract<VisualLayer, { type: "image" | "frame" }>>;
+  onAlign: (command: AlignmentCommand) => void;
+  onDelete: () => void;
+  onDuplicate: () => void;
+  onMoveLayer: (direction: "forward" | "backward" | "front" | "back") => void;
+  onPatch: (patch: Partial<VisualLayer>) => void;
+}): ReactElement {
+  const isFrame = layer.type === "frame";
+  const radius = isFrame ? layer.cornerRadius ?? 0 : Number(layer.metadata["imageCornerRadius"] ?? 0);
+  const flipH = Boolean(layer.metadata["flipH"]);
+  const flipV = Boolean(layer.metadata["flipV"]);
+
+  function patchMeta(patch: Record<string, string | number | boolean | null>): void {
+    onPatch({ metadata: { ...layer.metadata, ...patch } as Record<string, import("@/types/primitives").JsonValue> });
+  }
+
+  function setRadius(value: number): void {
+    if (isFrame) {
+      onPatch({ cornerRadius: value } as Partial<VisualLayer>);
+      return;
+    }
+    patchMeta({ imageCornerRadius: value });
+  }
+
+  return (
+    <section className="context-toolbar image-mode batch-mode" aria-label="Batch image toolbar" data-testid="context-toolbar">
+      <span className="context-toolbar-label">תמונות ({selectedLayers.length})</span>
+      <div className="context-group">
+        <ToolbarButton icon={AlignLeft} label="יישור שמאל" onClick={() => onAlign("left")} />
+        <ToolbarButton icon={AlignCenter} label="יישור מרכז אופקי" onClick={() => onAlign("centerX")} />
+        <ToolbarButton icon={AlignRight} label="יישור ימין" onClick={() => onAlign("right")} />
+        <ToolbarButton icon={ChevronsUp} label="יישור למעלה" onClick={() => onAlign("top")} />
+        <ToolbarButton icon={AlignCenter} label="יישור מרכז אנכי" onClick={() => onAlign("centerY")} />
+        <ToolbarButton icon={ChevronsDown} label="יישור למטה" onClick={() => onAlign("bottom")} />
+      </div>
+      <div className="context-group">
+        <select
+          className="context-select compact"
+          title="מצב התאמה"
+          value={layer.fitMode}
+          onChange={(event) => onPatch({ fitMode: event.target.value as "fit" | "fill" | "stretch" } as Partial<VisualLayer>)}
+        >
+          <option value="fit">Fit</option>
+          <option value="fill">Fill</option>
+          <option value="stretch">Stretch</option>
+        </select>
+        <CompactRange label="Radius" min={0} max={80} value={radius} onChange={setRadius} />
+      </div>
+      <div className="context-group">
+        <CompactRange label="Opacity" min={0} max={1} step={0.01} value={layer.opacity} onChange={(value) => onPatch({ opacity: value } as Partial<VisualLayer>)} />
+        <BlendModeSelect value={layer.blendMode} onChange={(blendMode) => onPatch({ blendMode } as Partial<VisualLayer>)} />
+      </div>
+      <ToolbarMenu label="סיבוב והיפוך" title="סיבוב והיפוך">
+        <button className="context-menu-button" type="button" onClick={() => rotateSelectionByEvent(90)}><RotateCw size={13} /> סובב 90° עם כיוון השעון</button>
+        <button className="context-menu-button" type="button" onClick={() => rotateSelectionByEvent(-90)}><RotateCcw size={13} /> סובב 90° נגד כיוון השעון</button>
+        <button className="context-menu-button" type="button" onClick={() => rotateSelectionByEvent(180)}><RotateCw size={13} /> סובב 180°</button>
+        <div className="context-divider" />
+        <button className={`context-menu-button${flipH ? " on" : ""}`} type="button" onClick={() => patchMeta({ flipH: !flipH })}><FlipHorizontal size={13} /> היפוך אופקי</button>
+        <button className={`context-menu-button${flipV ? " on" : ""}`} type="button" onClick={() => patchMeta({ flipV: !flipV })}><FlipVertical size={13} /> היפוך אנכי</button>
+      </ToolbarMenu>
+      <div className="context-group">
+        <ToolbarButton icon={Copy} label="שכפל בחירה" onClick={onDuplicate} />
+        <ToolbarButton active={selectedLayers.every((item) => item.locked)} icon={selectedLayers.every((item) => item.locked) ? Lock : Unlock} label="נעל / שחרר בחירה" onClick={() => onPatch({ locked: !selectedLayers.every((item) => item.locked) } as Partial<VisualLayer>)} />
+        <ToolbarButton icon={ChevronsUp} label="הבא קדימה" onClick={() => onMoveLayer("forward")} />
+        <ToolbarButton icon={ChevronsDown} label="שלח אחורה" onClick={() => onMoveLayer("backward")} />
+        <ToolbarButton danger icon={Trash2} label="מחק בחירה" onClick={onDelete} />
+      </div>
+    </section>
+  );
+}
+
+function MixedSelectionToolbar({ selectedLayers, onAlign, onDelete, onDuplicate, onMoveLayer }: { selectedLayers: VisualLayer[]; onAlign: (command: AlignmentCommand) => void; onDelete: () => void; onDuplicate: () => void; onMoveLayer: (direction: "forward" | "backward" | "front" | "back") => void; }): ReactElement {
+  const imageCount = selectedLayers.filter((layer) => layer.type === "image" || layer.type === "frame").length;
+  const textCount = selectedLayers.filter((layer) => layer.type === "text").length;
+  return (
+    <section className="context-toolbar batch-mode" aria-label="Mixed selection toolbar" data-testid="context-toolbar">
+      <span className="context-toolbar-label">בחירה מעורבת ({selectedLayers.length})</span>
+      <span className="context-muted">{imageCount} תמונות · {textCount} טקסטים</span>
+      <div className="context-group">
+        <ToolbarButton icon={AlignLeft} label="יישור שמאל" onClick={() => onAlign("left")} />
+        <ToolbarButton icon={AlignCenter} label="יישור מרכז אופקי" onClick={() => onAlign("centerX")} />
+        <ToolbarButton icon={AlignRight} label="יישור ימין" onClick={() => onAlign("right")} />
+        <ToolbarButton icon={ChevronsUp} label="יישור למעלה" onClick={() => onAlign("top")} />
+        <ToolbarButton icon={ChevronsDown} label="יישור למטה" onClick={() => onAlign("bottom")} />
+      </div>
+      <div className="context-group">
+        <ToolbarButton icon={Copy} label="שכפל בחירה" onClick={onDuplicate} />
+        <ToolbarButton icon={ChevronsUp} label="הבא קדימה" onClick={() => onMoveLayer("forward")} />
+        <ToolbarButton icon={ChevronsDown} label="שלח אחורה" onClick={() => onMoveLayer("backward")} />
+        <ToolbarButton danger icon={Trash2} label="מחק בחירה" onClick={onDelete} />
+      </div>
+    </section>
+  );
 }
 
 function PlaceholderContextToolbar({ label, onDelete, onDuplicate, onMoveLayer }: { label: string; onDelete: () => void; onDuplicate: () => void; onMoveLayer: (direction: "forward" | "backward" | "front" | "back") => void; }): ReactElement {
@@ -7303,17 +8459,9 @@ function ImageContextToolbar({
 
   // ג”€ג”€ג”€ Fit to canvas ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
   function fitToCanvas(mode: "fill" | "fit"): void {
-    const imgW = layer.width;
-    const imgH = layer.height;
-    if (imgW <= 0 || imgH <= 0) return;
-    const scaleX = canvasWidth / imgW;
-    const scaleY = canvasHeight / imgH;
-    const scale = mode === "fill" ? Math.max(scaleX, scaleY) : Math.min(scaleX, scaleY);
-    const newW = imgW * scale;
-    const newH = imgH * scale;
-    const newX = (canvasWidth - newW) / 2;
-    const newY = (canvasHeight - newH) / 2;
-    onPatch({ width: newW, height: newH, x: newX, y: newY } as Partial<VisualLayer>);
+    if (layer.width <= 0 || layer.height <= 0) return;
+    // Rotation-aware placement (see placeLayerToCanvas) so a rotated layer stays centered on-canvas.
+    onPatch(placeLayerToCanvas(layer, canvasWidth, canvasHeight, mode) as Partial<VisualLayer>);
   }
 
   return (
@@ -7452,11 +8600,14 @@ function ImageContextToolbar({
           </button>
         </div>
       </ToolbarMenu>
-      <div className="context-group">
-        <ToolbarButton icon={RotateCw} label="סובב 90°" onClick={() => onPatch({ rotation: ((layer.rotation ?? 0) + 90) % 360 } as Partial<VisualLayer>)} />
-        <ToolbarButton active={flipH} icon={FlipHorizontal} label="היפוך אופקי" onClick={() => patchMeta({ flipH: !flipH })} />
-        <ToolbarButton active={flipV} icon={FlipVertical} label="היפוך אנכי" onClick={() => patchMeta({ flipV: !flipV })} />
-      </div>
+      <ToolbarMenu label="סיבוב והיפוך" title="סיבוב והיפוך">
+        <button className="context-menu-button" type="button" onClick={() => rotateSelectionByEvent(90)}><RotateCw size={13} /> סובב 90° עם כיוון השעון</button>
+        <button className="context-menu-button" type="button" onClick={() => rotateSelectionByEvent(-90)}><RotateCcw size={13} /> סובב 90° נגד כיוון השעון</button>
+        <button className="context-menu-button" type="button" onClick={() => rotateSelectionByEvent(180)}><RotateCw size={13} /> סובב 180°</button>
+        <div className="context-divider" />
+        <button className={`context-menu-button${flipH ? " on" : ""}`} type="button" onClick={() => patchMeta({ flipH: !flipH })}><FlipHorizontal size={13} /> היפוך אופקי</button>
+        <button className={`context-menu-button${flipV ? " on" : ""}`} type="button" onClick={() => patchMeta({ flipV: !flipV })}><FlipVertical size={13} /> היפוך אנכי</button>
+      </ToolbarMenu>
 
       {/* Image Edit Mode entry — only for free ImageLayer */}
       {layer.type === "image" && (
@@ -7841,6 +8992,89 @@ function TemplateSaveModal({
   );
 }
 
+function CloudSaveAsModal({
+  initialName,
+  onConfirm,
+  onCancel,
+}: {
+  initialName: string;
+  onConfirm: (name: string) => void | Promise<void>;
+  onCancel: () => void;
+}): ReactElement {
+  const [name, setName] = useState(initialName);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.select();
+  }, []);
+
+  function handleKeyDown(e: React.KeyboardEvent): void {
+    if (e.key === "Enter" && name.trim()) void onConfirm(name);
+    if (e.key === "Escape") onCancel();
+  }
+
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 9999,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        background: "rgba(0,0,0,0.55)",
+      }}
+      onClick={onCancel}
+    >
+      <div
+        style={{
+          background: "var(--color-surface, #17233d)",
+          border: "1px solid rgba(255,255,255,0.15)",
+          borderRadius: 14, padding: "26px 28px", width: 340,
+          display: "flex", flexDirection: "column", gap: 14, direction: "rtl",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <CloudUpload size={16} style={{ color: "#60a5fa", flexShrink: 0 }} />
+          <strong style={{ fontSize: 15 }}>שמירה בענן בשם</strong>
+        </div>
+        <p style={{ margin: 0, fontSize: 12.5, color: "var(--color-text-secondary, #aebbd0)", lineHeight: 1.5 }}>
+          בחרו שם לפרויקט שיישמר בענן.
+        </p>
+        <input
+          ref={inputRef}
+          dir="auto"
+          placeholder="שם הפרויקט"
+          style={{
+            padding: "8px 10px",
+            borderRadius: 8, border: "1px solid rgba(255,255,255,0.18)",
+            background: "rgba(255,255,255,0.06)", color: "inherit",
+            fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box",
+          }}
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={handleKeyDown}
+        />
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button
+            style={{ padding: "7px 16px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.15)", background: "transparent", color: "inherit", cursor: "pointer", fontSize: 13 }}
+            onClick={onCancel}
+            type="button"
+          >
+            ביטול
+          </button>
+          <button
+            disabled={!name.trim()}
+            style={{ padding: "7px 16px", borderRadius: 8, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600, opacity: name.trim() ? 1 : 0.5 }}
+            onClick={() => name.trim() && void onConfirm(name)}
+            type="button"
+          >
+            שמור בענן
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ג”€ג”€ג”€ Batch Variable Section ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
 function BatchVariableSection({
@@ -8013,6 +9247,8 @@ function TextStudio({
   onNotify,
   onPatch,
   onPasteTextStyle,
+  selectedTextRange,
+  onTextSelectionChange,
   onTextChange
 }: {
   hasTextStyleClipboard: boolean;
@@ -8025,6 +9261,8 @@ function TextStudio({
   onNotify?: (message: string) => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
   onPasteTextStyle: () => void;
+  selectedTextRange: TextSelectionRange | null;
+  onTextSelectionChange: (selection: TextSelectionRange | null) => void;
   onTextChange: (text: string) => void;
 }): ReactElement {
   return (
@@ -8038,6 +9276,8 @@ function TextStudio({
           onNotify={onNotify}
           onPasteTextStyle={onPasteTextStyle}
           onPatch={onPatch}
+          selectedTextRange={selectedTextRange}
+          onTextSelectionChange={onTextSelectionChange}
           onTextChange={onTextChange}
         />
       </AccordionSection>
@@ -8688,6 +9928,18 @@ function ImageAiToolsPanel({
       <div className="image-ai-tool-grid">
         <button
             className="image-ai-tool-btn"
+            disabled={!hasEditableImage}
+            type="button"
+            onClick={() => useSmartExpandStore.getState().open({ kind: "canvas", layerId: layer.id })}
+          >
+            <Maximize2 size={15} />
+            <span>
+              <strong>✨ מלא קנבס בעזרת AI</strong>
+              <small>הרחבה חכמה — השלמת השטח הריק סביב התמונה.</small>
+            </span>
+          </button>
+        <button
+            className="image-ai-tool-btn"
             disabled={aiStylesDisabled}
             type="button"
             onClick={() => onOpenAiStyles?.()}
@@ -8785,20 +10037,20 @@ const QUICK_COLOR_PARAMS: QuickSliderParam[] = [
   {
     key: "saturation",
     label: "רוויה",
-    min: -40,
-    max: 40,
-    step: 0.1,
+    min: -60,
+    max: 60,
+    step: 0.5,
     default: 0,
-    hint: "חיזוק או החלשה מתונה של צבעים"
+    hint: "חיזוק או החלשה של צבעים — 0 = ניטרלי, שלילי מחוויר"
   },
   {
     key: "hue",
     label: "גוון",
-    min: -25,
-    max: 25,
-    step: 0.1,
+    min: -40,
+    max: 40,
+    step: 0.5,
     default: 0,
-    hint: "הסטת גוון עדינה בלבד"
+    hint: "סיבוב גוון הצבעים"
   },
   {
     key: "blur",
@@ -8854,6 +10106,19 @@ function imageParamString(params: EngineParams, key: string, fallback: string): 
   return typeof value === "string" ? value : fallback;
 }
 
+function normalizedEdgeFade(settings: EdgeFadeSettings | undefined): EdgeFadeSettings {
+  return {
+    ...DEFAULT_EDGE_FADE_SETTINGS,
+    ...(settings ?? {}),
+    depth: clampQuickValue(settings?.depth ?? DEFAULT_EDGE_FADE_SETTINGS.depth, 0, 1),
+    softness: clampQuickValue(settings?.softness ?? DEFAULT_EDGE_FADE_SETTINGS.softness, 0, 1),
+    strength: clampQuickValue(settings?.strength ?? DEFAULT_EDGE_FADE_SETTINGS.strength, 0, 1),
+    shape: settings?.shape === "roundedRect" || settings?.shape === "ellipse" || settings?.shape === "rect"
+      ? settings.shape
+      : DEFAULT_EDGE_FADE_SETTINGS.shape
+  };
+}
+
 function clampQuickValue(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -8904,6 +10169,47 @@ function QuickSlider({
   const displayValue = formatQuickValue(value, decimals);
   const [manualDraft, setManualDraft] = useState(displayValue);
   const [manualEditing, setManualEditing] = useState(false);
+
+  // Live drag value: dragging the range fires onChange on every pixel, and each
+  // commit re-rasterises the Konva node. We keep the thumb responsive via local
+  // state but coalesce store commits to one per animation frame, then flush the
+  // final value on release — removing the lag without dropping the last value.
+  const [liveValue, setLiveValue] = useState<number | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const pendingRef = useRef<number | null>(null);
+  const sliderValue = liveValue ?? value;
+
+  const flushPending = useCallback(() => {
+    rafRef.current = null;
+    if (pendingRef.current !== null) {
+      onChange(param.key, pendingRef.current);
+      pendingRef.current = null;
+    }
+  }, [onChange, param.key]);
+
+  const handleRangeChange = useCallback((next: number) => {
+    setLiveValue(next);
+    pendingRef.current = next;
+    if (rafRef.current === null) {
+      rafRef.current = requestAnimationFrame(flushPending);
+    }
+  }, [flushPending]);
+
+  const handleRangeRelease = useCallback(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    if (pendingRef.current !== null) {
+      onChange(param.key, pendingRef.current);
+      pendingRef.current = null;
+    }
+    setLiveValue(null);
+  }, [onChange, param.key]);
+
+  useEffect(() => () => {
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+  }, []);
 
   useEffect(() => {
     if (!manualEditing) setManualDraft(displayValue);
@@ -8978,12 +10284,426 @@ function QuickSlider({
         min={param.min}
         max={param.max}
         step={param.step}
-        value={value}
-        onChange={(event) => onChange(param.key, Number(event.target.value))}
+        value={sliderValue}
+        onChange={(event) => handleRangeChange(Number(event.target.value))}
+        onPointerUp={handleRangeRelease}
+        onPointerCancel={handleRangeRelease}
+        onKeyUp={handleRangeRelease}
         style={{ width: "100%", accentColor: isDirty ? "#7C6FE0" : undefined }}
       />
     </div>
   );
+}
+
+function EdgeFadeControls({
+  layer,
+  onPatch
+}: {
+  layer: ImageLayer;
+  onPatch: (patch: Partial<VisualLayer>) => void;
+}): ReactElement {
+  const fade = normalizedEdgeFade(layer.edgeFade);
+  const params: EngineParams = {
+    depth: fade.depth,
+    softness: fade.softness,
+    strength: fade.strength
+  };
+  const isDirty =
+    fade.enabled !== DEFAULT_EDGE_FADE_SETTINGS.enabled ||
+    fade.depth !== DEFAULT_EDGE_FADE_SETTINGS.depth ||
+    fade.softness !== DEFAULT_EDGE_FADE_SETTINGS.softness ||
+    fade.strength !== DEFAULT_EDGE_FADE_SETTINGS.strength ||
+    fade.shape !== DEFAULT_EDGE_FADE_SETTINGS.shape;
+
+  function patchEdgeFade(patch: Partial<EdgeFadeSettings>): void {
+    onPatch({ edgeFade: { ...fade, ...patch } });
+  }
+
+  function resetEdgeFade(): void {
+    onPatch({ edgeFade: { ...DEFAULT_EDGE_FADE_SETTINGS } });
+  }
+
+  return (
+    <AccordionSection title="Edge Fade" defaultOpen={fade.enabled}>
+      <label className="edge-fade-toggle">
+        <input
+          checked={fade.enabled}
+          onChange={(event) => patchEdgeFade({ enabled: event.target.checked })}
+          type="checkbox"
+        />
+        <span>Enabled</span>
+      </label>
+
+      <QuickSlider
+        param={{ key: "depth", label: "Depth", min: 0, max: 0.5, step: 0.01, default: DEFAULT_EDGE_FADE_SETTINGS.depth, decimals: 2, hint: "How far the transparent fade reaches inward from the image edges." }}
+        params={params}
+        onChange={(_key, value) => patchEdgeFade({ depth: value })}
+      />
+      <QuickSlider
+        param={{ key: "softness", label: "Softness", min: 0, max: 1, step: 0.01, default: DEFAULT_EDGE_FADE_SETTINGS.softness, decimals: 2, hint: "How gradual the alpha transition feels." }}
+        params={params}
+        onChange={(_key, value) => patchEdgeFade({ softness: value })}
+      />
+      <QuickSlider
+        param={{ key: "strength", label: "Strength", min: 0, max: 1, step: 0.01, default: DEFAULT_EDGE_FADE_SETTINGS.strength, decimals: 2, hint: "How transparent the outer edge becomes." }}
+        params={params}
+        onChange={(_key, value) => patchEdgeFade({ strength: value })}
+      />
+
+      <label className="edge-fade-shape">
+        <span>Shape</span>
+        <select value={fade.shape} onChange={(event) => patchEdgeFade({ shape: event.target.value as EdgeFadeShape })}>
+          <option value="rect">Rectangle</option>
+          <option value="roundedRect">Rounded Rectangle</option>
+          <option value="ellipse">Ellipse</option>
+        </select>
+      </label>
+
+      <button className="btn btn-ghost edge-fade-reset" disabled={!isDirty} onClick={resetEdgeFade} type="button">
+        <RotateCcw size={13} /> Reset
+      </button>
+    </AccordionSection>
+  );
+}
+
+type ImageBarMenu = "edgeFade" | "rotate" | "transform" | "more" | null;
+type ImagePopoverPlacement = "right" | "left" | "bottom" | "top";
+
+function ContextualImageBar({
+  canvasAreaRef,
+  layer,
+  stageRef,
+  viewportSignature,
+  onEdit,
+  onPatch,
+  onSmartExpand,
+  onSelectObject,
+  onRemoveBackground,
+  onRotate,
+  onFitCanvasFill,
+  onFitCanvasFit,
+  onCenterCanvas,
+  onResetTransform,
+  onFlipHorizontal,
+  onFlipVertical,
+  onOpenAdvancedEditor,
+  onReplaceImage,
+  onDuplicate,
+  onDelete
+}: {
+  canvasAreaRef: RefObject<HTMLDivElement | null>;
+  layer: ImageLayer;
+  stageRef: RefObject<Konva.Stage | null>;
+  viewportSignature: string;
+  onEdit: () => void;
+  onPatch: (patch: Partial<ImageLayer>) => void;
+  onSmartExpand: () => void;
+  onSelectObject: () => void;
+  onRemoveBackground: () => void;
+  onRotate: (delta: number) => void;
+  onFitCanvasFill: () => void;
+  onFitCanvasFit: () => void;
+  onCenterCanvas: () => void;
+  onResetTransform: () => void;
+  onFlipHorizontal: () => void;
+  onFlipVertical: () => void;
+  onOpenAdvancedEditor: () => void;
+  onReplaceImage: () => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+}): ReactElement | null {
+  const [openMenu, setOpenMenu] = useState<ImageBarMenu>(null);
+  const [style, setStyle] = useState<CSSProperties | null>(null);
+  const [popoverPlacement, setPopoverPlacement] = useState<ImagePopoverPlacement>("bottom");
+  const [popoverOffset, setPopoverOffset] = useState({ x: 0, y: 0 });
+  const popoverDragRef = useRef<{
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
+  const fade = normalizedEdgeFade(layer.edgeFade);
+
+  const updatePosition = useCallback(() => {
+    const stage = stageRef.current;
+    const canvasArea = canvasAreaRef.current;
+    if (stage === null || canvasArea === null) {
+      setStyle(null);
+      return;
+    }
+    const node = stage.findOne(`#${layer.id}`);
+    const container = stage.container();
+    if (node === undefined || node === null || container === null) {
+      setStyle(null);
+      return;
+    }
+    const containerRect = container.getBoundingClientRect();
+    const areaRect = canvasArea.getBoundingClientRect();
+    const barWidth = 344;
+    const barHeight = 38;
+    const transform = node.getAbsoluteTransform().copy();
+    const points = [
+      transform.point({ x: 0, y: 0 }),
+      transform.point({ x: layer.width, y: 0 }),
+      transform.point({ x: layer.width, y: layer.height }),
+      transform.point({ x: 0, y: layer.height })
+    ];
+    const minX = Math.min(...points.map((point) => point.x));
+    const minY = Math.min(...points.map((point) => point.y));
+    const maxX = Math.max(...points.map((point) => point.x));
+    const maxY = Math.max(...points.map((point) => point.y));
+    const screenLeft = containerRect.left - areaRect.left + minX;
+    const screenTop = containerRect.top - areaRect.top + minY;
+    const screenRight = containerRect.left - areaRect.left + maxX;
+    const screenBottom = containerRect.top - areaRect.top + maxY;
+    const centerX = (screenLeft + screenRight) / 2;
+    const areaWidth = Math.max(1, areaRect.width);
+    const areaHeight = Math.max(1, areaRect.height);
+    const maxLeft = Math.max(8, areaWidth - barWidth - 8);
+    const left = Math.max(8, Math.min(maxLeft, centerX - barWidth / 2));
+    const aboveTop = screenTop - barHeight - 10;
+    const belowTop = screenBottom + 10;
+    const maxTop = Math.max(8, areaHeight - barHeight - 8);
+    const insideBottomTop = screenBottom - barHeight - 10;
+    const top = aboveTop >= 8
+      ? Math.min(maxTop, aboveTop)
+      : belowTop <= maxTop
+        ? Math.max(8, belowTop)
+        : Math.max(8, Math.min(maxTop, insideBottomTop));
+    setStyle({
+      left: left + canvasArea.scrollLeft,
+      top: top + canvasArea.scrollTop
+    });
+    const popoverWidth = 260;
+    const popoverHeight = 236;
+    const rightSpace = areaWidth - screenRight;
+    const leftSpace = screenLeft;
+    const bottomSpace = areaHeight - screenBottom;
+    const topSpace = screenTop;
+    const nextPlacement: ImagePopoverPlacement =
+      rightSpace >= popoverWidth + 16 ? "right"
+        : leftSpace >= popoverWidth + 16 ? "left"
+          : bottomSpace >= popoverHeight + 16 ? "bottom"
+            : topSpace >= popoverHeight + 16 ? "top"
+              : top > areaHeight * 0.58 ? "top" : "bottom";
+    setPopoverPlacement(nextPlacement);
+  }, [canvasAreaRef, layer.height, layer.id, layer.width, stageRef]);
+
+  useEffect(() => {
+    const canvasArea = canvasAreaRef.current;
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    canvasArea?.addEventListener("scroll", updatePosition, { passive: true });
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      canvasArea?.removeEventListener("scroll", updatePosition);
+    };
+  }, [
+    canvasAreaRef,
+    updatePosition,
+    viewportSignature,
+    layer.x,
+    layer.y,
+    layer.width,
+    layer.height,
+    layer.rotation
+  ]);
+
+  useEffect(() => {
+    setOpenMenu(null);
+  }, [layer.id]);
+
+  useEffect(() => {
+    setPopoverOffset({ x: 0, y: 0 });
+  }, [layer.id, openMenu, popoverPlacement]);
+
+  useEffect(() => {
+    function handleMove(event: MouseEvent): void {
+      const drag = popoverDragRef.current;
+      if (drag === null) return;
+      setPopoverOffset({
+        x: drag.originX + event.clientX - drag.startX,
+        y: drag.originY + event.clientY - drag.startY
+      });
+    }
+
+    function handleUp(): void {
+      popoverDragRef.current = null;
+    }
+
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, []);
+
+  if (style === null) return null;
+
+  function patchEdgeFade(patch: Partial<EdgeFadeSettings>): void {
+    onPatch({ edgeFade: { ...fade, ...patch } });
+  }
+
+  function closeThen(action: () => void): void {
+    setOpenMenu(null);
+    action();
+  }
+
+  function beginPopoverDrag(event: ReactMouseEvent<HTMLDivElement>): void {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    popoverDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: popoverOffset.x,
+      originY: popoverOffset.y
+    };
+  }
+
+  const popoverStyle: CSSProperties | undefined = popoverOffset.x !== 0 || popoverOffset.y !== 0
+    ? { transform: `translate(${popoverOffset.x}px, ${popoverOffset.y}px)` }
+    : undefined;
+
+  const popoverClass = `contextual-image-popover placement-${popoverPlacement}`;
+
+  return (
+    <div
+      className="contextual-image-bar"
+      style={style}
+      onMouseDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+      data-testid="contextual-image-bar"
+    >
+      <IconOnlyButton icon={Crop} label="Image Edit" onClick={onEdit} />
+      <IconOnlyButton active={fade.enabled} icon={SquareRoundCorner} label="Edge Fade" onClick={() => setOpenMenu(openMenu === "edgeFade" ? null : "edgeFade")} />
+      <span className="contextual-image-separator" />
+      <IconOnlyButton icon={Maximize2} label="Smart Expand" onClick={onSmartExpand} />
+      <IconOnlyButton icon={MousePointer2} label="Select Object" onClick={onSelectObject} />
+      <IconOnlyButton icon={Eraser} label="Remove Background" onClick={onRemoveBackground} />
+      <span className="contextual-image-separator" />
+      <IconOnlyButton icon={RotateCw} label="Rotate" onClick={() => setOpenMenu(openMenu === "rotate" ? null : "rotate")} />
+      <IconOnlyButton icon={MoveHorizontal} label="Transform" onClick={() => setOpenMenu(openMenu === "transform" ? null : "transform")} />
+      <IconOnlyButton icon={MoreVertical} label="More" onClick={() => setOpenMenu(openMenu === "more" ? null : "more")} />
+
+      {openMenu === "edgeFade" && (
+        <div className={`${popoverClass} edge-fade-popover`} style={popoverStyle}>
+          <div className="ctx-popover-drag-handle" onMouseDown={beginPopoverDrag}>
+            <span>Edge Fade</span>
+            <MoveHorizontal size={13} />
+          </div>
+          <label className="ctx-mini-check">
+            <input checked={fade.enabled} onChange={(event) => patchEdgeFade({ enabled: event.target.checked })} type="checkbox" />
+            Enabled
+          </label>
+          <MiniRange label="Depth" max={0.5} min={0} step={0.01} value={fade.depth} onChange={(value) => patchEdgeFade({ depth: value })} />
+          <MiniRange label="Softness" max={1} min={0} step={0.01} value={fade.softness} onChange={(value) => patchEdgeFade({ softness: value })} />
+          <MiniRange label="Strength" max={1} min={0} step={0.01} value={fade.strength} onChange={(value) => patchEdgeFade({ strength: value })} />
+          <div className="ctx-icon-seg" aria-label="Edge Fade shape">
+            <button className={fade.shape === "rect" ? "on" : ""} title="Rectangle" type="button" onClick={() => patchEdgeFade({ shape: "rect" })}><Square size={15} /></button>
+            <button className={fade.shape === "roundedRect" ? "on" : ""} title="Rounded Rectangle" type="button" onClick={() => patchEdgeFade({ shape: "roundedRect" })}><SquareRoundCorner size={15} /></button>
+            <button className={fade.shape === "ellipse" ? "on" : ""} title="Ellipse" type="button" onClick={() => patchEdgeFade({ shape: "ellipse" })}><Circle size={15} /></button>
+          </div>
+            <button className="ctx-mini-command" type="button" onClick={() => onPatch({ edgeFade: { ...DEFAULT_EDGE_FADE_SETTINGS } })}>
+            <RotateCcw size={13} /> Reset
+          </button>
+        </div>
+      )}
+
+      {openMenu === "rotate" && (
+        <div className={`${popoverClass} compact-popover`} style={popoverStyle}>
+          <div className="ctx-popover-drag-handle" onMouseDown={beginPopoverDrag}>
+            <span>Rotate</span>
+            <MoveHorizontal size={13} />
+          </div>
+          <button type="button" onClick={() => closeThen(() => onRotate(-90))}><RotateCcw size={14} /> Rotate left</button>
+          <button type="button" onClick={() => closeThen(() => onRotate(90))}><RotateCw size={14} /> Rotate right</button>
+          <button type="button" onClick={() => closeThen(() => onRotate(180))}><RotateCw size={14} /> Rotate 180</button>
+        </div>
+      )}
+
+      {openMenu === "transform" && (
+        <div className={`${popoverClass} compact-popover`} style={popoverStyle}>
+          <div className="ctx-popover-drag-handle" onMouseDown={beginPopoverDrag}>
+            <span>Transform</span>
+            <MoveHorizontal size={13} />
+          </div>
+          <button type="button" onClick={() => closeThen(onFitCanvasFit)}><Minimize2Icon /> Fit to canvas</button>
+          <button type="button" onClick={() => closeThen(onFitCanvasFill)}><Maximize2 size={14} /> Fill canvas</button>
+          <button type="button" onClick={() => closeThen(onCenterCanvas)}><Crosshair size={14} /> Center</button>
+          <button type="button" onClick={() => closeThen(onFlipHorizontal)}><FlipHorizontal size={14} /> Flip horizontal</button>
+          <button type="button" onClick={() => closeThen(onFlipVertical)}><FlipVertical size={14} /> Flip vertical</button>
+          <button type="button" onClick={() => closeThen(onResetTransform)}><RotateCcw size={14} /> Reset transform</button>
+        </div>
+      )}
+
+      {openMenu === "more" && (
+        <div className={`${popoverClass} compact-popover`} style={popoverStyle}>
+          <div className="ctx-popover-drag-handle" onMouseDown={beginPopoverDrag}>
+            <span>More</span>
+            <MoveHorizontal size={13} />
+          </div>
+          <button type="button" onClick={() => closeThen(onOpenAdvancedEditor)}><Sparkles size={14} /> Advanced editor</button>
+          <button type="button" onClick={() => closeThen(onReplaceImage)}><Replace size={14} /> Replace image</button>
+          <button type="button" onClick={() => closeThen(onDuplicate)}><Copy size={14} /> Duplicate</button>
+          <button className="danger" type="button" onClick={() => closeThen(onDelete)}><Trash2 size={14} /> Delete</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IconOnlyButton({
+  active = false,
+  icon: Icon,
+  label,
+  onClick
+}: {
+  active?: boolean;
+  icon: LucideIcon;
+  label: string;
+  onClick: () => void;
+}): ReactElement {
+  return (
+    <button
+      aria-label={label}
+      className={`contextual-image-btn${active ? " on" : ""}`}
+      onClick={onClick}
+      title={label}
+      type="button"
+    >
+      <Icon size={15} />
+    </button>
+  );
+}
+
+function MiniRange({
+  label,
+  max,
+  min,
+  onChange,
+  step = 1,
+  value
+}: {
+  label: string;
+  max: number;
+  min: number;
+  onChange: (value: number) => void;
+  step?: number;
+  value: number;
+}): ReactElement {
+  return (
+    <label className="ctx-mini-range">
+      <span>{label}</span>
+      <input max={max} min={min} onChange={(event) => onChange(Number(event.target.value))} step={step} type="range" value={value} />
+      <output>{value.toFixed(step < 1 ? 2 : 0)}</output>
+    </label>
+  );
+}
+
+function Minimize2Icon(): ReactElement {
+  return <Maximize2 size={14} style={{ transform: "rotate(180deg)" }} />;
 }
 
 function ManagedImageFrameInspector({
@@ -9234,6 +10954,36 @@ function ImageStudio({
                   <Frame size={14} /> Use Alpha as Mask
                 </button>
               )}
+              {(layer.type === "image" || (layer.type === "frame" && layer.imageAssetId !== undefined)) && (
+                <button
+                  className="toggle"
+                  onClick={() => useAutoFixStore.getState().open(layer.id)}
+                  title="תיקון אוטומטי של תאורה, צבע וניגודיות"
+                  type="button"
+                >
+                  <Sparkles size={14} /> תיקון אוטומטי
+                </button>
+              )}
+              {(layer.type === "image" || (layer.type === "frame" && layer.imageAssetId !== undefined)) && (
+                <button
+                  className="toggle"
+                  onClick={() => useCurvesStore.getState().open(layer.id)}
+                  title="עריכת עקומות טונאליות (Curves)"
+                  type="button"
+                >
+                  <LineChart size={14} /> עקומות
+                </button>
+              )}
+              {(layer.type === "image" || (layer.type === "frame" && layer.imageAssetId !== undefined)) && (
+                <button
+                  className="toggle"
+                  onClick={() => useShadowHighlightsStore.getState().open(layer.id)}
+                  title="שחזור צללים ואורות מקומי חכם (Shadow/Highlights)"
+                  type="button"
+                >
+                  <Contrast size={14} /> צללים / אורות
+                </button>
+              )}
             </div>
             <SliderField
               decimals={2}
@@ -9259,6 +11009,10 @@ function ImageStudio({
               <QuickSlider key={param.key} param={param} params={savedParams} onChange={updateParam} onReset={resetSingleParam} />
             ))}
           </AccordionSection>
+
+          {layer.type === "image" && (
+            <EdgeFadeControls layer={layer} onPatch={onPatch} />
+          )}
 
           {layerHasEditableImage(layer) && (
             <AccordionSection title="התאמות תמונה (חכם)" defaultOpen={false}>
@@ -10603,8 +12357,36 @@ function FontSelector({
   const [query, setQuery] = useState("");
   const [favorites, setFavorites] = useState<Set<string>>(() => getFontFavorites());
   const [fontRevision, setFontRevision] = useState(0);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // The dropdown is rendered in a portal with fixed positioning so it escapes
+  // toolbar clipping (`.context-toolbar` has overflow-x:hidden, which forces
+  // overflow-y to auto and clips an absolutely-positioned menu to 84px).
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number; minWidth: number } | null>(null);
 
   const groups = useMemo(() => getGroupedFonts(favorites, query), [favorites, query, fontRevision]);
+
+  const updateMenuPos = useCallback(() => {
+    const el = triggerRef.current;
+    if (el === null) return;
+    const rect = el.getBoundingClientRect();
+    setMenuPos({
+      top: rect.bottom + 4,
+      right: Math.max(8, window.innerWidth - rect.right),
+      minWidth: Math.max(rect.width, 240)
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    updateMenuPos();
+    const handler = (): void => updateMenuPos();
+    window.addEventListener("resize", handler);
+    window.addEventListener("scroll", handler, true);
+    return () => {
+      window.removeEventListener("resize", handler);
+      window.removeEventListener("scroll", handler, true);
+    };
+  }, [open, updateMenuPos]);
 
   useEffect(() => {
     let cancelled = false;
@@ -10655,42 +12437,57 @@ function FontSelector({
     );
   }
 
+  function closeMenu(): void {
+    setOpen(false);
+    setQuery("");
+  }
+
   return (
     <div className={`font-selector ${open ? "open" : ""}`}>
       <button
+        ref={triggerRef}
         className="font-trigger"
         onClick={() => setOpen((v) => !v)}
         style={{ fontFamily: `"${value}", sans-serif` }}
         type="button"
       >
         <span className="font-trigger-label">{value}</span>
-        <span className="font-trigger-arrow">ג–¾</span>
+        <span className="font-trigger-arrow">▾</span>
       </button>
 
-      {open && (
-        <div className="font-dropdown">
-          <div className="font-search-wrap">
-            <input
-              autoFocus
-              className="font-search"
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="חפש גופן…"
-              type="text"
-              value={query}
-            />
+      {open && menuPos !== null && createPortal(
+        <>
+          <div className="font-overlay" style={{ zIndex: 3999 }} onClick={closeMenu} />
+          <div
+            className="font-dropdown"
+            style={{ position: "fixed", top: menuPos.top, right: menuPos.right, left: "auto", minWidth: menuPos.minWidth, zIndex: 4000 }}
+          >
+            <div className="font-search-wrap">
+              <input
+                autoFocus
+                className="font-search"
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Escape") closeMenu(); }}
+                placeholder="חפש גופן…"
+                type="text"
+                value={query}
+              />
+            </div>
+            <div className="font-list">
+              {renderGroup("★ מועדפים", groups.favorites)}
+              {renderGroup("עברית", groups.hebrew)}
+              {renderGroup("לטינית", groups.latin)}
+              {/* System fonts flood the list, so only show them once the user searches. */}
+              {query.trim() !== "" && renderGroup("מותקנים במחשב", groups.system)}
+              {groups.favorites.length === 0 && groups.hebrew.length === 0 && groups.latin.length === 0 &&
+                (query.trim() === "" || groups.system.length === 0) && (
+                <div className="font-empty">לא נמצאו גופנים</div>
+              )}
+            </div>
           </div>
-          <div className="font-list">
-            {renderGroup("★ מועדפים", groups.favorites)}
-            {renderGroup("עברית", groups.hebrew)}
-            {renderGroup("לטינית", groups.latin)}
-            {groups.favorites.length === 0 && groups.hebrew.length === 0 && groups.latin.length === 0 && (
-              <div className="font-empty">לא נמצאו גופנים</div>
-            )}
-          </div>
-        </div>
+        </>,
+        document.body
       )}
-
-      {open && <div className="font-overlay" onClick={() => { setOpen(false); setQuery(""); }} />}
     </div>
   );
 }
@@ -10708,6 +12505,8 @@ function LayerInspector({
   onNotify,
   onPatch,
   onPasteTextStyle,
+  selectedTextRange = null,
+  onTextSelectionChange = () => undefined,
   onTextChange
 }: {
   selectedLayer: VisualLayer | null;
@@ -10718,6 +12517,8 @@ function LayerInspector({
   onNotify?: (message: string) => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
   onPasteTextStyle: () => void;
+  selectedTextRange?: TextSelectionRange | null;
+  onTextSelectionChange?: (selection: TextSelectionRange | null) => void;
   onTextChange: (text: string) => void;
 }): ReactElement {
   if (selectedLayer === null) {
@@ -10778,6 +12579,8 @@ function LayerInspector({
           onNotify={onNotify}
           onPasteTextStyle={onPasteTextStyle}
           onPatch={onPatch}
+          selectedTextRange={selectedTextRange}
+          onTextSelectionChange={onTextSelectionChange}
           onTextChange={onTextChange}
         />
       ) : null}
@@ -11171,6 +12974,8 @@ function TextControls({
   onNotify,
   onPasteTextStyle,
   onPatch,
+  selectedTextRange,
+  onTextSelectionChange,
   onTextChange
 }: {
   hasTextStyleClipboard: boolean;
@@ -11180,12 +12985,47 @@ function TextControls({
   onNotify?: (message: string) => void;
   onPasteTextStyle: () => void;
   onPatch: (patch: Partial<VisualLayer>) => void;
+  selectedTextRange: TextSelectionRange | null;
+  onTextSelectionChange: (selection: TextSelectionRange | null) => void;
   onTextChange: (text: string) => void;
 }): ReactElement {
   const [tab, setTab] = useState<"type" | "effects" | "warp" | "presets">("type");
   const [userPresets, setUserPresets] = useState<TextPreset[]>(() => loadUserTextPresets());
   const [presetName, setPresetName] = useState("");
   const allPresets = useMemo(() => [...BUILTIN_TEXT_PRESETS, ...userPresets], [userPresets]);
+  const smartBlockSettings = readSmartTextBlockSettings(layer);
+
+  function activeTextSelection(): TextSelectionRange | null {
+    return selectedTextRange === null ? null : clampTextSelection(selectedTextRange, layer.text.length);
+  }
+
+  function applyInlineStyleOrLayerPatch(stylePatch: Parameters<typeof applyRichTextStyleToRange>[2], layerPatch: Partial<VisualLayer>): void {
+    const selection = activeTextSelection();
+    if (selection === null) {
+      onPatch(layerPatch);
+      return;
+    }
+    const nextLayer = applyRichTextStyleToRange(layer, selection, stylePatch);
+    onPatch({ richText: nextLayer.richText } as Partial<VisualLayer>);
+  }
+
+  function captureTextSelection(target: HTMLTextAreaElement): void {
+    onTextSelectionChange({ start: target.selectionStart, end: target.selectionEnd });
+  }
+
+  function patchSmartTextBlock(patch: Partial<SmartTextBlockSettings>): void {
+    const nextLayer = patch.enabled === false
+      ? withoutSmartTextBlock(layer)
+      : withSmartTextBlockSettings(layer, {
+          ...(smartBlockSettings ?? DEFAULT_SMART_TEXT_BLOCK_SETTINGS),
+          ...patch,
+          enabled: true
+        });
+    onPatch({
+      alignment: nextLayer.alignment,
+      metadata: nextLayer.metadata
+    } as Partial<VisualLayer>);
+  }
 
   function notify(message: string): void {
     onNotify?.(message);
@@ -11247,7 +13087,7 @@ function TextControls({
             <span className="field-label">גופן</span>
             <FontSelector
               value={layer.fontFamily}
-              onChange={(family) => onPatch({ fontFamily: family } as Partial<VisualLayer>)}
+              onChange={(family) => applyInlineStyleOrLayerPatch({ fontFamily: family }, { fontFamily: family } as Partial<VisualLayer>)}
             />
           </div>
 
@@ -11256,7 +13096,7 @@ function TextControls({
             min={8}
             max={240}
             value={layer.fontSize}
-            onChange={(v) => onPatch({ fontSize: v } as Partial<VisualLayer>)}
+            onChange={(v) => applyInlineStyleOrLayerPatch({ fontSize: v }, { fontSize: v } as Partial<VisualLayer>)}
             unit=" px"
           />
           <SliderField
@@ -11265,7 +13105,7 @@ function TextControls({
             max={900}
             step={100}
             value={layer.fontWeight}
-            onChange={(v) => onPatch({ fontWeight: v } as Partial<VisualLayer>)}
+            onChange={(v) => applyInlineStyleOrLayerPatch({ fontWeight: v }, { fontWeight: v } as Partial<VisualLayer>)}
           />
           <SliderField
             label="גובה שורה"
@@ -11282,14 +13122,47 @@ function TextControls({
             min={-10}
             max={40}
             value={layer.letterSpacing}
-            onChange={(v) => onPatch({ letterSpacing: v } as Partial<VisualLayer>)}
+            onChange={(v) => applyInlineStyleOrLayerPatch({ letterSpacing: v }, { letterSpacing: v } as Partial<VisualLayer>)}
             unit=" px"
           />
+
+          <div className="effect-card">
+            <label className="check-line">
+              <input
+                checked={smartBlockSettings?.enabled === true}
+                onChange={(e) => patchSmartTextBlock({ enabled: e.target.checked })}
+                type="checkbox"
+              />
+              Smart Text Block
+            </label>
+            {smartBlockSettings?.enabled === true ? (
+              <>
+                <SliderField
+                  label="Smart Block Strength"
+                  min={0}
+                  max={100}
+                  value={smartBlockSettings.strength}
+                  onChange={(v) => patchSmartTextBlock({ strength: v })}
+                />
+                <label className="check-line">
+                  <input
+                    checked={smartBlockSettings.autoEmphasis}
+                    onChange={(e) => patchSmartTextBlock({ autoEmphasis: e.target.checked })}
+                    type="checkbox"
+                  />
+                  Auto Emphasis
+                </label>
+              </>
+            ) : null}
+          </div>
 
           <div className="button-row">
             <button
               className={layer.fontWeight >= 700 ? "toggle on" : "toggle"}
-              onClick={() => onPatch({ fontWeight: layer.fontWeight >= 700 ? 400 : 700 } as Partial<VisualLayer>)}
+              onClick={() => {
+                const fontWeight = layer.fontWeight >= 700 ? 400 : 700;
+                applyInlineStyleOrLayerPatch({ fontWeight }, { fontWeight } as Partial<VisualLayer>);
+              }}
               type="button"
               title="Bold"
             >
@@ -11297,7 +13170,10 @@ function TextControls({
             </button>
             <button
               className={layer.fontStyle === "italic" ? "toggle on" : "toggle"}
-              onClick={() => onPatch({ fontStyle: layer.fontStyle === "italic" ? "normal" : "italic" } as Partial<VisualLayer>)}
+              onClick={() => {
+                const fontStyle = layer.fontStyle === "italic" ? "normal" : "italic";
+                applyInlineStyleOrLayerPatch({ fontStyle }, { fontStyle } as Partial<VisualLayer>);
+              }}
               type="button"
               title="Italic"
             >
@@ -11315,7 +13191,7 @@ function TextControls({
               <span className="field-label">צבע</span>
               <input
                 className="color-input"
-                onChange={(e) => onPatch({ color: e.target.value, autoContrastOverridden: true } as Partial<VisualLayer>)}
+                onChange={(e) => applyInlineStyleOrLayerPatch({ color: e.target.value }, { color: e.target.value, autoContrastOverridden: true } as Partial<VisualLayer>)}
                 type="color"
                 value={layer.color}
               />
@@ -11333,7 +13209,7 @@ function TextControls({
             max={1}
             step={0.01}
             value={layer.fillOpacity}
-            onChange={(v) => onPatch({ fillOpacity: v } as Partial<VisualLayer>)}
+            onChange={(v) => applyInlineStyleOrLayerPatch({ fillOpacity: v }, { fillOpacity: v } as Partial<VisualLayer>)}
             decimals={2}
           />
           <SliderField
@@ -11374,7 +13250,19 @@ function TextControls({
             </div>
             <label className="field">
               <span className="field-label">תוכן הטקסט</span>
-              <textarea className="text-area" dir="auto" value={layer.text} onChange={(e) => onTextChange(e.target.value)} />
+              <textarea
+                className="text-area"
+                dir="auto"
+                value={layer.text}
+                onChange={(e) => {
+                  captureTextSelection(e.currentTarget);
+                  onTextChange(e.target.value);
+                }}
+                onFocus={(e) => captureTextSelection(e.currentTarget)}
+                onKeyUp={(e) => captureTextSelection(e.currentTarget)}
+                onMouseUp={(e) => captureTextSelection(e.currentTarget)}
+                onSelect={(e) => captureTextSelection(e.currentTarget)}
+              />
             </label>
           </div>
         </div>
@@ -12002,11 +13890,14 @@ function LayerList({
   onToggleLock,
   onToggleVisibility,
   onLayerContextMenu,
+  onOpenLayerEdits,
   onHoverLayer,
   onMoveImageIntoFrame,
   onMoveLayerIntoGroup,
   onDeleteGroup,
-  onDuplicateGroup
+  onDuplicateGroup,
+  onMergeLayers,
+  onFlattenVisible
 }: {
   assets: Asset[];
   layers: VisualLayer[];
@@ -12030,11 +13921,14 @@ function LayerList({
   onToggleLock: (layerId: string) => void;
   onToggleVisibility: (layerId: string) => void;
   onLayerContextMenu: (layerId: string, screenX: number, screenY: number) => void;
+  onOpenLayerEdits?: (layerId: string) => void;
   onHoverLayer?: (layerId: string | null) => void;
   onMoveImageIntoFrame?: (imageLayerId: string, frameId: string) => void;
   onMoveLayerIntoGroup?: (layerId: string, groupId: string | null) => void;
   onDeleteGroup?: (groupId: string, deleteChildren: boolean) => void;
   onDuplicateGroup?: (groupId: string) => void;
+  onMergeLayers: () => void;
+  onFlattenVisible: () => void;
 }): ReactElement {
   const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -12042,18 +13936,24 @@ function LayerList({
   const [filter, setFilter] = useState<"all" | "images" | "text" | "frames" | "framesMasks" | "shapes" | "adjustments" | "hidden" | "locked">("all");
   const [draftName, setDraftName] = useState("");
   const [pendingGroupDelete, setPendingGroupDelete] = useState<string | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLDivElement>());
 
   // Tool Library access straight from the Layers panel "+" menu. Targets the
   // selected image layer when one is active (image context), otherwise applies
   // as a page-level look. Replaces the old "disconnected" legacy adjustment layers.
   const activePageId = useDocumentStore((s) => s.activePageId);
+  const pageCount = useDocumentStore((s) => s.document?.pages.length ?? 1);
   const applyPresetToImage = useDocumentStore((s) => s.applyPresetToImage);
   const applyPresetToAllImagesOnPage = useDocumentStore((s) => s.applyPresetToAllImagesOnPage);
+  const applyPresetToAllImagesOnAllPages = useDocumentStore((s) => s.applyPresetToAllImagesOnAllPages);
   const applyPresetToDuplicatedImage = useDocumentStore((s) => s.applyPresetToDuplicatedImage);
   const applyPresetAsPageLook = useDocumentStore((s) => s.applyPresetAsPageLook);
+  const applyPresetAsPageLookToAllPages = useDocumentStore((s) => s.applyPresetAsPageLookToAllPages);
   const addImageAdjustment = useDocumentStore((s) => s.addImageAdjustment);
   const applyAdjustmentToAllImagesOnPage = useDocumentStore((s) => s.applyAdjustmentToAllImagesOnPage);
+  const applyAdjustmentToAllImagesOnAllPages = useDocumentStore((s) => s.applyAdjustmentToAllImagesOnAllPages);
   const addPageLook = useDocumentStore((s) => s.addPageLook);
+  const addPageLookToAllPages = useDocumentStore((s) => s.addPageLookToAllPages);
 
   const selectedLayer = layers.find((l) => l.id === selectedLayerId);
   const selectedImageLayer = selectedLayer?.type === "image" ? (selectedLayer as ImageLayer) : undefined;
@@ -12078,18 +13978,25 @@ function LayerList({
     strength: number,
     applyToAll: boolean,
     duplicate: boolean,
-    extra: ImageAdjustmentTemplate[]
+    extra: ImageAdjustmentTemplate[],
+    applyToAllPages: boolean
   ): void => {
     if (activePageId === null) return;
     if (item.kind === "tool" || item.kind === "aiTool") {
       // `extra` carries the concrete, edited recipe (tool sliders / AI analysis).
-      if (applyToAll) {
+      if (applyToAllPages) {
+        for (const template of extra) applyAdjustmentToAllImagesOnAllPages(template);
+      } else if (applyToAll) {
         for (const template of extra) applyAdjustmentToAllImagesOnPage(activePageId, template);
       } else if (libraryTargetId !== undefined) {
         for (const template of extra) addImageAdjustment(activePageId, libraryTargetId, template);
       }
     } else if (item.kind === "imagePreset" && item.presetId !== undefined) {
-      if (applyToAll || libraryTargetId === undefined) {
+      if (applyToAllPages) {
+        void runWithBusy("מחיל פריסט על כל התמונות בכל העמודים...", () =>
+          applyPresetToAllImagesOnAllPages(item.presetId!, strength, extra)
+        );
+      } else if (applyToAll || libraryTargetId === undefined) {
         void runWithBusy("מחיל פריסט על כל תמונות העמוד…", () =>
           applyPresetToAllImagesOnPage(activePageId, item.presetId!, strength, extra)
         );
@@ -12101,9 +14008,11 @@ function LayerList({
         applyPresetToImage(activePageId, libraryTargetId, item.presetId, strength, extra);
       }
     } else if (item.kind === "pageLookPreset" && item.presetId !== undefined) {
-      applyPresetAsPageLook(activePageId, item.presetId, strength);
+      if (applyToAllPages) applyPresetAsPageLookToAllPages(item.presetId, strength);
+      else applyPresetAsPageLook(activePageId, item.presetId, strength);
     } else if (item.kind === "effect" && item.effectKind !== undefined) {
-      addPageLook(activePageId, createPageLookLayer({ kind: item.effectKind }));
+      if (applyToAllPages) addPageLookToAllPages({ kind: item.effectKind });
+      else addPageLook(activePageId, createPageLookLayer({ kind: item.effectKind }));
     }
     setLibraryOpen(false);
   };
@@ -12140,6 +14049,17 @@ function LayerList({
     const layer = layers.find((item) => item.id === renamingLayerId);
     if (layer !== undefined) setDraftName(layer.name);
   }, [layers, renamingLayerId]);
+
+  useEffect(() => {
+    if (selectedLayerId === null) return;
+    if (!filtered.some((layer) => layer.id === selectedLayerId)) {
+      setFilter("all");
+      return;
+    }
+    const row = rowRefs.current.get(selectedLayerId);
+    if (row === undefined) return;
+    row.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [filter, selectedLayerId]);
 
   function handleDrop(event: React.DragEvent<HTMLDivElement>, targetLayerId: string): void {
     event.preventDefault();
@@ -12260,6 +14180,10 @@ function LayerList({
         <div
           className={`layer-row${isChild ? " layer-row--child" : ""} ${selectedLayerIds.includes(layer.id) ? "active" : ""} ${draggingLayerId === layer.id ? "dragging" : ""} ${!layer.visible ? "hidden" : ""} ${layer.locked ? "locked" : ""}`}
           draggable
+          ref={(node) => {
+            if (node === null) rowRefs.current.delete(layer.id);
+            else rowRefs.current.set(layer.id, node);
+          }}
           onContextMenu={(e) => handleRowContextMenu(e, layer.id)}
           onDragEnd={() => setDraggingLayerId(null)}
           onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
@@ -12285,7 +14209,13 @@ function LayerList({
             role="button"
             tabIndex={0}
           >
-            <LayerThumbnail assets={assets} layer={layer} />
+            <span
+              className="layer-thumb-wrap"
+              title="פתח עריכות שכבה"
+              onDoubleClick={(e) => { e.stopPropagation(); onOpenLayerEdits?.(layer.id); }}
+            >
+              <LayerThumbnail assets={assets} layer={layer} />
+            </span>
             <span className="layer-type-icon">{layerTypeIcon(layer)}</span>
             {renamingLayerId === layer.id ? (
               <input
@@ -12305,29 +14235,22 @@ function LayerList({
             )}
             {layer.type === "adjustment-layer" ? <em className="layer-legacy-pill" title="שכבת התאמה ישנה — מושבתת, תומר אוטומטית">Legacy — מושבת</em> : null}
             {(() => {
-              if (layer.type !== "image") return null;
-              const adj = (layer as ImageLayer).imageAdjustments;
-              const presets = adj?.presetInstances ?? [];
-              const generatedIds = new Set(presets.flatMap((p) => p.generatedAdjustments));
-              const manualCount = (adj?.stack ?? []).filter((a) => !generatedIds.has(a.id)).length;
-              const total = presets.length + manualCount;
+              // Compact, generic "has edits" indicator for ANY layer type. Click
+              // opens the unified Layer Edits panel; keeps the row uncluttered.
+              const total = countLayerEdits(layer);
               if (total === 0) return null;
-              const presetName = presets[0]?.name;
-              const title =
-                presetName !== undefined
-                  ? `פריסט: ${presetName}${total > 1 ? ` ועוד ${total - 1}` : ""} — לחץ לעריכת עוצמה`
-                  : `${total} התאמות מוחלות — לחץ לעריכה`;
+              const someOff = hasDisabledLayerEdits(layer);
               return (
                 <em
-                  className="layer-preset-pill"
-                  title={title}
+                  className={`layer-edits-dot${someOff ? " has-disabled" : ""}`}
+                  title={`${total} עריכות על השכבה${someOff ? " (חלקן מוסתרות)" : ""} — לחץ לניהול`}
                   role="button"
                   tabIndex={0}
-                  onClick={(e) => { e.stopPropagation(); onSelect(layer.id); }}
-                  onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onSelect(layer.id); } }}
+                  onClick={(e) => { e.stopPropagation(); onOpenLayerEdits?.(layer.id); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onOpenLayerEdits?.(layer.id); } }}
                   style={{ cursor: "pointer" }}
                 >
-                  ✨{total > 1 ? ` ${total}` : ""}
+                  {total}
                 </em>
               );
             })()}
@@ -12578,6 +14501,25 @@ function LayerList({
           </>
         ) : null}
         <SmartArrangeControl onArrange={onSmartArrange} />
+        <button
+          aria-label="איחוד שכבות"
+          className="layer-group-btn"
+          disabled={selectedLayerIds.length < 2}
+          onClick={onMergeLayers}
+          title="איחוד השכבות שנבחרו לשכבה אחת"
+          type="button"
+        >
+          <Layers size={13} />
+        </button>
+        <button
+          aria-label="שיטוח התמונה"
+          className="layer-group-btn"
+          onClick={onFlattenVisible}
+          title="שיטוח כל השכבות הגלויות לשכבה אחת"
+          type="button"
+        >
+          <Combine size={13} />
+        </button>
       </div>
       {libraryOpen && (
         <ToolLibrary
@@ -12585,6 +14527,7 @@ function LayerList({
           previewSrc={librarySrc}
           previewLabel={libraryTargetName}
           selectedCount={libraryTargetId !== undefined ? 1 : 0}
+          pageCount={pageCount}
           onApply={handleLibraryApply}
           onClose={() => setLibraryOpen(false)}
         />
@@ -12645,6 +14588,8 @@ function LayerContextMenu({
   onMoveToBack,
   onDuplicate,
   onDelete,
+  onMergeLayers,
+  onFlatten,
   onToggleBatchVariable,
   onConvertAlphaToFrame,
   onInsertImageIntoFrame,
@@ -12653,7 +14598,11 @@ function LayerContextMenu({
   onConvertFrameBackToImage,
   frameHasImage,
   onCopyEffects,
-  onPasteEffects
+  onPasteEffects,
+  onOpenLayerEdits,
+  onToggleBeforeAfter,
+  onDisableAllEdits,
+  onResetAllEdits
 }: {
   target: { layerId: string; screenX: number; screenY: number };
   layer: VisualLayer | undefined;
@@ -12671,6 +14620,8 @@ function LayerContextMenu({
   onMoveToBack: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  onMergeLayers?: () => void;
+  onFlatten: () => void;
   onToggleBatchVariable?: () => void;
   onConvertAlphaToFrame?: () => void;
   onInsertImageIntoFrame?: () => void;
@@ -12680,6 +14631,10 @@ function LayerContextMenu({
   frameHasImage?: boolean;
   onCopyEffects: () => void;
   onPasteEffects: () => void;
+  onOpenLayerEdits?: () => void;
+  onToggleBeforeAfter?: () => void;
+  onDisableAllEdits?: () => void;
+  onResetAllEdits?: () => void;
 }): ReactElement {
   const menuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: target.screenX, top: target.screenY });
@@ -12733,6 +14688,35 @@ function LayerContextMenu({
       <button className="ctx-item" onClick={action(onToggleLock)} type="button">
         {layer?.locked === true ? "Unlock Layer" : "Lock Layer"}
       </button>
+      {(onOpenLayerEdits !== undefined || onToggleBeforeAfter !== undefined) && (
+        <>
+          <div className="ctx-divider" />
+          {onOpenLayerEdits !== undefined && (
+            <button className="ctx-item" onClick={onOpenLayerEdits} type="button">
+              <SlidersHorizontal size={12} style={{ display: "inline", marginInlineEnd: 5 }} />
+              ערוך עריכות שכבה
+            </button>
+          )}
+          {onToggleBeforeAfter !== undefined && (
+            <button className="ctx-item" onClick={onToggleBeforeAfter} type="button">
+              <Eye size={12} style={{ display: "inline", marginInlineEnd: 5 }} />
+              השוואה לפני / אחרי
+            </button>
+          )}
+          {onDisableAllEdits !== undefined && (
+            <button className="ctx-item" onClick={onDisableAllEdits} type="button">
+              <EyeOff size={12} style={{ display: "inline", marginInlineEnd: 5 }} />
+              כבה את כל העריכות
+            </button>
+          )}
+          {onResetAllEdits !== undefined && (
+            <button className="ctx-item" onClick={onResetAllEdits} type="button">
+              <RotateCcw size={12} style={{ display: "inline", marginInlineEnd: 5 }} />
+              אפס עריכות
+            </button>
+          )}
+        </>
+      )}
       <div className="ctx-blend-row">
         <span className="ctx-blend-label">מצב מיזוג</span>
         <select
@@ -12766,6 +14750,17 @@ function LayerContextMenu({
       </button>
       <button className="ctx-item" onClick={action(onDelete)} type="button">
         מחק
+      </button>
+      <div className="ctx-divider" />
+      {onMergeLayers !== undefined && (
+        <button className="ctx-item" onClick={action(onMergeLayers)} type="button">
+          <Layers size={12} style={{ display: "inline", marginInlineEnd: 5 }} />
+          איחוד שכבות
+        </button>
+      )}
+      <button className="ctx-item" onClick={action(onFlatten)} type="button">
+        <Layers size={12} style={{ display: "inline", marginInlineEnd: 5 }} />
+        שיטוח התמונה
       </button>
       {onToggleBatchVariable !== undefined && (
         <>
@@ -12848,6 +14843,10 @@ function CanvasContextMenu({
   onClose,
   onSelectObject,
   onRemoveBackground,
+  onAutoFix,
+  onCurves,
+  onShadowHighlights,
+  onOpenIsolatedImageEditor,
   onConvertAlphaToFrame,
   onMoveForward,
   onMoveBackward,
@@ -12865,6 +14864,7 @@ function CanvasContextMenu({
   onBlackBorder,
   onReplaceImage,
   onDuplicate,
+  onSmartRepeat,
   onDeleteTarget,
   onToggleLock,
   onToggleVisibility,
@@ -12885,6 +14885,7 @@ function CanvasContextMenu({
   onTextDirectionLtr,
   onTextIncreaseSize,
   onTextDecreaseSize,
+  onTextSmartBlock,
   onTextSmartFitFull,
   onTextSmartFitPartial,
   onTextSmartFitWrap,
@@ -12900,7 +14901,9 @@ function CanvasContextMenu({
   onOpenInColorLab,
   onHarmonize,
   onAiExpand,
+  onSmartExpand,
   onAiRemove,
+  onContentFill,
   onAiUpscale,
   onAiRestore
 }: {
@@ -12912,6 +14915,10 @@ function CanvasContextMenu({
   onClose: () => void;
   onSelectObject: () => void;
   onRemoveBackground: () => void;
+  onAutoFix?: () => void;
+  onCurves?: () => void;
+  onShadowHighlights?: () => void;
+  onOpenIsolatedImageEditor: () => void;
   onConvertAlphaToFrame: () => void;
   onMoveForward: () => void;
   onMoveBackward: () => void;
@@ -12929,6 +14936,7 @@ function CanvasContextMenu({
   onBlackBorder: () => void;
   onReplaceImage: () => void;
   onDuplicate: () => void;
+  onSmartRepeat: () => void;
   onDeleteTarget: () => void;
   onToggleLock: () => void;
   onToggleVisibility: () => void;
@@ -12949,6 +14957,7 @@ function CanvasContextMenu({
   onTextDirectionLtr: () => void;
   onTextIncreaseSize: () => void;
   onTextDecreaseSize: () => void;
+  onTextSmartBlock: () => void;
   onTextSmartFitFull: () => void;
   onTextSmartFitPartial: () => void;
   onTextSmartFitWrap: () => void;
@@ -12964,7 +14973,9 @@ function CanvasContextMenu({
   onOpenInColorLab: () => void;
   onHarmonize?: () => void;
   onAiExpand?: () => void;
+  onSmartExpand?: () => void;
   onAiRemove?: () => void;
+  onContentFill?: () => void;
   onAiUpscale?: () => void;
   onAiRestore?: () => void;
 }): ReactElement {
@@ -13014,6 +15025,7 @@ function CanvasContextMenu({
         <details className="ctx-submenu">
           <summary>מהיר</summary>
           <button className="ctx-item" onClick={onDuplicate} type="button">שכפל טקסט</button>
+          <button className="ctx-item" onClick={onSmartRepeat} type="button">שכפול חכם לדף…</button>
           <button className="ctx-item" onClick={onToggleLock} type="button">נעל / שחרר</button>
           <button className="ctx-item" onClick={onToggleVisibility} type="button">הסתר / הצג</button>
           <button className="ctx-item" onClick={onDeleteTarget} type="button">מחק</button>
@@ -13033,6 +15045,7 @@ function CanvasContextMenu({
         </details>
         <details className="ctx-submenu">
           <summary>ארגון חכם</summary>
+          <button className="ctx-item" onClick={onTextSmartBlock} type="button">Smart Text Block</button>
           <button className="ctx-item" onClick={onTextSmartFitFull} type="button">התאמה מלאה</button>
           <button className="ctx-item" onClick={onTextSmartFitPartial} type="button">התאמה חלקית</button>
           <button className="ctx-item" onClick={onTextSmartFitWrap} type="button">פריסת שורות</button>
@@ -13076,6 +15089,26 @@ function CanvasContextMenu({
       <button className="ctx-item" disabled={!smartSelectionEnabled} onClick={onRemoveBackground} type="button">
         הסרת רקע
       </button>
+      {onAutoFix !== undefined && target.hasImage && (
+        <button className="ctx-item" onClick={onAutoFix} type="button">
+          ✨ תיקון אוטומטי…
+        </button>
+      )}
+      {onCurves !== undefined && target.hasImage && (
+        <button className="ctx-item" onClick={onCurves} type="button">
+          עקומות…
+        </button>
+      )}
+      {onShadowHighlights !== undefined && target.hasImage && (
+        <button className="ctx-item" onClick={onShadowHighlights} type="button">
+          צללים / אורות…
+        </button>
+      )}
+      {target.layerType === "frame" && target.hasImage ? (
+        <button className="ctx-item" onClick={onOpenIsolatedImageEditor} type="button">
+          עריכת תמונה מבודדת
+        </button>
+      ) : null}
       <button className="ctx-item" disabled={target.layerType !== "image"} onClick={onConvertAlphaToFrame} type="button">
         Alpha Mask
       </button>
@@ -13115,15 +15148,18 @@ function CanvasContextMenu({
         <summary>עריכה</summary>
         <button className="ctx-item" onClick={onReplaceImage} type="button">החלף תמונה</button>
         <button className="ctx-item" onClick={onDuplicate} type="button">שכפל תמונה</button>
+        <button className="ctx-item" onClick={onSmartRepeat} type="button">שכפול חכם לדף…</button>
         {onHarmonize && target.hasImage && (
           <button className="ctx-item" onClick={onHarmonize} type="button">מיזוג סגנון</button>
         )}
       </details>
-      {target.hasImage && (onAiExpand ?? onAiRemove ?? onAiUpscale ?? onAiRestore) && (
+      {target.hasImage && (onSmartExpand ?? onAiExpand ?? onAiRemove ?? onContentFill ?? onAiUpscale ?? onAiRestore) && (
         <details className="ctx-submenu">
           <summary>✨ כלי AI</summary>
+          {onSmartExpand && <button className="ctx-item" onClick={onSmartExpand} type="button">✨ הרחבה חכמה</button>}
           {onAiExpand && <button className="ctx-item" onClick={onAiExpand} type="button">הרחב תמונה</button>}
           {onAiRemove && <button className="ctx-item" onClick={onAiRemove} type="button">הסר אובייקט</button>}
+          {onContentFill && <button className="ctx-item" onClick={onContentFill} type="button">מחיקה / מילוי חכם ✨</button>}
           {onAiUpscale && <button className="ctx-item" onClick={onAiUpscale} type="button">שפר רזולוציה</button>}
           {onAiRestore && <button className="ctx-item" onClick={onAiRestore} type="button">שחזר תמונה</button>}
         </details>

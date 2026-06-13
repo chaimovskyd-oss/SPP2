@@ -10,14 +10,73 @@ export interface SmartSelectionCapabilities {
   profile: SmartSelectionProfile;
   recommendedProfile: SmartSelectionProfile;
   providers: string[];
+  selectedProvider?: string | null;
   gpu: {
     cuda: boolean;
     mps: boolean;
     directml: boolean;
   };
+  pythonExecutable?: string;
+  diagnostics?: {
+    pythonExecutable?: string;
+    pythonVersion?: string;
+    onnxruntime?: {
+      available: boolean;
+      version?: string | null;
+      providers?: string[];
+      selectedProvider?: string | null;
+      error?: string;
+    };
+    onnxruntimeDirectml?: {
+      installed: boolean;
+      version?: string | null;
+    };
+    torch?: { available: boolean; version?: string | null; cuda?: boolean; error?: string };
+    mediapipe?: { available: boolean; version?: string | null; error?: string };
+    warnings?: string[];
+    models?: Record<string, unknown>;
+  };
   modelsDir?: string;
   fallback?: boolean;
   message?: string;
+}
+
+export interface AiAccelerationStatus {
+  ok: boolean;
+  platform: string;
+  onnxruntimePackage?: string | null;
+  onnxruntimeVersion?: string | null;
+  onnxruntimeCpuInstalled: boolean;
+  onnxruntimeDirectmlInstalled: boolean;
+  onnxruntimeGpuInstalled?: boolean;
+  conflict: boolean;
+  availableProviders: string[];
+  selectedProvider?: string | null;
+  accelerationEnabled: boolean;
+  device: string;
+  message: string;
+}
+
+export interface AiBenchmarkResult {
+  ok: boolean;
+  results: Array<{ requested: string; provider?: string | null; device: string; msPerInference?: number; error?: string }>;
+  selectedProvider?: string | null;
+  accelerationEnabled: boolean;
+  device: string;
+  speedup?: number | null;
+  message: string;
+}
+
+export interface SdAccelerationStatus {
+  ok: boolean;
+  torchInstalled: boolean;
+  torchVersion?: string | null;
+  cudaAvailable: boolean;
+  cudaDeviceName?: string | null;
+  diffusersInstalled: boolean;
+  sdDevice?: string | null;
+  estimatedMode: "fast" | "slow" | "unavailable";
+  message: string;
 }
 
 export interface SmartSelectionMaskResult {
@@ -89,6 +148,26 @@ export async function getSmartSelectionCapabilities(): Promise<SmartSelectionCap
   const api = window.spp?.smartSelection;
   if (api === undefined) return null;
   return api.health();
+}
+
+export async function getAiAccelerationStatus(providers?: string[]): Promise<AiAccelerationStatus | null> {
+  const api = window.spp?.smartSelection;
+  if (api === undefined || typeof api.accelerationStatus !== "function") return null;
+  return api.accelerationStatus(providers);
+}
+
+export async function runAiAccelerationBenchmark(
+  options?: { iterations?: number; providers?: string[] }
+): Promise<AiBenchmarkResult | null> {
+  const api = window.spp?.smartSelection;
+  if (api === undefined || typeof api.benchmark !== "function") return null;
+  return api.benchmark(options);
+}
+
+export async function getSdAccelerationStatus(): Promise<SdAccelerationStatus | null> {
+  const api = window.spp?.smartSelection;
+  if (api === undefined || typeof api.sdAccelerationStatus !== "function") return null;
+  return api.sdAccelerationStatus();
 }
 
 export async function listSmartSelectionModels(): Promise<SmartSelectionModelList | null> {

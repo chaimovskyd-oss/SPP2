@@ -1,9 +1,11 @@
 import {
   ChevronDown,
   ExternalLink,
+  Images,
   Layers,
   Link2,
   MessageSquare,
+  Printer,
   QrCode,
   Search,
   Settings2,
@@ -16,14 +18,16 @@ import {
   useState,
   type ReactElement
 } from "react";
+import { BatchBackgroundRemovePanel } from "./BatchBackgroundRemovePanel";
 import { CustomerActionsPanel } from "./CustomerActionsPanel";
 import { ExternalAppsSettings } from "./ExternalAppsSettings";
 import { MaskLibraryPanel } from "./MaskLibraryPanel";
 import { QRGeneratorPanel } from "./QRGeneratorPanel";
 import { QuickLinksPanel } from "./QuickLinksPanel";
 import { QuickSearchPanel } from "./QuickSearchPanel";
+import { PrintHubPanel } from "../printHub/PrintHubPanel";
 
-type UtilPanel = "qr" | "links" | "search" | "customer" | "settings" | "masks" | null;
+type UtilPanel = "qr" | "links" | "search" | "customer" | "settings" | "masks" | "batch-bg" | "print-hub" | null;
 
 interface UtilitiesMenuProps {
   customerName?: string;
@@ -97,6 +101,18 @@ export function UtilitiesMenu({
       icon: Layers,
       label: "ספריית מסיכות",
       sub: "SVG & PNG עיצובים"
+    },
+    {
+      id: "batch-bg" as UtilPanel,
+      icon: Images,
+      label: "הסרת רקע כמותית",
+      sub: "PNG שקוף מכמה תמונות"
+    },
+    {
+      id: "print-hub" as UtilPanel,
+      icon: Printer,
+      label: "מרכז הדפסות",
+      sub: "תור הדפסה ושרת מרוחק"
     },
     {
       id: "settings" as UtilPanel,
@@ -190,6 +206,16 @@ export function UtilitiesMenu({
       {activePanel === "masks" && (
         <FloatingOverlay onClose={closePanel}>
           <MaskLibraryPanel onClose={closePanel} />
+        </FloatingOverlay>
+      )}
+      {activePanel === "batch-bg" && (
+        <FloatingOverlay onClose={closePanel}>
+          <BatchBackgroundRemovePanel onClose={closePanel} />
+        </FloatingOverlay>
+      )}
+      {activePanel === "print-hub" && (
+        <FloatingOverlay onClose={closePanel}>
+          <PrintHubPanel onClose={closePanel} />
         </FloatingOverlay>
       )}
       {activePanel === "settings" && (

@@ -5,9 +5,41 @@ const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
-const { ensurePythonEnv, ensureEditorAiDeps, getVenvPythonExe } = require("./pythonBootstrap.cjs");
+// ─── Dual-mode entry ────────────────────────────────────────────────────────────
+// SPP2.exe            → editor (this file).
+// SPP2.exe --print-hub-server → standalone Print Hub Tray (delegate to the bundled server and
+// skip the editor bootstrap entirely). Top-level `return` is valid in a CommonJS module.
+if (process.argv.includes("--print-hub-server")) {
+  require("./printHubServer.bundle.cjs");
+  return;
+}
+
+const { ensurePythonEnv, ensureComponentInstalled, getVenvPythonExe } = require("./pythonBootstrap.cjs");
 const { registerHealthCheckIpc } = require("./healthCheck.cjs");
+const { registerComponentManagerIpc } = require("./componentManager.cjs");
+const { registerPrintHubMainIpc } = require("./printHubMain.cjs");
+const { registerAdvancedPrintIpc } = require("./advancedPrintMain.cjs");
+const { registerQuickPrintIpc, extractQuickPrintFiles } = require("./printHubQuickPrint.cjs");
 const diagnosticsEnabled = !app.isPackaged || process.env.NODE_ENV !== "production";
+
+function appendMainErrorLog(kind, err) {
+  try {
+    const dir = path.join(app.getPath("userData"), "logs");
+    fs.mkdirSync(dir, { recursive: true });
+    const message = err instanceof Error ? `${err.stack || err.message}` : String(err);
+    fs.appendFileSync(path.join(dir, "main-error.log"), `[${new Date().toISOString()}] ${kind}\n${message}\n\n`, "utf-8");
+  } catch { /* ignore */ }
+}
+
+process.on("uncaughtException", (err) => {
+  appendMainErrorLog("uncaughtException", err);
+  console.error("[main:uncaughtException]", err);
+});
+
+process.on("unhandledRejection", (err) => {
+  appendMainErrorLog("unhandledRejection", err);
+  console.error("[main:unhandledRejection]", err);
+});
 
 // ─── Paths ────────────────────────────────────────────────────────────────────
 
@@ -46,9 +78,9 @@ function getPrintPreviewEngineDir() {
  * - Dev: system `python` (Windows) / `python3` (else) — same behavior as before.
  */
 function getPythonCommand() {
+  const venvPython = getVenvPythonExe();
+  if (fs.existsSync(venvPython)) return venvPython;
   if (app.isPackaged) {
-    const venvPython = getVenvPythonExe();
-    if (fs.existsSync(venvPython)) return venvPython;
     // Fallback: embedded python (won't have engine deps, but allows minimal commands).
     const embedded = path.join(process.resourcesPath, "python-embed", process.platform === "win32" ? "python.exe" : "bin/python3");
     if (fs.existsSync(embedded)) return embedded;
@@ -266,6 +298,12 @@ class SmartSelectionSidecar {
         else console.log("[smart-selection:stderr]", line);
       }
     });
+    this.proc.stdin.on("error", (err) => {
+      console.warn("[smart-selection:stdin]", err);
+      this.rejectAll(err);
+      this.proc = null;
+      this.stdoutBuffer = Buffer.alloc(0);
+    });
     this.proc.on("close", (code) => {
       this.rejectAll(new Error(`Smart Selection sidecar exited with code ${code}`));
       this.proc = null;
@@ -300,12 +338,23 @@ class SmartSelectionSidecar {
   }
 
   call(method, params = {}, timeoutMs = 120000) {
-    this.ensureStarted();
-    const id = this.nextId++;
-    const payload = Buffer.from(JSON.stringify({ id, method, params }), "utf-8");
-    const header = Buffer.alloc(4);
-    header.writeUInt32BE(payload.length, 0);
     return new Promise((resolve, reject) => {
+      try {
+        this.ensureStarted();
+      } catch (err) {
+        reject(err);
+        return;
+      }
+
+      if (!this.proc || this.proc.killed || !this.proc.stdin || !this.proc.stdin.writable) {
+        reject(new Error("Smart Selection sidecar unavailable"));
+        return;
+      }
+
+      const id = this.nextId++;
+      const payload = Buffer.from(JSON.stringify({ id, method, params }), "utf-8");
+      const header = Buffer.alloc(4);
+      header.writeUInt32BE(payload.length, 0);
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Smart Selection timed out: ${method}`));
@@ -314,12 +363,18 @@ class SmartSelectionSidecar {
         resolve: (value) => { clearTimeout(timer); resolve(value); },
         reject: (error) => { clearTimeout(timer); reject(error); }
       });
-      this.proc.stdin.write(Buffer.concat([header, payload]), (err) => {
-        if (!err) return;
+      try {
+        this.proc.stdin.write(Buffer.concat([header, payload]), (err) => {
+          if (!err) return;
+          this.pending.delete(id);
+          clearTimeout(timer);
+          reject(err);
+        });
+      } catch (err) {
         this.pending.delete(id);
         clearTimeout(timer);
         reject(err);
-      });
+      }
     });
   }
 
@@ -336,6 +391,14 @@ class SmartSelectionSidecar {
 }
 
 const smartSelectionSidecar = new SmartSelectionSidecar();
+
+async function ensureContentAwareFillReady() {
+  const result = await ensureComponentInstalled("content-aware-fill", { prompt: false });
+  if (!result || result.ok !== true) {
+    throw new Error(result && result.error ? result.error : "Content-Aware Fill dependencies are not installed.");
+  }
+  if (app.isPackaged) smartSelectionSidecar.shutdown();
+}
 
 function smartSelectionCall(method, params = {}, timeoutMs) {
   return smartSelectionSidecar.call(method, params, timeoutMs).catch((err) => ({
@@ -661,6 +724,56 @@ ipcMain.handle("spp:save-pdf-dialog", async (_event, pdfBase64, suggestedName = 
   }
 });
 
+// Pick a destination for a project file (Save As). Returns the chosen path only;
+// the renderer writes via spp:write-project-file so metadata stays consistent.
+ipcMain.handle("spp:save-project-dialog", async (_event, suggestedName = "project.spp2") => {
+  try {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    const result = await dialog.showSaveDialog(win, {
+      title: "שמירת פרויקט",
+      defaultPath: suggestedName,
+      filters: [
+        { name: "SPP2 Project", extensions: ["spp2"] },
+        { name: "JSON", extensions: ["json"] }
+      ]
+    });
+    if (result.canceled || !result.filePath) {
+      return { success: false, canceled: true };
+    }
+    return { success: true, filePath: result.filePath };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+// Overwrite an existing project file in place (Ctrl+S when a path is known).
+ipcMain.handle("spp:write-project-file", async (_event, filePath, content) => {
+  try {
+    fs.writeFileSync(filePath, content, "utf8");
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+// Persist an imported asset's original bytes to an on-disk cache. Autosave strips
+// inline data URLs to stay under the localStorage quota; keeping a stable cache
+// path lets recovery re-load the full image later. Content-addressed by filename
+// (hash.ext) so re-importing the same image is deduplicated.
+ipcMain.handle("spp:cache-asset-file", async (_event, base64, fileName) => {
+  try {
+    const dir = path.join(app.getPath("userData"), "asset-cache");
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, path.basename(fileName));
+    if (!fs.existsSync(filePath)) {
+      fs.writeFileSync(filePath, Buffer.from(base64, "base64"));
+    }
+    return { success: true, filePath };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
 function getLibreOfficeCandidates() {
   const candidates = [];
   const configured = getConfiguredLibreOfficePath();
@@ -808,6 +921,17 @@ ipcMain.handle("spp:convert-office-to-pdf", async (_event, inputPath) => {
 
 
 ipcMain.handle("spp:open-image-editor", async (_event, inputPath, outputPath) => {
+  {
+    const engineDir = getEngineDir();
+    const launcherPath = path.join(engineDir, "launch_editor.py");
+    const standalonePath = path.join(engineDir, "standalone.py");
+
+    if (fs.existsSync(launcherPath)) {
+      return runPython(launcherPath, ["--input", inputPath, "--output", outputPath]);
+    }
+    return runPython(standalonePath, []);
+  }
+
   // Ensure editor-only AI deps (gfpgan, realesrgan) are installed before opening.
   const depsResult = await ensureEditorAiDeps();
   if (!depsResult.ok) {
@@ -885,6 +1009,9 @@ function spawnPrintPreview(args, engineDir) {
 }
 
 ipcMain.handle("spp:smart-selection:health", async () => smartSelectionCall("health", {}, 8000));
+ipcMain.handle("spp:smart-selection:acceleration-status", async (_event, providers) => smartSelectionCall("acceleration_status", { providers: Array.isArray(providers) ? providers : undefined }, 15000));
+ipcMain.handle("spp:smart-selection:sd-acceleration-status", async () => smartSelectionCall("sd_acceleration_status", {}, 20000));
+ipcMain.handle("spp:smart-selection:benchmark", async (_event, options) => smartSelectionCall("benchmark_acceleration", { iterations: options && options.iterations, providers: options && Array.isArray(options.providers) ? options.providers : undefined }, 60000));
 ipcMain.handle("spp:smart-selection:set-performance-profile", async (_event, profile) => smartSelectionCall("set_performance_profile", { profile }, 8000));
 ipcMain.handle("spp:smart-selection:ensure-model", async (_event, modelId) => smartSelectionCall("ensure_model", { model_id: modelId }, 120000));
 ipcMain.handle("spp:smart-selection:list-models", async () => smartSelectionCall("list_models", {}, 8000));
@@ -893,10 +1020,351 @@ ipcMain.handle("spp:smart-selection:encode-sam", async (_event, imageId) => smar
 ipcMain.handle("spp:smart-selection:auto-segment", async (_event, imageId, options) => smartSelectionCall("auto_segment", { image_id: imageId, options: options || {} }, 120000));
 ipcMain.handle("spp:smart-selection:predict-mask", async (_event, imageId, options) => smartSelectionCall("predict_mask", { image_id: imageId, options: options || {} }, 30000));
 ipcMain.handle("spp:smart-selection:refine-mask", async (_event, imageId, options) => smartSelectionCall("refine_mask", { image_id: imageId, options: options || {} }, 120000));
-ipcMain.handle("spp:smart-selection:inpaint-remove", async (_event, imageId, options) => smartSelectionCall("inpaint_remove", { image_id: imageId, options: options || {} }, 120000));
+ipcMain.handle("spp:smart-selection:inpaint-remove", async (_event, imageId, options) => {
+  const requestedEngine = String((options && options.engine) || "sd_inpaint").toLowerCase();
+  if (requestedEngine !== "quick_heal") await ensureContentAwareFillReady();
+  return smartSelectionCall("inpaint_remove", { image_id: imageId, options: options || {} }, 600000);
+});
+ipcMain.handle("spp:smart-selection:warm-inpaint", async () => smartSelectionCall("warm_inpaint", {}, 120000));
+ipcMain.handle("spp:smart-selection:warm-sd-inpaint", async () => {
+  await ensureContentAwareFillReady();
+  return smartSelectionCall("warm_sd_inpaint", {}, 600000);
+});
+ipcMain.handle("spp:smart-selection:preload-models", async (_event, level) => smartSelectionCall("preload_models", { level }, 8000));
+ipcMain.handle("spp:smart-selection:models-status", async () => smartSelectionCall("ai_models_status", {}, 8000));
+ipcMain.handle("spp:smart-selection:reload-models", async (_event, level) => smartSelectionCall("reload_models", { level }, 8000));
 ipcMain.handle("spp:smart-selection:unload-image", async (_event, imageId) => smartSelectionCall("unload_image", { image_id: imageId }, 8000));
 ipcMain.handle("spp:smart-selection:detect-faces", async (_event, imageId) => smartSelectionCall("detect_faces", { image_id: imageId }, 30000));
 ipcMain.handle("spp:smart-selection:cancel", async (_event, requestId) => smartSelectionCall("cancel", { request_id: requestId }, 8000));
+
+// Develop a camera RAW file to a flat JPEG so the rest of the app treats it like
+// any other imported photo. rawpy (LibRaw) is an optional, lazily-installed
+// component — the first RAW dropped triggers a small one-time install with a note
+// about the default-development limitations; after that it is seamless.
+ipcMain.handle("spp:raw:decode", async (_event, bytes, fileName) => {
+  const ext = String(path.extname(String(fileName || "")).replace(/^\./, "") || "raw")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "") || "raw";
+  const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const inputPath = path.join(os.tmpdir(), `spp_raw_in_${stamp}.${ext}`);
+  const outputPath = path.join(os.tmpdir(), `spp_raw_out_${stamp}.jpg`);
+  try {
+    const install = await ensureComponentInstalled("raw-support", {
+      prompt: true,
+      detail:
+        "תמיכה בקבצי RAW (CR2/CR3, NEF, ARW, DNG, RAF, RW2 ועוד) דורשת התקנה חד-פעמית קטנה (כ-15MB).\n\n" +
+        "שים לב: קבצי RAW מפותחים אוטומטית עם איזון הלבן של המצלמה והגדרות ברירת מחדל — בשלב הטעינה אין כוונון ידני של חשיפה או צבע."
+    });
+    if (!install || install.ok !== true) {
+      return { ok: false, cancelled: Boolean(install && install.cancelled), error: install && install.error };
+    }
+
+    const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+    fs.writeFileSync(inputPath, buffer);
+
+    const result = await smartSelectionCall("decode_raw", { options: { inputPath, outputPath } }, 120000);
+    if (!result || result.ok !== true || !fs.existsSync(outputPath)) {
+      return { ok: false, error: (result && (result.error || result.message)) || "RAW decode failed" };
+    }
+
+    const out = fs.readFileSync(outputPath);
+    return { ok: true, bytes: out, width: result.width, height: result.height, format: result.format || "JPEG" };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    try { if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath); } catch { /* ignore */ }
+    try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath); } catch { /* ignore */ }
+  }
+});
+
+const BATCH_BG_IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff"];
+
+function batchBgDefaultOutputDir(filePaths) {
+  const first = Array.isArray(filePaths) ? filePaths.find((filePath) => typeof filePath === "string" && filePath.length > 0) : undefined;
+  const baseDir = first ? path.dirname(first) : app.getPath("pictures");
+  return path.join(baseDir, "SPP2_background_removed");
+}
+
+function uniquePngOutputPath(outputDir, inputPath) {
+  const baseName = path.basename(inputPath, path.extname(inputPath)).replace(/[<>:"/\\|?*\x00-\x1F]/g, "_") || "image";
+  let candidate = path.join(outputDir, `${baseName}_no-bg.png`);
+  let index = 2;
+  while (fs.existsSync(candidate)) {
+    candidate = path.join(outputDir, `${baseName}_no-bg_${index}.png`);
+    index += 1;
+  }
+  return candidate;
+}
+
+function sendBatchBgProgress(payload) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send("spp:batch-background-remove:progress", payload);
+  }
+}
+
+ipcMain.handle("spp:batch-background-remove:choose-images", async () => {
+  try {
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    const result = await dialog.showOpenDialog(win, {
+      title: "בחירת תמונות להסרת רקע כמותית",
+      properties: ["openFile", "multiSelections"],
+      filters: [{ name: "Images", extensions: BATCH_BG_IMAGE_EXTENSIONS }]
+    });
+    if (result.canceled || result.filePaths.length === 0) return { success: false, canceled: true };
+    return {
+      success: true,
+      filePaths: result.filePaths,
+      defaultOutputDir: batchBgDefaultOutputDir(result.filePaths)
+    };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle("spp:batch-background-remove:choose-output-dir", async (_event, defaultPath) => {
+  try {
+    const fallbackDir = typeof defaultPath === "string" && defaultPath.length > 0 ? defaultPath : batchBgDefaultOutputDir([]);
+    fs.mkdirSync(fallbackDir, { recursive: true });
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    const result = await dialog.showOpenDialog(win, {
+      title: "בחירת תיקיית שמירה",
+      defaultPath: fallbackDir,
+      properties: ["openDirectory", "createDirectory"]
+    });
+    if (result.canceled || !result.filePaths[0]) return { success: false, canceled: true };
+    return { success: true, folderPath: result.filePaths[0] };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle("spp:batch-background-remove:run", async (_event, payload) => {
+  const requestedPaths = Array.isArray(payload?.filePaths) ? payload.filePaths : [];
+  const filePaths = requestedPaths
+    .map((filePath) => String(filePath || ""))
+    .filter((filePath) => {
+      const ext = path.extname(filePath).toLowerCase().slice(1);
+      return filePath && fs.existsSync(filePath) && BATCH_BG_IMAGE_EXTENSIONS.includes(ext);
+    });
+  const outputDir = String(payload?.outputDir || batchBgDefaultOutputDir(filePaths));
+  const successes = [];
+  const failures = [];
+
+  if (filePaths.length === 0) {
+    return { success: false, outputDir, successes, failures, error: "No image files were selected." };
+  }
+
+  fs.mkdirSync(outputDir, { recursive: true });
+  sendBatchBgProgress({ status: "running", total: filePaths.length, completed: 0, currentFile: "", message: "מתחיל עיבוד תמונות" });
+
+  for (let index = 0; index < filePaths.length; index += 1) {
+    const inputPath = filePaths[index];
+    const fileName = path.basename(inputPath);
+    const imageId = `batch-bg-${Date.now()}-${index}-${Math.random().toString(16).slice(2)}`;
+    const outputPath = uniquePngOutputPath(outputDir, inputPath);
+    sendBatchBgProgress({
+      status: "running",
+      total: filePaths.length,
+      completed: index,
+      currentFile: fileName,
+      message: `מעבד ${index + 1} מתוך ${filePaths.length}`
+    });
+    try {
+      const loaded = await smartSelectionCall("load_image", { image_id: imageId, path: inputPath, source_hash: `${inputPath}:${fs.statSync(inputPath).mtimeMs}` }, 30000);
+      if (!loaded?.ok) throw new Error(loaded?.error || loaded?.message || "Failed to load image.");
+      const result = await smartSelectionCall("remove_background_to_file", { image_id: imageId, options: { outputPath } }, 180000);
+      if (!result?.ok || !fs.existsSync(outputPath)) {
+        throw new Error(result?.error || result?.message || "Object detection failed.");
+      }
+      successes.push({ inputPath, outputPath, fileName });
+    } catch (err) {
+      failures.push({ inputPath, fileName, error: err instanceof Error ? err.message : String(err) });
+      try {
+        if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+      } catch {}
+    } finally {
+      await smartSelectionCall("unload_image", { image_id: imageId }, 8000);
+    }
+  }
+
+  sendBatchBgProgress({
+    status: "done",
+    total: filePaths.length,
+    completed: filePaths.length,
+    currentFile: "",
+    message: `הסתיים: ${successes.length} הצליחו, ${failures.length} נכשלו`
+  });
+  return { success: true, outputDir, successes, failures };
+});
+
+function smartPrepareDefaultOutputDir(items) {
+  const firstSource = items.map((item) => String(item.sourcePath || "")).find((value) => value.length > 0 && fs.existsSync(value));
+  const baseDir = firstSource ? path.dirname(firstSource) : app.getPath("pictures");
+  const stamp = new Date().toISOString().slice(0, 10);
+  return path.join(baseDir, `SPP2_Smart_Print_Prepare_${stamp}`);
+}
+
+function safePreparedBaseName(fileName) {
+  const raw = path.basename(String(fileName || "image"), path.extname(String(fileName || "")));
+  return (raw || "image").replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").slice(0, 120);
+}
+
+function uniquePreparedOutputPath(outputDir, fileName) {
+  const base = safePreparedBaseName(fileName);
+  let candidate = path.join(outputDir, `${base}_prepared.jpg`);
+  let index = 2;
+  while (fs.existsSync(candidate)) {
+    candidate = path.join(outputDir, `${base}_prepared_${index}.jpg`);
+    index += 1;
+  }
+  return candidate;
+}
+
+function dataUrlToBuffer(dataUrl) {
+  const value = String(dataUrl || "");
+  const match = /^data:[^;]+;base64,(.+)$/i.exec(value);
+  if (!match) throw new Error("Invalid image data URL.");
+  return Buffer.from(match[1], "base64");
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;" }[char] || char));
+}
+
+function smartPrepareReportHtml(report, outputDir) {
+  const summary = report?.summary || {};
+  const rows = Array.isArray(report?.results) ? report.results : [];
+  const tr = rows.map((item) => `
+    <tr>
+      <td>${escapeHtml(item.fileName || "")}</td>
+      <td>${Math.round(Number(item.confidence || 0) * 100)}%</td>
+      <td>${escapeHtml((item.warnings || []).map((warning) => warning.message || warning.type).join(", "))}</td>
+    </tr>
+  `).join("");
+  return `<!doctype html>
+<html lang="he" dir="rtl">
+<head><meta charset="utf-8"><title>SPP2 Smart Print Prepare Report</title>
+<style>body{font-family:Arial,sans-serif;margin:32px;line-height:1.6;color:#111827}table{width:100%;border-collapse:collapse}td,th{border:1px solid #d1d5db;padding:8px;text-align:right}th{background:#eef2ff}.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:18px 0}.card{border:1px solid #d1d5db;border-radius:8px;padding:12px;background:#f9fafb}</style></head>
+<body><h1>הכנה חכמה לדפוס - דוח</h1><p>פלט נשמר אל: ${escapeHtml(outputDir)}</p>
+<div class="summary">
+<div class="card"><strong>${Number(report?.total || rows.length)}</strong><br>תמונות</div>
+<div class="card"><strong>${Number(summary.screenshotsCleaned || 0)}</strong><br>צילומי מסך נוקו</div>
+<div class="card"><strong>${Number(summary.colorCorrected || 0)}</strong><br>תיקוני צבע</div>
+<div class="card"><strong>${Number(summary.croppedToTarget || 0)}</strong><br>התאמות למידה</div>
+<div class="card"><strong>${Number(summary.manualReviewRequired || 0)}</strong><br>דורשות בדיקה</div>
+</div>
+<table><thead><tr><th>קובץ</th><th>Confidence</th><th>אזהרות</th></tr></thead><tbody>${tr}</tbody></table>
+</body></html>`;
+}
+
+ipcMain.handle("spp:smart-print-prepare:choose-output-dir", async (_event, defaultPath) => {
+  try {
+    const fallbackDir = typeof defaultPath === "string" && defaultPath.length > 0 ? defaultPath : path.join(app.getPath("pictures"), "SPP2_Smart_Print_Prepare");
+    fs.mkdirSync(fallbackDir, { recursive: true });
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    const result = await dialog.showOpenDialog(win, {
+      title: "בחירת תיקיית פלט",
+      defaultPath: fallbackDir,
+      properties: ["openDirectory", "createDirectory"]
+    });
+    if (result.canceled || !result.filePaths[0]) return { success: false, canceled: true };
+    return { success: true, folderPath: result.filePaths[0] };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle("spp:smart-print-prepare:save-batch", async (_event, payload) => {
+  try {
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    if (items.length === 0) return { success: false, error: "No prepared images to save." };
+    const outputDir = String(payload?.outputDir || smartPrepareDefaultOutputDir(items));
+    const imagesDir = path.join(outputDir, "images");
+    fs.mkdirSync(imagesDir, { recursive: true });
+    const saved = [];
+    for (const item of items) {
+      const outputPath = uniquePreparedOutputPath(imagesDir, item.fileName);
+      fs.writeFileSync(outputPath, dataUrlToBuffer(item.dataUrl));
+      saved.push(outputPath);
+    }
+    const report = payload?.report || {};
+    fs.writeFileSync(path.join(outputDir, "report.json"), JSON.stringify(report, null, 2), "utf-8");
+    fs.writeFileSync(path.join(outputDir, "report.html"), smartPrepareReportHtml(report, outputDir), "utf-8");
+    return { success: true, outputDir, saved };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+// Export every page of a multi-page document to ONE chosen folder in a single
+// dialog (replaces the old per-page browser download which opened N save popups).
+// The renderer supplies fully-formed, numbered file names (e.g. "doc-page-01.png").
+ipcMain.handle("spp:export-pages-to-folder", async (_event, payload) => {
+  try {
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    if (items.length === 0) return { success: false, error: "אין עמודים לייצוא." };
+    const safeDocName = (String(payload?.documentName || "SPP2_Export").replace(/[<>:"/\\|?* -]/g, "_").slice(0, 120)) || "SPP2_Export";
+    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+    const result = await dialog.showOpenDialog(win, {
+      title: "בחירת תיקיית ייצוא",
+      defaultPath: path.join(app.getPath("pictures"), safeDocName),
+      properties: ["openDirectory", "createDirectory"]
+    });
+    if (result.canceled || !result.filePaths[0]) return { success: false, canceled: true };
+    const outputDir = path.join(result.filePaths[0], safeDocName);
+    fs.mkdirSync(outputDir, { recursive: true });
+    let count = 0;
+    for (const item of items) {
+      const base = safePreparedBaseName(item.fileName || "page");
+      const ext = (path.extname(String(item.fileName || "")) || ".png").toLowerCase();
+      let candidate = path.join(outputDir, `${base}${ext}`);
+      let index = 2;
+      while (fs.existsSync(candidate)) {
+        candidate = path.join(outputDir, `${base}_${index}${ext}`);
+        index += 1;
+      }
+      fs.writeFileSync(candidate, dataUrlToBuffer(item.dataUrl));
+      count += 1;
+    }
+    void shell.openPath(outputDir);
+    return { success: true, folderPath: outputDir, count };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+registerPrintHubMainIpc({ ipcMain, getUserDataDir: () => app.getPath("userData") });
+registerAdvancedPrintIpc({
+  ipcMain,
+  isPackaged: () => app.isPackaged,
+  getResourcesRoot: () => (app.isPackaged ? process.resourcesPath : path.join(__dirname, "..")),
+  getUserDataDir: () => app.getPath("userData"),
+  pythonColorCall: (method, params, timeoutMs) => smartSelectionCall(method, params, timeoutMs)
+});
+registerQuickPrintIpc({ ipcMain, getExePath: () => app.getPath("exe") });
+
+// Quick Print: aggregate multi-select (Explorer invokes the verb once per file → several
+// second-instance events) with a short debounce, then forward to the renderer once.
+let quickPrintBuffer = [];
+let quickPrintTimer = null;
+function flushQuickPrintFiles() {
+  const files = quickPrintBuffer;
+  quickPrintBuffer = [];
+  quickPrintTimer = null;
+  if (files.length === 0) return;
+  const win = BrowserWindow.getAllWindows()[0];
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore();
+    win.focus();
+    win.webContents.send("spp:printHub:quick-print-files", files);
+  }
+}
+function enqueueQuickPrintFiles(files) {
+  if (!Array.isArray(files) || files.length === 0) return;
+  quickPrintBuffer.push(...files);
+  if (quickPrintTimer) clearTimeout(quickPrintTimer);
+  quickPrintTimer = setTimeout(flushQuickPrintFiles, 400);
+}
 
 ipcMain.handle("spp:open-print-preview", async (_event, payload) => {
   const engineDir = getPrintPreviewEngineDir();
@@ -1078,6 +1546,25 @@ ipcMain.handle("spp:open-folder", async (_event, folderPath) => {
 ipcMain.handle("spp:open-path", async (_event, filePath) => {
   try {
     const error = await shell.openPath(filePath);
+    return error ? { error } : {};
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+// Opens the bundled HTML user guide in the OS default browser. We must NOT use
+// window.open(file://) in the renderer — installFileDropNavigationGuard's
+// setWindowOpenHandler denies any file:// URL that isn't the app index. The guide ships
+// via extraResources (packaged) / lives in the repo (dev) at the same docs/guide-mapping
+// location, so its relative ../../output/...screenshots paths resolve in both.
+ipcMain.handle("spp:open-user-guide", async () => {
+  try {
+    const base = app.isPackaged ? process.resourcesPath : path.join(__dirname, "..");
+    const guidePath = path.join(base, "docs", "guide-mapping", "spp2-user-guide-he.html");
+    if (!fs.existsSync(guidePath)) {
+      return { error: `Guide not found at ${guidePath}` };
+    }
+    const error = await shell.openPath(guidePath);
     return error ? { error } : {};
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
@@ -1456,6 +1943,7 @@ function installFileDropNavigationGuard(win) {
 // ─── File-association helpers ─────────────────────────────────────────────────
 
 let pendingOpenFilePath = null;
+let pendingQuickPrintFiles = [];
 
 function extractFilePathFromArgv(argv) {
   const exts = [".spp2", ".spp", ".psd", ".psb"];
@@ -1485,6 +1973,7 @@ if (!gotTheLock) {
     if (filePath) {
       win.webContents.send("spp:open-file-path", filePath);
     }
+    enqueueQuickPrintFiles(extractQuickPrintFiles(commandLine));
   });
 }
 
@@ -1505,6 +1994,19 @@ function createWindow() {
   });
 
   installFileDropNavigationGuard(win);
+
+  // Don't let the window close out from under unsaved work. Ask the renderer
+  // first; it shows the "unsaved changes" prompt and calls confirmClose() when
+  // the user decides. confirmClose() destroys the window, bypassing this guard
+  // and the beforeunload handler. Only guard once the renderer is loaded and
+  // listening; before that, allow a normal close so the X never appears stuck.
+  win.webContents.once("did-finish-load", () => { win.__sppCloseGuard = true; });
+  win.on("close", (event) => {
+    if (win.__sppCloseGuard !== true || win.webContents.isDestroyed()) return;
+    event.preventDefault();
+    win.webContents.send("spp:close-requested");
+  });
+
   win.loadFile(path.join(getAppRoot(), "dist", "index.html"));
 
   // If the app was launched by double-clicking a file, send the path once
@@ -1517,9 +2019,27 @@ function createWindow() {
     });
   }
 
+  // If launched via Explorer "Send to SPP Print Hub" (--quick-print), forward the files once ready.
+  if (pendingQuickPrintFiles.length > 0) {
+    const files = pendingQuickPrintFiles;
+    pendingQuickPrintFiles = [];
+    win.webContents.once("did-finish-load", () => {
+      win.webContents.send("spp:printHub:quick-print-files", files);
+    });
+  }
+
   // לפתיחת DevTools זמנית אם צריך דיבוג:
   // win.webContents.openDevTools();
 }
+
+// The renderer calls this once the user has resolved any unsaved-changes prompt.
+// destroy() force-closes without re-triggering the close guard or beforeunload.
+ipcMain.on("spp:confirm-close", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win !== null) {
+    win.destroy();
+  }
+});
 
 function createModeWindow(payload = {}) {
   const mode = sanitizeModeWindowMode(payload.mode);
@@ -1586,6 +2106,7 @@ ipcMain.handle("spp:open-pdf-studio-window", async () => {
 app.whenReady().then(async () => {
   // Capture file path from launch arguments (file-association double-click).
   pendingOpenFilePath = extractFilePathFromArgv(process.argv);
+  pendingQuickPrintFiles = extractQuickPrintFiles(process.argv);
 
   try {
     seedProductLibraryIfNeeded();
@@ -1596,6 +2117,11 @@ app.whenReady().then(async () => {
     registerHealthCheckIpc();
   } catch (err) {
     console.warn("[startup] health check registration failed:", err);
+  }
+  try {
+    registerComponentManagerIpc();
+  } catch (err) {
+    console.warn("[startup] component manager registration failed:", err);
   }
   try {
     await ensurePythonEnv();

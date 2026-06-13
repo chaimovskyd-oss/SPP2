@@ -90,6 +90,105 @@ export async function renderPdfBytesPage(
   }
 }
 
+// ─── Regular-canvas PDF import helpers ────────────────────────────────────────
+// Used by the "Import PDF to canvas" flow (PdfImportDialog). Unlike the PDF Studio
+// helpers above, these operate on a single loaded PDFDocumentProxy so the dialog
+// can render thumbnails AND the final high-DPI pages without re-parsing the file.
+
+const PDF_POINTS_PER_INCH = 72;
+const DEFAULT_MAX_PNG_BYTES = 12 * 1024 * 1024;
+
+export interface PdfImageRenderResult {
+  dataUrl: string;
+  widthPx: number;
+  heightPx: number;
+  /** Native PDF page size in points (1/72 inch). */
+  widthPt: number;
+  heightPt: number;
+  mimeType: string;
+}
+
+/** Estimate the decoded byte size of a base64 data URL without allocating it. */
+function estimateDataUrlBytes(dataUrl: string): number {
+  const comma = dataUrl.indexOf(",");
+  const body = comma >= 0 ? dataUrl.length - comma - 1 : dataUrl.length;
+  return Math.floor(body * 0.75);
+}
+
+/**
+ * Load a PDF from raw bytes and return the document. The caller owns the document
+ * and must call `doc.destroy()` when finished (e.g. on dialog unmount).
+ */
+export async function openPdfFromBytes(bytes: Uint8Array): Promise<PDFDocumentProxy> {
+  const loadingTask = pdfjsLib.getDocument({
+    data: cloneBytes(bytes),
+    useWorkerFetch: false
+  });
+  return loadingTask.promise;
+}
+
+/**
+ * Render one page of a loaded document at the requested DPI for import as an
+ * ImageLayer. Emits PNG for maximum quality, falling back to high-quality JPEG
+ * when the PNG would exceed `maxPngBytes` (guards against memory/storage blowups
+ * on very large/complex pages).
+ */
+export async function renderPdfPageToImage(
+  doc: PDFDocumentProxy,
+  pageIndex: number,
+  options: { dpi: number; maxPngBytes?: number }
+): Promise<PdfImageRenderResult> {
+  const page = await doc.getPage(pageIndex + 1);
+  const baseViewport = page.getViewport({ scale: 1 });
+  const scale = options.dpi / PDF_POINTS_PER_INCH;
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (context === null) throw new Error("לא ניתן ליצור canvas לעיבוד PDF.");
+  canvas.width = Math.max(1, Math.ceil(viewport.width));
+  canvas.height = Math.max(1, Math.ceil(viewport.height));
+  await page.render({ canvasContext: context, viewport }).promise;
+
+  let mimeType = "image/png";
+  let dataUrl = canvas.toDataURL("image/png");
+  const maxPngBytes = options.maxPngBytes ?? DEFAULT_MAX_PNG_BYTES;
+  if (estimateDataUrlBytes(dataUrl) > maxPngBytes) {
+    mimeType = "image/jpeg";
+    dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+  }
+  return {
+    dataUrl,
+    widthPx: canvas.width,
+    heightPx: canvas.height,
+    widthPt: baseViewport.width,
+    heightPt: baseViewport.height,
+    mimeType
+  };
+}
+
+/** Render a small PNG thumbnail of a page for the import dialog's grid. */
+export async function renderPdfThumbnail(
+  doc: PDFDocumentProxy,
+  pageIndex: number,
+  targetWidthPx = 150
+): Promise<PdfRenderedPage> {
+  const page = await doc.getPage(pageIndex + 1);
+  const base = page.getViewport({ scale: 1 });
+  const scale = Math.max(0.05, targetWidthPx / Math.max(1, base.width));
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (context === null) throw new Error("לא ניתן ליצור canvas לתצוגת PDF.");
+  canvas.width = Math.max(1, Math.ceil(viewport.width));
+  canvas.height = Math.max(1, Math.ceil(viewport.height));
+  await page.render({ canvasContext: context, viewport }).promise;
+  return {
+    dataUrl: canvas.toDataURL("image/png"),
+    widthPx: canvas.width,
+    heightPx: canvas.height
+  };
+}
+
 async function renderPdfSourcePage(
   source: PdfStudioSourceFile,
   pageIndex: number,
